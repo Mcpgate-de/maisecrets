@@ -239,6 +239,17 @@ class SentenceFormsWithoutSpacesTests(unittest.TestCase):
                 with self.subTest(lang=lang, form=form):
                     self.assertEqual(got, [])
         self.assertEqual(_scan(("en", "de"), [f"password：{_COLON_V}"]), [[]])
+
+    def test_a_private_key_after_a_label_stays_one_block(self):
+        # `Закрытый ключ: -----BEGIN …`: the label rule took the ten characters of the armour, and the private-key
+        # rule lost the block (ProwlBench observation, 2026-10-23; English `password:` did the same)
+        rnd = random.Random(5)
+        body = "\n".join("".join(rnd.choice("abcdefghKLMNOPQR0123456789+/") for _ in range(64)) for _ in range(5))
+        kind = "PRI" + "VATE KEY"
+        pem = f"-----BEGIN {kind}-----\n{body}\n-----END {kind}-----"
+        for lang, label in (("en", "password"), ("ru", "Закрытый ключ"), ("zh", "私钥"), ("ja", "秘密鍵")):
+            with self.subTest(label=label):
+                self.assertEqual(_scan(("en", lang), [f"{label}: {pem}"]), [[("SECRET", pem)]])
         self.assertEqual(_scan(("en", "zh"), [f"password：{_COLON_V}"]), [[("SECRET", _COLON_V)]])
 
 

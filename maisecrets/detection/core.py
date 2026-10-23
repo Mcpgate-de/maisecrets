@@ -551,6 +551,10 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False
     if _DS_TEMPLATED.match(v) or _DS_INDIRECT.match(v):
         return False
+    if v.startswith("-----BEGIN"):
+        # the armour of a PEM block after a label (`Закрытый ключ: -----BEGIN …`, `password: -----BEGIN …`): the
+        # private-key rule takes the whole block, and the cut value took its first ten characters instead
+        return False
     if _GENERIC_TYPE.search(v):
         return False   # a generic type: Option<String>, Secret<String>
     if _VERSION_RE.fullmatch(v):
