@@ -71,10 +71,12 @@ and OpenAI plugin directories.
   and no new branch name: GitHub keeps listing a deleted pull-request branch.
 - Vendored rulesets: Renovate keeps `maisecrets/detection/rules/` current (`renovate.json`). The job `renovate`
   runs self-hosted on a pipeline schedule with `RENOVATE_RUN=true`; on a schedule no other job runs.
-  It reads the three `*_VERSION` files. For an upstream release at least 7 days old it runs the sync
+  It reads the three `*_VERSION` files. For an upstream release at least 3 days old it runs the sync
   script of that ruleset (`postUpgradeTasks`), so the MR carries the version and the regenerated
-  JSON together. The MR pipeline tests the new rules, and a person merges; it becomes a
-  `deps(rules)` patch release. A version of detect-secrets or Presidio moved without its JSON is red
+  JSON together. The MR goes to `next`, and Renovate merges a patch or minor update itself once its
+  pipeline is green (since 0.7.16; a merge into `next` releases nothing). A major update waits for a person
+  (label `needs-review`). The update reaches `main` with the weekly release on Fridays, through the release
+  gate, as a `deps(rules)` line. A version of detect-secrets or Presidio moved without its JSON is red
   (`scripts/check_vendored_rules.py`, `tests/test_vendored_rules.py`).
 
   The sync scripts execute no upstream code: betterleaks ships TOML, and the detect-secrets and Presidio
@@ -91,15 +93,17 @@ and OpenAI plugin directories.
   the schedule's owner, or handed an artifact to a job with a push token.
 
   `RENOVATE_TOKEN` is the project access token `renovate-bot`, Developer, `api` and
-  `write_repository`: it can open an MR and push an unprotected branch, also a branch of another
-  open MR, and it cannot push to `main`, merge, create a `v*` tag or read a CI variable (with the
+  `write_repository`: it can open an MR, push an unprotected branch (also a branch of another
+  open MR) and merge into `next`, and it cannot push to or merge into `main`, create a `v*` tag or read a CI variable (with the
   project's protection: `main` and `v*` tags for Maintainers only). It is protected (only protected
   branches and tags get it) and scoped to the environment `renovate` (on gitlab.com Free that names which
   job of this file gets it; it is no access control).
 
-  What review of the MR is for: a vendored ruleset is data the detector trusts. A new release can
-  weaken or drop a rule, or bring a regex
-  that backtracks; the tests catch only what they cover. Read the diff of the rule ids. The 7-day wait
+  What the weekly gate does instead of a review of each MR: a vendored ruleset is data the detector
+  trusts. A new release can weaken or drop a rule, or bring a regex that backtracks. A dropped or weakened rule
+  lowers the catalog coverage or a span, and the release gate stops (`--catalogs`, span by span). A regex
+  that backtracks only on crafted text passes the gate's CPU check, which reads a normal text: read the diff of
+  the rule ids before the Friday release. The 3-day wait
   is weaker for detect-secrets: a GitHub tag's date is set by its author, and a tag can move.
   `LICENSE-presidio` comes from the main branch, not from the release.
 
