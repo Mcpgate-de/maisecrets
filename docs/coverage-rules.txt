@@ -852,7 +852,7 @@ kingfisher	kingfisher.branchio.2	1	1
 kingfisher	kingfisher.branchio.3	0	1
 kingfisher	kingfisher.brave.1	1	1
 kingfisher	kingfisher.brevo.1	1	1
-kingfisher	kingfisher.browserbase.1	0	1
+kingfisher	kingfisher.browserbase.1	1	1
 kingfisher	kingfisher.browserstack.1	0	1
 kingfisher	kingfisher.browserstack.2	0	1
 kingfisher	kingfisher.browseruse.1	0	1
@@ -1097,7 +1097,7 @@ kingfisher	kingfisher.gcnotify.1	0	0
 kingfisher	kingfisher.gcp.1	0	0
 kingfisher	kingfisher.gcp.3	0	1
 kingfisher	kingfisher.gcp.4	1	1
-kingfisher	kingfisher.gcp.5	0	1
+kingfisher	kingfisher.gcp.5	1	1
 kingfisher	kingfisher.gcp.6	0	0
 kingfisher	kingfisher.gemfury.1	0	1
 kingfisher	kingfisher.gemfury.2	0	1
@@ -1583,7 +1583,7 @@ kingfisher	kingfisher.sidekiq.2	0	0
 kingfisher	kingfisher.signifyd.1	0	1
 kingfisher	kingfisher.siliconflow.1	0	1
 kingfisher	kingfisher.slack.1	1	1
-kingfisher	kingfisher.slack.2	0	1
+kingfisher	kingfisher.slack.2	1	1
 kingfisher	kingfisher.slack.4	1	1
 kingfisher	kingfisher.slack.5	1	1
 kingfisher	kingfisher.slack.6	1	1
@@ -1618,7 +1618,7 @@ kingfisher	kingfisher.sslmate.1	0	1
 kingfisher	kingfisher.stabilityai.1	0	1
 kingfisher	kingfisher.stackhawk.1	1	1
 kingfisher	kingfisher.starknet.1	0	1
-kingfisher	kingfisher.statsig.1	0	1
+kingfisher	kingfisher.statsig.1	1	1
 kingfisher	kingfisher.statuscake.1	0	1
 kingfisher	kingfisher.statuspage.1	0	1
 kingfisher	kingfisher.storyblok.1	0	1
@@ -1629,7 +1629,7 @@ kingfisher	kingfisher.stripe.1	0	1
 kingfisher	kingfisher.stripe.2	1	1
 kingfisher	kingfisher.stripe.3	1	1
 kingfisher	kingfisher.stytch.1	0	1
-kingfisher	kingfisher.stytch.2	0	1
+kingfisher	kingfisher.stytch.2	1	1
 kingfisher	kingfisher.sumologic.1	0	1
 kingfisher	kingfisher.sumologic.2	0	1
 kingfisher	kingfisher.supabase.1	1	1
@@ -1771,14 +1771,14 @@ kingfisher	kingfisher.yandex.3	0	1
 kingfisher	kingfisher.yelp.1	0	1
 kingfisher	kingfisher.yousign.1	0	1
 kingfisher	kingfisher.youtube.1	1	1
-kingfisher	kingfisher.zapier.1	0	1
+kingfisher	kingfisher.zapier.1	1	1
 kingfisher	kingfisher.zendesk.1	0	0
 kingfisher	kingfisher.zendesk.2	0	0
 kingfisher	kingfisher.zendesk.3	0	1
 kingfisher	kingfisher.zerobounce.1	0	1
 kingfisher	kingfisher.zerotier.1	0	1
 kingfisher	kingfisher.zhipu.1	0	1
-kingfisher	kingfisher.zohocrm.1	0	1
+kingfisher	kingfisher.zohocrm.1	1	1
 kingfisher	kingfisher.zohocrm.2	0	1
 kingfisher	kingfisher.zohocrm.3	0	1
 kingfisher	kingfisher.zoom.1	0	1
@@ -2473,7 +2473,7 @@ trufflehog	myintervals	0	1
 trufflehog	nasdaqdatalink	0	1
 trufflehog	nethunt	0	1
 trufflehog	netlify/v1	0	1
-trufflehog	netlify/v2	0	1
+trufflehog	netlify/v2	1	1
 trufflehog	neutrinoapi	0	1
 trufflehog	newrelicbrowserkey	0	1
 trufflehog	newrelicinsightsinsertkey	0	1
@@ -2655,7 +2655,7 @@ trufflehog	sendbird	0	1
 trufflehog	sendbirdorganizationapi	0	1
 trufflehog	sendgrid	0	1
 trufflehog	sendinbluev2	0	1
-trufflehog	sentryorgtoken	0	1
+trufflehog	sentryorgtoken	1	1
 trufflehog	sentrytoken/v1	0	1
 trufflehog	sentrytoken/v2	1	1
 trufflehog	serphouse	0	1
@@ -2862,6 +2862,6 @@ trufflehog	zipapi	0	1
 trufflehog	zipbooks	0	0
 trufflehog	zipcodeapi	0	1
 trufflehog	zipcodebase	0	1
-trufflehog	zohocrm	0	1
+trufflehog	zohocrm	1	1
 trufflehog	zonkafeedback	0	1
 trufflehog	zulipchat	0	1

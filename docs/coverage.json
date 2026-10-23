@@ -18,7 +18,7 @@
   "kingfisher": {
    "rules": 1095,
    "with_examples": 1095,
-   "bare": 344,
+   "bare": 351,
    "label": 994
   },
   "gitleaks": {
@@ -36,7 +36,7 @@
   "trufflehog": {
    "rules": 945,
    "with_examples": 892,
-   "bare": 80,
+   "bare": 83,
    "label": 839
   },
   "gitlab": {
