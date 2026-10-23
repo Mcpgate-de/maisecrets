@@ -585,7 +585,7 @@
  },
  {
   "id": "atlassian-org-admin-scoped-api-key-sibling",
-  "regex": "ATCTT3xFfG(?:(?<![A-Za-z0-9_-]ATCTT3xFfG)|(?<=\\\\[nrt]ATCTT3xFfG))[A-Za-z0-9+/=_\\-]+=[A-Za-z0-9]{8}(?![A-Za-z0-9_-])"
+  "regex": "ATCTT3xFfG(?:(?<![A-Za-z0-9_-]ATCTT3xFfG)|(?<=\\\\[nrt]ATCTT3xFfG))[A-Za-z0-9+/=_\\-]{1,1024}=[A-Za-z0-9]{8}(?![A-Za-z0-9_-])"
  },
  {
   "id": "aws-bedrock-short-term-api-key",

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.7.14] - 2026-10-23
+
+### Security
+
+- a long run of spaces or "!" after a password word no longer stalls the scan (5e107b0)
+
 ## [0.7.13] - 2026-10-23
 
 ### Fixes
