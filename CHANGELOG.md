@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.7.16] - 2026-10-23
+
+### Fixes
+
+- the format report link comes only for a value with a fixed start, and fits one line (6d2fca7)
+- the directory version names the mod in its own hooks file again (e83527e)
+- a Cloudflare Access service token secret is found with any checksum letters, as Cloudflare documents it (c3ca1be)
+
 ## [0.7.15] - 2026-10-23
 
 ### Fixes

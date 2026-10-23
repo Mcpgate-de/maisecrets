@@ -73,8 +73,5 @@
         ]
       }
     ]
-  },
-  "modules": [
-    "../claude-mod/maisecrets-mod.mjs"
-  ]
+  }
 }

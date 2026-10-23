@@ -625,7 +625,7 @@
  },
  {
   "id": "cloudflare-access-service-token-client-secret-sibling",
-  "regex": "cfast_(?:(?<![A-Za-z0-9_-]cfast_)|(?<=\\\\[nrt]cfast_))[A-Za-z0-9]{40}[a-f0-9]{8}(?![A-Za-z0-9_-])"
+  "regex": "cfast_(?:(?<![A-Za-z0-9_-]cfast_)|(?<=\\\\[nrt]cfast_))[A-Za-z0-9]{40}[A-Za-z0-9]{8}(?![A-Za-z0-9_-])"
  },
  {
   "id": "coveo-api-key-rotation-secret-sibling",
