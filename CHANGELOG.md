@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.7.17] - 2026-10-23
+
+### Fixes
+
+- the directory can read each detection file, as none is over its size limit any more (b4dd82f)
+
 ## [0.7.16] - 2026-10-23
 
 ### Fixes
