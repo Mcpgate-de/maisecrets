@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.7.13] - 2026-10-23
+
+### Fixes
+
+- an Azure client secret at the end of a sentence is found (62ebee1)
+
 ## [0.7.12] - 2026-10-23
 
 ### Fixes
