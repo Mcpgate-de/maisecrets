@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.7.15] - 2026-10-23
+
+### Fixes
+
+- the directory version declares the mod as a module of hooks/hooks.json (320cc76)
+
 ## [0.7.14] - 2026-10-23
 
 ### Security
