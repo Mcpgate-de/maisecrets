@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.7.11] - 2026-10-23
+
+### Features
+
+- finds passwords and keys after Russian, Chinese and Japanese labels (3abff8d)
+
+### Fixes
+
+- a private key after a label is masked as one whole block (d6629a1)
+
 ## [0.7.10] - 2026-10-23
 
 ### Features
