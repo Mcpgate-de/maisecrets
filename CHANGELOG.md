@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.7.20] - 2026-10-24
+
+### Features
+
+- finds a Fireworks AI API key and an Infisical service token without a label (ff957f7)
+
+### Fixes
+
+- the directory can read the hook code, as no file is over its size limit any more (9748721)
+
 ## [0.7.19] - 2026-10-23
 
 ### Fixes
