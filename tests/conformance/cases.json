@@ -401,6 +401,310 @@
     }
    ],
    "why": "the channel decides: a prompt a person typed does not take a phone number from a key of a record"
+  },
+  {
+   "id": "field-phone-under-customer-telefon",
+   "kind": "normative",
+   "input": "0171 4829173",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "de",
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 0,
+     "end": 12,
+     "type": "PHONE"
+    }
+   ],
+   "not_expected": [],
+   "why": "a field named telefon is evidence as the label `telefon:` in text; the gateway scans each string leaf of a tool response with its field path (src/security/detector_shadow.py)",
+   "context": {
+    "fields": [
+     {
+      "start": 0,
+      "end": 12,
+      "name": [
+       "customer",
+       "telefon"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "field-phone-bare-is-no-finding",
+   "kind": "normative",
+   "input": "0171 4829173",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "de",
+    "en"
+   ],
+   "expected": [],
+   "not_expected": [
+    {
+     "start": 0,
+     "end": 12,
+     "type": "PHONE"
+    }
+   ],
+   "why": "the same digits without their field: only the field decides"
+  },
+  {
+   "id": "field-build-number-stays-text",
+   "kind": "normative",
+   "input": "20261021",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "de",
+    "en"
+   ],
+   "expected": [],
+   "not_expected": [
+    {
+     "start": 0,
+     "end": 8,
+     "type": "SECRET"
+    },
+    {
+     "start": 0,
+     "end": 8,
+     "type": "PHONE"
+    },
+    {
+     "start": 0,
+     "end": 8,
+     "type": "BIRTH_DATE"
+    }
+   ],
+   "why": "a build number field gives no evidence, and the value has no shape of its own",
+   "context": {
+    "fields": [
+     {
+      "start": 0,
+      "end": 8,
+      "name": [
+       "pipeline",
+       "build_number"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "field-password-marks-its-value",
+   "kind": "normative",
+   "input": "Mauve-Otter-4821",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "de",
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 0,
+     "end": 16,
+     "type": "SECRET"
+    }
+   ],
+   "not_expected": [],
+   "why": "a password field marks a value that bare is a word with a number",
+   "context": {
+    "fields": [
+     {
+      "start": 0,
+      "end": 16,
+      "name": [
+       "db",
+       "password"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "field-id-adds-nothing",
+   "kind": "normative",
+   "input": "X1234567",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "de",
+    "en"
+   ],
+   "expected": [],
+   "not_expected": [
+    {
+     "start": 0,
+     "end": 8,
+     "type": "SECRET"
+    },
+    {
+     "start": 0,
+     "end": 8,
+     "type": "ID_NUMBER"
+    }
+   ],
+   "why": "id is no label of the rules: the field adds nothing",
+   "context": {
+    "fields": [
+     {
+      "start": 0,
+      "end": 8,
+      "name": [
+       "id"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "field-unknown-name-adds-nothing",
+   "kind": "normative",
+   "input": "X1234567",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "de",
+    "en"
+   ],
+   "expected": [],
+   "not_expected": [
+    {
+     "start": 0,
+     "end": 8,
+     "type": "SECRET"
+    },
+    {
+     "start": 0,
+     "end": 8,
+     "type": "ID_NUMBER"
+    }
+   ],
+   "why": "an unknown field name adds nothing",
+   "context": {
+    "fields": [
+     {
+      "start": 0,
+      "end": 8,
+      "name": [
+       "flux_capacitor"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "field-page-cursor-is-no-key",
+   "kind": "normative",
+   "input": "CiAKGjBpNDd2Nmp2Zml2cXRwYjBpOXAzMhIDCJgBGgA",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "de",
+    "en"
+   ],
+   "expected": [],
+   "not_expected": [
+    {
+     "start": 0,
+     "end": 43,
+     "type": "SECRET"
+    }
+   ],
+   "why": "the cursor of a paged list response is no credential, though its name ends in token",
+   "context": {
+    "fields": [
+     {
+      "start": 0,
+      "end": 43,
+      "name": [
+       "nextPageToken"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "field-json-text-same-as-its-own-parse",
+   "kind": "normative",
+   "input": "{\"customer\": {\"telefon\": \"0171 4829173\", \"build_number\": \"20261021\"}}",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "de",
+    "en"
+   ],
+   "context": {
+    "fields": [
+     {
+      "start": 26,
+      "end": 38,
+      "name": [
+       "customer",
+       "telefon"
+      ]
+     },
+     {
+      "start": 58,
+      "end": 66,
+      "name": [
+       "customer",
+       "build_number"
+      ]
+     }
+    ]
+   },
+   "expected": [
+    {
+     "start": 26,
+     "end": 38,
+     "type": "PHONE"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 58,
+     "end": 66,
+     "type": "SECRET"
+    },
+    {
+     "start": 58,
+     "end": 66,
+     "type": "PHONE"
+    }
+   ],
+   "why": "the core parses the JSON itself; fields that name its own keys give the same one hit, not a second"
   }
  ]
 }
