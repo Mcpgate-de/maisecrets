@@ -181,13 +181,13 @@ The schema of the request and of the response is `maisecrets/detection/detect-1.
 | `regions` | yes | the country rule sets, such as `["generic", "de"]`: `generic` and the country codes the rules name (`de`, `us`, `uk`, …; an unknown code is an error). `generic` is always on; `[]` gives it alone |
 | `languages` | yes | the label languages, such as `["en", "de"]`: the files of `maisecrets/detection/rules/labels/`. English is always on |
 | `context.path` | no | the file the text came from: a value of a test file can then be a fixture and no finding |
+| `context.fields` | no | the field names of values in the text: a list of `{"start", "end", "name", "format"}`, the span of a value in code points, its field path outermost first (strings and integers, at least one part) and an informative format. It is the `fields` argument of `Detector.findings` ("Field names" above): evidence as a label, never a finding taken away. A wrong field is an error with the path `context.fields[i]…` |
 
 The order of `regions` and of `languages` does not matter. A key that the table does not name is an error, so a
-misspelt key never goes unnoticed. Two keys of the proposal are
-not in `maisecrets.detect/1` yet: `context.fields` comes with the `fields` argument of `Detector.findings`, and
-`exclusions` has no form in the core today (a reference form is a `References` object of six questions, not a list
-of spans). A caller drops a finding inside its own placeholders itself. A later release may accept both as new
-optional keys; a request without them keeps its meaning.
+misspelt key never goes unnoticed. One key of the proposal is
+not in `maisecrets.detect/1` yet: `exclusions` has no form in the core today (a reference form is a `References` object of six questions, not a list
+of spans). A caller drops a finding inside its own placeholders itself. A later release may accept it as a new
+optional key; a request without them keeps its meaning.
 
 ```json
 {"contract": "maisecrets.detect/1",

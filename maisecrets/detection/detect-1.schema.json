@@ -17,8 +17,23 @@
     "context": {
      "type": "object",
      "additionalProperties": false,
-     "properties": {"path": {"type": "string"}}
+     "properties": {
+      "path": {"type": "string"},
+      "fields": {"type": "array", "items": {"$ref": "#/$defs/field"}}
+     }
     }
+   }
+  },
+  "field": {
+   "description": "The span of a value in code points of the text (start < end <= its length) and its field path, outermost first (at least one part). format is informative.",
+   "type": "object",
+   "required": ["start", "end", "name"],
+   "additionalProperties": false,
+   "properties": {
+    "start": {"type": "integer", "minimum": 0},
+    "end": {"type": "integer", "minimum": 1},
+    "name": {"type": "array", "items": {"oneOf": [{"type": "string"}, {"type": "integer"}]}},
+    "format": {"type": "string"}
    }
   },
   "response": {"oneOf": [{"$ref": "#/$defs/result"}, {"$ref": "#/$defs/error"}]},
