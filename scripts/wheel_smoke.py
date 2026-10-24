@@ -53,6 +53,7 @@ print(json.dumps({
     "modules": sorted(m for m in sys.modules if m.startswith("maisecrets")),
     "home": sorted(os.listdir(os.environ["HOME"])),
     "own": [(m.kind, m.value) for m in own.findings("ref ORD-" + "123456", channel="tool")],
+    "classes": {m.type: det.TYPES[m.type]["class"] for m in given.findings(text, channel="tool")},
 }))
 '''
 
@@ -105,6 +106,8 @@ def main(argv) -> int:
                                         for m in got["modules"]), str(got["modules"])),
         ("the empty HOME stays empty", got["home"] == [], str(got["home"])),
         ("a rule of your own through user_rule", got["own"] == [["user:order-ref", "123456"]], str(got["own"])),
+        ("the type vocabulary (types.json) gives each found type its class",
+         got["classes"] == {"SECRET": "secret", "US_SSN": "pii.national_id"}, str(got["classes"])),
     ]
     # a wheel to hand out is built at the tag of its version: the release commit lands on main only, so a build from
     # next carries the version of the last release with changes that release lacks
