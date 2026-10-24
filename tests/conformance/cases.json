@@ -1,5 +1,7 @@
 {
  "format": "maisecrets conformance cases v0 (docs/DETECTION-SPEC-DRAFT.md)",
+ "contract": "maisecrets.detect/1",
+ "offsets": "start and end count Unicode code points of input; end is exclusive",
  "cases": [
   {
    "id": "street-direction-after-label",
@@ -324,6 +326,81 @@
     }
    ],
    "why": "a table of fields and values is one record"
+  },
+  {
+   "id": "phone-word-as-a-json-key",
+   "input": "{\"customer\": {\"telefon\": \"0171 4829173\", \"build_number\": \"20261021\"}}",
+   "kind": "normative",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "en",
+    "de"
+   ],
+   "expected": [
+    {
+     "start": 26,
+     "end": 38,
+     "type": "PHONE"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 58,
+     "end": 66,
+     "type": "PHONE"
+    }
+   ],
+   "why": "a JSON key that names a phone makes its value a phone; a build number stays text (DETECTION-CONTRACT-PROPOSAL.md, the example)"
+  },
+  {
+   "id": "offsets-count-code-points",
+   "input": "\ud83d\ude00\ud83d\ude00 {\"customer\": {\"telefon\": \"0171 4829173\", \"build_number\": \"20261021\"}}",
+   "kind": "normative",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "en",
+    "de"
+   ],
+   "expected": [
+    {
+     "start": 29,
+     "end": 41,
+     "type": "PHONE"
+    }
+   ],
+   "not_expected": [],
+   "why": "an emoji outside the BMP is one code point: the value starts at 29; a UTF-16 count (two units each) would give 31"
+  },
+  {
+   "id": "phone-word-is-a-tool-form",
+   "input": "{\"customer\": {\"telefon\": \"0171 4829173\", \"build_number\": \"20261021\"}}",
+   "kind": "normative",
+   "channel": "prompt",
+   "regions": [
+    "generic",
+    "de"
+   ],
+   "languages": [
+    "en",
+    "de"
+   ],
+   "expected": [],
+   "not_expected": [
+    {
+     "start": 26,
+     "end": 38,
+     "type": "PHONE"
+    }
+   ],
+   "why": "the channel decides: a prompt a person typed does not take a phone number from a key of a record"
   }
  ]
 }

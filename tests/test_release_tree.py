@@ -222,6 +222,20 @@ class ReleaseTreeTests(unittest.TestCase):
         self.assertEqual([(d["id"], d["regex"]) for d in shipped], [(i, r.strip()) for i, r in lines])
         self.assertGreater(len(shipped), 40)
 
+    def test_the_json_entry_point_of_the_tree_gives_the_ruleset_of_the_checkout(self):
+        # the tree has betterleaks parts with hashed allow lists and prefixes.json: the digest is over the loaded
+        # rules, so both name the same ruleset (docs/DETECTION.md, "The JSON entry point")
+        request = json.dumps({"contract": "maisecrets.detect/1", "text": "runner glrt-" + "x" * 3, "channel": "tool",
+                              "regions": ["generic", "de", "us"], "languages": ["en", "de"]}).encode()
+        out = []
+        for root in (ROOT, self.tree):
+            r = subprocess.run([sys.executable, "-m", "maisecrets.detection"], input=request, cwd=str(root),
+                               capture_output=True, timeout=60,
+                               env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"})
+            self.assertEqual((r.returncode, r.stderr), (0, b""))
+            out.append(json.loads(r.stdout)["engine"])
+        self.assertEqual(out[0], out[1])
+
     def test_the_tree_loads_its_prefix_rules_from_the_json(self):
         # a runner token of rules/prefixes.txt is found by the detector of the tree alone, which has no prefixes.txt
         token = "glr" + "t-" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(24))

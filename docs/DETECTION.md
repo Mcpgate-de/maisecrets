@@ -124,6 +124,92 @@ TYPES["SECRET"]          # {"family": "secret", "class": "secret"}
 the passes, and fails when a type is emitted and not listed, or listed and emitted by nothing (unless it is
 `deprecated`). A vendored rule-set update that brings a new type is therefore red until the type gets an entry.
 
+## The JSON entry point: maisecrets.detect/1
+
+A caller in any language runs the core as a process: one JSON request on stdin, one JSON response on stdout.
+
+```bash
+python3 -m maisecrets.detection < request.json > response.json
+```
+
+It needs Python 3.9 or later and the wheel installed (or the plugin folder as the working directory), and no other
+package. It reads no home folder, no config and no network. Each call is one process; it loads the rules of its
+request and ends (about 0.1 s on an M-series laptop). A Python server uses the library in process instead.
+
+The schema of the request and of the response is `maisecrets/detection/detect-1.schema.json` (JSON Schema 2020-12,
+`$defs/request` and `$defs/response`); it ships in the wheel next to the code. The contract follows
+`docs/DETECTION-CONTRACT-PROPOSAL.md`, with the keys the core fills today.
+
+**The request.** A JSON object in UTF-8 (a byte order mark is allowed):
+
+| Key | Required | Meaning |
+|---|---|---|
+| `contract` | yes | `"maisecrets.detect/1"` |
+| `text` | yes | the text to scan, a string |
+| `channel` | yes | `"prompt"` (a person typed it) or `"tool"` (a tool result or a file). The tool channel takes forms a prompt does not, such as a phone number under a key that names a phone |
+| `regions` | yes | the country rule sets, such as `["generic", "de"]`: `generic` and the country codes the rules name (`de`, `us`, `uk`, …; an unknown code is an error). `generic` is always on; `[]` gives it alone |
+| `languages` | yes | the label languages, such as `["en", "de"]`: the files of `maisecrets/detection/rules/labels/`. English is always on |
+| `context.path` | no | the file the text came from: a value of a test file can then be a fixture and no finding |
+
+The order of `regions` and of `languages` does not matter. A key that the table does not name is an error, so a
+misspelt key never goes unnoticed. Two keys of the proposal are
+not in `maisecrets.detect/1` yet: `context.fields` comes with the `fields` argument of `Detector.findings`, and
+`exclusions` has no form in the core today (a reference form is a `References` object of six questions, not a list
+of spans). A caller drops a finding inside its own placeholders itself. A later release may accept both as new
+optional keys; a request without them keeps its meaning.
+
+```json
+{"contract": "maisecrets.detect/1",
+ "text": "{\"customer\": {\"telefon\": \"0171 4829173\", \"build_number\": \"20261021\"}}",
+ "channel": "tool", "regions": ["generic", "de"], "languages": ["en", "de"]}
+```
+
+**The response.** One line of JSON with a fixed key order:
+
+```json
+{"contract": "maisecrets.detect/1",
+ "engine": {"name": "maisecrets", "version": "0.8.0", "ruleset": "sha256:…"},
+ "findings": [{"start": 26, "end": 38, "type": "PHONE",
+               "provenance": {"rule": "phone-after-phone-word", "origin": "builtin", "layer": "deterministic"}}]}
+```
+
+- **`start` and `end`** count Unicode code points of `text`, `end` exclusive. The value is `text[start:end]`; the
+  response never carries it, so a secret stays out of the output stream. A UTF-16 caller (JavaScript, Java, .NET)
+  counts a character outside the BMP, such as an emoji, as two units and converts.
+- **`type`** is a type of `maisecrets/detection/types.json` (section "The type vocabulary"), with its family and class
+  there. The findings are sorted by `start`, `end`, `type` and `rule`, and no two of them overlap.
+- **`provenance`** is informative: `rule` is the rule id (`Match.kind`), and it may change with the rules; `origin`
+  is `builtin` and `layer` is `deterministic` in this release. There is no confidence.
+- **`engine.version`** is the version of the plugin or the wheel. **`engine.ruleset`** is a sha256 over the rule list
+  the request loaded (each rule's id, type, pattern, keywords and checks, in scan order), the regions, the label
+  languages and the year. It is computed from the loaded rules, not from the files: a checkout with CRLF line ends
+  and the release tree give the same digest. The same request, version and ruleset give the same bytes.
+- **The year** is the one input from outside the request: a birth date must lie before the current year (UTC). It is
+  part of `ruleset`, so the digest changes on 1 January.
+
+**Errors.** An error is a response too, on stdout, with a non-zero exit status. stderr stays empty.
+
+```json
+{"contract": "maisecrets.detect/1", "error": {"code": "invalid_request", "path": "regions[1]", "message": "is no known region"}}
+```
+
+| `code` | Exit status | When |
+|---|---|---|
+| `invalid_json` | 2 | the input is not one JSON document in UTF-8, has a key twice in one object, or holds `NaN` |
+| `unsupported_contract` | 2 | `contract` is not `maisecrets.detect/1` |
+| `invalid_request` | 2 | a required key is missing, a value has the wrong type or is not known, a key is not defined, or the process got arguments; `path` names the field (`channel`, `regions[1]`, `context.path`; `""` for the request itself) |
+| `internal_error` | 3 | the engine failed; the message names the class of the exception |
+
+Exit status 0 is a response with findings. Any other status (1 from the interpreter itself, for example when the
+package is not found) means no response was written. The message of an error is a fixed text of the engine: it
+never holds a value of the request, not even the name of an unknown key, since a key is input as well.
+
+`tests/test_detection_entry_point.py` runs the conformance cases (`tests/conformance/cases.json`) through the entry
+point and compares each response with the Python API, checks every response kind and the two examples above against
+the schema, runs one request twice in fresh processes and compares the bytes, and sends a secret-shaped value in each
+wrong field and checks that no output holds it. `scripts/wheel_smoke.py` calls the entry point from the installed
+wheel.
+
 ## The old names
 
 `maisecrets.detect` and `maisecrets.checksums`, `lazy_regex`, `normalise`, `regions`, `registry`, `rulespec`,
@@ -142,6 +228,7 @@ import or a patch through an old name reaches the core itself. The plugin and it
 | `tests/test_detector_host.py` | An explicit host reads neither the user name nor the clock; an explicit detector gives one result on two hosts. |
 | `tests/test_detection_package.py` | The API, the old names, the rule data, and a library caller that imports nothing of the plugin. |
 | `tests/test_code_point_offsets.py` | The offsets count code points: emoji and combining characters before, around and inside a value, in a JSON line and in the cleaned copy of a tool result. |
+| `tests/test_detection_entry_point.py` | The JSON entry point: the conformance cases through it, the schema, the errors, the bytes of two runs, no value in any output. |
 | `tests/test_library_consumer.py` | A server-like caller of the public names only (`examples/library_consumer.py`): its own sources and rules, `reset()`, two detectors in eight threads, a large input, many requests, no file under HOME. |
 
 `scripts/detection_fingerprint.py` records the hits of 27,337 inputs. A change that moves the code and not the rules
