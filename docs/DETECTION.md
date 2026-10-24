@@ -75,7 +75,7 @@ maintainer on 2026-10-20 (merge request !160):
 | `Detector`, `Match` (`kind`, `type`, `value`, `start`, `end`), `Sources`, `NO_SOURCES`, `References`, `NO_REFERENCES`, `Host`, `THIS_COMPUTER`, `Active`, `resolve_regions` | **stable** |
 | `user_rule(id, type, pattern, keywords=(), secret_group=0)` | **stable**: the one way for a caller to make a rule of its own. The id becomes `user:<id>`; a wrong argument raises `ValueError` |
 | `Rule` | **no stable constructor**: the type that `user_rule` returns and `Detector.rules()` lists. Of its fields only `id`, `type`, `keywords` and `secret_group` are promised; the other 17 belong to the detector |
-| `TYPES` and `maisecrets/detection/types.json` | **stable** as the section "The type vocabulary" says: a listed type, its family and its class stay; new types may come |
+| `TYPES` and `maisecrets/detection/types.json` | **stable** as the section "The type vocabulary" says: a listed type and its family stay; a class may be refined in a minor release; new types may come |
 | `LazyRegex` | **deprecated**: a `DeprecationWarning` on access; importable until 0.8 at least |
 | `maisecrets.detect` and the other old names | **not API**: plugin modules, not in the wheel |
 | The hits themselves | **not API**: a patch version may find more or fewer values; `docs/BENCHMARKS.md` and `scripts/compare_bench.py` report how |
@@ -103,10 +103,13 @@ TYPES["SECRET"]          # {"family": "secret", "class": "secret"}
 
 - **`family`** is `secret` or `pii`. **`class`** is one of the classes of the benchmark (`bench/cases.py`), such as
   `pii.phone`, `pii.national_id` or `pii.bank_account`, or the family alone when the type does not say which kind it
-  is (`SECRET`). The benchmark reads its classes from this file (`bench/sources.py`).
+  is (`SECRET`). The benchmark reads its classes from this file (`bench/sources.py`). The classes today are the
+  classes of the benchmark, so several types under `pii.national_id` (postcodes, vehicle plates, tax and company
+  numbers) are candidates for a finer class later.
 - **Stable:** a type that a release lists is not renamed or removed without the deprecation path above. When its
-  last rule goes, the entry stays with a `deprecated` field for at least one minor version. The family and the class
-  of a listed type never change.
+  last rule goes, the entry stays with a `deprecated` field for at least one minor version. The family of a listed
+  type never changes.
+- **May be refined in a minor release:** the class of a listed type. The changelog names each type whose class moved.
 - **May grow in any release:** new types (a new rule, a new region, a vendored rule set that brings a new entity),
   and new optional fields in an entry. A caller handles a type it does not know by its `family` and `class` from
   `TYPES` of the installed version: that version lists every type it emits.

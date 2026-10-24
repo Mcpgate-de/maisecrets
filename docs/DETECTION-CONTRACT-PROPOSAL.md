@@ -64,7 +64,8 @@ new type is added in a minor version and a type is never renamed or removed with
 
 Done for 0.8: `maisecrets/detection/types.json` and `maisecrets.detection.TYPES`, 79 types with every region
 loaded. A new type may come in any release, since the installed version lists every type it emits; a listed type is
-not renamed or removed without the deprecation path (docs/DETECTION.md, "The type vocabulary").
+not renamed or removed without the deprecation path, and its family stays; its class may be refined in a minor
+release (docs/DETECTION.md, "The type vocabulary").
 
 ## Structured context: when the field name carries the meaning
 
