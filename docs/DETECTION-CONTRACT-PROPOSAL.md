@@ -100,6 +100,11 @@ The contract carries it as spans with names, not as a second data model:
 This is also where the record-field misses of the benchmark (category C, about 8 % of what 0.7.3 misses) would be
 taken: one declarative field lexicon read by both the text parsers and `context.fields`.
 
+**Built in 0.8, narrower than above** (docs/DETECTION.md, "Field names"): `fields` only adds evidence. A field holds
+no hit back, the text is parsed as without fields (no "structure first"), and the lexicon is the label words the
+rules already have, plus three kinds of name that add nothing (`key` and `token` alone, a page cursor). A field that
+holds a value back would need the field lexicon above; it waits for a measured case.
+
 ## The conformance cases
 
 `tests/conformance/cases.json` already has the shape: `input` (text), `channel`, `regions`, `languages`, `expected`

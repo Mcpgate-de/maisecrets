@@ -44,15 +44,24 @@ def call(request, root: Path = ROOT, args=(), env: dict | None = None) -> subpro
 
 
 def request_of(case: dict) -> dict:
-    return {"contract": contract.CONTRACT, "text": case["input"], "channel": case["channel"],
-            "regions": case["regions"], "languages": case["languages"]}
+    out = {"contract": contract.CONTRACT, "text": case["input"], "channel": case["channel"],
+           "regions": case["regions"], "languages": case["languages"]}
+    if "context" in case:
+        out["context"] = case["context"]
+    return out
+
+
+def fields_of(case: dict):
+    given = case.get("context", {}).get("fields")
+    return None if given is None else [(f["start"], f["end"], tuple(f["name"])) for f in given]
 
 
 def library(case: dict) -> list:
     """(start, end, type, rule) of the Python API with the configuration of the entry point."""
     d = Detector(regions=Active(regions=tuple(case["regions"]), languages=tuple(case["languages"]), source="t"),
                  sources=NO_SOURCES, references=NO_REFERENCES, host=Host(user="", year=time.gmtime().tm_year))
-    return sorted({(m.start, m.end, m.type, m.kind) for m in d.findings(case["input"], channel=case["channel"])})
+    return sorted({(m.start, m.end, m.type, m.kind) for m in d.findings(case["input"], channel=case["channel"],
+                                                                fields=fields_of(case))})
 
 
 # ------------------------------------------------------------------------------------------- a small schema check --
@@ -205,7 +214,15 @@ class Errors(unittest.TestCase):
             ({**ok, TOKEN: "x"}, "invalid_request", ""),
             ({**ok, "extra": TOKEN}, "invalid_request", ""),
             ({**ok, "context": {TOKEN: 1}}, "invalid_request", "context"),
-            ({**ok, "context": {"fields": [{"start": 0, "end": 5, "name": [TOKEN]}]}}, "invalid_request", "context"),
+            ({**ok, "context": {"fields": [{"start": 0, "end": 5, "name": ["a"], TOKEN: 1}]}}, "invalid_request",
+             "context.fields[0]"),
+            ({**ok, "context": {"fields": [{"start": 0, "end": 99, "name": [TOKEN]}]}}, "invalid_request",
+             "context.fields[0]"),
+            ({**ok, "context": {"fields": [{"start": 0, "end": 5, "name": [TOKEN, None]}]}}, "invalid_request",
+             "context.fields[0].name[1]"),
+            ({**ok, "context": {"fields": [{"start": 0, "end": 5, "name": ["a"], "format": [TOKEN]}]}},
+             "invalid_request", "context.fields[0].format"),
+            ({**ok, "context": {"fields": TOKEN}}, "invalid_request", "context.fields"),
             ({**ok, "context": TOKEN}, "invalid_request", "context"),
             ({**ok, "text": [TOKEN]}, "invalid_request", "text"),
             ({k: v for k, v in {**ok, "note": TOKEN}.items() if k != "text"}, "invalid_request", ""),
@@ -221,6 +238,27 @@ class Errors(unittest.TestCase):
                        raw[:-1] + b', "n": NaN, "x": "' + TOKEN.encode() + b'"}'):
             with self.subTest(raw=len(broken)):
                 self.assertRefused(broken, "invalid_json", "")
+
+    def test_context_fields_reach_the_detector_and_no_name_is_echoed(self):
+        base = {"contract": contract.CONTRACT, "text": "0171 4829173", "channel": "tool", "regions": ["generic", "de"],
+                "languages": ["de", "en"]}
+        self.assertEqual(json.loads(call(base).stdout)["findings"], [], "the premise: bare it is no finding")
+        field = {"start": 0, "end": 12, "name": ["customer", "telefon"], "format": "json"}
+        r = call({**base, "context": {"fields": [field]}})
+        self.assertEqual((r.returncode, r.stderr), (0, b""))
+        out = json.loads(r.stdout)
+        self.assertEqual(response_problems(out), [])
+        self.assertEqual([(f["start"], f["end"], f["type"]) for f in out["findings"]], [(0, 12, "PHONE")])
+        r = call({**base, "context": {"fields": [{"start": 0, "end": 12, "name": [TOKEN, 0]}]}})
+        self.assertEqual((r.returncode, json.loads(r.stdout)["findings"]), (0, []))
+        self.assertNotIn(TOKEN.encode(), r.stdout)
+        for bad in ({"start": True, "end": 12, "name": ["a"]}, {"start": 0, "end": 12.0, "name": ["a"]},
+                    {"start": 0, "end": 12, "name": []}, {"start": 0, "end": 12},
+                    {"start": 3, "end": 3, "name": ["a"]}):
+            with self.subTest(bad=sorted(bad)):
+                r = call({**base, "context": {"fields": [bad]}})
+                self.assertEqual((r.returncode, json.loads(r.stdout)["error"]["code"]), (2, "invalid_request"))
+                self.assertTrue(json.loads(r.stdout)["error"]["path"].startswith("context.fields[0]"))
 
     def test_the_required_keys_and_the_arguments(self):
         ok = {"contract": contract.CONTRACT, "text": "", "channel": "prompt", "regions": [], "languages": []}

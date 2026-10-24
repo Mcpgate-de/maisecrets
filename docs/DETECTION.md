@@ -48,7 +48,7 @@ for m in d.findings(text, channel="tool", path="notes.txt"):
 
 | Name | What |
 |---|---|
-| `Detector` | A detector with its own configuration: `scan`, `findings`, `rules`, `allow_list`, `explain_allowed`, `regions`, `reset`, `slowest_user_rule`, `activate`. `scan` and `findings` take the text as a `str` (a subclass of `str` too) and raise `TypeError` for anything else, `bytes` and `None` included (since 0.8) |
+| `Detector` | A detector with its own configuration: `scan`, `findings`, `rules`, `allow_list`, `explain_allowed`, `regions`, `reset`, `slowest_user_rule`, `activate`. `scan` and `findings` take the text as a `str` (a subclass of `str` too) and raise `TypeError` for anything else, `bytes` and `None` included (since 0.8). They take an optional keyword argument `fields` (since 0.8, additive): the field names of values in the text, below |
 | `Match` | One hit: `kind` (the rule id), `type`, `value`, `start`, `end`. `start` and `end` count the Unicode code points of the `str` that was scanned, and `text[start:end] == value` |
 | `Sources`, `NO_SOURCES` | What a scan takes besides the built-in rules |
 | `References`, `NO_REFERENCES` | The reference form of the caller |
@@ -64,6 +64,37 @@ checks of a value), `own_rules.py` (`OWN_RULES`, `FALLBACK_RULES`), `text_index.
 test-code check) and `encoded_mail.py` (an address with its @ as %40). `core.py` imports each of their names, so
 `core.<name>` is the same object. A patch of such a name on the core does not reach the functions of the part:
 patch the module that defines the name.
+
+## Field names: `fields` (since 0.8)
+
+A caller that has the structure of its data (a JSON response walked with a field path, a key-value record) can give
+the field name of a value with the text, instead of the core guessing it back from the text:
+
+```python
+d.findings("0171 4829173", channel="tool", fields=[(0, 12, ("customer", "telefon"))])   # one PHONE, 0-12
+d.findings("0171 4829173", channel="tool")                                            # no hit
+```
+
+- **The shape:** a list or tuple of `(start, end, name)`. `start` and `end` are the span of the value in code points
+  of the text, `0 <= start < end <= len(text)`; `name` is the field path, outermost first, a tuple (or list) of `str`
+  and `int` parts. A wrong shape raises `TypeError`, an offset outside the text `ValueError`; the message names the
+  position (`fields[1]`) and never a part of the text or of a name. Fields may overlap.
+- **What a name does:** it is evidence as the same label before the value in text is, and only that. The last part of
+  the path that is no list index is put before a copy of the value (`telefon: <value>`) and that line is scanned with
+  the rules of the call. A hit inside the value is added when the bare value has none there and the scan of the whole
+  text has none there either (`maisecrets/detection/fields.py`).
+- **What it never does:** take a hit away (the hits of the text stay as they are), add a hit outside its span, bring
+  back a hit that the text around the value took away, or parse anything: the core reads JSON and the other formats of
+  the text itself, as without fields. A field that names what the core read itself adds no second hit.
+- **Names that add nothing:** a name the label rules give no evidence for (`id`, `value`, `data`, `title`, an unknown
+  word), `key` and `token` alone (in API data they name a ticket key, an object key or a cursor as often as a
+  credential; `api_key`, `access_token`, `secret_key` are labels as in text), the cursor of a paged list
+  (`nextPageToken`, `syncToken`, `continuationToken`), and a name with a line break, `:`, `=` or a quote, or longer
+  than 64 characters. `build_number` stays text.
+- **Without `fields`** (or with an empty list) a scan is the one of before: `scripts/detection_fingerprint.py` gives
+  the same bytes. Each field costs two scans of its value, one with the label and one bare.
+- `tests/test_detection_fields.py` holds these points; `tests/conformance/cases.json` has cases with
+  `context.fields` in the gateway's shapes (a leaf with its field path, and a JSON text with fields of its own keys).
 
 ## The API: the decision of 2026-10-20
 
@@ -150,13 +181,13 @@ The schema of the request and of the response is `maisecrets/detection/detect-1.
 | `regions` | yes | the country rule sets, such as `["generic", "de"]`: `generic` and the country codes the rules name (`de`, `us`, `uk`, …; an unknown code is an error). `generic` is always on; `[]` gives it alone |
 | `languages` | yes | the label languages, such as `["en", "de"]`: the files of `maisecrets/detection/rules/labels/`. English is always on |
 | `context.path` | no | the file the text came from: a value of a test file can then be a fixture and no finding |
+| `context.fields` | no | the field names of values in the text: a list of `{"start", "end", "name", "format"}`, the span of a value in code points, its field path outermost first (strings and integers, at least one part) and an informative format. It is the `fields` argument of `Detector.findings` ("Field names" above): evidence as a label, never a finding taken away. A wrong field is an error with the path `context.fields[i]…` |
 
 The order of `regions` and of `languages` does not matter. A key that the table does not name is an error, so a
-misspelt key never goes unnoticed. Two keys of the proposal are
-not in `maisecrets.detect/1` yet: `context.fields` comes with the `fields` argument of `Detector.findings`, and
-`exclusions` has no form in the core today (a reference form is a `References` object of six questions, not a list
-of spans). A caller drops a finding inside its own placeholders itself. A later release may accept both as new
-optional keys; a request without them keeps its meaning.
+misspelt key never goes unnoticed. One key of the proposal is
+not in `maisecrets.detect/1` yet: `exclusions` has no form in the core today (a reference form is a `References` object of six questions, not a list
+of spans). A caller drops a finding inside its own placeholders itself. A later release may accept it as a new
+optional key; a request without them keeps its meaning.
 
 ```json
 {"contract": "maisecrets.detect/1",
@@ -229,6 +260,7 @@ import or a patch through an old name reaches the core itself. The plugin and it
 | `tests/test_detection_package.py` | The API, the old names, the rule data, and a library caller that imports nothing of the plugin. |
 | `tests/test_code_point_offsets.py` | The offsets count code points: emoji and combining characters before, around and inside a value, in a JSON line and in the cleaned copy of a tool result. |
 | `tests/test_detection_entry_point.py` | The JSON entry point: the conformance cases through it, the schema, the errors, the bytes of two runs, no value in any output. |
+| `tests/test_detection_fields.py` | The `fields` argument: evidence as a label in text, nothing for a weak name, no hit taken away, the same hits on a JSON text the core parses itself, the `TypeError` and `ValueError` of a wrong shape. |
 | `tests/test_library_consumer.py` | A server-like caller of the public names only (`examples/library_consumer.py`): its own sources and rules, `reset()`, two detectors in eight threads, a large input, many requests, no file under HOME. |
 
 `scripts/detection_fingerprint.py` records the hits of 27,337 inputs. A change that moves the code and not the rules

@@ -20,7 +20,8 @@ CHANNELS = ("prompt", "tool")
 EXIT = {"ok": 0, "invalid_json": 2, "unsupported_contract": 2, "invalid_request": 2, "internal_error": 3}
 ERRORS = ("invalid_json", "unsupported_contract", "invalid_request", "internal_error")
 _KEYS = {"contract", "text", "channel", "regions", "languages", "context"}
-_CONTEXT_KEYS = {"path"}
+_CONTEXT_KEYS = {"path", "fields"}
+_FIELD_KEYS = {"start", "end", "name", "format"}
 
 
 class RequestError(Exception):
@@ -99,10 +100,47 @@ def parse(raw: bytes) -> dict:
     if not isinstance(path, str):
         raise RequestError("invalid_request", "context.path", "must be a string")
     return {"text": doc["text"], "channel": doc["channel"], "path": path,
+            "fields": _fields(context["fields"], len(doc["text"])) if "fields" in context else None,
             # generic and English are always on, as in the plugin (regions.resolve): a request may name them. The
             # order of a list says nothing: sorted, the same sets give the same ruleset digest
             "regions": ("generic", *sorted(r for r in regions if r != "generic")),
             "languages": ("en", *sorted(x for x in languages if x != "en"))}
+
+
+def _integer(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _fields(given, length: int) -> tuple:
+    """context.fields as Detector.findings takes them: ((start, end, name path), ...). A field is
+    {start, end, name, format?}: the span of a value in code points of the text and its field path, outermost first."""
+    if not isinstance(given, list):
+        raise RequestError("invalid_request", "context.fields", "must be a list")
+    out = []
+    for i, f in enumerate(given):
+        at = f"context.fields[{i}]"
+        if not isinstance(f, dict):
+            raise RequestError("invalid_request", at, "must be an object")
+        if set(f) - _FIELD_KEYS:
+            raise RequestError("invalid_request", at, "holds a key the contract does not define")
+        for key in ("start", "end", "name"):
+            if key not in f:
+                raise RequestError("invalid_request", f"{at}.{key}", "is required")
+        for key in ("start", "end"):
+            if not _integer(f[key]):
+                raise RequestError("invalid_request", f"{at}.{key}", "must be an integer")
+        if not 0 <= f["start"] < f["end"] <= length:
+            raise RequestError("invalid_request", at, "must have 0 <= start < end <= the length of the text")
+        name = f["name"]
+        if not isinstance(name, list) or not name:
+            raise RequestError("invalid_request", f"{at}.name", "must be a non-empty list")
+        for j, part in enumerate(name):
+            if not (isinstance(part, str) or _integer(part)):
+                raise RequestError("invalid_request", f"{at}.name[{j}]", "must be a string or an integer")
+        if not isinstance(f.get("format", ""), str):
+            raise RequestError("invalid_request", f"{at}.format", "must be a string")
+        out.append((f["start"], f["end"], tuple(name)))
+    return tuple(out)
 
 
 def engine_version() -> str:
@@ -146,7 +184,7 @@ def detect(request: dict) -> dict:
     # nothing of a host, and a home path then is a finding whoever runs the engine
     d = Detector(regions=Active(regions=request["regions"], languages=request["languages"], source=CONTRACT),
                  sources=NO_SOURCES, references=NO_REFERENCES, host=Host(user="", year=time.gmtime().tm_year))
-    found = d.findings(request["text"], channel=request["channel"], path=request["path"])
+    found = d.findings(request["text"], channel=request["channel"], path=request["path"], fields=request.get("fields"))
     rows = sorted({(m.start, m.end, m.type, m.kind) for m in found})
     return {"contract": CONTRACT,
             "engine": {"name": "maisecrets", "version": engine_version(), "ruleset": ruleset(d)},
