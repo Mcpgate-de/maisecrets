@@ -55,6 +55,7 @@ for m in d.findings(text, channel="tool", path="notes.txt"):
 | `Host`, `THIS_COMPUTER` | What a scan reads of its computer |
 | `Active`, `resolve_regions` | The regions and label languages, and their resolution from a config (`locale=` to give the locale) |
 | `user_rule` | A rule of your own, for `Sources.user_rules` (returns a `Rule`; `LazyRegex` is deprecated) |
+| `TYPES` | The type vocabulary: each type a `Match` can carry, with its `family` and `class` (`maisecrets/detection/types.json`) |
 
 The rule tables and the helpers of `core.py` are no API: they change with the rules.
 
@@ -74,6 +75,7 @@ maintainer on 2026-10-20 (merge request !160):
 | `Detector`, `Match` (`kind`, `type`, `value`, `start`, `end`), `Sources`, `NO_SOURCES`, `References`, `NO_REFERENCES`, `Host`, `THIS_COMPUTER`, `Active`, `resolve_regions` | **stable** |
 | `user_rule(id, type, pattern, keywords=(), secret_group=0)` | **stable**: the one way for a caller to make a rule of its own. The id becomes `user:<id>`; a wrong argument raises `ValueError` |
 | `Rule` | **no stable constructor**: the type that `user_rule` returns and `Detector.rules()` lists. Of its fields only `id`, `type`, `keywords` and `secret_group` are promised; the other 17 belong to the detector |
+| `TYPES` and `maisecrets/detection/types.json` | **stable** as the section "The type vocabulary" says: a listed type and its family stay; a class may be refined in a minor release; new types may come |
 | `LazyRegex` | **deprecated**: a `DeprecationWarning` on access; importable until 0.8 at least |
 | `maisecrets.detect` and the other old names | **not API**: plugin modules, not in the wheel |
 | The hits themselves | **not API**: a patch version may find more or fewer values; `docs/BENCHMARKS.md` and `scripts/compare_bench.py` report how |
@@ -87,6 +89,36 @@ to be carried as API.
 **Checks that hold it:** `tests/test_detection_package.py` pins `__all__`, the parameters of `user_rule`, the stable
 `Match` fields, a rule of your own found through a `Detector`, the `ValueError` of a wrong argument and the warning of
 `LazyRegex`. `scripts/wheel_smoke.py` makes a rule of its own through `user_rule` in a fresh venv.
+
+## The type vocabulary
+
+`maisecrets/detection/types.json` lists every type that a `Match.type` of a built-in rule or pass can carry, and
+`TYPES` is the same list as a read-only mapping:
+
+```python
+from maisecrets.detection import TYPES
+TYPES["DE_TAX_ID"]       # {"family": "pii", "class": "pii.tax_id"}
+TYPES["SECRET"]          # {"family": "secret", "class": "secret"}
+```
+
+- **`family`** is `secret` or `pii`. **`class`** is one of the classes of the benchmark (`bench/cases.py`), such as
+  `pii.phone`, `pii.national_id` or `pii.bank_account`, or the family alone when the type does not say which kind it
+  is (`SECRET`). The benchmark reads its classes from this file (`bench/sources.py`). The classes today are the
+  classes of the benchmark, so several types under `pii.national_id` (postcodes, vehicle plates, tax and company
+  numbers) are candidates for a finer class later.
+- **Stable:** a type that a release lists is not renamed or removed without the deprecation path above. When its
+  last rule goes, the entry stays with a `deprecated` field for at least one minor version. The family of a listed
+  type never changes.
+- **May be refined in a minor release:** the class of a listed type. The changelog names each type whose class moved.
+- **May grow in any release:** new types (a new rule, a new region, a vendored rule set that brings a new entity),
+  and new optional fields in an entry. A caller handles a type it does not know by its `family` and `class` from
+  `TYPES` of the installed version: that version lists every type it emits.
+- **Not listed:** the type of a rule of your own (`user_rule`) and of a term list or an imported value of the
+  plugin; the caller or the person chose it. The terms and imports of the plugin take listed types only.
+
+`tests/test_type_vocabulary.py` derives the emitted types from the rules of every region and label language and from
+the passes, and fails when a type is emitted and not listed, or listed and emitted by nothing (unless it is
+`deprecated`). A vendored rule-set update that brings a new type is therefore red until the type gets an entry.
 
 ## The old names
 

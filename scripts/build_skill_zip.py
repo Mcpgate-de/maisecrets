@@ -26,6 +26,7 @@ DETECTOR = ("maisecrets/__init__.py", "maisecrets/detection/__init__.py", "maise
             "maisecrets/detection/lazy_regex.py", "maisecrets/detection/normalise.py",
             "maisecrets/detection/regions.py", "maisecrets/detection/registry.py",
             "maisecrets/detection/rule_filter.py", "maisecrets/detection/rulespec.py",
+            "maisecrets/detection/vocabulary.py", "maisecrets/detection/types.json",
             "maisecrets/detect.py", "maisecrets/checksums.py", "maisecrets/lazy_regex.py", "maisecrets/normalise.py",
             "maisecrets/regions.py", "maisecrets/registry.py", "maisecrets/rule_filter.py", "maisecrets/rulespec.py",
             "maisecrets/placeholder.py", "maisecrets/rules/freemail_domains.txt")
