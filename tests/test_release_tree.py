@@ -101,6 +101,15 @@ class ReleaseTreeTests(unittest.TestCase):
         self.assertGreaterEqual(len(parts), 2)
         self.assertEqual(sorted(self.files), sorted(want + parts))
 
+    def test_every_file_is_small_enough_for_the_directory_to_read(self):
+        # the directory reads a file only up to a size between 207 KB (read) and 271 KB (BINARIES_NOT_INSPECTED,
+        # 0.7.17 to 0.7.19), and then holds the version; docs/REPO-STANDARDS.md, "What the directory flags"
+        sizes = subprocess.run(["git", "ls-tree", "-r", "-l", self.commit], capture_output=True, text=True,
+                               check=True, cwd=ROOT).stdout.splitlines()
+        self.assertGreater(len(sizes), 50)
+        big = [row.split("\t")[1] for row in sizes if int(row.split()[3]) >= self.mod.FILE_BYTES]
+        self.assertEqual(big, [])
+
     def test_the_betterleaks_parts_load_the_same_rules_and_ship_no_key(self):
         # the directory held every version whose betterleaks.json it could not read whole; the parts are each under
         # PART_BYTES, the release detector loads the same rules from them, and the gcp-api-key allow list decides the
