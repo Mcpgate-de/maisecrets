@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## [0.8.0] - 2026-10-24
+
+### Breaking
+
+- a library caller gets a TypeError for a text that is not a str, and LazyRegex is gone (bb0edb8)
+
+### API
+
+- the JSON entry point accepts the optional request key context.fields (additive) (25609f3)
+- scan and findings take an optional keyword argument fields, the field names of values (additive) (e82049b)
+- the offsets of a Match are defined as Unicode code points of the scanned str (text[start:end] == value) (016583d)
+- Detector.scan and Detector.findings raise TypeError for a text that is not a str (None and bytes included); a str subclass is accepted (bb0edb8)
+- LazyRegex is removed from maisecrets.detection (deprecated in 0.7.0); give user_rule the pattern as a string (bb0edb8)
+- new stable name maisecrets.detection.TYPES and the data file maisecrets/detection/types.json (85b6cc3)
+
+### Features
+
+- the JSON entry point takes context.fields, the field names of values (25609f3)
+- a library caller can give the field name of a value, and the name counts as a label (e82049b)
+- a caller in any language scans text with python3 -m maisecrets.detection (contract maisecrets.detect/1) (1ef231b)
+- the library publishes its type vocabulary, each type with its family and class (85b6cc3)
+
+### Fixes
+
+- the release gate names the baseline of an approved minor or major version (b9a56dc)
+
 ## [0.7.20] - 2026-10-24
 
 ### Features
