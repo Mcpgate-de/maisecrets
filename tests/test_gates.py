@@ -136,7 +136,7 @@ class GrantTests(unittest.TestCase):
         token = "glpat-" + "PendingProbeAbc123456789x"
         out = hooks.user_prompt({"prompt": f"deploy with {token} now", "session_id": "S7", "transcript_path": "",
                                  **CLAUDE})
-        self.assertIn("/ms", out["reason"])
+        self.assertIn("/maisecrets:send", out["reason"])
         self.assertNotIn(token, out["reason"])
         text = hooks.take_pending("S7")
         self.assertEqual(text, "deploy with ⟦SECRET_c2⟧ now")
@@ -837,7 +837,7 @@ class RedactionTests(unittest.TestCase):
         text = json.dumps(out)
         self.assertNotIn(NASTY, text)
         self.assertEqual(out["hookSpecificOutput"]["updatedToolOutput"]["stdout"], f"PW={e.ref}\ngot:{e.ref}\n")
-        self.assertIn(f"replaced 2 value(s) in this Bash result before the AI saw it: {e.ref}", out["systemMessage"])
+        self.assertIn(f"masked 2 value(s) in this Bash result before the AI saw it: {e.ref}", out["systemMessage"])
 
     def test_index_carries_no_reversible_fingerprint(self):
         import hashlib

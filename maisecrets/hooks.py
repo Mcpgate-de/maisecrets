@@ -454,7 +454,8 @@ def take_pending(session: str | None = None) -> str | None:
         if len(fresh) > 1:
             # two sessions blocked a prompt; without a session id the newest could belong to the
             # other one and its private text would land here (review, 2026-09-26)
-            return "(maisecrets: blocked prompts of two sessions are waiting; paste from the clipboard instead)"
+            return ("(maisecrets: blocked prompts of two sessions are waiting; paste from the clipboard, or copy "
+                    "the cleaned prompt from the block message)")
         cands = sorted(fresh, key=lambda p: p.stat().st_mtime, reverse=True)[:1]
     cands = [c for c in cands if time.time() - c.stat().st_mtime < 15 * 60]   # a stale prompt is not sent
     if not cands:
@@ -685,8 +686,8 @@ def settings_mod_came_from(payload: dict) -> str:
 def _run_sh() -> str:
     """The absolute path of this plugin's launcher for this OS, for a line the person runs in a terminal (run.sh does
     not run in cmd or PowerShell)."""
-    name = "run.cmd" if os.name == "nt" else "run.sh"
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", name)
+    from .notices import launcher
+    return launcher()
 
 
 def _incident_answer(kind: str, selector: str | None) -> dict:
@@ -994,8 +995,8 @@ def user_prompt(payload: dict) -> dict:
         return {
             "decision": "block",
             "reason": (
-                f"maisecrets: @{mention} would inline the file without scanning. "
-                "Ask the assistant to read it instead, so the Read result can be redacted."
+                f"maisecrets: @{mention} would send the whole file to the AI before maisecrets can check it. "
+                "Ask the AI to read the file instead; then maisecrets masks what is secret in it."
             ),
             "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
         }
@@ -1076,9 +1077,9 @@ def user_prompt(payload: dict) -> dict:
             prompt, _marked = term_files.take_markers(prompt, _name_ttl(cfg))
         except OSError as exc:
             return {"decision": "block", "reason": (
-                f"maisecrets: the name you marked with {{{{…}}}} cannot be recorded ({type(exc).__name__}), so it "
-                "would reach the model unmasked. This prompt was not sent; send it again without the marker, or "
-                "write the name as /maisecrets:term add NAME."),
+                f"maisecrets: the name you marked with {{{{…}}}} cannot be recorded ({type(exc).__name__}), so the "
+                "AI would see it. This prompt was not sent. Add the name with /maisecrets:term add NAME, then send "
+                "the prompt again."),
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if grant:
         from . import consent_store
@@ -1095,12 +1096,12 @@ def user_prompt(payload: dict) -> dict:
             consent_store.drop_codes(session)    # a wrong sentence is another prompt: the code ends (codex review)
         reason = (f"maisecrets: writes over ssh to {', '.join(hosts)} run without asking for "
                   f"{consent_store.APPROVAL_SECONDS // 3600} hours in this session. This prompt was not sent to the "
-                  "model; send your next request." if hosts else
+                  "AI; send your next request." if hosts else
                   ("maisecrets: this consent code is not valid (wrong host, used, or older than "
                    f"{consent_store.CODE_SECONDS // 60} minutes). Nothing was allowed; this prompt was not sent."
                    if grant.group(2) else
-                   "maisecrets: in Codex this sentence needs the code from the refusal. Nothing was allowed; this "
-                   "prompt was not sent."))
+                   "maisecrets: in Codex this sentence needs the 6-digit code from the refusal message. Nothing "
+                   "was allowed; this prompt was not sent."))
         return {"decision": "block", "reason": reason,
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
 
@@ -2567,7 +2568,8 @@ def post_tool(payload: dict) -> dict:
             return {"decision": "block",
                     "reason": f"[maisecrets: the tool ran and finished; this is not an error. {note}]\n\n{cleaned}"}
         return {
-            "systemMessage": f"maisecrets removed {hidden['n']} invisible character(s) from this {tool} result.",
+            "systemMessage": f"maisecrets removed {hidden['n']} invisible character(s) from this {tool} result. "
+                             "They can hide instructions; the text around them stays.",
             "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response,
                                    "additionalContext": note},
         }
@@ -2604,7 +2606,7 @@ def post_tool(payload: dict) -> dict:
     shown = ", ".join(dict.fromkeys(refs)) if refs else "values that are already stored"
     return {
         # the person sees what was replaced, not only the model (UX review, 2026-09-27)
-        "systemMessage": f"maisecrets replaced {hit['n']} value(s) in this {tool} "
+        "systemMessage": f"maisecrets masked {hit['n']} value(s) in this {tool} "
                          f"result before the AI saw it: {shown}."
                          + (f" It also removed {hidden['n']} invisible character(s)." if hidden["n"] else "")
                          + (f" {swap[2]}" if swap else ""),
@@ -2813,15 +2815,16 @@ def post_tool_failure(payload: dict) -> dict:
                  "maisecrets cleaned the transcript on disk now, but could not start the later pass" if now else
                  "maisecrets could not clean the transcript on disk")
     unkeyed = max(0, len(dict.fromkeys(values)) - len(refs)) if matches else 0
-    cap = (f" {unkeyed} more were not stored (above max_new_entries_per_result), so a repeat of those is found "
-           "only by its shape." if unkeyed else "")
+    cap = (f" {unkeyed} more were not stored (too many in one result), so a repeat of those is found only by its "
+           "format." if unkeyed else "")
     from . import events
     events.record("PostToolUseFailure", "claude", entries, outcome=f"a failed call: seen by the model; {scrub}")
     shown = ", ".join(refs) if refs else "values that are already stored"
     tool = payload.get("tool_name") or "tool"
     return {
         "systemMessage": f"maisecrets: this failed {tool} call printed {hit['n']} value(s) ({shown}). Claude Code "
-                         f"shows the output of a failed call to the AI as it is, so the AI saw them; {scrub}.{cap}",
+                         f"shows the output of a failed call to the AI as it is, so the AI saw them; {scrub}.{cap} "
+                         "If a value is a real secret, change it at its service.",
         "hookSpecificOutput": {
             "hookEventName": "PostToolUseFailure",
             "additionalContext": (f"maisecrets: the output of this failed call held {hit['n']} value(s) the user "

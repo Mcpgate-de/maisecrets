@@ -245,7 +245,8 @@ class Change(unittest.TestCase):
         self.assertNotIn("ssh_consent", _user())
         with mock.patch.object(settings, "load_config",
                                return_value={**load_config(), "policy_keys": ["ssh_consent"]}):
-            self.assertIn("machine policy", settings.apply_typed("ssh_consent", "on")[1])
+            self.assertIn("SSH consent is set by your administrator's policy",
+                          settings.apply_typed("ssh_consent", "on")[1])
         self.assertNotIn("ssh_consent", _user())
         CONFIG.write_text('{"backend": "jsonfile", "allow_plaintext_store": true,')
         try:

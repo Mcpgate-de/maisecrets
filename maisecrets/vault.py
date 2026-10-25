@@ -50,7 +50,7 @@ def describe_backend(backend) -> str:
         "EncryptedFileBackend": f"encrypted file {HOME / 'vault.enc.json'} (openssl, key file {HOME / 'key'})",
         "JsonFileBackend": f"PLAINTEXT file {HOME / 'vault.json'} - TEST MODE, not for real secrets",
     }.get(name, name)
-    return (f"maisecrets vault: {where}. Metadata: {INDEX}. "
+    return (f"Stored values: {where}. Metadata: {INDEX}. "
             f"To change it: write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (takes effect on the next call). "
             "Free and open source, by mcpgate.de.")
 
@@ -617,8 +617,9 @@ class Vault:
             # next put would overwrite SECRET_c1 in the store. The file stays in place, so every
             # later call raises too (moving it away made the guard last one call; review,
             # 2026-09-26). `maisecrets repair` rebuilds the counters from the store.
-            raise CodedError(f"vault index unreadable ({INDEX.name}); nothing is stored or resolved until "
-                             f"`maisecrets repair` ran or the file was fixed by hand",
+            from .notices import launcher
+            raise CodedError(f"its list of stored values ({INDEX.name}) is damaged. Until it is repaired, nothing is "
+                             f"stored or put into a command. To repair it, run {launcher()} repair in a terminal",
                              "store.index-read", "parse") from exc
         if not isinstance(data, dict) or "entries" not in data:
             raise CodedError("vault index has an unexpected shape", "store.index-shape", "shape")

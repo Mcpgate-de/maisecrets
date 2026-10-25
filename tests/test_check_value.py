@@ -544,11 +544,15 @@ class TipTests(_Base):
                                    input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=60)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 return json.loads(r.stdout).get("systemMessage", "")
-            self.assertIn(check_value.TIP_CODEX, start())
-            self.assertNotIn("ms:(", start())
+            # the first start names ms:(…) in its try-it line; the Codex tip would say it twice, and its hint is used
+            first = start()
+            self.assertIn("Try it: send ms:(", first)
+            self.assertNotIn(check_value.TIP_CODEX, first)
+            self.assertIn("check_value", (home / "store" / "hints.json").read_text())
+            self.assertNotIn(check_value.TIP_CODEX, start())
             payload["transcript_path"] = str(home / ".claude" / "projects" / "p" / "r.jsonl")
             (home / "store" / "hints.json").unlink()
-            self.assertNotIn("ms:(", start(), "Claude Code names it under a blocked prompt, not at the start")
+            self.assertNotIn(check_value.TIP_CLAUDE, start(), "Claude Code names it under a blocked prompt")
 
 
 

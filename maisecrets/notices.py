@@ -69,6 +69,14 @@ def send_command() -> str:
     return "/maisecrets:send"
 
 
+def launcher() -> str:
+    """The absolute path of this plugin's launcher for this OS, for a line the person runs in a terminal (run.sh does
+    not run in cmd or PowerShell)."""
+    import os
+    name = "run.cmd" if os.name == "nt" else "run.sh"
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", name)
+
+
 def _paste_key() -> str:
     return "⌘V" if platform.system() == "Darwin" else "Ctrl+V"
 
@@ -112,5 +120,5 @@ def peer_notice(entries: list, sender: str) -> list[str]:
     what = ("a secret and personal data" if secret and personal else "a secret" if secret else "personal data")
     return [f"maisecrets: a message from the Claude session {sender} held {what}. It was kept from the AI here, and "
             "the AI did not get the message.", "",
-            "    The values are stored. Ask that session to send them as placeholders (⟦…⟧) or as shapes.", "",
+            "    The values are stored. Ask that session to send placeholders (⟦…⟧) instead of the values.", "",
             "Something wrong? /maisecrets:report · maisecrets by mcpgate.de"]

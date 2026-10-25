@@ -237,7 +237,7 @@ class ClientShapeTests(unittest.TestCase):
             codex = hooks.user_prompt({"prompt": "use " + GLPAT, "session_id": "U2", "turn_id": "t",
                                        "transcript_path": ""})
         self.assertTrue(claude["hookSpecificOutput"]["suppressOriginalPrompt"])
-        self.assertIn("pastes the cleaned prompt. Then send it, or type /ms", claude["reason"])
+        self.assertIn("pastes the cleaned prompt. Then send it, or type /maisecrets:send", claude["reason"])
         self.assertNotIn("hookSpecificOutput", codex)
         self.assertIn("pastes the cleaned prompt. Then send it.", codex["reason"])
         self.assertIn("maisecrets by mcpgate.de", codex["reason"])
@@ -297,7 +297,7 @@ class ClientShapeTests(unittest.TestCase):
         self.assertEqual(new["content"][1], {"n": 5, "ok": True, "none": None})
         self.assertEqual(new["meta"]["deep"], [["x", self.e.ref + " tail"]])
         self.assertEqual(new["exit"], 0)
-        self.assertIn("replaced 2 value(s) in this mcp__x__y result", out["systemMessage"])
+        self.assertIn("masked 2 value(s) in this mcp__x__y result", out["systemMessage"])
         self.assertEqual(hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "tool_response": None,
                                           **CLAUDE}), {})
         self.assertEqual(hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "tool_response": [1, 2.5],
@@ -469,7 +469,7 @@ class MentionAndPendingTests(unittest.TestCase):
             with self.subTest(prompt):
                 out = hooks.user_prompt({"prompt": prompt, "cwd": cwd, "session_id": "M1", "prompt_id": "p"})
                 self.assertEqual(out["decision"], "block")
-                self.assertIn("would inline the file without scanning", out["reason"])
+                self.assertIn("would send the whole file to the AI before maisecrets can check it", out["reason"])
                 self.assertTrue(out["hookSpecificOutput"]["suppressOriginalPrompt"])
         self.assertEqual(hooks.user_prompt({"prompt": "see @nothing-here.env", "cwd": str(self.dir), **CLAUDE}), {})
         self.assertEqual(hooks.user_prompt({"prompt": "mail me@example", "cwd": str(self.dir), **CLAUDE}), {})

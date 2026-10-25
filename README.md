@@ -615,11 +615,11 @@ apart, as a local use. `/maisecrets:list`
 shows it under each secret:
 
 ```
-SECRET_c7      SECRET  github_pat            3d   14        21h  -
-    Seen at (a record, not a permission)
+SECRET_c7      SECRET  format       3d   14        21h  -
+    Sent to (a record only; it allows nothing)
       other.example.net     1×     last less than an hour ago   new
       api.github.com        10+×   last 2 hours ago
-    Local uses (not destination-protected)
+    Used on this computer
       a file in ~/proj/     2–9×   last 3 days ago
 ```
 
