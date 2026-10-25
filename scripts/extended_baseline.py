@@ -404,6 +404,29 @@ def report(index: list, out: Path, v3_dir: Path | None, base_081: Path | None) -
     return "\n".join(lines) + "\n"
 
 
+def merge_resources(path: Path, staged_path: Path) -> dict:
+    """The candidate's maisecrets rows and the other scanners' rows of the staging run in one table. A staged row keeps
+    the load average of its run; a staging run on another machine is not merged."""
+    import measure_resources
+    res, staged = json.loads(path.read_text(encoding="utf-8")), json.loads(staged_path.read_text(encoding="utf-8"))
+    if staged.get("machine") != res.get("machine"):
+        res["staged_not_merged"] = "the staging run measured another machine"
+    else:
+        for name, row in staged.get("scanners", {}).items():
+            if not name.startswith("maisecrets"):
+                res["scanners"][name] = {**row, "staged": True}
+        res["staged_load_average"] = staged.get("load_average")
+        res["staged_date"] = staged.get("date")
+    path.write_text(json.dumps(res, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    text = measure_resources.markdown(res)
+    if res.get("staged_load_average"):
+        sl = res["staged_load_average"]
+        text += (f"\nThe rows of the other scanners come from the staging run of {res.get('staged_date')} on the same "
+                 f"machine (load average {sl.get('start')} at its start, {sl.get('end')} at its end).\n")
+    path.with_name("resources.md").write_text(text, encoding="utf-8")
+    return res
+
+
 # ---------------------------------------------------------------------------------------------------------- main
 
 def tool_versions(index: list) -> dict:
@@ -529,7 +552,11 @@ def main(argv: list) -> int:
     text = report(index, a.out, v3_dir, base_081)
     if a.resources or a.resources_quick:   # after the runs, alone: the times need a machine without our own load
         import measure_resources
-        measure_resources.main([str(cand), str(a.out)] + (["--quick"] if a.resources_quick else []))
+        staged = a.reuse_from / "resources.json" if a.reuse_from else None
+        mine = ["--scanners", "maisecrets,maisecrets_ner"] if staged and staged.is_file() else []
+        measure_resources.main([str(cand), str(a.out)] + (["--quick"] if a.resources_quick else []) + mine)
+        if mine:   # the other scanners from the staging run: same machine, their own load average
+            merge_resources(a.out / "resources.json", staged)
         text += "\n" + (a.out / "resources.md").read_text(encoding="utf-8")
     (a.out / "report.md").write_text(text, encoding="utf-8")
     print(text)

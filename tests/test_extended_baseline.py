@@ -269,5 +269,26 @@ class StagedTests(unittest.TestCase):
         self.assertNotIn("reuse", self.plan(self.stage(name), name))
 
 
+class MergeResourcesTests(unittest.TestCase):
+    def test_the_staged_rows_of_the_other_scanners_join_the_candidates_rows(self):
+        tmp = Path(tempfile.mkdtemp())
+        m = {"cpu": "Test CPU", "cpus": 4, "ram_gb": 8, "os": "TestOS"}
+        row = {"cells": {}, "footprint": {"what": "x", "disk_mb": 1, "models_mb": 0, "torch": False}, "network": "no"}
+        mine = {"machine": m, "load_average": {"start": 1, "end": 1}, "scanners": {"maisecrets": row}}
+        staged = {"machine": m, "load_average": {"start": 2, "end": 3}, "date": "2026-10-25",
+                  "scanners": {"maisecrets": {"skipped": "old candidate"}, "presidio": row}}
+        (tmp / "resources.json").write_text(json.dumps(mine), encoding="utf-8")
+        (tmp / "staged.json").write_text(json.dumps(staged), encoding="utf-8")
+        res = xb.merge_resources(tmp / "resources.json", tmp / "staged.json")
+        self.assertEqual(set(res["scanners"]), {"maisecrets", "presidio"})
+        self.assertNotIn("skipped", res["scanners"]["maisecrets"])
+        self.assertTrue(res["scanners"]["presidio"]["staged"])
+        self.assertIn("staging run", (tmp / "resources.md").read_text(encoding="utf-8"))
+        staged["machine"] = {**m, "cpu": "Other CPU"}
+        (tmp / "staged.json").write_text(json.dumps(staged), encoding="utf-8")
+        (tmp / "resources.json").write_text(json.dumps(mine), encoding="utf-8")
+        self.assertIn("staged_not_merged", xb.merge_resources(tmp / "resources.json", tmp / "staged.json"))
+
+
 if __name__ == "__main__":
     unittest.main()
