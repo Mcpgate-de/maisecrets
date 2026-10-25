@@ -704,21 +704,21 @@ after `ms:` as your whole prompt:
 
 ```
 > ms:(the-value-you-want-to-check)
-✓ maisecrets would mask this: SECRET (gitlab-pat)
+✓ maisecrets masks this as a secret (⟦SECRET_…⟧). maisecrets knows this format, so it masks it wherever it appears, also alone.
 
 This prompt was not sent. The value did not reach the AI.
 ```
 
 ```
 > ms:(Kx7#another-value)
-⚠ maisecrets would NOT have caught this. It is now stored (⟦SECRET_c4⟧). From now on it is masked wherever it stands as a word of its own.
+⚠ maisecrets did not catch this value. maisecrets stored it as ⟦SECRET_c4⟧. For 1 day after each use it is masked wherever it stands as a word of its own.
 
 This prompt was not sent. The value did not reach the AI.
 ```
 
 ```
 > ms:(two words)
-⚠ maisecrets would NOT have caught this. It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets:put.
+⚠ maisecrets did not catch this value. It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets:put.
 
 This prompt was not sent. The value did not reach the AI.
 ```

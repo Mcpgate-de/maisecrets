@@ -139,7 +139,8 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
         "with_mod": {"expect_blocked": False, "expect_dropped": True},
-        "expect_output": ["\u2713 maisecrets would mask this: SECRET (gitlab-pat)"],
+        "expect_output": ["\u2713 maisecrets masks this as a secret (\u27e6SECRET_\u2026\u27e7). maisecrets knows "
+                          "this format"],
         "expect_not_in_transcript": ["ms:("],
     },
     # a value with no shape (quotes, $( and a closing bracket inside): not caught. `claude -p` is a program, so it is
@@ -150,7 +151,7 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
         "with_mod": {"expect_blocked": False, "expect_dropped": True},
-        "expect_output": ["maisecrets would NOT have caught this. It was not stored"],
+        "expect_output": ["maisecrets did not catch this value. It was not stored"],
         "expect_not_in_transcript": ["ms:("],
     },
     # the mod gets no verdict (its question to dispatch.py fails): it drops the check with its own sentence, and nothing
@@ -172,7 +173,7 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
         "with_mod": {"expect_blocked": False, "expect_dropped": True},
-        "expect_output": ["\u2713 maisecrets would mask this"],
+        "expect_output": ["\u2713 maisecrets masks this as a secret"],
         "expect_not_in_transcript": ["Ms:("],
     },
     # the mod's question fails on the real client (an injected fault: dispatch.py mod-prompt exits 1). The mod

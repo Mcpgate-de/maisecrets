@@ -68,8 +68,9 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
     # a value this session resolved matches without an entry of its own; it was stored as a secret
     secret = "SECRET" in kinds or not kinds
     personal = bool(kinds - {"SECRET"})
-    what = ("a secret and personal data were" if secret and personal
-            else "a secret was" if secret else "personal data was")
+    a_secret = type_word("SECRET")      # the word the ms:( check uses for the same thing
+    what = (f"{a_secret} and personal data were" if secret and personal
+            else f"{a_secret} was" if secret else "personal data was")
     lines = [f"maisecrets: {what} found and kept from the AI.", ""]
     if copied:
         tail = " Then send it." if codex else " Then send it, or type /ms to send it at once."

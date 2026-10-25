@@ -731,8 +731,10 @@ def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None, exa
     from . import settings as settings_mod
     allowed = _allowed_by_the_list(value)
     if allowed:
-        return check_value.not_caught(f"maisecrets lets it through: {allowed}. It was not stored. Remove that line "
-                                      "from the allow list to protect it.")
+        from .user_rules import ALLOW_FILE
+        why = allowed[len("your allow list "):] if allowed.startswith("your allow list ") else allowed
+        return check_value.not_caught(f"Your allow list lets it through: it {why}. It was not stored. To protect it, "
+                                      f"remove that line from {ALLOW_FILE}.")
     if not exact:
         return check_value.not_caught("It was not stored, because the prompt does not start with ms:( exactly. Send "
                                       "it again as ms:(…) to store it.")
@@ -746,8 +748,8 @@ def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None, exa
         return check_value.not_caught("It holds a maisecrets placeholder, so it was not stored. Check the value "
                                       "without the placeholder.")
     if "\n" in value or "\r" in value:
-        return check_value.not_caught("It has more than one line, and maisecrets finds a stored value only on one "
-                                      "line. It was not stored.")
+        return check_value.not_caught("It has more than one line, so it was not stored. maisecrets finds a stored "
+                                      "value only on one line. Use /maisecrets:put for it.")
     if len(value) < _EXACT_MIN_LEN:
         return check_value.not_caught(f"maisecrets finds a stored value only from {_EXACT_MIN_LEN} characters on, "
                                       "so it was not stored.")
@@ -759,17 +761,20 @@ def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None, exa
         e = Vault(cfg).put(value, "SECRET", "manual", session=session)
     except Exception as exc:  # noqa: BLE001 - the answer says it; the prompt stays blocked
         incidents.note("prompt.check-store", exc)
-        return check_value.not_caught(f"It could not be stored ({type(exc).__name__}).")
+        return check_value.not_caught(f"It could not be stored (an internal error, {type(exc).__name__}). Try "
+                                      "/maisecrets:put, or /maisecrets:report incident.")
     _live_cache.clear()        # the store holds a value now: the checks below must look for it
     alone = any(_verdict(value, cfg, session)[1:3])
     in_text = any(_verdict(f"see {value} here", cfg, session)[1:3])
-    return check_value.stored_text(e.ref, alone, in_text) + check_value.format_report(value)
+    seconds = int(round(e.expires - e.created))
+    return check_value.stored_text(e.ref, alone, in_text, _hours(seconds)) + check_value.format_report(value)
 
 
 def _check_value(payload: dict, groups: list) -> dict:
     """The answer to ms:(…): always a block, whatever the verdict. Each group of the prompt (check_value.parse_all)
     gets its own verdict, from the same calls as a normal prompt with that value. The reason goes to the person and
-    names types and rule ids, never the value; the transcript loses the prompt as typed."""
+    says what each hit is masked as and how it was found (maisecrets/verdict.py), never the value; the transcript
+    loses the prompt as typed."""
     cfg = load_config()
     session = payload.get("session_id")
     codex = client_of(payload) == "codex"
@@ -822,9 +827,8 @@ def _check_one(payload: dict, cfg: dict, session: str | None, value: str, exact:
         return [], [], check_value.A_PLACEHOLDER_LINE
     entries, matches, n_stored, values = _verdict(value, cfg, session)
     if matches or n_stored:
-        labels = [check_value.hit_label(m.type, m.kind) for m in matches]
-        labels += [check_value.hit_label(e.type, e.kind, stored=True) for e in entries[len(matches):]]
-        return entries, values, check_value.caught_line(labels)
+        from . import verdict
+        return entries, values, verdict.caught(value, matches, entries)
     return entries, values, ("store", value, session, exact)     # _check_value stores it after the last verdict
 
 

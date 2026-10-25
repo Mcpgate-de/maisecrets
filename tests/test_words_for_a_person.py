@@ -64,5 +64,45 @@ class PersonalFormTests(unittest.TestCase):
             self.assertEqual(spec.form, rule.form, spec.key)
 
 
+class HowFoundTests(unittest.TestCase):
+    def test_the_form_sentence_follows_the_rule(self):
+        from maisecrets import verdict
+        self.assertEqual(verdict.how_found("email"), "format")
+        self.assertEqual(verdict.how_found("ds-keyword-colon"), "label")
+        self.assertEqual(verdict.how_found("name-after-label"), "label")
+        self.assertEqual(verdict.how_found("phone-after-phone-word"), "label")
+        self.assertEqual(verdict.how_found("address-in-form"), "words")
+        self.assertEqual(verdict.how_found("name-vcard-n"), "words")
+        # a rule that fires only with a context word near it is no format found alone
+        self.assertEqual(verdict.how_found("de-plz"), "words")
+
+    def test_the_label_shown_never_touches_a_value(self):
+        from maisecrets import verdict
+        text = "password: abcdefgh"
+        self.assertEqual(verdict.label_before(text, 10, [(10, 18)]), "password:")
+        self.assertEqual(verdict.label_before("token=abc", 6, [(6, 9)]), "token=")
+        self.assertEqual(verdict.label_before("Authorization: Bearer abc", 22, [(22, 25)]), "Bearer")
+        # the word before the value is a value itself: no label is shown
+        self.assertEqual(verdict.label_before("abcdefgh: xyz", 10, [(0, 8), (10, 13)]), "")
+
+    def test_each_source_has_its_own_sentence_and_no_rule_id(self):
+        from types import SimpleNamespace as NS
+
+        from maisecrets import verdict
+        cases = {"term:ent-1": "It is on your term list, so it is masked. The AI sees a placeholder that is never put "
+                               "back.",
+                 "import:abc123:v1": "It is in your imported values (import:abc123). It is masked and never put back "
+                                     "into a command.",
+                 "user:acme-token": "Your own rule acme-token found it.",
+                 "label-password-export": "It is in the password column of a password export, so the whole cell is "
+                                          "masked."}
+        for kind, want in cases.items():
+            m = NS(kind=kind, type="SECRET", value="x" * 12, start=0, end=12)
+            self.assertEqual(verdict.hit_sentences("x" * 12, m, None, [(0, 12)])[0], want, kind)
+        stored = NS(type="SECRET", ref="REF")
+        self.assertEqual(verdict.stored_sentences(stored)[0],
+                         "This value is already stored as REF. maisecrets masks it wherever it appears exactly.")
+
+
 if __name__ == "__main__":
     unittest.main()
