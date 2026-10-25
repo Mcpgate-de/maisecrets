@@ -206,5 +206,21 @@ class FirstAndLastNameColumnTests(Base):
                 self.assertNoName(text)
 
 
+class BareStudentLabelTests(Base):
+    COURSE = "Informatik " + "Bachelor"
+
+    def test_a_name_after_student_that_ends_its_field_is_masked(self):
+        for text in ("Student: " + NAME + "\n", "Student: " + NAME + " (ID 4711)\n",
+                     "Student: " + NAME + ", Class 7B\n", "student_name: " + NAME + ", enrolled\n"):
+            with self.subTest(text=text):
+                self.assertMasked(text, NAME)
+
+    def test_a_course_of_study_that_a_sentence_goes_on_from_stays_text(self):
+        for text in ("Student: " + self.COURSE + " an der Hochschule\n",
+                     "Student: " + self.COURSE + ", zweites Semester\n"):
+            with self.subTest(text=text):
+                self.assertNoName(text)
+
+
 if __name__ == "__main__":
     unittest.main()

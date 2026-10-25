@@ -367,6 +367,8 @@ def _xml_parent(text: str, at: int) -> str:
         else:
             return t.group(2).rsplit(":", 1)[-1].lower()
     return ""
+# a lower-case word right after a value, or after its comma: the sentence goes on, the value is no field of a record
+_PROSE_GOES_ON_RE = re.compile(r"(?:,[ \t]?| )[a-zà-ÿ]")
 # the end of a word that makes it a noun, not a name: Streaming, Expedition, Management, Wörterbuch, Verwaltung
 _NOUN_END_RE = re.compile(r"(?i)(?:ing|tion|sion|ment|ness|ity|ism|ogy|ware|ance|ence|able|ible|buch|ung|heit|keit"
                           r"|schaft|isch|tät|ive|ics|ers|ies)$")
@@ -2309,6 +2311,8 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 cut = short.group(0)
                 if not _reads_as_words(cut) or not _reads_as_words(re.sub(r"-[^\s]*", "", cut)):
                     v, words_only = cut, False
+            if m.group(1) and m.group(1).lower() == "student" and _PROSE_GOES_ON_RE.match(text, m.start(3) + len(v)):
+                continue   # Student: Informatik Bachelor an der …: a course of study in a sentence, not a name
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
     if "name-after-label" in want and (":" in text or "=" in text):
