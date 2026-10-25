@@ -263,6 +263,44 @@ def describe_now(scanner: str, env: dict) -> dict | None:
         os.environ.update(saved)
 
 
+LOADERS = {"ghissues": ["bench/ghissues.py"], "nym": ["bench/nym.py", "bench/sealed.py"],
+           "dialogpii": ["bench/dialogpii.py", "bench/sealed.py"], "structured-b": ["bench/structured_b.py"],
+           "structured": ["bench/structgen.py", "bench/structvocab.py", "bench/structvalues.py"],
+           "catalogs": ["bench/sources.py", "scripts/measure_catalog_coverage.py"],
+           "catalogs-example": ["bench/sources.py", "scripts/measure_catalog_coverage.py"]}
+
+
+def staged_plan(jobs: list, staged: Path, env: dict) -> None:
+    """Mark each run of another scanner whose result a staging run of this command already wrote (--reuse-from):
+    reused when the scoring, the configuration and the version are unchanged and the loader of its sealed or generated
+    cases is the same code (the seals pin the data). A maisecrets result is never taken: it belongs to the candidate."""
+    from bench import v3
+    scope, described = v3.inventory(), {}
+    for j in jobs:
+        f = staged / "results" / j["name"]
+        if j["scanner"].startswith("maisecrets") or (j.get("reuse") or {}).get("ok") or not f.is_file():
+            continue
+        stored, scanner = _load(f), j["scanner"]
+        if scanner not in described:
+            described[scanner] = describe_now(scanner, env)
+        commit = stored.get("bench_commit")
+        loader_same = _unchanged(commit, LOADERS.get(j["source"], ["bench/sources.py", "bench/cases.py", "bench/bank",
+                                                                   "scripts/measure_datasets.py"]))
+        src = stored.get("source")
+        now_scope = scope.get(src, "every class (written by this project)" if src in v3.OWN_SOURCES else None)
+        if "v3" not in stored:   # a holdout result has no V3 block: its scope is that of the loader
+            now_scope = None
+        adapter_paths = [f"bench/adapters/{scanner}.py", f"bench/adapters/requirements/{scanner.replace('_', '-')}.txt",
+                         "bench/adapters/_filescan.py", "bench/adapters/_proc.py"]
+        why = reuse_check(stored, scanner, stored.get("cases_sha256") if loader_same else None, now_scope,
+                          described[scanner], _unchanged(commit, adapter_paths),
+                          _unchanged(commit, ["bench/score.py", "bench/v3.py", "bench/v3_scope.json"]))
+        if stored.get("bench_dirty") is not False:
+            why.append("the staging run measured a modified benchmark tree")
+        j["reuse"] = {"from": str(f), "ok": not why, "why_not": why}
+        j["stored"] = f
+
+
 def v3_competitor_plan(reuse_dir: Path, data: dict, env: dict) -> list:
     """Each stored result of another scanner in the published V3 run: reuse it, or run it again."""
     from bench import v3
@@ -390,6 +428,11 @@ def main(argv: list) -> int:
     ap.add_argument("--catalogs", type=Path, default=os.environ.get("BENCH_CATALOGS") or None)
     ap.add_argument("--reuse", type=Path, default=REUSE_DEFAULT, help="the published V3 run of the other scanners")
     ap.add_argument("--only", action="append", default=[], help="keep the runs whose file name matches (a glob)")
+    ap.add_argument("--exclude", action="append", default=[], help="leave out the runs whose file name matches")
+    ap.add_argument("--competitors-only", action="store_true", help="a staging run: every scanner but maisecrets, no "
+                    "V3 run of maisecrets and no comparison; the final run takes it in with --reuse-from")
+    ap.add_argument("--reuse-from", type=Path, help="the OUT of a staging run: its results of the other scanners are "
+                    "reused when unchanged (staged_plan)")
     ap.add_argument("--plan", action="store_true", help="print the runs and the reuse decisions, run nothing")
     ap.add_argument("--resources", action="store_true", help="also speed and resources of each scanner "
                     "(scripts/measure_resources.py), after the runs")
@@ -414,8 +457,12 @@ def main(argv: list) -> int:
     keep_job = (lambda j: any(fnmatch.fnmatch(j["name"], g) for g in a.only)) if a.only else (lambda j: True)
     if not a.only or any("v3" in g or "every25" in g or "bank" in g or "privy" in g for g in a.only):
         jobs = v3_competitor_plan(a.reuse, data, env) + jobs
-    jobs = [j for j in jobs if keep_job(j)]
-    want_v3 = not a.only
+    jobs = [j for j in jobs if keep_job(j) and not any(fnmatch.fnmatch(j["name"], g) for g in a.exclude)]
+    if a.competitors_only:
+        jobs = [j for j in jobs if not j["scanner"].startswith("maisecrets")]
+    if a.reuse_from:
+        staged_plan(jobs, a.reuse_from, env)
+    want_v3 = not a.only and not a.competitors_only
 
     if a.plan:
         for j in jobs:

@@ -236,5 +236,38 @@ class ResourcesTests(unittest.TestCase):
         self.assertFalse(mr.available("maisecrets_ner", {"BENCH_NER_PYTHON": "/p"}))
 
 
+class StagedTests(unittest.TestCase):
+    def stage(self, name, **over):
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "results").mkdir()
+        res = {"bench_commit": head, "bench_dirty": False, "cases_sha256": "c" * 64, "source": "ghissues",
+               "scanner": {"scanner": "gitleaks", "version": "8.30.1"}}
+        res.update(over)
+        (tmp / "results" / name).write_text(json.dumps(res), encoding="utf-8")
+        return tmp
+
+    def plan(self, staged, name):
+        jobs = [j for j in xb.new_jobs() if j["name"] == name]
+        xb.staged_plan(jobs, staged, {})
+        return jobs[0]
+
+    def test_a_staged_result_of_another_scanner_is_taken_when_unchanged(self):
+        name = "ghissues-holdout-full-gitleaks.json"
+        self.assertTrue(self.plan(self.stage(name), name)["reuse"]["ok"])
+
+    def test_a_staged_result_is_refused_when_its_tree_was_modified_or_its_version_differs(self):
+        name = "ghissues-holdout-full-gitleaks.json"
+        self.assertFalse(self.plan(self.stage(name, bench_dirty=True), name)["reuse"]["ok"])
+        old = self.stage(name, scanner={"scanner": "gitleaks", "version": "8.29.0"})
+        self.assertFalse(self.plan(old, name)["reuse"]["ok"])
+        unknown = self.stage(name, bench_commit="f" * 40)
+        self.assertFalse(self.plan(unknown, name)["reuse"]["ok"])
+
+    def test_a_staged_maisecrets_result_is_never_taken(self):
+        name = "ghissues-holdout-full-maisecrets.json"
+        self.assertNotIn("reuse", self.plan(self.stage(name), name))
+
+
 if __name__ == "__main__":
     unittest.main()

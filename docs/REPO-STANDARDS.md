@@ -147,6 +147,9 @@ and OpenAI plugin directories.
   as the gate does. `--plan` lists the runs and the reuse decisions; `--only GLOB` runs a part. `--resources`
   adds speed and resources per scanner (`scripts/measure_resources.py`: cold start, warm latency for a prompt, 10 KB
   and 1 MB, peak RSS, install footprint), one scanner at a time, with the machine and the load average.
+  The other scanners do not depend on the candidate: `--competitors-only` runs them into a staging OUT ahead of
+  time, and the final run takes them in with `--reuse-from STAGING` under the same rule (scoring, configuration,
+  version and the loader of the sealed cases unchanged; a maisecrets result is never taken).
 - **The gate's measurement is the next baseline.** The release commit changes only the version, so a second run of
   Benchmark V3 on the tag measures the same code. With `--keep` the gate writes its results to
   `bench/results/<date>-v3-<next version>`, with `measured.json` (the commit and the git tree of each runtime
