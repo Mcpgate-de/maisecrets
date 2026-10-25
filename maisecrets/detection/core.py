@@ -2419,7 +2419,34 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", pa
     spans = _fields.checked(text, fields)
     # the channel and the path travel as arguments: a nested scan (is_fixture) or a scan in another thread has its own
     hits = _scan(text, enabled, rule_list=rule_list, channel="tool" if channel == "tool" else "prompt", path=path or "")
-    return _fields.added(text, hits, spans, lambda t: scan(t, enabled, channel, "", rule_list)) if spans else hits
+    hits = _fields.added(text, hits, spans, lambda t: scan(t, enabled, channel, "", rule_list)) if spans else hits
+    if channel == "tool" and rule_list is None and "|" in text:
+        hits = _md_key_value_hits(text, hits, lambda t: scan(t, enabled, channel, "", rule_list))
+    return hits
+
+
+# a row of a two-column Markdown table whose first cell names the second: | Date of Birth | 1984-07-12 |. The cell is
+# a label as `Date of Birth: 1984-07-12` would be (the field rule of fields.py), and only personal data comes of it
+_MD_KV_ROW_RE = _LazyRx(r"(?m)^[ \t]*\|[ \t]*(\*{0,2})([A-Za-z][A-Za-z ()/#.'_-]{1,40}?)\1[ \t]*:?[ \t]*\|[ \t]*"
+                        r"([^|\n]{1,120}?)[ \t]*\|[ \t]*$")
+
+
+def _md_key_value_hits(text: str, hits: list, scanner) -> list:
+    spans = []
+    for m in _MD_KV_ROW_RE.finditer(text):
+        if set(m.group(3)) <= set("-: "):
+            continue
+        label = _fields._label((m.group(2).strip(),))
+        if label:
+            spans.append((m.start(3), m.end(3), label))
+    if not spans:
+        return hits
+    from .vocabulary import TYPES
+    before = {(h.start, h.end) for h in hits}
+    out = _fields.added(text, hits, tuple(spans), scanner)
+    # a name stays with the record rules of the Markdown table: a first name alone in a form is no person
+    return [h for h in out if (h.start, h.end) in before
+            or (h.type != "NAME" and TYPES.get(h.type, {}).get("family") == "pii")]
 
 
 # a label rule (LABEL_RULES): its header labels the cell, so a word in it is stored quiet and a fixture in test code
