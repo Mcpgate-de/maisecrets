@@ -54,6 +54,21 @@ def _hours(seconds: int) -> str:
     return f"{n} hour" + ("s" if n != 1 else "")
 
 
+def send_command() -> str:
+    """The command that sends the blocked prompt: `/ms` only when the person installed the shortcut (its command file
+    calls the maisecrets wrapper, cli.install_shortcut), else `/maisecrets:send`. The plugin ships no `/ms`: without
+    the shortcut it is an unknown command."""
+    import os
+    from pathlib import Path
+    commands = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "commands"
+    try:
+        if "maisecrets/bin/ms.sh" in (commands / "ms.md").read_text(encoding="utf-8"):
+            return "/ms"
+    except (OSError, UnicodeDecodeError):
+        pass
+    return "/maisecrets:send"
+
+
 def _paste_key() -> str:
     return "⌘V" if platform.system() == "Darwin" else "Ctrl+V"
 
@@ -73,12 +88,13 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
             else f"{a_secret} was" if secret else "personal data was")
     lines = [f"maisecrets: {what} found and kept from the AI.", ""]
     if copied:
-        tail = " Then send it." if codex else " Then send it, or type /ms to send it at once."
+        tail = " Then send it." if codex else f" Then send it, or type {send_command()} to send it at once."
         lines.append(f"    {_paste_key()}  pastes the cleaned prompt.{tail}")
     elif codex:
         lines += ["    Copy the cleaned prompt from here and send it:", "", "    " + rewritten]
     else:
-        lines += ["    Type /ms to send the cleaned prompt, or copy it from here:", "", "    " + rewritten]
+        lines += [f"    Type {send_command()} to send the cleaned prompt, or copy it from here:", "",
+                  "    " + rewritten]
     lines.append("")
     if codex:
         lines.append("maisecrets by mcpgate.de")

@@ -132,11 +132,12 @@ You paste a token into the prompt by accident:
 > please check why my GitLab token glpat-… fails in CI
 maisecrets: a secret was found and kept from the AI.
 
-    ⌘V  pastes the cleaned prompt. Then send it, or type /ms to send it at once.
+    ⌘V  pastes the cleaned prompt. Then send it, or type /maisecrets:send to send it at once.
 
 Something wrong? /maisecrets:report · maisecrets by mcpgate.de
 ```
 
+With `/maisecrets:shortcut` installed, the line names the short `/ms`.
 Zero requests left the machine for that prompt. The rewritten prompt reads
 `please check why ⟦SECRET_c3⟧ fails in CI`, and Claude can use the
 placeholder in a command as above.

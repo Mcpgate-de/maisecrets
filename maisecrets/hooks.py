@@ -677,6 +677,11 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
     return rewritten, entries, values, stored, matches
 
 
+def settings_mod_came_from(payload: dict) -> str:
+    from .settings import came_from
+    return came_from(payload)
+
+
 def _run_sh() -> str:
     """The absolute path of this plugin's launcher for this OS, for a line the person runs in a terminal (run.sh does
     not run in cmd or PowerShell)."""
@@ -936,7 +941,7 @@ def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
         reason = terms.USAGE
     elif not typed:
         reason = ("maisecrets: a change of your terms counts only when you type it as your prompt; this one came from "
-                  f"the client ({payload.get('source')}), so nothing was changed.")
+                  f"{settings_mod_came_from(payload)}, so nothing was changed.")
     elif verb == "add":
         # Claude Code sends a source with every prompt; one without it may not come from the person, so the floor of
         # a team list holds. Codex never sends a source: its adds follow the person's rules (gate review, round 2)
@@ -1060,7 +1065,7 @@ def user_prompt(payload: dict) -> dict:
                 reason = f"maisecrets: the import could not be removed ({type(exc).__name__}); nothing was changed."
         else:
             reason = ("maisecrets: the removal of an import counts only when you type it as your prompt; this one came "
-                      f"from the client ({payload.get('source')}), so nothing was removed.")
+                      f"from {settings_mod_came_from(payload)}, so nothing was removed.")
         if client_of(payload) == "codex":
             return {"decision": "block", "reason": reason}
         return {"decision": "block", "reason": reason,
@@ -1384,9 +1389,9 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
     if matched:
         # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
         # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)
-        return _deny(f"maisecrets: this command touches {matched}, the user's own store. The user manages it "
-                     f"with /maisecrets:list and /maisecrets:forget{also}. The command did not run. If the task needs "
-                     "something from there, tell the user what; if this is a false positive, "
+        return _deny(f"maisecrets: this command reads a part of maisecrets that holds stored values ({matched}). "
+                     f"The user manages them with /maisecrets:list and /maisecrets:forget{also}. The command did not "
+                     "run. If the task needs something from there, tell the user what; if this is a false positive, "
                      "/maisecrets:report records it.")
     return None
 
@@ -1599,7 +1604,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         # /ms reads the blocked prompt of the session the client names; a command that names another one
         # would take that session's text (Codex review, 2026-09-28)
         return _deny("maisecrets: this command sets or clears the session id, which selects the blocked prompt "
-                     "of another session. The command did not run. /ms sends the blocked prompt of this session.")
+                     "of another session. The command did not run. /maisecrets:send sends the blocked prompt of this "
+                     "session.")
     refused = _store_refusal(command)
     if refused:
         return refused
@@ -2288,7 +2294,7 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
         return _deny("maisecrets: this PowerShell call has no command text to check. The command did not run.")
     if re.search(r"CLAUDE_CODE_SESSION_ID", command, re.IGNORECASE):
         return _deny("maisecrets: this command names the session id, which selects the blocked prompt of a "
-                     "session. The command did not run. /ms sends the blocked prompt of this session"
+                     "session. The command did not run. /maisecrets:send sends the blocked prompt of this session"
                      + _NEEDS_GIT_BASH + ".")
     refused = _store_refusal(command, windows_paths=True)
     if refused:

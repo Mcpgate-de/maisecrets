@@ -188,8 +188,25 @@ def not_typed_reason(payload: dict) -> str:
         return ("maisecrets: a settings change counts only when you type it as your prompt; this one came from a "
                 f"client that a program started (entry point {shown}, as `claude -p` has), so nothing was changed. "
                 "Type it in your own Claude Code or Codex session.")
-    return ("maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
-            f"client ({payload.get('source')}), so nothing was changed.")
+    return ("maisecrets: a settings change counts only when you type it as your prompt; this one came from "
+            f"{came_from(payload)}, so nothing was changed.")
+
+
+def came_from(payload: dict) -> str:
+    """Who sent a prompt that the person did not type, in words: the client's `source` is a raw value (`cron`, a
+    missing field), which said nothing to the person."""
+    if peer_sender(payload.get("prompt")) is not None:
+        return "another Claude session"
+    if payload.get("agent_id"):
+        return "a subagent"
+    source = str(payload.get("source") or "").lower()
+    if "sdk" in source or nested_program(payload):
+        return "a program"
+    if any(w in source for w in ("loop", "wake")):
+        return "a loop that wakes the session"
+    if any(w in source for w in ("cron", "schedul", "task")):
+        return "a scheduled task"
+    return "the client, not from you"
 
 
 def state(key: str, cfg: dict) -> str:

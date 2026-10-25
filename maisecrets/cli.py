@@ -53,7 +53,10 @@ def _list_values() -> int:
                 print(line)
     if v.backend.test_mode:
         print("\nbackend: jsonfile (TEST MODE, plaintext under ~/.maisecrets/)")
-    print("\nTo delete one: /maisecrets:forget <key>. To delete everything: /maisecrets:status shows how.")
+    launcher = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks",
+                            "run.cmd" if os.name == "nt" else "run.sh")
+    print(f"\nTo delete one: /maisecrets:forget <placeholder>. To delete everything, run in a terminal: {launcher} "
+          "wipe --yes")
     return 0
 
 

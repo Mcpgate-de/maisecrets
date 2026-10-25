@@ -544,7 +544,7 @@ SCENARIOS = {
         "turns": [{"tool": "PowerShell", "input": {"command": "Get-Content $env:MAISECRETS_HOME/config.json"}},
                   {"text": "done"}],
         "expect_requests": 2,
-        "expect_text": "the user's own store",
+        "expect_text": "a part of maisecrets that holds stored values",
     },
 }
 
