@@ -137,6 +137,14 @@ and OpenAI plugin directories.
   On Mondays the scheduled job `format_intake` (`scripts/format_intake.py`) adds the changed entries (by rule
   fingerprint, `docs/format-watch-fp.txt`), the open "Token format:" reports and the posts about token formats in
   `docs/format-feeds.txt` to one queue, its artifact `format-intake/`, and turns red on an item.
+- **The extended baseline adds the newer sets.** `scripts/extended_baseline.py CANDIDATE OUT --v3 GATE_OUT` takes the
+  gate's V3 results and adds, each in a section of its own: the other scanners of V3 (a stored result of 2026-10-21 is
+  reused only when its cases, scoring, configuration and scanner version are unchanged, else the scanner runs again),
+  nym and DialogPII, the GitHub-issues secret set and the catalog examples, and the structured corpus (set A dev and
+  val, set B as a sealed holdout; a targeted regression benchmark, labelled so). It compares the candidate with the
+  last release and with the published 0.7.3 baseline, V3 only; the new sets never enter those tables. The holdouts run
+  once, on the final candidate, for totals only. With `--keep` it writes `bench/results/<date>-v3-<version>/extended/`
+  as the gate does. `--plan` lists the runs and the reuse decisions; `--only GLOB` runs a part.
 - **The gate's measurement is the next baseline.** The release commit changes only the version, so a second run of
   Benchmark V3 on the tag measures the same code. With `--keep` the gate writes its results to
   `bench/results/<date>-v3-<next version>`, with `measured.json` (the commit and the git tree of each runtime
