@@ -1151,6 +1151,15 @@ _SINGLE_NAME_RE = _lazy(r"(?i:(?<![a-z_./-])(?:" + _SINGLE_NAME_LABELS + r"))[\"
                         r"(?:-[" + _UP + r"][" + _LO + r"\u1e00-\u1eff\u0300-\u036f'’]{1,30})?)"
                         r"(?![\w'’-])"   # Nguyễn, Ạnh, and a combining accent
                         r"(?![ \t]{1,2}[" + _UP + r"])")
+# a first or last name that is also a word (Grace, Hunter, Rose): capitalised, no noun ending, the whole value of its
+# field (the line, the quotes or the cell end after it). It counts only in a person's record (_form_hits)
+_FIELD_END_RE = _lazy(r"[\"']?[ \t]*(?:[,;}\]|]|$)", re.M)
+_WORD_NAME_NEAR = 300
+
+
+def _word_as_name(text: str, m, v: str) -> bool:
+    return v[:1].isupper() and v[1:] == v[1:].lower() and len(v) >= 3 and not _NOUN_END_RE.search(v) \
+        and bool(_FIELD_END_RE.match(text, m.end(1)))
 # a user name after a label that names one (`"username": "jdoe42"`, `user_name: jdoe42`): the label of a record, not
 # the word `user` or `login` alone (`"user": {`, `login: true`). The whole value is read first (a quoted string, else
 # the scalar up to a space, a comma, a semicolon or a bracket) and judged as one: it is masked whole or not at all, so
@@ -1912,7 +1921,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
     if "name-single-after-label" in want and ("name" in low or "nom" in low or "apellido" in low or "cognome" in low
                                               or "voornaam" in low or "achternaam" in low or "namn" in low):
-        found = []
+        found, wordy = [], []
         for m in _SINGLE_NAME_RE.finditer(text):
             v = m.group(1)
             low_v = v.lower().strip("'’-")
@@ -1928,14 +1937,24 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 continue   # first_name: Too long (maximum…), Renamed to given_name: a sentence, not a name
             if low_v in _PLACEHOLDER_NAME_WORDS or low_v in PLACEHOLDER_NAMES \
                     or low_v in _NOT_A_NAME_START or low_v in _NOT_A_NAME_WORD or low_v in _SHORT_EN \
-                    or len(low_v) < 2 or _reads_as_words(_no_marks(v)) or _inflected_word(low_v):
+                    or len(low_v) < 2 or _inflected_word(low_v):
+                continue
+            if _reads_as_words(_no_marks(v)):
+                if _word_as_name(text, m, v):
+                    wordy.append((m.start(1), m.end(1), "name-single-after-label", NAME))
                 continue
             # a double surname is words when each part is a word (Self-Employed, Non-Applicable), as in name-after-label
             parts = [w for w in _no_marks(v).split("-") if w]
             if len(parts) > 1 and all(_reads_as_words(w) or _inflected_word(w.lower()) for w in parts):
                 continue
             found.append((m.start(1), m.end(1), "name-single-after-label", NAME))
+        # a name that is also a word counts only in a person's record: a name part that is no word, and it or an
+        # e-mail address within 300 characters (first_name: Unique / last_name: Index is a schema)
         out += found
+        for h in wordy if found else ():
+            lo, hi = max(0, h[0] - _WORD_NAME_NEAR), h[0] + _WORD_NAME_NEAR
+            if any(abs(f[0] - h[0]) <= _WORD_NAME_NEAR for f in found) or text.find("@", lo, hi + 1) >= 0:
+                out.append(h)
     if "username-after-label" in want and ("name" in low or _USER_ID_WORD_RE.search(low)):
         for m in _USERNAME_LABEL_RE.finditer(text):
             g = next(i for i in (2, 3, 4) if m.group(i) is not None)
