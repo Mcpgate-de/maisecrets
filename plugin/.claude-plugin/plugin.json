@@ -1,0 +1,27 @@
+{
+  "name": "maisecrets",
+  "displayName": "maisecrets",
+  "version": "0.8.1",
+  "description": "Intercepts detected secrets and PII before they reach the cloud model: deterministic detection, a local vault with TTL, placeholders resolved only where the real call happens. Free and open source, by mcpgate.de.",
+  "author": {
+    "name": "mcpgate",
+    "url": "https://mcpgate.de"
+  },
+  "repository": "https://github.com/Mcpgate-de/maisecrets",
+  "license": "Apache-2.0",
+  "hooks": "./claude-mod/maisecrets-mod.json",
+  "keywords": [
+    "security",
+    "privacy",
+    "secrets",
+    "pii",
+    "redaction",
+    "vault"
+  ],
+  "homepage": "https://maisecrets.dev",
+  "privacyPolicyUrl": "https://github.com/Mcpgate-de/maisecrets/blob/main/PRIVACY.md",
+  "documentationUrl": "https://github.com/Mcpgate-de/maisecrets#readme",
+  "termsOfServiceUrl": "https://mcpgate.de/terms/#maisecrets",
+  "supportUrl": "https://github.com/Mcpgate-de/maisecrets/issues",
+  "icon": "https://raw.githubusercontent.com/Mcpgate-de/maisecrets/main/assets/icon.png"
+}

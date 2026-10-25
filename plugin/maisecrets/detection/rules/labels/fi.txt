@@ -1,0 +1,12 @@
+# Finnish credential labels.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# salasana: no word start, because Finnish joins compounds (paakayttajansalasana).
+salasana	salasana	salasana, Salasana, tietokannan_salasana, uusi salasana
+salainen	(?<![^\W\d_])salainen[ _-]avain	salainen avain, Salainen avain
+# avain alone is an ordinary word (key): only the compounds count.
+avain	(?<![^\W\d_])(?:p(?:ää|aa)sy|api[ _-]?)avain	pääsyavain, paasyavain, API-avain, api_avain
+# salaisuus alone is an ordinary word (a secret); only the compound of the client secret counts.
+asiakassalaisuus	asiakassalaisuus	asiakassalaisuus, Asiakassalaisuus
+tunnistetiedot	(?<![^\W\d_])tunnistetiedot	tunnistetiedot, Tunnistetiedot

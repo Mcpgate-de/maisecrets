@@ -1,0 +1,9 @@
+# Polish credential labels.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+hasł	(?<![^\W\d_])hasło	hasło, Hasło, db_hasło, nowe hasło
+hasl	(?<![^\W\d_])haslo	haslo, HASLO, db_haslo
+# klucz alone is an ordinary word (key): only the two-word labels count.
+klucz	(?<![^\W\d_])(?:klucz[ _-](?:dost(?:ę|e)pu|api)|tajny[ _-]klucz)	klucz dostępu, klucz dostepu, Klucz API, tajny klucz
+wiadczenia	(?<![^\W\d_])po(?:ś|s)wiadczenia	poświadczenia, Poswiadczenia

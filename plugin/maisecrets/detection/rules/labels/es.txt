@@ -1,0 +1,8 @@
+# Spanish credential labels. contraseña and contrasena are in the detect-secrets denylist already.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# clave alone is an ordinary word (palabra clave: keyword) and secreto alone is too: only the
+# two-word labels count.
+clave	(?<![^\W\d_])clave[ _-](?:de[ _-]acceso|secreta|(?:de[ _-](?:la[ _-])?)?api)	clave de acceso, Clave secreta, clave de la API, clave API, clave_secreta
+credenciales	(?<![^\W\d_])credenciales	credenciales, Credenciales, db_credenciales

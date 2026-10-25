@@ -1,0 +1,2069 @@
+{
+ "presidio_version": "2.2.364",
+ "recognizers": [
+  {
+   "id": "au-abn",
+   "class": "AuAbnRecognizer",
+   "entity": "AU_ABN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "ABN (Medium)",
+     "score": 0.1,
+     "regex": "\\b\\d{2}\\s\\d{3}\\s\\d{3}\\s\\d{3}\\b"
+    },
+    {
+     "name": "ABN (Low)",
+     "score": 0.01,
+     "regex": "\\b\\d{11}\\b"
+    }
+   ],
+   "context": [
+    "australian business number",
+    "abn"
+   ],
+   "validator": true
+  },
+  {
+   "id": "au-acn",
+   "class": "AuAcnRecognizer",
+   "entity": "AU_ACN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "ACN (Medium)",
+     "score": 0.1,
+     "regex": "\\b\\d{3}\\s\\d{3}\\s\\d{3}\\b"
+    },
+    {
+     "name": "ACN (Low)",
+     "score": 0.01,
+     "regex": "\\b\\d{9}\\b"
+    }
+   ],
+   "context": [
+    "australian company number",
+    "acn"
+   ],
+   "validator": true
+  },
+  {
+   "id": "au-medicare",
+   "class": "AuMedicareRecognizer",
+   "entity": "AU_MEDICARE",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Australian Medicare Number (Medium)",
+     "score": 0.1,
+     "regex": "\\b[2-6]\\d{3}\\s\\d{5}\\s\\d\\b"
+    },
+    {
+     "name": "Australian Medicare Number (Low)",
+     "score": 0.01,
+     "regex": "\\b[2-6]\\d{9}\\b"
+    }
+   ],
+   "context": [
+    "medicare"
+   ],
+   "validator": true
+  },
+  {
+   "id": "au-tfn",
+   "class": "AuTfnRecognizer",
+   "entity": "AU_TFN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "TFN (Medium)",
+     "score": 0.1,
+     "regex": "\\b\\d{3}\\s\\d{3}\\s\\d{3}\\b"
+    },
+    {
+     "name": "TFN (Low)",
+     "score": 0.01,
+     "regex": "\\b\\d{9}\\b"
+    }
+   ],
+   "context": [
+    "tax file number",
+    "tfn"
+   ],
+   "validator": true
+  },
+  {
+   "id": "ca-sin",
+   "class": "CaSinRecognizer",
+   "entity": "CA_SIN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "SIN (weak)",
+     "score": 0.05,
+     "regex": "\\b[1-79]\\d{8}\\b"
+    },
+    {
+     "name": "SIN (medium)",
+     "score": 0.5,
+     "regex": "\\b[1-79]\\d{2}([- ])\\d{3}\\1\\d{3}\\b"
+    }
+   ],
+   "context": [
+    "sin",
+    "sin number",
+    "social insurance",
+    "social insurance number",
+    "canada",
+    "nas",
+    "num\u00e9ro nas",
+    "num\u00e9ro d'assurance sociale",
+    "assurance sociale"
+   ],
+   "validator": false
+  },
+  {
+   "id": "fi-personal-identity-code",
+   "class": "FiPersonalIdentityCodeRecognizer",
+   "entity": "FI_PERSONAL_IDENTITY_CODE",
+   "language": "fi",
+   "patterns": [
+    {
+     "name": "Finnish Personal Identity Code (Medium)",
+     "score": 0.5,
+     "regex": "\\b(\\d{6})([-+ABCDEFYXWVU])(\\d{3})([0123456789ABCDEFHJKLMNPRSTUVWXY])\\b"
+    },
+    {
+     "name": "Finnish Personal Identity Code (Very Weak)",
+     "score": 0.1,
+     "regex": "(\\d{6})([-+ABCDEFYXWVU])(\\d{3})([0123456789ABCDEFHJKLMNPRSTUVWXY])"
+    }
+   ],
+   "context": [
+    "hetu",
+    "henkil\u00f6tunnus",
+    "personbeteckningen",
+    "personal identity code"
+   ],
+   "validator": true
+  },
+  {
+   "id": "de-bsnr",
+   "class": "DeBsnrRecognizer",
+   "entity": "DE_BSNR",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Betriebsst\u00e4ttennummer BSNR (9 digits)",
+     "score": 0.2,
+     "regex": "\\b\\d{9}\\b"
+    }
+   ],
+   "context": [
+    "betriebsst\u00e4ttennummer",
+    "betriebsst\u00e4tten-nummer",
+    "bsnr",
+    "betriebsst\u00e4tte",
+    "praxisnummer",
+    "arztpraxis",
+    "praxis",
+    "kassen\u00e4rztliche vereinigung",
+    "kv-nummer",
+    "kv nummer",
+    "praxisadresse",
+    "praxisstandort",
+    "nebenbetriebsst\u00e4tte",
+    "hauptbetriebsst\u00e4tte",
+    "behandlungsort",
+    "vertragsarztpraxis"
+   ],
+   "validator": true
+  },
+  {
+   "id": "de-fuehrerschein",
+   "class": "DeFuehrerscheinRecognizer",
+   "entity": "DE_FUEHRERSCHEIN",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "F\u00fchrerscheinnummer (Post-2013 EU-Format, 11 Zeichen)",
+     "score": 0.35,
+     "regex": "\\b[A-Z]{2}\\d{8}[A-Z0-9]\\b"
+    }
+   ],
+   "context": [
+    "f\u00fchrerscheinnummer",
+    "f\u00fchrerschein",
+    "fahrerlaubnis",
+    "fahrerlaubnisnummer",
+    "fahrerlaubnisklasse",
+    "f\u00fchrerscheininhaber",
+    "fev",
+    "kba",
+    "kraftfahrt-bundesamt",
+    "driving licence",
+    "driving license",
+    "driver's license",
+    "licence number",
+    "license number",
+    "dokument nr",
+    "dokument-nr",
+    "feld 5"
+   ],
+   "validator": false
+  },
+  {
+   "id": "de-handelsregister",
+   "class": "DeHandelsregisterRecognizer",
+   "entity": "DE_HANDELSREGISTER",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Handelsregisternummer HRA/HRB",
+     "score": 0.5,
+     "regex": "\\bHR[AB]\\s*\\d{1,6}\\b"
+    }
+   ],
+   "context": [
+    "handelsregister",
+    "handelsregisternummer",
+    "amtsgericht",
+    "registergericht",
+    "hra",
+    "hrb",
+    "hr-nummer",
+    "registerauszug",
+    "handelsregistereintrag",
+    "firma",
+    "gesellschaft",
+    "gmbh",
+    "ag",
+    "ug",
+    "kg",
+    "ohg",
+    "einzelkaufmann",
+    "einzelkauffrau",
+    "handelsregisterblattnummer"
+   ],
+   "validator": false
+  },
+  {
+   "id": "de-health-insurance",
+   "class": "DeHealthInsuranceRecognizer",
+   "entity": "DE_HEALTH_INSURANCE",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Krankenversicherungsnummer KVNR (letter + 9 digits)",
+     "score": 0.3,
+     "regex": "\\b[A-Z]\\d{9}\\b"
+    }
+   ],
+   "context": [
+    "krankenversicherungsnummer",
+    "krankenversichertennummer",
+    "versichertennummer",
+    "kvnr",
+    "krankenkasse",
+    "krankenversicherung",
+    "gesundheitskarte",
+    "egk",
+    "elektronische gesundheitskarte",
+    "gkv",
+    "gesetzliche krankenversicherung",
+    "krankenversicherungsausweis",
+    "versichertenausweis",
+    "versichertenkarte",
+    "aok",
+    "tkk",
+    "barmer",
+    "dak"
+   ],
+   "validator": true
+  },
+  {
+   "id": "de-id-card",
+   "class": "DeIdCardRecognizer",
+   "entity": "DE_ID_CARD",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Personalausweisnummer nPA (ICAO charset + check digit)",
+     "score": 0.4,
+     "regex": "\\b[CFGHJKLMNPRTVWXYZ][CFGHJKLMNPRTVWXYZ0-9]{7}[0-9]\\b"
+    },
+    {
+     "name": "Personalausweisnummer alt (T + 8 Ziffern)",
+     "score": 0.5,
+     "regex": "\\bT\\d{8}\\b"
+    }
+   ],
+   "context": [
+    "personalausweis",
+    "ausweis",
+    "personalausweisnummer",
+    "ausweisnummer",
+    "ausweisdokument",
+    "dokumentennummer",
+    "seriennummer",
+    "npa",
+    "neuer personalausweis",
+    "personalausweisgesetz",
+    "pauwsg",
+    "bundespersonalausweis",
+    "identity card",
+    "national id"
+   ],
+   "validator": true
+  },
+  {
+   "id": "de-kfz",
+   "class": "DeKfzRecognizer",
+   "entity": "DE_KFZ",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "KFZ-Kennzeichen (mit Leerzeichen)",
+     "score": 0.3,
+     "regex": "(?<![\\w-])[A-Z\u00c4\u00d6\u00dc]{1,3}\\s[A-Z]{1,2}\\s\\d{1,4}[EH]?(?!\\w)"
+    },
+    {
+     "name": "KFZ-Kennzeichen (mit Bindestrich)",
+     "score": 0.3,
+     "regex": "(?<![\\w-])[A-Z\u00c4\u00d6\u00dc]{1,3}-[A-Z]{1,2}-\\d{1,4}[EH]?(?!\\w)"
+    },
+    {
+     "name": "KFZ-Kennzeichen (Bindestrich + Leerzeichen)",
+     "score": 0.3,
+     "regex": "(?<![\\w-])[A-Z\u00c4\u00d6\u00dc]{1,3}-[A-Z]{1,2}\\s\\d{1,4}[EH]?(?!\\w)"
+    },
+    {
+     "name": "KFZ-Kennzeichen (ASCII only, mit Leerzeichen)",
+     "score": 0.2,
+     "regex": "(?<![\\w-])[A-Z]{1,3}\\s[A-Z]{1,2}\\s\\d{1,4}[EH]?(?!\\w)"
+    },
+    {
+     "name": "KFZ-Kennzeichen (ASCII only, Bindestrich + Leerzeichen)",
+     "score": 0.2,
+     "regex": "(?<![\\w-])[A-Z]{1,3}-[A-Z]{1,2}\\s\\d{1,4}[EH]?(?!\\w)"
+    }
+   ],
+   "context": [
+    "kennzeichen",
+    "kfz-kennzeichen",
+    "kraftfahrzeugkennzeichen",
+    "nummernschild",
+    "fahrzeugkennzeichen",
+    "zulassung",
+    "kfz",
+    "fahrzeug",
+    "auto",
+    "pkw",
+    "lkw",
+    "fahrzeugschein",
+    "fahrzeugbrief",
+    "zulassungsbescheinigung",
+    "amtliches kennzeichen"
+   ],
+   "validator": false
+  },
+  {
+   "id": "de-lanr",
+   "class": "DeLanrRecognizer",
+   "entity": "DE_LANR",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Lebenslange Arztnummer LANR (9 digits)",
+     "score": 0.3,
+     "regex": "\\b\\d{9}\\b"
+    }
+   ],
+   "context": [
+    "arztnummer",
+    "lanr",
+    "lebenslange arztnummer",
+    "arzt-nr",
+    "arzt nr",
+    "arzt-nummer",
+    "vertragsarzt",
+    "kassenarzt",
+    "niedergelassener arzt",
+    "kbv",
+    "kassen\u00e4rztliche vereinigung",
+    "kv-nummer",
+    "rezept",
+    "verschreibung",
+    "behandelnder arzt",
+    "hausarzt",
+    "facharzt"
+   ],
+   "validator": true
+  },
+  {
+   "id": "de-passport",
+   "class": "DePassportRecognizer",
+   "entity": "DE_PASSPORT",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Reisepassnummer (Strict ICAO charset)",
+     "score": 0.4,
+     "regex": "\\b[CFGHJKLMNPRTVWXYZ][CFGHJKLMNPRTVWXYZ0-9]{7}[0-9]\\b"
+    }
+   ],
+   "context": [
+    "reisepass",
+    "pass",
+    "passnummer",
+    "reisepassnummer",
+    "passport",
+    "passport number",
+    "pass-nr",
+    "dokumentennummer",
+    "bundesrepublik deutschland",
+    "ausweisdokument",
+    "mrz"
+   ],
+   "validator": true
+  },
+  {
+   "id": "de-plz",
+   "class": "DePlzRecognizer",
+   "entity": "DE_PLZ",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Postleitzahl (5 digits, very low base confidence \u2013 context required)",
+     "score": 0.05,
+     "regex": "\\b(?!01000\\b|99999\\b)(0[1-9]\\d{3}|[1-9]\\d{4})\\b"
+    }
+   ],
+   "context": [
+    "plz",
+    "postleitzahl",
+    "postanschrift",
+    "adresse",
+    "wohnort",
+    "ort",
+    "wohnanschrift",
+    "lieferadresse",
+    "rechnungsadresse",
+    "stra\u00dfe",
+    "strasse",
+    "hausnummer",
+    "postfach",
+    "bundesland",
+    "gemeinde",
+    "stadt",
+    "dorf"
+   ],
+   "validator": false
+  },
+  {
+   "id": "de-social-security",
+   "class": "DeSocialSecurityRecognizer",
+   "entity": "DE_SOCIAL_SECURITY",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Rentenversicherungsnummer (Strict, with birth date structure)",
+     "score": 0.5,
+     "regex": "\\b\\d{2}(0[1-9]|[12]\\d|3[01]|5[1-9]|[67]\\d|8[01])(0[1-9]|1[0-2])\\d{2}[A-Z]\\d{2}[0-9]\\b"
+    },
+    {
+     "name": "Rentenversicherungsnummer (Relaxed)",
+     "score": 0.3,
+     "regex": "\\b\\d{8}[A-Z]\\d{3}\\b"
+    }
+   ],
+   "context": [
+    "rentenversicherungsnummer",
+    "sozialversicherungsnummer",
+    "versicherungsnummer",
+    "rvnr",
+    "svnr",
+    "sv-nummer",
+    "rente",
+    "rentenversicherung",
+    "deutsche rentenversicherung",
+    "drv",
+    "sozialversicherung",
+    "sozialversicherungsausweis",
+    "rentenausweis"
+   ],
+   "validator": true
+  },
+  {
+   "id": "de-tax-id",
+   "class": "DeTaxIdRecognizer",
+   "entity": "DE_TAX_ID",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Steueridentifikationsnummer (High)",
+     "score": 0.5,
+     "regex": "\\b[1-9]\\d{10}\\b"
+    }
+   ],
+   "context": [
+    "steueridentifikationsnummer",
+    "steuer-id",
+    "steuerid",
+    "steuerliche identifikationsnummer",
+    "steuerliche identifikation",
+    "pers\u00f6nliche identifikationsnummer",
+    "steuer identifikation",
+    "idnr",
+    "steuer-idnr",
+    "steuernummer",
+    "bzst"
+   ],
+   "validator": true
+  },
+  {
+   "id": "de-tax-number",
+   "class": "DeTaxNumberRecognizer",
+   "entity": "DE_TAX_NUMBER",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Steuernummer ELSTER (bundeseinheitlich, 13-stellig)",
+     "score": 0.5,
+     "regex": "\\b(0[1-9]|1[0-6])\\d{11}\\b"
+    },
+    {
+     "name": "Steuernummer mit Schr\u00e4gstrich (Bayern/BW: 3/3/5)",
+     "score": 0.4,
+     "regex": "(?<!\\w)\\d{3}/\\d{3}/\\d{5}(?!\\w)"
+    },
+    {
+     "name": "Steuernummer mit Schr\u00e4gstrich (NW: 3/4/4 oder allgemein 2-3/3-4/4-5)",
+     "score": 0.2,
+     "regex": "(?<!\\w)\\d{2,3}/\\d{3,4}/\\d{4,5}(?!\\w)"
+    }
+   ],
+   "context": [
+    "steuernummer",
+    "steuer-nr",
+    "steuer nr",
+    "st.-nr",
+    "st-nr",
+    "finanzamt",
+    "umsatzsteuer",
+    "einkommensteuer",
+    "k\u00f6rperschaftsteuer",
+    "gewerbesteuer",
+    "steuerveranlagung",
+    "steuerbescheid"
+   ],
+   "validator": false
+  },
+  {
+   "id": "de-vat-id",
+   "class": "DeVatIdRecognizer",
+   "entity": "DE_VAT_ID",
+   "language": "de",
+   "patterns": [
+    {
+     "name": "Umsatzsteuer-Identifikationsnummer USt-IdNr. (DE + 9 digits)",
+     "score": 0.5,
+     "regex": "\\bDE\\d{9}\\b"
+    },
+    {
+     "name": "Umsatzsteuer-Identifikationsnummer USt-IdNr. (with separators)",
+     "score": 0.4,
+     "regex": "\\bDE[\\s.\\-]?\\d{3}[\\s.\\-]?\\d{3}[\\s.\\-]?\\d{3}\\b"
+    }
+   ],
+   "context": [
+    "umsatzsteuer-identifikationsnummer",
+    "umsatzsteueridentifikationsnummer",
+    "ust-idnr",
+    "ust-id",
+    "ustidnr",
+    "umsatzsteuer-id",
+    "mehrwertsteuer",
+    "vat",
+    "vat-id",
+    "vat id",
+    "steueridentifikation",
+    "bzst",
+    "bundeszentralamt f\u00fcr steuern",
+    "finanzamt",
+    "invoice",
+    "rechnung"
+   ],
+   "validator": true
+  },
+  {
+   "id": "in-aadhaar",
+   "class": "InAadhaarRecognizer",
+   "entity": "IN_AADHAAR",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "AADHAAR (Very Weak)",
+     "score": 0.01,
+     "regex": "\\b[0-9]{12}\\b"
+    },
+    {
+     "name": "AADHAR (Very Weak)",
+     "score": 0.01,
+     "regex": "\\b[0-9]{4}[- :][0-9]{4}[- :][0-9]{4}\\b"
+    }
+   ],
+   "context": [
+    "aadhaar",
+    "uidai"
+   ],
+   "validator": true
+  },
+  {
+   "id": "in-gstin",
+   "class": "InGstinRecognizer",
+   "entity": "IN_GSTIN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "GSTIN (High)",
+     "score": 0.8,
+     "regex": "\\b((?:0[1-9]|[1-3][0-7])[A-Za-z0-9]{10}[A-Za-z0-9]{1}Z[A-Za-z0-9]{1})\\b"
+    },
+    {
+     "name": "GSTIN (Medium)",
+     "score": 0.4,
+     "regex": "\\b((?:0[1-9]|[1-3][0-7])[A-Za-z0-9]{11}Z[A-Za-z0-9]{1})\\b"
+    },
+    {
+     "name": "GSTIN (Low)",
+     "score": 0.1,
+     "regex": "\\b([0-9]{2}[A-Za-z0-9]{11}Z[A-Za-z0-9]{1})\\b"
+    }
+   ],
+   "context": [
+    "gstin",
+    "gst",
+    "goods and services tax",
+    "tax identification",
+    "gst number",
+    "gst registration"
+   ],
+   "validator": true
+  },
+  {
+   "id": "in-pan",
+   "class": "InPanRecognizer",
+   "entity": "IN_PAN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "PAN (High)",
+     "score": 0.5,
+     "regex": "\\b([A-Za-z]{3}[AaBbCcFfGgHhJjLlPpTt]{1}[A-Za-z]{1}[0-9]{4}[A-Za-z]{1})\\b"
+    },
+    {
+     "name": "PAN (Medium)",
+     "score": 0.1,
+     "regex": "\\b([A-Za-z]{5}[0-9]{4}[A-Za-z]{1})\\b"
+    },
+    {
+     "name": "PAN (Low)",
+     "score": 0.01,
+     "regex": "\\b((?=.*?[a-zA-Z])(?=.*?[0-9]{4})[\\w@#$%^?~-]{10})\\b"
+    }
+   ],
+   "context": [
+    "permanent account number",
+    "pan"
+   ],
+   "validator": false
+  },
+  {
+   "id": "in-passport",
+   "class": "InPassportRecognizer",
+   "entity": "IN_PASSPORT",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "PASSPORT",
+     "score": 0.1,
+     "regex": "\\b[A-Z][1-9]\\d\\s?\\d{4}[1-9]\\b"
+    }
+   ],
+   "context": [
+    "passport",
+    "indian passport",
+    "passport number"
+   ],
+   "validator": false
+  },
+  {
+   "id": "in-vehicle-registration",
+   "class": "InVehicleRegistrationRecognizer",
+   "entity": "IN_VEHICLE_REGISTRATION",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "India Vehicle Registration (Very Weak)",
+     "score": 0.01,
+     "regex": "\\b[A-Z]{1}(?!0000)[0-9]{4}\\b"
+    },
+    {
+     "name": "India Vehicle Registration (Very Weak)",
+     "score": 0.01,
+     "regex": "\\b[A-Z]{2}(?!0000)\\d{4}\\b"
+    },
+    {
+     "name": "India Vehicle Registration (Very Weak)",
+     "score": 0.01,
+     "regex": "\\b(I)(?!00000)\\d{5}\\b"
+    },
+    {
+     "name": "India Vehicle Registration (Weak)",
+     "score": 0.2,
+     "regex": "\\b[A-Z]{3}(?!0000)\\d{4}\\b"
+    },
+    {
+     "name": "India Vehicle Registration (Medium)",
+     "score": 0.4,
+     "regex": "\\b\\d{1,3}(CD|CC|UN)[1-9]{1}[0-9]{1,3}\\b"
+    },
+    {
+     "name": "India Vehicle Registration",
+     "score": 0.5,
+     "regex": "\\b[A-Z]{2}\\d{1}[A-Z]{1,3}(?!0000)\\d{4}\\b"
+    },
+    {
+     "name": "India Vehicle Registration",
+     "score": 0.5,
+     "regex": "\\b[A-Z]{2}\\d{2}[A-Z]{1,2}(?!0000)\\d{4}\\b"
+    },
+    {
+     "name": "India Vehicle Registration",
+     "score": 0.85,
+     "regex": "\\b[2-9]{1}[1-9]{1}(BH)(?!0000)\\d{4}[A-HJ-NP-Z]{2}\\b"
+    },
+    {
+     "name": "India Vehicle Registration",
+     "score": 0.85,
+     "regex": "\\b(?!00)\\d{2}(A|B|C|D|E|F|H|K|P|R|X)\\d{6}[A-Z]{1}\\b"
+    }
+   ],
+   "context": [
+    "RTO",
+    "vehicle",
+    "plate",
+    "registration"
+   ],
+   "validator": true
+  },
+  {
+   "id": "in-voter",
+   "class": "InVoterRecognizer",
+   "entity": "IN_VOTER",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "VOTER",
+     "score": 0.4,
+     "regex": "\\b([A-Za-z]{1}[ABCDGHJKMNPRSYabcdghjkmnprsy]{1}[A-Za-z]{1}([0-9]){7})\\b"
+    },
+    {
+     "name": "VOTER",
+     "score": 0.3,
+     "regex": "\\b([A-Za-z]){3}([0-9]){7}\\b"
+    }
+   ],
+   "context": [
+    "voter",
+    "epic",
+    "elector photo identity card"
+   ],
+   "validator": false
+  },
+  {
+   "id": "it-driver-license",
+   "class": "ItDriverLicenseRecognizer",
+   "entity": "IT_DRIVER_LICENSE",
+   "language": "it",
+   "patterns": [
+    {
+     "name": "Driver License",
+     "score": 0.2,
+     "regex": "\\b(?i)(([A-Z]{2}\\d{7}[A-Z])|(U1[BCDEFGHLJKMNPRSTUWYXZ0-9]{7}[A-Z]))\\b"
+    }
+   ],
+   "context": [
+    "patente",
+    "patente di guida",
+    "licenza",
+    "licenza di guida"
+   ],
+   "validator": false
+  },
+  {
+   "id": "it-fiscal-code",
+   "class": "ItFiscalCodeRecognizer",
+   "entity": "IT_FISCAL_CODE",
+   "language": "it",
+   "patterns": [
+    {
+     "name": "Fiscal Code",
+     "score": 0.3,
+     "regex": "(?i)((?:[A-Z][AEIOU][AEIOUX]|[AEIOU]X{2}|[B-DF-HJ-NP-TV-Z]{2}[A-Z]){2}(?:[\\dLMNP-V]{2}(?:[A-EHLMPR-T](?:[04LQ][1-9MNP-V]|[15MR][\\dLMNP-V]|[26NS][0-8LMNP-U])|[DHPS][37PT][0L]|[ACELMRT][37PT][01LM]|[AC-EHLMPR-T][26NS][9V])|(?:[02468LNQSU][048LQU]|[13579MPRTV][26NS])B[26NS][9V])(?:[A-MZ][1-9MNP-V][\\dLMNP-V]{2}|[A-M][0L](?:[1-9MNP-V][\\dLMNP-V]|[0L][1-9MNP-V]))[A-Z])"
+    }
+   ],
+   "context": [
+    "codice fiscale",
+    "cf"
+   ],
+   "validator": true
+  },
+  {
+   "id": "it-identity-card",
+   "class": "ItIdentityCardRecognizer",
+   "entity": "IT_IDENTITY_CARD",
+   "language": "it",
+   "patterns": [
+    {
+     "name": "Paper-based Identity Card (very weak)",
+     "score": 0.01,
+     "regex": "(?i)\\b[A-Z]{2}\\s?\\d{7}\\b"
+    },
+    {
+     "name": "Electronic Identity Card (CIE) 2.0 (very weak)",
+     "score": 0.01,
+     "regex": "(?i)\\b\\d{7}[A-Z]{2}\\b"
+    },
+    {
+     "name": "Electronic Identity Card (CIE) 3.0 (very weak)",
+     "score": 0.01,
+     "regex": "(?i)\\b[A-Z]{2}\\d{5}[A-Z]{2}\\b"
+    }
+   ],
+   "context": [
+    "carta",
+    "identit\u00e0",
+    "elettronica",
+    "cie",
+    "documento",
+    "riconoscimento",
+    "espatrio"
+   ],
+   "validator": false
+  },
+  {
+   "id": "it-passport",
+   "class": "ItPassportRecognizer",
+   "entity": "IT_PASSPORT",
+   "language": "it",
+   "patterns": [
+    {
+     "name": "Passport (very weak)",
+     "score": 0.01,
+     "regex": "(?i)\\b[A-Z]{2}\\d{7}\\b"
+    }
+   ],
+   "context": [
+    "passaporto",
+    "elettronico",
+    "italiano",
+    "viaggio",
+    "viaggiare",
+    "estero",
+    "documento",
+    "dogana"
+   ],
+   "validator": false
+  },
+  {
+   "id": "it-vat-code",
+   "class": "ItVatCodeRecognizer",
+   "entity": "IT_VAT_CODE",
+   "language": "it",
+   "patterns": [
+    {
+     "name": "IT Vat code (piva)",
+     "score": 0.1,
+     "regex": "\\b([0-9][ _]?){11}\\b"
+    }
+   ],
+   "context": [
+    "piva",
+    "partita iva",
+    "pi"
+   ],
+   "validator": true
+  },
+  {
+   "id": "kr-brn",
+   "class": "KrBrnRecognizer",
+   "entity": "KR_BRN",
+   "language": "ko",
+   "patterns": [
+    {
+     "name": "BRN (Weak)",
+     "score": 0.1,
+     "regex": "(?<!\\d)\\d{3}-\\d{2}-\\d{5}(?!\\d)"
+    },
+    {
+     "name": "BRN (Very weak)",
+     "score": 0.05,
+     "regex": "(?<!\\d)\\d{10}(?!\\d)"
+    }
+   ],
+   "context": [
+    "\uc0ac\uc5c5\uc790\ub4f1\ub85d\ubc88\ud638",
+    "\uc0ac\uc5c5\uc790\ubc88\ud638",
+    "\uc0ac\uc5c5\uc790",
+    "BRN",
+    "Business Registration Number",
+    "Korean BRN",
+    "business number",
+    "tax registration number"
+   ],
+   "validator": true
+  },
+  {
+   "id": "kr-driver-license",
+   "class": "KrDriverLicenseRecognizer",
+   "entity": "KR_DRIVER_LICENSE",
+   "language": "ko",
+   "patterns": [
+    {
+     "name": "Driver License (very weak)",
+     "score": 0.05,
+     "regex": "(?<!\\d)(\\d{2})[- ]?(\\d{2})[- ]?(\\d{6})[- ]?(\\d{2})(?!\\d)"
+    }
+   ],
+   "context": [
+    "\uc6b4\uc804\uba74\ud5c8",
+    "\uc6b4\uc804\uba74\ud5c8\ubc88\ud638",
+    "\uba74\ud5c8\ubc88\ud638",
+    "Korean driver license",
+    "Korean driver's license"
+   ],
+   "validator": true
+  },
+  {
+   "id": "kr-frn",
+   "class": "KrFrnRecognizer",
+   "entity": "KR_FRN",
+   "language": "ko",
+   "patterns": [
+    {
+     "name": "FRN (Medium)",
+     "score": 0.5,
+     "regex": "(?<!\\d)\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\d|3[01])(-?)[5-8]\\d{6}(?!\\d)"
+    }
+   ],
+   "context": [
+    "\uc678\uad6d\uc778\ub4f1\ub85d\ubc88\ud638",
+    "Korean FRN",
+    "FRN",
+    "Foreigner Registration Number",
+    "Korean Foreigner Registration Number",
+    "\uc678\uad6d\uc778\ubc88\ud638"
+   ],
+   "validator": true
+  },
+  {
+   "id": "kr-passport",
+   "class": "KrPassportRecognizer",
+   "entity": "KR_PASSPORT",
+   "language": "kr",
+   "patterns": [
+    {
+     "name": "Passport Number (Current)",
+     "score": 0.1,
+     "regex": "(?<![A-Z0-9a-z])[MmSsRrOoDd]\\d{3}[A-Za-z]\\d{4}(?![0-9])"
+    },
+    {
+     "name": "Passport Number (Previous)",
+     "score": 0.05,
+     "regex": "(?<![A-Z0-9a-z])[MmSsRrOoDd]\\d{8}(?![0-9])"
+    }
+   ],
+   "context": [
+    "Korean passport",
+    "Korean passport number",
+    "\ub300\ud55c\ubbfc\uad6d \uc5ec\uad8c",
+    "\uc5ec\uad8c",
+    "passport",
+    "passport number"
+   ],
+   "validator": false
+  },
+  {
+   "id": "kr-rrn",
+   "class": "KrRrnRecognizer",
+   "entity": "KR_RRN",
+   "language": "ko",
+   "patterns": [
+    {
+     "name": "RRN (Medium)",
+     "score": 0.5,
+     "regex": "(?<!\\d)\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\d|3[01])(-?)[1-4]\\d{6}(?!\\d)"
+    }
+   ],
+   "context": [
+    "Korean RRN",
+    "Korean Resident Registration Number",
+    "Resident Registration Number",
+    "RRN",
+    "rrn",
+    "rrn#"
+   ],
+   "validator": true
+  },
+  {
+   "id": "ng-nin",
+   "class": "NgNinRecognizer",
+   "entity": "NG_NIN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "NIN (Very Weak)",
+     "score": 0.01,
+     "regex": "\\b\\d{11}\\b"
+    }
+   ],
+   "context": [
+    "nin",
+    "national identification number",
+    "national identity number",
+    "nimc",
+    "national identity",
+    "nigeria id",
+    "nigerian identification"
+   ],
+   "validator": true
+  },
+  {
+   "id": "ng-vehicle-registration",
+   "class": "NgVehicleRegistrationRecognizer",
+   "entity": "NG_VEHICLE_REGISTRATION",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Nigeria Vehicle Registration",
+     "score": 0.5,
+     "regex": "\\b[A-Z]{3}[- ]?\\d{3}[A-Z]{2}\\b"
+    }
+   ],
+   "context": [
+    "plate number",
+    "vehicle registration",
+    "license plate",
+    "number plate",
+    "plate",
+    "vehicle",
+    "registration"
+   ],
+   "validator": false
+  },
+  {
+   "id": "ph-tin",
+   "class": "PhTinRecognizer",
+   "entity": "PH_TIN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "TIN (Low)",
+     "score": 0.05,
+     "regex": "\\b(\\d{3}-\\d{3}-\\d{3}(-\\d{3})?)\\b"
+    },
+    {
+     "name": "TIN (Very Low)",
+     "score": 0.01,
+     "regex": "\\b(\\d{9}|\\d{12})\\b"
+    }
+   ],
+   "context": [
+    "tin",
+    "taxpayer identification number",
+    "bir",
+    "taxpayer id",
+    "tax id",
+    "rdo",
+    "revenue district office"
+   ],
+   "validator": false
+  },
+  {
+   "id": "ph-umid",
+   "class": "PhUmidRecognizer",
+   "entity": "PH_UMID",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "UMID (with dashes)",
+     "score": 0.5,
+     "regex": "\\b\\d{4}-\\d{7}-\\d\\b"
+    },
+    {
+     "name": "UMID (without dashes)",
+     "score": 0.3,
+     "regex": "\\b\\d{12}\\b"
+    }
+   ],
+   "context": [
+    "umid",
+    "unified multi-purpose id",
+    "crn",
+    "common reference number",
+    "sss",
+    "gsis",
+    "philhealth",
+    "pag-ibig",
+    "umid number",
+    "umid card",
+    "unified multipurpose id"
+   ],
+   "validator": false
+  },
+  {
+   "id": "pl-pesel",
+   "class": "PlPeselRecognizer",
+   "entity": "PL_PESEL",
+   "language": "pl",
+   "patterns": [
+    {
+     "name": "PESEL",
+     "score": 0.4,
+     "regex": "[0-9]{2}([02468][1-9]|[13579][012])(0[1-9]|1[0-9]|2[0-9]|3[01])[0-9]{5}"
+    }
+   ],
+   "context": [
+    "PESEL"
+   ],
+   "validator": true
+  },
+  {
+   "id": "sg-fin",
+   "class": "SgFinRecognizer",
+   "entity": "SG_NRIC_FIN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Nric (weak)",
+     "score": 0.3,
+     "regex": "(?i)(\\b[A-Z][0-9]{7}[A-Z]\\b)"
+    },
+    {
+     "name": "Nric (medium)",
+     "score": 0.5,
+     "regex": "(?i)(\\b[STFGM][0-9]{7}[A-Z]\\b)"
+    }
+   ],
+   "context": [
+    "fin",
+    "fin#",
+    "nric",
+    "nric#"
+   ],
+   "validator": false
+  },
+  {
+   "id": "sg-uen",
+   "class": "SgUenRecognizer",
+   "entity": "SG_UEN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "UEN (low)",
+     "score": 0.3,
+     "regex": "\\b\\d{8}[A-Z]\\b|\\b\\d{9}[A-Z]\\b|\\b[TSR]\\d{2}[A-Z]{2}\\d{4}[A-Z]\\b"
+    }
+   ],
+   "context": [
+    "uen",
+    "unique entity number",
+    "business registration",
+    "ACRA"
+   ],
+   "validator": true
+  },
+  {
+   "id": "za-id-number",
+   "class": "ZaIdNumberRecognizer",
+   "entity": "ZA_ID_NUMBER",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "South African ID Number",
+     "score": 0.2,
+     "regex": "\\b\\d{10}[0-2][89]\\d\\b"
+    }
+   ],
+   "context": [
+    "id",
+    "identity",
+    "identity number",
+    "id number",
+    "south african id",
+    "rsa id",
+    "smart id",
+    "national id"
+   ],
+   "validator": true
+  },
+  {
+   "id": "es-nie",
+   "class": "EsNieRecognizer",
+   "entity": "ES_NIE",
+   "language": "es",
+   "patterns": [
+    {
+     "name": "NIE",
+     "score": 0.5,
+     "regex": "\\b[X-Z]?[0-9]?[0-9]{7}[-]?[A-Z]\\b"
+    }
+   ],
+   "context": [
+    "n\u00famero de identificaci\u00f3n de extranjero",
+    "NIE"
+   ],
+   "validator": true
+  },
+  {
+   "id": "es-nif",
+   "class": "EsNifRecognizer",
+   "entity": "ES_NIF",
+   "language": "es",
+   "patterns": [
+    {
+     "name": "NIF",
+     "score": 0.5,
+     "regex": "\\b[0-9]?[0-9]{7}[-]?[A-Z]\\b"
+    }
+   ],
+   "context": [
+    "documento nacional de identidad",
+    "DNI",
+    "NIF",
+    "identificaci\u00f3n"
+   ],
+   "validator": true
+  },
+  {
+   "id": "es-passport",
+   "class": "EsPassportRecognizer",
+   "entity": "ES_PASSPORT",
+   "language": "es",
+   "patterns": [
+    {
+     "name": "ES_PASSPORT",
+     "score": 0.05,
+     "regex": "\\b[A-Z]{3}[0-9]{6}\\b"
+    }
+   ],
+   "context": [
+    "pasaporte",
+    "passport",
+    "n\u00famero de pasaporte",
+    "passport number"
+   ],
+   "validator": false
+  },
+  {
+   "id": "se-organisationsnummer",
+   "class": "SeOrganisationsnummerRecognizer",
+   "entity": "SE_ORGANISATIONSNUMMER",
+   "language": "sv",
+   "patterns": [
+    {
+     "name": "Swedish Organisationsnummer (Medium)",
+     "score": 0.6,
+     "regex": "\\b\\d{6}[-]?\\d{4}\\b"
+    },
+    {
+     "name": "Swedish Organisationsnummer (Weak)",
+     "score": 0.2,
+     "regex": "\\d{6}[-]?\\d{4}"
+    }
+   ],
+   "context": [
+    "organisationsnummer",
+    "orgnr",
+    "org nr",
+    "f\u00f6retagsnummer"
+   ],
+   "validator": true
+  },
+  {
+   "id": "se-personnummer",
+   "class": "SePersonnummerRecognizer",
+   "entity": "SE_PERSONNUMMER",
+   "language": "sv",
+   "patterns": [
+    {
+     "name": "Swedish Personnummer (Medium)",
+     "score": 0.5,
+     "regex": "\\b(\\d{6,8})([-+]?)\\d{4}\\b"
+    },
+    {
+     "name": "Swedish Personnummer (Very Weak)",
+     "score": 0.1,
+     "regex": "(\\d{6,8})([-+]?)\\d{4}"
+    }
+   ],
+   "context": [
+    "personnummer",
+    "svenskt personnummer",
+    "svensk id",
+    "ssn",
+    "personal identity number",
+    "samordningsnummer"
+   ],
+   "validator": true
+  },
+  {
+   "id": "th-tnin",
+   "class": "ThTninRecognizer",
+   "entity": "TH_TNIN",
+   "language": "th",
+   "patterns": [
+    {
+     "name": "TNIN (Medium)",
+     "score": 0.5,
+     "regex": "\\b[1-9](?:[134][0-9]|2[0-7]|5[0-8]|[67][01234567]|[89][0123456])\\d{10}\\b"
+    }
+   ],
+   "context": [
+    "Thai National ID",
+    "Thai ID Number",
+    "TNIN",
+    "\u0e40\u0e25\u0e02\u0e1b\u0e23\u0e30\u0e08\u0e33\u0e15\u0e31\u0e27\u0e1b\u0e23\u0e30\u0e0a\u0e32\u0e0a\u0e19",
+    "\u0e40\u0e25\u0e02\u0e1a\u0e31\u0e15\u0e23\u0e1b\u0e23\u0e30\u0e0a\u0e32\u0e0a\u0e19",
+    "\u0e23\u0e2b\u0e31\u0e2a\u0e1b\u0e0a\u0e0a"
+   ],
+   "validator": true
+  },
+  {
+   "id": "tr-license-plate",
+   "class": "TrLicensePlateRecognizer",
+   "entity": "TR_LICENSE_PLATE",
+   "language": "tr",
+   "patterns": [
+    {
+     "name": "TR License Plate (space)",
+     "score": 0.3,
+     "regex": "\\b(0[1-9]|[1-7][0-9]|8[0-1])\\s?[A-PR-VY-Z]{1,3}\\s?\\d{2,4}\\b"
+    },
+    {
+     "name": "TR License Plate (hyphen)",
+     "score": 0.3,
+     "regex": "\\b(0[1-9]|[1-7][0-9]|8[0-1])-[A-PR-VY-Z]{1,3}-\\d{2,4}\\b"
+    }
+   ],
+   "context": [
+    "plaka",
+    "ara\u00e7 plakas\u0131",
+    "plaka numaras\u0131",
+    "kay\u0131t plakas\u0131",
+    "tr plaka",
+    "license plate",
+    "number plate",
+    "plate",
+    "ta\u015f\u0131t plakas\u0131",
+    "kay\u0131t"
+   ],
+   "validator": true
+  },
+  {
+   "id": "tr-national-id",
+   "class": "TrNationalIdRecognizer",
+   "entity": "TR_NATIONAL_ID",
+   "language": "tr",
+   "patterns": [
+    {
+     "name": "TR_NATIONAL_ID",
+     "score": 0.3,
+     "regex": "\\b[1-9][0-9]{10}\\b"
+    }
+   ],
+   "context": [
+    "tc kimlik",
+    "kimlik no",
+    "kimlik numaras\u0131",
+    "tckn",
+    "tc no",
+    "n\u00fcfus c\u00fczdan\u0131",
+    "national id",
+    "turkish id",
+    "t\u00fcrk kimlik"
+   ],
+   "validator": true
+  },
+  {
+   "id": "uk-driving-licence",
+   "class": "UkDrivingLicenceRecognizer",
+   "entity": "UK_DRIVING_LICENCE",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "UK Driving Licence",
+     "score": 0.5,
+     "regex": "\\b[A-Z9]{5}[0-9](?:0[1-9]|1[0-2]|5[1-9]|6[0-2])(?:0[1-9]|[12][0-9]|3[01])[0-9][A-Z9]{2}[A-Z0-9][A-Z]{2}\\b"
+    }
+   ],
+   "context": [
+    "driving licence",
+    "driving license",
+    "driver's licence",
+    "driver's license",
+    "dvla",
+    "dl number",
+    "licence number",
+    "license number"
+   ],
+   "validator": true
+  },
+  {
+   "id": "nhs",
+   "class": "NhsRecognizer",
+   "entity": "UK_NHS",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "NHS (medium)",
+     "score": 0.5,
+     "regex": "\\b([0-9]{3})[- ]?([0-9]{3})[- ]?([0-9]{4})\\b"
+    }
+   ],
+   "context": [
+    "national health service",
+    "nhs",
+    "health services authority",
+    "health authority"
+   ],
+   "validator": true
+  },
+  {
+   "id": "uk-nino",
+   "class": "UkNinoRecognizer",
+   "entity": "UK_NINO",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "NINO (medium)",
+     "score": 0.5,
+     "regex": "\\b(?!bg|gb|nk|kn|nt|tn|zz|BG|GB|NK|KN|NT|TN|ZZ) ?([a-ceghj-pr-tw-zA-CEGHJ-PR-TW-Z]{1}[a-ceghj-npr-tw-zA-CEGHJ-NPR-TW-Z]{1}) ?([0-9]{2}) ?([0-9]{2}) ?([0-9]{2}) ?([a-dA-D]{1})\\b"
+    }
+   ],
+   "context": [
+    "national insurance",
+    "ni number",
+    "nino"
+   ],
+   "validator": false
+  },
+  {
+   "id": "uk-passport",
+   "class": "UkPassportRecognizer",
+   "entity": "UK_PASSPORT",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "UK Passport (weak)",
+     "score": 0.1,
+     "regex": "\\b[A-Z]{2}\\d{7}\\b"
+    }
+   ],
+   "context": [
+    "passport",
+    "passport number",
+    "travel document",
+    "uk passport",
+    "british passport",
+    "her majesty",
+    "his majesty",
+    "hm passport",
+    "hmpo"
+   ],
+   "validator": false
+  },
+  {
+   "id": "uk-postcode",
+   "class": "UkPostcodeRecognizer",
+   "entity": "UK_POSTCODE",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "UK Postcode",
+     "score": 0.1,
+     "regex": "\\b(GIR\\s?0AA|[A-PR-UWYZ][0-9][ABCDEFGHJKPSTUW]?\\s?[0-9][ABD-HJLNP-UW-Z]{2}|[A-PR-UWYZ][0-9]{2}\\s?[0-9][ABD-HJLNP-UW-Z]{2}|[A-PR-UWYZ][A-HK-Y][0-9][ABEHMNPRVWXY]?\\s?[0-9][ABD-HJLNP-UW-Z]{2}|[A-PR-UWYZ][A-HK-Y][0-9]{2}\\s?[0-9][ABD-HJLNP-UW-Z]{2})\\b"
+    }
+   ],
+   "context": [
+    "postcode",
+    "post code",
+    "postal code",
+    "zip",
+    "address",
+    "delivery",
+    "mailing",
+    "shipping",
+    "correspondence"
+   ],
+   "validator": false
+  },
+  {
+   "id": "uk-vehicle-registration",
+   "class": "UkVehicleRegistrationRecognizer",
+   "entity": "UK_VEHICLE_REGISTRATION",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "UK Vehicle Registration (current)",
+     "score": 0.3,
+     "regex": "\\b[A-HJ-PR-Y][A-HJ-PR-Y](?:0[1-9]|[1-7][0-9])[- ]?[A-HJ-PR-Z]{3}\\b"
+    },
+    {
+     "name": "UK Vehicle Registration (prefix)",
+     "score": 0.2,
+     "regex": "\\b[A-HJ-NPR-TV-Y]\\d{1,3}[- ]?[A-HJ-PR-Y][A-HJ-PR-Z]{2}\\b"
+    },
+    {
+     "name": "UK Vehicle Registration (suffix)",
+     "score": 0.15,
+     "regex": "\\b[A-HJ-PR-Z]{3}[- ]?\\d{1,3}[- ]?[A-HJ-NPR-TV-Y]\\b"
+    }
+   ],
+   "context": [
+    "vehicle",
+    "registration",
+    "number plate",
+    "licence plate",
+    "license plate",
+    "reg",
+    "vrn",
+    "dvla",
+    "v5c",
+    "logbook",
+    "mot",
+    "car",
+    "insured vehicle"
+   ],
+   "validator": true
+  },
+  {
+   "id": "aba-routing",
+   "class": "AbaRoutingRecognizer",
+   "entity": "ABA_ROUTING_NUMBER",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "ABA routing number (weak)",
+     "score": 0.05,
+     "regex": "\\b[0123678]\\d{8}\\b"
+    },
+    {
+     "name": "ABA routing number",
+     "score": 0.3,
+     "regex": "\\b[0123678]\\d{3}-\\d{4}-\\d\\b"
+    }
+   ],
+   "context": [
+    "aba",
+    "routing",
+    "abarouting",
+    "association",
+    "bankrouting"
+   ],
+   "validator": true
+  },
+  {
+   "id": "medical-license",
+   "class": "MedicalLicenseRecognizer",
+   "entity": "MEDICAL_LICENSE",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "USA DEA Certificate Number (weak)",
+     "score": 0.4,
+     "regex": "[abcdefghjklmprstuxABCDEFGHJKLMPRSTUX]{1}[a-zA-Z]{1}\\d{7}|[abcdefghjklmprstuxABCDEFGHJKLMPRSTUX]{1}9\\d{7}"
+    }
+   ],
+   "context": [
+    "medical",
+    "certificate",
+    "DEA"
+   ],
+   "validator": true
+  },
+  {
+   "id": "us-bank",
+   "class": "UsBankRecognizer",
+   "entity": "US_BANK_NUMBER",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Bank Account (weak)",
+     "score": 0.05,
+     "regex": "\\b[0-9]{8,17}\\b"
+    }
+   ],
+   "context": [
+    "check",
+    "account",
+    "account#",
+    "acct",
+    "bank",
+    "save",
+    "debit"
+   ],
+   "validator": false
+  },
+  {
+   "id": "us-license",
+   "class": "UsLicenseRecognizer",
+   "entity": "US_DRIVER_LICENSE",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Driver License - Alphanumeric (weak)",
+     "score": 0.3,
+     "regex": "\\b([A-Z][0-9]{3,6}|[A-Z][0-9]{5,9}|[A-Z][0-9]{6,8}|[A-Z][0-9]{4,8}|[A-Z][0-9]{9,11}|[A-Z]{1,2}[0-9]{5,6}|H[0-9]{8}|V[0-9]{6}|X[0-9]{8}|A-Z]{2}[0-9]{2,5}|[A-Z]{2}[0-9]{3,7}|[0-9]{2}[A-Z]{3}[0-9]{5,6}|[A-Z][0-9]{13,14}|[A-Z][0-9]{18}|[A-Z][0-9]{6}R|[A-Z][0-9]{9}|[A-Z][0-9]{1,12}|[0-9]{9}[A-Z]|[A-Z]{2}[0-9]{6}[A-Z]|[0-9]{8}[A-Z]{2}|[0-9]{3}[A-Z]{2}[0-9]{4}|[A-Z][0-9][A-Z][0-9][A-Z]|[0-9]{7,8}[A-Z])\\b"
+    },
+    {
+     "name": "Driver License - Digits (very weak)",
+     "score": 0.01,
+     "regex": "\\b([0-9]{6,14}|[0-9]{16})\\b"
+    }
+   ],
+   "context": [
+    "driver",
+    "license",
+    "permit",
+    "lic",
+    "identification",
+    "dls",
+    "cdls",
+    "lic#",
+    "driving"
+   ],
+   "validator": false
+  },
+  {
+   "id": "us-itin",
+   "class": "UsItinRecognizer",
+   "entity": "US_ITIN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Itin (very weak)",
+     "score": 0.05,
+     "regex": "\\b9\\d{2}[- ](5\\d|6[0-5]|7\\d|8[0-8]|9([0-2]|[4-9]))\\d{4}\\b|\\b9\\d{2}(5\\d|6[0-5]|7\\d|8[0-8]|9([0-2]|[4-9]))[- ]\\d{4}\\b"
+    },
+    {
+     "name": "Itin (weak)",
+     "score": 0.3,
+     "regex": "\\b9\\d{2}(5\\d|6[0-5]|7\\d|8[0-8]|9([0-2]|[4-9]))\\d{4}\\b"
+    },
+    {
+     "name": "Itin (medium)",
+     "score": 0.5,
+     "regex": "\\b9\\d{2}[- ](5\\d|6[0-5]|7\\d|8[0-8]|9([0-2]|[4-9]))[- ]\\d{4}\\b"
+    }
+   ],
+   "context": [
+    "individual",
+    "taxpayer",
+    "itin",
+    "tax",
+    "payer",
+    "taxid",
+    "tin"
+   ],
+   "validator": false
+  },
+  {
+   "id": "us-mbi",
+   "class": "UsMbiRecognizer",
+   "entity": "US_MBI",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "MBI (weak)",
+     "score": 0.3,
+     "regex": "\\b[0-9][ACDEFGHJKMNPQRTUVWXY][0-9ACDEFGHJKMNPQRTUVWXY][0-9][ACDEFGHJKMNPQRTUVWXY][0-9ACDEFGHJKMNPQRTUVWXY][0-9][ACDEFGHJKMNPQRTUVWXY][ACDEFGHJKMNPQRTUVWXY][0-9][0-9]\\b"
+    },
+    {
+     "name": "MBI (medium)",
+     "score": 0.5,
+     "regex": "\\b[0-9][ACDEFGHJKMNPQRTUVWXY][0-9ACDEFGHJKMNPQRTUVWXY][0-9]-[ACDEFGHJKMNPQRTUVWXY][0-9ACDEFGHJKMNPQRTUVWXY][0-9]-[ACDEFGHJKMNPQRTUVWXY][ACDEFGHJKMNPQRTUVWXY][0-9][0-9]\\b"
+    }
+   ],
+   "context": [
+    "medicare",
+    "mbi",
+    "beneficiary",
+    "cms",
+    "medicaid",
+    "hic",
+    "hicn"
+   ],
+   "validator": false
+  },
+  {
+   "id": "us-npi",
+   "class": "UsNpiRecognizer",
+   "entity": "US_NPI",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "NPI (weak)",
+     "score": 0.1,
+     "regex": "\\b[12]\\d{9}\\b"
+    },
+    {
+     "name": "NPI (medium)",
+     "score": 0.4,
+     "regex": "\\b[12]\\d{3}[ -]\\d{3}[ -]\\d{3}\\b"
+    }
+   ],
+   "context": [
+    "npi",
+    "national provider",
+    "provider",
+    "npi number",
+    "provider id",
+    "provider identifier",
+    "taxonomy"
+   ],
+   "validator": true
+  },
+  {
+   "id": "us-passport",
+   "class": "UsPassportRecognizer",
+   "entity": "US_PASSPORT",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Passport (very weak)",
+     "score": 0.05,
+     "regex": "(\\b[0-9]{9}\\b)"
+    },
+    {
+     "name": "Passport Next Generation (very weak)",
+     "score": 0.1,
+     "regex": "(\\b[A-Z][0-9]{8}\\b)"
+    }
+   ],
+   "context": [
+    "us",
+    "united",
+    "states",
+    "passport",
+    "passport#",
+    "travel",
+    "document"
+   ],
+   "validator": false
+  },
+  {
+   "id": "us-ssn",
+   "class": "UsSsnRecognizer",
+   "entity": "US_SSN",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "SSN1 (very weak)",
+     "score": 0.05,
+     "regex": "\\b([0-9]{5})-([0-9]{4})\\b"
+    },
+    {
+     "name": "SSN2 (very weak)",
+     "score": 0.05,
+     "regex": "\\b([0-9]{3})-([0-9]{6})\\b"
+    },
+    {
+     "name": "SSN3 (very weak)",
+     "score": 0.05,
+     "regex": "\\b(([0-9]{3})-([0-9]{2})-([0-9]{4}))\\b"
+    },
+    {
+     "name": "SSN4 (very weak)",
+     "score": 0.05,
+     "regex": "\\b[0-9]{9}\\b"
+    },
+    {
+     "name": "SSN5 (medium)",
+     "score": 0.5,
+     "regex": "\\b([0-9]{3})[- .]([0-9]{2})[- .]([0-9]{4})\\b"
+    }
+   ],
+   "context": [
+    "social",
+    "security",
+    "ssn",
+    "ssns",
+    "ssid"
+   ],
+   "validator": false
+  },
+  {
+   "id": "credit-card",
+   "class": "CreditCardRecognizer",
+   "entity": "CREDIT_CARD",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "All Credit Cards (weak)",
+     "score": 0.3,
+     "regex": "\\b(?!1\\d{12}(?!\\d))((4\\d{3})|(5[0-5]\\d{2})|(6\\d{3})|(1\\d{3})|(3\\d{3}))[- ]?(\\d{3,4})[- ]?(\\d{3,4})[- ]?(\\d{3,5})\\b"
+    }
+   ],
+   "context": [
+    "credit",
+    "card",
+    "visa",
+    "mastercard",
+    "cc ",
+    "amex",
+    "discover",
+    "jcb",
+    "diners",
+    "maestro",
+    "instapayment"
+   ],
+   "validator": true
+  },
+  {
+   "id": "crypto",
+   "class": "CryptoRecognizer",
+   "entity": "CRYPTO",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Crypto (Medium)",
+     "score": 0.5,
+     "regex": "(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,59}"
+    }
+   ],
+   "context": [
+    "wallet",
+    "btc",
+    "bitcoin",
+    "crypto"
+   ],
+   "validator": true
+  },
+  {
+   "id": "date",
+   "class": "DateRecognizer",
+   "entity": "DATE_TIME",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Datetime (yyyy-mm-ddThh:mm[:ss[.f]] with timezone)",
+     "score": 0.8,
+     "regex": "\\b(?:(\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T[0-2]\\d:[0-5]\\d:[0-5]\\d\\.\\d+([+-][0-2]\\d:[0-5]\\d|Z))|(\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T[0-2]\\d:[0-5]\\d:[0-5]\\d([+-][0-2]\\d:[0-5]\\d|Z))|(\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T[0-2]\\d:[0-5]\\d([+-][0-2]\\d:[0-5]\\d|Z)))\\b"
+    },
+    {
+     "name": "mm/dd/yyyy or mm/dd/yy",
+     "score": 0.6,
+     "regex": "\\b(([1-9]|0[1-9]|1[0-2])/([1-9]|0[1-9]|[1-2][0-9]|3[0-1])/(\\d{4}|\\d{2}))\\b"
+    },
+    {
+     "name": "dd/mm/yyyy or dd/mm/yy",
+     "score": 0.6,
+     "regex": "\\b(([1-9]|0[1-9]|[1-2][0-9]|3[0-1])/([1-9]|0[1-9]|1[0-2])/(\\d{4}|\\d{2}))\\b"
+    },
+    {
+     "name": "yyyy/mm/dd",
+     "score": 0.6,
+     "regex": "\\b(\\d{4}/([1-9]|0[1-9]|1[0-2])/([1-9]|0[1-9]|[1-2][0-9]|3[0-1]))\\b"
+    },
+    {
+     "name": "mm-dd-yyyy",
+     "score": 0.6,
+     "regex": "\\b(([1-9]|0[1-9]|1[0-2])-([1-9]|0[1-9]|[1-2][0-9]|3[0-1])-\\d{4})\\b"
+    },
+    {
+     "name": "dd-mm-yyyy",
+     "score": 0.6,
+     "regex": "\\b(([1-9]|0[1-9]|[1-2][0-9]|3[0-1])-([1-9]|0[1-9]|1[0-2])-\\d{4})\\b"
+    },
+    {
+     "name": "yyyy-mm-dd",
+     "score": 0.6,
+     "regex": "\\b(\\d{4}-([1-9]|0[1-9]|1[0-2])-([1-9]|0[1-9]|[1-2][0-9]|3[0-1]))\\b"
+    },
+    {
+     "name": "dd.mm.yyyy or dd.mm.yy",
+     "score": 0.6,
+     "regex": "\\b(([1-9]|0[1-9]|[1-2][0-9]|3[0-1])\\.([1-9]|0[1-9]|1[0-2])\\.(\\d{4}|\\d{2}))\\b"
+    },
+    {
+     "name": "dd-MMM-yyyy or dd-MMM-yy",
+     "score": 0.6,
+     "regex": "\\b(([1-9]|0[1-9]|[1-2][0-9]|3[0-1])-(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)-(\\d{4}|\\d{2}))\\b"
+    },
+    {
+     "name": "MMM-yyyy or MMM-yy",
+     "score": 0.6,
+     "regex": "\\b((JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)-(\\d{4}|\\d{2}))\\b"
+    },
+    {
+     "name": "dd-MMM or dd-MMM",
+     "score": 0.6,
+     "regex": "\\b(([1-9]|0[1-9]|[1-2][0-9]|3[0-1])-(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC))\\b"
+    },
+    {
+     "name": "mm/yyyy or m/yyyy",
+     "score": 0.2,
+     "regex": "\\b(([1-9]|0[1-9]|1[0-2])/\\d{4})\\b"
+    },
+    {
+     "name": "mm/yy or m/yy",
+     "score": 0.1,
+     "regex": "\\b(([1-9]|0[1-9]|1[0-2])/\\d{2})\\b"
+    }
+   ],
+   "context": [
+    "date",
+    "birthday"
+   ],
+   "validator": false
+  },
+  {
+   "id": "email",
+   "class": "EmailRecognizer",
+   "entity": "EMAIL_ADDRESS",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Email (Medium)",
+     "score": 0.5,
+     "regex": "\\b((([!#$%&'*+\\-/=?^_`{|}~\\w])|([!#$%&'*+\\-/=?^_`{|}~\\w][!#$%&'*+\\-/=?^_`{|}~\\.\\w]{0,}[!#$%&'*+\\-/=?^_`{|}~\\w]))[@]\\w+(?:-+\\w+)*(?:\\.\\w+(?:-+\\w+)*)+)\\b"
+    }
+   ],
+   "context": [
+    "email"
+   ],
+   "validator": true
+  },
+  {
+   "id": "iban",
+   "class": "IbanRecognizer",
+   "entity": "IBAN_CODE",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "IBAN Generic",
+     "score": 0.5,
+     "regex": "(?<![A-Z0-9])([A-Z]{2}[0-9]{2}(?:[ -]?[A-Z0-9]{4}){2,6})((?:[ -]?[A-Z0-9]{4})?)((?:[ -]?[A-Z0-9]{1,3})?)(?![A-Z0-9])"
+    }
+   ],
+   "context": [
+    "iban",
+    "bank",
+    "transaction"
+   ],
+   "validator": true
+  },
+  {
+   "id": "ip",
+   "class": "IpRecognizer",
+   "entity": "IP_ADDRESS",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "IPv4_mapped",
+     "score": 0.6,
+     "regex": "(?<![\\w:])::(?:ffff(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:/(?:12[0-8]|1[01]\\d|[1-9]?\\d))?\\b"
+    },
+    {
+     "name": "IPv4_embedded",
+     "score": 0.6,
+     "regex": "(?<![\\w:])(?:(?:[0-9A-Fa-f]{1,4}:){1,5}:(?:[0-9A-Fa-f]{1,4}:){0,4}|(?:[0-9A-Fa-f]{1,4}:){6})(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:/(?:12[0-8]|1[01]\\d|[1-9]?\\d))?\\b"
+    },
+    {
+     "name": "IPv4",
+     "score": 0.6,
+     "regex": "\\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:/(?:[0-2]?\\d|3[0-2]))?\\b"
+    },
+    {
+     "name": "IPv6",
+     "score": 0.6,
+     "regex": "(?<![\\w:])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|:(?::[0-9A-Fa-f]{1,4}){1,7}|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?::[0-9A-Fa-f]{1,4}){1,6})(?:%[0-9a-zA-Z]+)?(?:/(?:12[0-8]|1[01]\\d|[1-9]?\\d))?(?![\\w:]|\\.\\d)"
+    },
+    {
+     "name": "IPv6_unspecified",
+     "score": 0.1,
+     "regex": "(?<![\\w:])::(?:/(?:12[0-8]|1[01]\\d|[1-9]?\\d))?(?![\\w:])"
+    }
+   ],
+   "context": [
+    "ip",
+    "ipv4",
+    "ipv6"
+   ],
+   "validator": false
+  },
+  {
+   "id": "mac-address",
+   "class": "MacAddressRecognizer",
+   "entity": "MAC_ADDRESS",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "MAC_COLON_OR_HYPHEN",
+     "score": 0.6,
+     "regex": "\\b[0-9A-Fa-f]{2}([:-])(?:[0-9A-Fa-f]{2}\\1){4}[0-9A-Fa-f]{2}\\b"
+    },
+    {
+     "name": "MAC_CISCO_DOT",
+     "score": 0.6,
+     "regex": "\\b[0-9A-Fa-f]{4}\\.[0-9A-Fa-f]{4}\\.[0-9A-Fa-f]{4}\\b"
+    }
+   ],
+   "context": [
+    "mac",
+    "mac address",
+    "hardware address",
+    "physical address",
+    "ethernet"
+   ],
+   "validator": false
+  },
+  {
+   "id": "url",
+   "class": "UrlRecognizer",
+   "entity": "URL",
+   "language": "en",
+   "patterns": [
+    {
+     "name": "Standard Url",
+     "score": 0.6,
+     "regex": "(?i)(?:https?://)((www\\d{0,3}[.])?[a-z0-9.\\-]{1,253}[.](?:(?:com)|(?:edu)|(?:gov)|(?:int)|(?:mil)|(?:net)|(?:onl)|(?:org)|(?:pro)|(?:red)|(?:tel)|(?:uno)|(?:xxx)|(?:academy)|(?:accountant)|(?:accountants)|(?:actor)|(?:adult)|(?:africa)|(?:agency)|(?:airforce)|(?:apartments)|(?:app)|(?:archi)|(?:army)|(?:art)|(?:asia)|(?:associates)|(?:attorney)|(?:auction)|(?:audio)|(?:auto)|(?:autos)|(?:baby)|(?:band)|(?:bar)|(?:bargains)|(?:beer)|(?:berlin)|(?:best)|(?:bet)|(?:bid)|(?:bike)|(?:bio)|(?:black)|(?:blackfriday)|(?:blog)|(?:blue)|(?:boats)|(?:bond)|(?:boo)|(?:boston)|(?:bot)|(?:boutique)|(?:build)|(?:builders)|(?:business)|(?:buzz)|(?:cab)|(?:cafe)|(?:cam)|(?:camera)|(?:camp)|(?:capital)|(?:car)|(?:cards)|(?:care)|(?:careers)|(?:cars)|(?:casa)|(?:cash)|(?:casino)|(?:catering)|(?:center)|(?:ceo)|(?:cfd)|(?:charity)|(?:chat)|(?:cheap)|(?:christmas)|(?:church)|(?:city)|(?:claims)|(?:cleaning)|(?:click)|(?:clinic)|(?:clothing)|(?:cloud)|(?:club)|(?:codes)|(?:coffee)|(?:college)|(?:com)|(?:community)|(?:company)|(?:computer)|(?:condos)|(?:construction)|(?:consulting)|(?:contact)|(?:contractors)|(?:cooking)|(?:cool)|(?:coupons)|(?:courses)|(?:credit)|(?:creditcard)|(?:cricket)|(?:cruises)|(?:cyou)|(?:dad)|(?:dance)|(?:date)|(?:dating)|(?:day)|(?:degree)|(?:delivery)|(?:democrat)|(?:dental)|(?:dentist)|(?:desi)|(?:design)|(?:dev)|(?:diamonds)|(?:diet)|(?:digital)|(?:direct)|(?:directory)|(?:discount)|(?:doctor)|(?:dog)|(?:domains)|(?:download)|(?:earth)|(?:eco)|(?:education)|(?:email)|(?:energy)|(?:engineer)|(?:engineering)|(?:enterprises)|(?:equipment)|(?:esq)|(?:estate)|(?:events)|(?:exchange)|(?:expert)|(?:exposed)|(?:express)|(?:fail)|(?:faith)|(?:family)|(?:fans)|(?:farm)|(?:fashion)|(?:feedback)|(?:film)|(?:finance)|(?:financial)|(?:fish)|(?:fishing)|(?:fit)|(?:fitness)|(?:flights)|(?:florist)|(?:flowers)|(?:football)|(?:forsale)|(?:foundation)|(?:fun)|(?:fund)|(?:furniture)|(?:futbol)|(?:fyi)|(?:gallery)|(?:game)|(?:games)|(?:garden)|(?:gay)|(?:gdn)|(?:gifts)|(?:gives)|(?:giving)|(?:glass)|(?:global)|(?:gmbh)|(?:gold)|(?:golf)|(?:graphics)|(?:gratis)|(?:green)|(?:gripe)|(?:group)|(?:guide)|(?:guitars)|(?:guru)|(?:hair)|(?:hamburg)|(?:haus)|(?:health)|(?:healthcare)|(?:help)|(?:hiphop)|(?:hockey)|(?:holdings)|(?:holiday)|(?:homes)|(?:horse)|(?:hospital)|(?:host)|(?:hosting)|(?:house)|(?:how)|(?:icu)|(?:info)|(?:ink)|(?:institute)|(?:insure)|(?:international)|(?:investments)|(?:irish)|(?:jewelry)|(?:jetzt)|(?:juegos)|(?:kaufen)|(?:kids)|(?:kitchen)|(?:kiwi)|(?:krd)|(?:kyoto)|(?:land)|(?:lat)|(?:law)|(?:lawyer)|(?:lease)|(?:legal)|(?:lgbt)|(?:life)|(?:lighting)|(?:limited)|(?:limo)|(?:link)|(?:live)|(?:loan)|(?:loans)|(?:lol)|(?:london)|(?:love)|(?:ltd)|(?:ltda)|(?:luxury)|(?:maison)|(?:management)|(?:market)|(?:marketing)|(?:markets)|(?:mba)|(?:media)|(?:melbourne)|(?:meme)|(?:memorial)|(?:men)|(?:miami)|(?:mobi)|(?:moda)|(?:moe)|(?:mom)|(?:money)|(?:monster)|(?:mortgage)|(?:motorcycles)|(?:mov)|(?:movie)|(?:nagoya)|(?:name)|(?:navy)|(?:network)|(?:new)|(?:news)|(?:ngo)|(?:ninja)|(?:now)|(?:nyc)|(?:observer)|(?:okinawa)|(?:one)|(?:ong)|(?:onl)|(?:online)|(?:organic)|(?:osaka)|(?:page)|(?:paris)|(?:partners)|(?:parts)|(?:party)|(?:pet)|(?:phd)|(?:photo)|(?:photography)|(?:photos)|(?:pics)|(?:pictures)|(?:pink)|(?:pizza)|(?:place)|(?:plumbing)|(?:plus)|(?:poker)|(?:porn)|(?:press)|(?:pro)|(?:productions)|(?:prof)|(?:promo)|(?:properties)|(?:property)|(?:protection)|(?:pub)|(?:quest)|(?:racing)|(?:recipes)|(?:red)|(?:rehab)|(?:reise)|(?:reisen)|(?:rent)|(?:rentals)|(?:repair)|(?:report)|(?:republican)|(?:rest)|(?:restaurant)|(?:review)|(?:reviews)|(?:rip)|(?:rocks)|(?:rodeo)|(?:rsvp)|(?:run)|(?:saarland)|(?:sale)|(?:salon)|(?:sarl)|(?:sbs)|(?:school)|(?:schule)|(?:science)|(?:services)|(?:sex)|(?:sexy)|(?:sh)|(?:shoes)|(?:shop)|(?:shopping)|(?:show)|(?:singles)|(?:site)|(?:skin)|(?:soccer)|(?:social)|(?:software)|(?:solar)|(?:solutions)|(?:soy)|(?:space)|(?:spiegel)|(?:study)|(?:style)|(?:sucks)|(?:supply)|(?:support)|(?:surf)|(?:surgery)|(?:systems)|(?:tax)|(?:taxi)|(?:team)|(?:tech)|(?:technology)|(?:tel)|(?:theater)|(?:tips)|(?:tires)|(?:today)|(?:tools)|(?:top)|(?:tours)|(?:town)|(?:toys)|(?:trade)|(?:training)|(?:tube)|(?:uk)|(?:university)|(?:uno)|(?:vacations)|(?:ventures)|(?:vet)|(?:video)|(?:villas)|(?:vin)|(?:vip)|(?:vision)|(?:vlaanderen)|(?:vodka)|(?:vote)|(?:voting)|(?:voyage)|(?:wales)|(?:wang)|(?:watch)|(?:webcam)|(?:website)|(?:wedding)|(?:wiki)|(?:wine)|(?:work)|(?:works)|(?:world)|(?:wtf)|(?:xyz)|(?:yoga)|(?:yokohama)|(?:you)|(?:zone)|(?:ac)|(?:ad)|(?:ae)|(?:af)|(?:ag)|(?:ai)|(?:al)|(?:am)|(?:an)|(?:ao)|(?:aq)|(?:ar)|(?:as)|(?:at)|(?:au)|(?:aw)|(?:ax)|(?:az)|(?:ba)|(?:bb)|(?:bd)|(?:be)|(?:bf)|(?:bg)|(?:bh)|(?:bi)|(?:bj)|(?:bm)|(?:bn)|(?:bo)|(?:br)|(?:bs)|(?:bt)|(?:bv)|(?:bw)|(?:by)|(?:bz)|(?:ca)|(?:cc)|(?:cd)|(?:cf)|(?:cg)|(?:ch)|(?:ci)|(?:ck)|(?:cl)|(?:cm)|(?:cn)|(?:co)|(?:cr)|(?:cu)|(?:cv)|(?:cw)|(?:cx)|(?:cy)|(?:cz)|(?:de)|(?:dj)|(?:dk)|(?:dm)|(?:do)|(?:dz)|(?:ec)|(?:ee)|(?:eg)|(?:er)|(?:es)|(?:et)|(?:eu)|(?:fi)|(?:fj)|(?:fk)|(?:fm)|(?:fo)|(?:fr)|(?:ga)|(?:gb)|(?:gd)|(?:ge)|(?:gf)|(?:gg)|(?:gh)|(?:gi)|(?:gl)|(?:gm)|(?:gn)|(?:gp)|(?:gq)|(?:gr)|(?:gs)|(?:gt)|(?:gu)|(?:gw)|(?:gy)|(?:hk)|(?:hm)|(?:hn)|(?:hr)|(?:ht)|(?:hu)|(?:id)|(?:ie)|(?:il)|(?:im)|(?:in)|(?:io)|(?:iq)|(?:ir)|(?:is)|(?:it)|(?:je)|(?:jm)|(?:jo)|(?:jp)|(?:ke)|(?:kg)|(?:kh)|(?:ki)|(?:km)|(?:kn)|(?:kp)|(?:kr)|(?:kw)|(?:ky)|(?:kz)|(?:la)|(?:lb)|(?:lc)|(?:li)|(?:lk)|(?:lr)|(?:ls)|(?:lt)|(?:lu)|(?:lv)|(?:ly)|(?:ma)|(?:mc)|(?:md)|(?:me)|(?:mg)|(?:mh)|(?:mk)|(?:ml)|(?:mm)|(?:mn)|(?:mo)|(?:mp)|(?:mq)|(?:mr)|(?:ms)|(?:mt)|(?:mu)|(?:mv)|(?:mw)|(?:mx)|(?:my)|(?:mz)|(?:na)|(?:nc)|(?:ne)|(?:nf)|(?:ng)|(?:ni)|(?:nl)|(?:no)|(?:np)|(?:nr)|(?:nu)|(?:nz)|(?:om)|(?:pa)|(?:pe)|(?:pf)|(?:pg)|(?:ph)|(?:pk)|(?:pl)|(?:pm)|(?:pn)|(?:pr)|(?:ps)|(?:pt)|(?:pw)|(?:py)|(?:qa)|(?:re)|(?:ro)|(?:rs)|(?:ru)|(?:rw)|(?:sa)|(?:sb)|(?:sc)|(?:sd)|(?:se)|(?:sg)|(?:sh)|(?:si)|(?:sj)|(?:sk)|(?:sl)|(?:sm)|(?:sn)|(?:so)|(?:sr)|(?:st)|(?:su)|(?:sv)|(?:sx)|(?:sy)|(?:sz)|(?:tc)|(?:td)|(?:tf)|(?:tg)|(?:th)|(?:tj)|(?:tk)|(?:tl)|(?:tm)|(?:tn)|(?:to)|(?:tp)|(?:tr)|(?:tt)|(?:tv)|(?:tw)|(?:tz)|(?:ua)|(?:ug)|(?:uk)|(?:us)|(?:uy)|(?:uz)|(?:va)|(?:vc)|(?:ve)|(?:vg)|(?:vi)|(?:vn)|(?:vu)|(?:wf)|(?:ws)|(?:ye)|(?:yt)|(?:za)|(?:zm)|(?:zw))(?:/[^\\s()<>\\\"']*)?)"
+    },
+    {
+     "name": "Non schema URL",
+     "score": 0.5,
+     "regex": "(?i)((www\\d{0,3}[.])?[a-z0-9.\\-]{1,253}[.](?:(?:com)|(?:edu)|(?:gov)|(?:int)|(?:mil)|(?:net)|(?:onl)|(?:org)|(?:pro)|(?:red)|(?:tel)|(?:uno)|(?:xxx)|(?:academy)|(?:accountant)|(?:accountants)|(?:actor)|(?:adult)|(?:africa)|(?:agency)|(?:airforce)|(?:apartments)|(?:app)|(?:archi)|(?:army)|(?:art)|(?:asia)|(?:associates)|(?:attorney)|(?:auction)|(?:audio)|(?:auto)|(?:autos)|(?:baby)|(?:band)|(?:bar)|(?:bargains)|(?:beer)|(?:berlin)|(?:best)|(?:bet)|(?:bid)|(?:bike)|(?:bio)|(?:black)|(?:blackfriday)|(?:blog)|(?:blue)|(?:boats)|(?:bond)|(?:boo)|(?:boston)|(?:bot)|(?:boutique)|(?:build)|(?:builders)|(?:business)|(?:buzz)|(?:cab)|(?:cafe)|(?:cam)|(?:camera)|(?:camp)|(?:capital)|(?:car)|(?:cards)|(?:care)|(?:careers)|(?:cars)|(?:casa)|(?:cash)|(?:casino)|(?:catering)|(?:center)|(?:ceo)|(?:cfd)|(?:charity)|(?:chat)|(?:cheap)|(?:christmas)|(?:church)|(?:city)|(?:claims)|(?:cleaning)|(?:click)|(?:clinic)|(?:clothing)|(?:cloud)|(?:club)|(?:codes)|(?:coffee)|(?:college)|(?:com)|(?:community)|(?:company)|(?:computer)|(?:condos)|(?:construction)|(?:consulting)|(?:contact)|(?:contractors)|(?:cooking)|(?:cool)|(?:coupons)|(?:courses)|(?:credit)|(?:creditcard)|(?:cricket)|(?:cruises)|(?:cyou)|(?:dad)|(?:dance)|(?:date)|(?:dating)|(?:day)|(?:degree)|(?:delivery)|(?:democrat)|(?:dental)|(?:dentist)|(?:desi)|(?:design)|(?:dev)|(?:diamonds)|(?:diet)|(?:digital)|(?:direct)|(?:directory)|(?:discount)|(?:doctor)|(?:dog)|(?:domains)|(?:download)|(?:earth)|(?:eco)|(?:education)|(?:email)|(?:energy)|(?:engineer)|(?:engineering)|(?:enterprises)|(?:equipment)|(?:esq)|(?:estate)|(?:events)|(?:exchange)|(?:expert)|(?:exposed)|(?:express)|(?:fail)|(?:faith)|(?:family)|(?:fans)|(?:farm)|(?:fashion)|(?:feedback)|(?:film)|(?:finance)|(?:financial)|(?:fish)|(?:fishing)|(?:fit)|(?:fitness)|(?:flights)|(?:florist)|(?:flowers)|(?:football)|(?:forsale)|(?:foundation)|(?:fun)|(?:fund)|(?:furniture)|(?:futbol)|(?:fyi)|(?:gallery)|(?:game)|(?:games)|(?:garden)|(?:gay)|(?:gdn)|(?:gifts)|(?:gives)|(?:giving)|(?:glass)|(?:global)|(?:gmbh)|(?:gold)|(?:golf)|(?:graphics)|(?:gratis)|(?:green)|(?:gripe)|(?:group)|(?:guide)|(?:guitars)|(?:guru)|(?:hair)|(?:hamburg)|(?:haus)|(?:health)|(?:healthcare)|(?:help)|(?:hiphop)|(?:hockey)|(?:holdings)|(?:holiday)|(?:homes)|(?:horse)|(?:hospital)|(?:host)|(?:hosting)|(?:house)|(?:how)|(?:icu)|(?:info)|(?:ink)|(?:institute)|(?:insure)|(?:international)|(?:investments)|(?:irish)|(?:jewelry)|(?:jetzt)|(?:juegos)|(?:kaufen)|(?:kids)|(?:kitchen)|(?:kiwi)|(?:krd)|(?:kyoto)|(?:land)|(?:lat)|(?:law)|(?:lawyer)|(?:lease)|(?:legal)|(?:lgbt)|(?:life)|(?:lighting)|(?:limited)|(?:limo)|(?:link)|(?:live)|(?:loan)|(?:loans)|(?:lol)|(?:london)|(?:love)|(?:ltd)|(?:ltda)|(?:luxury)|(?:maison)|(?:management)|(?:market)|(?:marketing)|(?:markets)|(?:mba)|(?:media)|(?:melbourne)|(?:meme)|(?:memorial)|(?:men)|(?:miami)|(?:mobi)|(?:moda)|(?:moe)|(?:mom)|(?:money)|(?:monster)|(?:mortgage)|(?:motorcycles)|(?:mov)|(?:movie)|(?:nagoya)|(?:name)|(?:navy)|(?:network)|(?:new)|(?:news)|(?:ngo)|(?:ninja)|(?:now)|(?:nyc)|(?:observer)|(?:okinawa)|(?:one)|(?:ong)|(?:onl)|(?:online)|(?:organic)|(?:osaka)|(?:page)|(?:paris)|(?:partners)|(?:parts)|(?:party)|(?:pet)|(?:phd)|(?:photo)|(?:photography)|(?:photos)|(?:pics)|(?:pictures)|(?:pink)|(?:pizza)|(?:place)|(?:plumbing)|(?:plus)|(?:poker)|(?:porn)|(?:press)|(?:pro)|(?:productions)|(?:prof)|(?:promo)|(?:properties)|(?:property)|(?:protection)|(?:pub)|(?:quest)|(?:racing)|(?:recipes)|(?:red)|(?:rehab)|(?:reise)|(?:reisen)|(?:rent)|(?:rentals)|(?:repair)|(?:report)|(?:republican)|(?:rest)|(?:restaurant)|(?:review)|(?:reviews)|(?:rip)|(?:rocks)|(?:rodeo)|(?:rsvp)|(?:run)|(?:saarland)|(?:sale)|(?:salon)|(?:sarl)|(?:sbs)|(?:school)|(?:schule)|(?:science)|(?:services)|(?:sex)|(?:sexy)|(?:sh)|(?:shoes)|(?:shop)|(?:shopping)|(?:show)|(?:singles)|(?:site)|(?:skin)|(?:soccer)|(?:social)|(?:software)|(?:solar)|(?:solutions)|(?:soy)|(?:space)|(?:spiegel)|(?:study)|(?:style)|(?:sucks)|(?:supply)|(?:support)|(?:surf)|(?:surgery)|(?:systems)|(?:tax)|(?:taxi)|(?:team)|(?:tech)|(?:technology)|(?:tel)|(?:theater)|(?:tips)|(?:tires)|(?:today)|(?:tools)|(?:top)|(?:tours)|(?:town)|(?:toys)|(?:trade)|(?:training)|(?:tube)|(?:uk)|(?:university)|(?:uno)|(?:vacations)|(?:ventures)|(?:vet)|(?:video)|(?:villas)|(?:vin)|(?:vip)|(?:vision)|(?:vlaanderen)|(?:vodka)|(?:vote)|(?:voting)|(?:voyage)|(?:wales)|(?:wang)|(?:watch)|(?:webcam)|(?:website)|(?:wedding)|(?:wiki)|(?:wine)|(?:work)|(?:works)|(?:world)|(?:wtf)|(?:xyz)|(?:yoga)|(?:yokohama)|(?:you)|(?:zone)|(?:ac)|(?:ad)|(?:ae)|(?:af)|(?:ag)|(?:ai)|(?:al)|(?:am)|(?:an)|(?:ao)|(?:aq)|(?:ar)|(?:as)|(?:at)|(?:au)|(?:aw)|(?:ax)|(?:az)|(?:ba)|(?:bb)|(?:bd)|(?:be)|(?:bf)|(?:bg)|(?:bh)|(?:bi)|(?:bj)|(?:bm)|(?:bn)|(?:bo)|(?:br)|(?:bs)|(?:bt)|(?:bv)|(?:bw)|(?:by)|(?:bz)|(?:ca)|(?:cc)|(?:cd)|(?:cf)|(?:cg)|(?:ch)|(?:ci)|(?:ck)|(?:cl)|(?:cm)|(?:cn)|(?:co)|(?:cr)|(?:cu)|(?:cv)|(?:cw)|(?:cx)|(?:cy)|(?:cz)|(?:de)|(?:dj)|(?:dk)|(?:dm)|(?:do)|(?:dz)|(?:ec)|(?:ee)|(?:eg)|(?:er)|(?:es)|(?:et)|(?:eu)|(?:fi)|(?:fj)|(?:fk)|(?:fm)|(?:fo)|(?:fr)|(?:ga)|(?:gb)|(?:gd)|(?:ge)|(?:gf)|(?:gg)|(?:gh)|(?:gi)|(?:gl)|(?:gm)|(?:gn)|(?:gp)|(?:gq)|(?:gr)|(?:gs)|(?:gt)|(?:gu)|(?:gw)|(?:gy)|(?:hk)|(?:hm)|(?:hn)|(?:hr)|(?:ht)|(?:hu)|(?:id)|(?:ie)|(?:il)|(?:im)|(?:in)|(?:io)|(?:iq)|(?:ir)|(?:is)|(?:it)|(?:je)|(?:jm)|(?:jo)|(?:jp)|(?:ke)|(?:kg)|(?:kh)|(?:ki)|(?:km)|(?:kn)|(?:kp)|(?:kr)|(?:kw)|(?:ky)|(?:kz)|(?:la)|(?:lb)|(?:lc)|(?:li)|(?:lk)|(?:lr)|(?:ls)|(?:lt)|(?:lu)|(?:lv)|(?:ly)|(?:ma)|(?:mc)|(?:md)|(?:me)|(?:mg)|(?:mh)|(?:mk)|(?:ml)|(?:mm)|(?:mn)|(?:mo)|(?:mp)|(?:mq)|(?:mr)|(?:ms)|(?:mt)|(?:mu)|(?:mv)|(?:mw)|(?:mx)|(?:my)|(?:mz)|(?:na)|(?:nc)|(?:ne)|(?:nf)|(?:ng)|(?:ni)|(?:nl)|(?:no)|(?:np)|(?:nr)|(?:nu)|(?:nz)|(?:om)|(?:pa)|(?:pe)|(?:pf)|(?:pg)|(?:ph)|(?:pk)|(?:pl)|(?:pm)|(?:pn)|(?:pr)|(?:ps)|(?:pt)|(?:pw)|(?:py)|(?:qa)|(?:re)|(?:ro)|(?:rs)|(?:ru)|(?:rw)|(?:sa)|(?:sb)|(?:sc)|(?:sd)|(?:se)|(?:sg)|(?:sh)|(?:si)|(?:sj)|(?:sk)|(?:sl)|(?:sm)|(?:sn)|(?:so)|(?:sr)|(?:st)|(?:su)|(?:sv)|(?:sx)|(?:sy)|(?:sz)|(?:tc)|(?:td)|(?:tf)|(?:tg)|(?:th)|(?:tj)|(?:tk)|(?:tl)|(?:tm)|(?:tn)|(?:to)|(?:tp)|(?:tr)|(?:tt)|(?:tv)|(?:tw)|(?:tz)|(?:ua)|(?:ug)|(?:uk)|(?:us)|(?:uy)|(?:uz)|(?:va)|(?:vc)|(?:ve)|(?:vg)|(?:vi)|(?:vn)|(?:vu)|(?:wf)|(?:ws)|(?:ye)|(?:yt)|(?:za)|(?:zm)|(?:zw))(?:/[^\\s()<>\\\"']*)?)"
+    },
+    {
+     "name": "Quoted URL",
+     "score": 0.6,
+     "regex": "(?i)[\"\\'](https?://((www\\d{0,3}[.])?[a-z0-9.\\-]{1,253}[.](?:(?:com)|(?:edu)|(?:gov)|(?:int)|(?:mil)|(?:net)|(?:onl)|(?:org)|(?:pro)|(?:red)|(?:tel)|(?:uno)|(?:xxx)|(?:academy)|(?:accountant)|(?:accountants)|(?:actor)|(?:adult)|(?:africa)|(?:agency)|(?:airforce)|(?:apartments)|(?:app)|(?:archi)|(?:army)|(?:art)|(?:asia)|(?:associates)|(?:attorney)|(?:auction)|(?:audio)|(?:auto)|(?:autos)|(?:baby)|(?:band)|(?:bar)|(?:bargains)|(?:beer)|(?:berlin)|(?:best)|(?:bet)|(?:bid)|(?:bike)|(?:bio)|(?:black)|(?:blackfriday)|(?:blog)|(?:blue)|(?:boats)|(?:bond)|(?:boo)|(?:boston)|(?:bot)|(?:boutique)|(?:build)|(?:builders)|(?:business)|(?:buzz)|(?:cab)|(?:cafe)|(?:cam)|(?:camera)|(?:camp)|(?:capital)|(?:car)|(?:cards)|(?:care)|(?:careers)|(?:cars)|(?:casa)|(?:cash)|(?:casino)|(?:catering)|(?:center)|(?:ceo)|(?:cfd)|(?:charity)|(?:chat)|(?:cheap)|(?:christmas)|(?:church)|(?:city)|(?:claims)|(?:cleaning)|(?:click)|(?:clinic)|(?:clothing)|(?:cloud)|(?:club)|(?:codes)|(?:coffee)|(?:college)|(?:com)|(?:community)|(?:company)|(?:computer)|(?:condos)|(?:construction)|(?:consulting)|(?:contact)|(?:contractors)|(?:cooking)|(?:cool)|(?:coupons)|(?:courses)|(?:credit)|(?:creditcard)|(?:cricket)|(?:cruises)|(?:cyou)|(?:dad)|(?:dance)|(?:date)|(?:dating)|(?:day)|(?:degree)|(?:delivery)|(?:democrat)|(?:dental)|(?:dentist)|(?:desi)|(?:design)|(?:dev)|(?:diamonds)|(?:diet)|(?:digital)|(?:direct)|(?:directory)|(?:discount)|(?:doctor)|(?:dog)|(?:domains)|(?:download)|(?:earth)|(?:eco)|(?:education)|(?:email)|(?:energy)|(?:engineer)|(?:engineering)|(?:enterprises)|(?:equipment)|(?:esq)|(?:estate)|(?:events)|(?:exchange)|(?:expert)|(?:exposed)|(?:express)|(?:fail)|(?:faith)|(?:family)|(?:fans)|(?:farm)|(?:fashion)|(?:feedback)|(?:film)|(?:finance)|(?:financial)|(?:fish)|(?:fishing)|(?:fit)|(?:fitness)|(?:flights)|(?:florist)|(?:flowers)|(?:football)|(?:forsale)|(?:foundation)|(?:fun)|(?:fund)|(?:furniture)|(?:futbol)|(?:fyi)|(?:gallery)|(?:game)|(?:games)|(?:garden)|(?:gay)|(?:gdn)|(?:gifts)|(?:gives)|(?:giving)|(?:glass)|(?:global)|(?:gmbh)|(?:gold)|(?:golf)|(?:graphics)|(?:gratis)|(?:green)|(?:gripe)|(?:group)|(?:guide)|(?:guitars)|(?:guru)|(?:hair)|(?:hamburg)|(?:haus)|(?:health)|(?:healthcare)|(?:help)|(?:hiphop)|(?:hockey)|(?:holdings)|(?:holiday)|(?:homes)|(?:horse)|(?:hospital)|(?:host)|(?:hosting)|(?:house)|(?:how)|(?:icu)|(?:info)|(?:ink)|(?:institute)|(?:insure)|(?:international)|(?:investments)|(?:irish)|(?:jewelry)|(?:jetzt)|(?:juegos)|(?:kaufen)|(?:kids)|(?:kitchen)|(?:kiwi)|(?:krd)|(?:kyoto)|(?:land)|(?:lat)|(?:law)|(?:lawyer)|(?:lease)|(?:legal)|(?:lgbt)|(?:life)|(?:lighting)|(?:limited)|(?:limo)|(?:link)|(?:live)|(?:loan)|(?:loans)|(?:lol)|(?:london)|(?:love)|(?:ltd)|(?:ltda)|(?:luxury)|(?:maison)|(?:management)|(?:market)|(?:marketing)|(?:markets)|(?:mba)|(?:media)|(?:melbourne)|(?:meme)|(?:memorial)|(?:men)|(?:miami)|(?:mobi)|(?:moda)|(?:moe)|(?:mom)|(?:money)|(?:monster)|(?:mortgage)|(?:motorcycles)|(?:mov)|(?:movie)|(?:nagoya)|(?:name)|(?:navy)|(?:network)|(?:new)|(?:news)|(?:ngo)|(?:ninja)|(?:now)|(?:nyc)|(?:observer)|(?:okinawa)|(?:one)|(?:ong)|(?:onl)|(?:online)|(?:organic)|(?:osaka)|(?:page)|(?:paris)|(?:partners)|(?:parts)|(?:party)|(?:pet)|(?:phd)|(?:photo)|(?:photography)|(?:photos)|(?:pics)|(?:pictures)|(?:pink)|(?:pizza)|(?:place)|(?:plumbing)|(?:plus)|(?:poker)|(?:porn)|(?:press)|(?:pro)|(?:productions)|(?:prof)|(?:promo)|(?:properties)|(?:property)|(?:protection)|(?:pub)|(?:quest)|(?:racing)|(?:recipes)|(?:red)|(?:rehab)|(?:reise)|(?:reisen)|(?:rent)|(?:rentals)|(?:repair)|(?:report)|(?:republican)|(?:rest)|(?:restaurant)|(?:review)|(?:reviews)|(?:rip)|(?:rocks)|(?:rodeo)|(?:rsvp)|(?:run)|(?:saarland)|(?:sale)|(?:salon)|(?:sarl)|(?:sbs)|(?:school)|(?:schule)|(?:science)|(?:services)|(?:sex)|(?:sexy)|(?:sh)|(?:shoes)|(?:shop)|(?:shopping)|(?:show)|(?:singles)|(?:site)|(?:skin)|(?:soccer)|(?:social)|(?:software)|(?:solar)|(?:solutions)|(?:soy)|(?:space)|(?:spiegel)|(?:study)|(?:style)|(?:sucks)|(?:supply)|(?:support)|(?:surf)|(?:surgery)|(?:systems)|(?:tax)|(?:taxi)|(?:team)|(?:tech)|(?:technology)|(?:tel)|(?:theater)|(?:tips)|(?:tires)|(?:today)|(?:tools)|(?:top)|(?:tours)|(?:town)|(?:toys)|(?:trade)|(?:training)|(?:tube)|(?:uk)|(?:university)|(?:uno)|(?:vacations)|(?:ventures)|(?:vet)|(?:video)|(?:villas)|(?:vin)|(?:vip)|(?:vision)|(?:vlaanderen)|(?:vodka)|(?:vote)|(?:voting)|(?:voyage)|(?:wales)|(?:wang)|(?:watch)|(?:webcam)|(?:website)|(?:wedding)|(?:wiki)|(?:wine)|(?:work)|(?:works)|(?:world)|(?:wtf)|(?:xyz)|(?:yoga)|(?:yokohama)|(?:you)|(?:zone)|(?:ac)|(?:ad)|(?:ae)|(?:af)|(?:ag)|(?:ai)|(?:al)|(?:am)|(?:an)|(?:ao)|(?:aq)|(?:ar)|(?:as)|(?:at)|(?:au)|(?:aw)|(?:ax)|(?:az)|(?:ba)|(?:bb)|(?:bd)|(?:be)|(?:bf)|(?:bg)|(?:bh)|(?:bi)|(?:bj)|(?:bm)|(?:bn)|(?:bo)|(?:br)|(?:bs)|(?:bt)|(?:bv)|(?:bw)|(?:by)|(?:bz)|(?:ca)|(?:cc)|(?:cd)|(?:cf)|(?:cg)|(?:ch)|(?:ci)|(?:ck)|(?:cl)|(?:cm)|(?:cn)|(?:co)|(?:cr)|(?:cu)|(?:cv)|(?:cw)|(?:cx)|(?:cy)|(?:cz)|(?:de)|(?:dj)|(?:dk)|(?:dm)|(?:do)|(?:dz)|(?:ec)|(?:ee)|(?:eg)|(?:er)|(?:es)|(?:et)|(?:eu)|(?:fi)|(?:fj)|(?:fk)|(?:fm)|(?:fo)|(?:fr)|(?:ga)|(?:gb)|(?:gd)|(?:ge)|(?:gf)|(?:gg)|(?:gh)|(?:gi)|(?:gl)|(?:gm)|(?:gn)|(?:gp)|(?:gq)|(?:gr)|(?:gs)|(?:gt)|(?:gu)|(?:gw)|(?:gy)|(?:hk)|(?:hm)|(?:hn)|(?:hr)|(?:ht)|(?:hu)|(?:id)|(?:ie)|(?:il)|(?:im)|(?:in)|(?:io)|(?:iq)|(?:ir)|(?:is)|(?:it)|(?:je)|(?:jm)|(?:jo)|(?:jp)|(?:ke)|(?:kg)|(?:kh)|(?:ki)|(?:km)|(?:kn)|(?:kp)|(?:kr)|(?:kw)|(?:ky)|(?:kz)|(?:la)|(?:lb)|(?:lc)|(?:li)|(?:lk)|(?:lr)|(?:ls)|(?:lt)|(?:lu)|(?:lv)|(?:ly)|(?:ma)|(?:mc)|(?:md)|(?:me)|(?:mg)|(?:mh)|(?:mk)|(?:ml)|(?:mm)|(?:mn)|(?:mo)|(?:mp)|(?:mq)|(?:mr)|(?:ms)|(?:mt)|(?:mu)|(?:mv)|(?:mw)|(?:mx)|(?:my)|(?:mz)|(?:na)|(?:nc)|(?:ne)|(?:nf)|(?:ng)|(?:ni)|(?:nl)|(?:no)|(?:np)|(?:nr)|(?:nu)|(?:nz)|(?:om)|(?:pa)|(?:pe)|(?:pf)|(?:pg)|(?:ph)|(?:pk)|(?:pl)|(?:pm)|(?:pn)|(?:pr)|(?:ps)|(?:pt)|(?:pw)|(?:py)|(?:qa)|(?:re)|(?:ro)|(?:rs)|(?:ru)|(?:rw)|(?:sa)|(?:sb)|(?:sc)|(?:sd)|(?:se)|(?:sg)|(?:sh)|(?:si)|(?:sj)|(?:sk)|(?:sl)|(?:sm)|(?:sn)|(?:so)|(?:sr)|(?:st)|(?:su)|(?:sv)|(?:sx)|(?:sy)|(?:sz)|(?:tc)|(?:td)|(?:tf)|(?:tg)|(?:th)|(?:tj)|(?:tk)|(?:tl)|(?:tm)|(?:tn)|(?:to)|(?:tp)|(?:tr)|(?:tt)|(?:tv)|(?:tw)|(?:tz)|(?:ua)|(?:ug)|(?:uk)|(?:us)|(?:uy)|(?:uz)|(?:va)|(?:vc)|(?:ve)|(?:vg)|(?:vi)|(?:vn)|(?:vu)|(?:wf)|(?:ws)|(?:ye)|(?:yt)|(?:za)|(?:zm)|(?:zw))(?:/[^\\s()<>\\\"']*)?))[\"\\']"
+    },
+    {
+     "name": "Quoted Non-schema URL",
+     "score": 0.5,
+     "regex": "(?i)[\"\\'](((www\\d{0,3}[.])?[a-z0-9.\\-]{1,253}[.](?:(?:com)|(?:edu)|(?:gov)|(?:int)|(?:mil)|(?:net)|(?:onl)|(?:org)|(?:pro)|(?:red)|(?:tel)|(?:uno)|(?:xxx)|(?:academy)|(?:accountant)|(?:accountants)|(?:actor)|(?:adult)|(?:africa)|(?:agency)|(?:airforce)|(?:apartments)|(?:app)|(?:archi)|(?:army)|(?:art)|(?:asia)|(?:associates)|(?:attorney)|(?:auction)|(?:audio)|(?:auto)|(?:autos)|(?:baby)|(?:band)|(?:bar)|(?:bargains)|(?:beer)|(?:berlin)|(?:best)|(?:bet)|(?:bid)|(?:bike)|(?:bio)|(?:black)|(?:blackfriday)|(?:blog)|(?:blue)|(?:boats)|(?:bond)|(?:boo)|(?:boston)|(?:bot)|(?:boutique)|(?:build)|(?:builders)|(?:business)|(?:buzz)|(?:cab)|(?:cafe)|(?:cam)|(?:camera)|(?:camp)|(?:capital)|(?:car)|(?:cards)|(?:care)|(?:careers)|(?:cars)|(?:casa)|(?:cash)|(?:casino)|(?:catering)|(?:center)|(?:ceo)|(?:cfd)|(?:charity)|(?:chat)|(?:cheap)|(?:christmas)|(?:church)|(?:city)|(?:claims)|(?:cleaning)|(?:click)|(?:clinic)|(?:clothing)|(?:cloud)|(?:club)|(?:codes)|(?:coffee)|(?:college)|(?:com)|(?:community)|(?:company)|(?:computer)|(?:condos)|(?:construction)|(?:consulting)|(?:contact)|(?:contractors)|(?:cooking)|(?:cool)|(?:coupons)|(?:courses)|(?:credit)|(?:creditcard)|(?:cricket)|(?:cruises)|(?:cyou)|(?:dad)|(?:dance)|(?:date)|(?:dating)|(?:day)|(?:degree)|(?:delivery)|(?:democrat)|(?:dental)|(?:dentist)|(?:desi)|(?:design)|(?:dev)|(?:diamonds)|(?:diet)|(?:digital)|(?:direct)|(?:directory)|(?:discount)|(?:doctor)|(?:dog)|(?:domains)|(?:download)|(?:earth)|(?:eco)|(?:education)|(?:email)|(?:energy)|(?:engineer)|(?:engineering)|(?:enterprises)|(?:equipment)|(?:esq)|(?:estate)|(?:events)|(?:exchange)|(?:expert)|(?:exposed)|(?:express)|(?:fail)|(?:faith)|(?:family)|(?:fans)|(?:farm)|(?:fashion)|(?:feedback)|(?:film)|(?:finance)|(?:financial)|(?:fish)|(?:fishing)|(?:fit)|(?:fitness)|(?:flights)|(?:florist)|(?:flowers)|(?:football)|(?:forsale)|(?:foundation)|(?:fun)|(?:fund)|(?:furniture)|(?:futbol)|(?:fyi)|(?:gallery)|(?:game)|(?:games)|(?:garden)|(?:gay)|(?:gdn)|(?:gifts)|(?:gives)|(?:giving)|(?:glass)|(?:global)|(?:gmbh)|(?:gold)|(?:golf)|(?:graphics)|(?:gratis)|(?:green)|(?:gripe)|(?:group)|(?:guide)|(?:guitars)|(?:guru)|(?:hair)|(?:hamburg)|(?:haus)|(?:health)|(?:healthcare)|(?:help)|(?:hiphop)|(?:hockey)|(?:holdings)|(?:holiday)|(?:homes)|(?:horse)|(?:hospital)|(?:host)|(?:hosting)|(?:house)|(?:how)|(?:icu)|(?:info)|(?:ink)|(?:institute)|(?:insure)|(?:international)|(?:investments)|(?:irish)|(?:jewelry)|(?:jetzt)|(?:juegos)|(?:kaufen)|(?:kids)|(?:kitchen)|(?:kiwi)|(?:krd)|(?:kyoto)|(?:land)|(?:lat)|(?:law)|(?:lawyer)|(?:lease)|(?:legal)|(?:lgbt)|(?:life)|(?:lighting)|(?:limited)|(?:limo)|(?:link)|(?:live)|(?:loan)|(?:loans)|(?:lol)|(?:london)|(?:love)|(?:ltd)|(?:ltda)|(?:luxury)|(?:maison)|(?:management)|(?:market)|(?:marketing)|(?:markets)|(?:mba)|(?:media)|(?:melbourne)|(?:meme)|(?:memorial)|(?:men)|(?:miami)|(?:mobi)|(?:moda)|(?:moe)|(?:mom)|(?:money)|(?:monster)|(?:mortgage)|(?:motorcycles)|(?:mov)|(?:movie)|(?:nagoya)|(?:name)|(?:navy)|(?:network)|(?:new)|(?:news)|(?:ngo)|(?:ninja)|(?:now)|(?:nyc)|(?:observer)|(?:okinawa)|(?:one)|(?:ong)|(?:onl)|(?:online)|(?:organic)|(?:osaka)|(?:page)|(?:paris)|(?:partners)|(?:parts)|(?:party)|(?:pet)|(?:phd)|(?:photo)|(?:photography)|(?:photos)|(?:pics)|(?:pictures)|(?:pink)|(?:pizza)|(?:place)|(?:plumbing)|(?:plus)|(?:poker)|(?:porn)|(?:press)|(?:pro)|(?:productions)|(?:prof)|(?:promo)|(?:properties)|(?:property)|(?:protection)|(?:pub)|(?:quest)|(?:racing)|(?:recipes)|(?:red)|(?:rehab)|(?:reise)|(?:reisen)|(?:rent)|(?:rentals)|(?:repair)|(?:report)|(?:republican)|(?:rest)|(?:restaurant)|(?:review)|(?:reviews)|(?:rip)|(?:rocks)|(?:rodeo)|(?:rsvp)|(?:run)|(?:saarland)|(?:sale)|(?:salon)|(?:sarl)|(?:sbs)|(?:school)|(?:schule)|(?:science)|(?:services)|(?:sex)|(?:sexy)|(?:sh)|(?:shoes)|(?:shop)|(?:shopping)|(?:show)|(?:singles)|(?:site)|(?:skin)|(?:soccer)|(?:social)|(?:software)|(?:solar)|(?:solutions)|(?:soy)|(?:space)|(?:spiegel)|(?:study)|(?:style)|(?:sucks)|(?:supply)|(?:support)|(?:surf)|(?:surgery)|(?:systems)|(?:tax)|(?:taxi)|(?:team)|(?:tech)|(?:technology)|(?:tel)|(?:theater)|(?:tips)|(?:tires)|(?:today)|(?:tools)|(?:top)|(?:tours)|(?:town)|(?:toys)|(?:trade)|(?:training)|(?:tube)|(?:uk)|(?:university)|(?:uno)|(?:vacations)|(?:ventures)|(?:vet)|(?:video)|(?:villas)|(?:vin)|(?:vip)|(?:vision)|(?:vlaanderen)|(?:vodka)|(?:vote)|(?:voting)|(?:voyage)|(?:wales)|(?:wang)|(?:watch)|(?:webcam)|(?:website)|(?:wedding)|(?:wiki)|(?:wine)|(?:work)|(?:works)|(?:world)|(?:wtf)|(?:xyz)|(?:yoga)|(?:yokohama)|(?:you)|(?:zone)|(?:ac)|(?:ad)|(?:ae)|(?:af)|(?:ag)|(?:ai)|(?:al)|(?:am)|(?:an)|(?:ao)|(?:aq)|(?:ar)|(?:as)|(?:at)|(?:au)|(?:aw)|(?:ax)|(?:az)|(?:ba)|(?:bb)|(?:bd)|(?:be)|(?:bf)|(?:bg)|(?:bh)|(?:bi)|(?:bj)|(?:bm)|(?:bn)|(?:bo)|(?:br)|(?:bs)|(?:bt)|(?:bv)|(?:bw)|(?:by)|(?:bz)|(?:ca)|(?:cc)|(?:cd)|(?:cf)|(?:cg)|(?:ch)|(?:ci)|(?:ck)|(?:cl)|(?:cm)|(?:cn)|(?:co)|(?:cr)|(?:cu)|(?:cv)|(?:cw)|(?:cx)|(?:cy)|(?:cz)|(?:de)|(?:dj)|(?:dk)|(?:dm)|(?:do)|(?:dz)|(?:ec)|(?:ee)|(?:eg)|(?:er)|(?:es)|(?:et)|(?:eu)|(?:fi)|(?:fj)|(?:fk)|(?:fm)|(?:fo)|(?:fr)|(?:ga)|(?:gb)|(?:gd)|(?:ge)|(?:gf)|(?:gg)|(?:gh)|(?:gi)|(?:gl)|(?:gm)|(?:gn)|(?:gp)|(?:gq)|(?:gr)|(?:gs)|(?:gt)|(?:gu)|(?:gw)|(?:gy)|(?:hk)|(?:hm)|(?:hn)|(?:hr)|(?:ht)|(?:hu)|(?:id)|(?:ie)|(?:il)|(?:im)|(?:in)|(?:io)|(?:iq)|(?:ir)|(?:is)|(?:it)|(?:je)|(?:jm)|(?:jo)|(?:jp)|(?:ke)|(?:kg)|(?:kh)|(?:ki)|(?:km)|(?:kn)|(?:kp)|(?:kr)|(?:kw)|(?:ky)|(?:kz)|(?:la)|(?:lb)|(?:lc)|(?:li)|(?:lk)|(?:lr)|(?:ls)|(?:lt)|(?:lu)|(?:lv)|(?:ly)|(?:ma)|(?:mc)|(?:md)|(?:me)|(?:mg)|(?:mh)|(?:mk)|(?:ml)|(?:mm)|(?:mn)|(?:mo)|(?:mp)|(?:mq)|(?:mr)|(?:ms)|(?:mt)|(?:mu)|(?:mv)|(?:mw)|(?:mx)|(?:my)|(?:mz)|(?:na)|(?:nc)|(?:ne)|(?:nf)|(?:ng)|(?:ni)|(?:nl)|(?:no)|(?:np)|(?:nr)|(?:nu)|(?:nz)|(?:om)|(?:pa)|(?:pe)|(?:pf)|(?:pg)|(?:ph)|(?:pk)|(?:pl)|(?:pm)|(?:pn)|(?:pr)|(?:ps)|(?:pt)|(?:pw)|(?:py)|(?:qa)|(?:re)|(?:ro)|(?:rs)|(?:ru)|(?:rw)|(?:sa)|(?:sb)|(?:sc)|(?:sd)|(?:se)|(?:sg)|(?:sh)|(?:si)|(?:sj)|(?:sk)|(?:sl)|(?:sm)|(?:sn)|(?:so)|(?:sr)|(?:st)|(?:su)|(?:sv)|(?:sx)|(?:sy)|(?:sz)|(?:tc)|(?:td)|(?:tf)|(?:tg)|(?:th)|(?:tj)|(?:tk)|(?:tl)|(?:tm)|(?:tn)|(?:to)|(?:tp)|(?:tr)|(?:tt)|(?:tv)|(?:tw)|(?:tz)|(?:ua)|(?:ug)|(?:uk)|(?:us)|(?:uy)|(?:uz)|(?:va)|(?:vc)|(?:ve)|(?:vg)|(?:vi)|(?:vn)|(?:vu)|(?:wf)|(?:ws)|(?:ye)|(?:yt)|(?:za)|(?:zm)|(?:zw))(?:/[^\\s()<>\\\"']*)?))[\"\\']"
+    }
+   ],
+   "context": [
+    "url",
+    "website",
+    "link"
+   ],
+   "validator": false
+  }
+ ]
+}

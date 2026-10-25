@@ -1,0 +1,12 @@
+# Portuguese credential labels, for Portugal (palavra-passe) and Brazil (senha).
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+senha	(?<![^\W\d_])senha	senha, Senha, db_senha, nova senha
+# palavra-passe: the English pass takes passe at a word start already; the line keeps the
+# Portuguese label complete.
+passe	(?<![^\W\d_])palavra[ _-]passe	palavra-passe, Palavra-passe, palavra passe
+# chave alone is an ordinary word (palavra-chave: keyword): only the labels of two or more words.
+chave	(?<![^\W\d_])chave[ _-](?:d[ae][ _-]acesso|secreta|(?:de[ _-])?api)	chave de acesso, Chave da acesso, chave secreta, Chave API, chave de API
+segredo	(?<![^\W\d_])segredo[ _-]d[eo][ _-]cliente	segredo do cliente, Segredo de cliente
+credenciais	(?<![^\W\d_])credenciais	credenciais, Credenciais

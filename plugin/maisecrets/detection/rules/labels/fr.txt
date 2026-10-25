@@ -1,0 +1,25 @@
+# French credential labels.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# mot de passe: the English pass takes passe at a word start already; the line keeps the French
+# label complete, and the match then starts at mot.
+passe	(?<![^\W\d_])mot[ _-]de[ _-]passe	mot de passe, Mot de passe, mot_de_passe, nouveau mot de passe
+# clé d'accès, clé secrète, clé API. The prefilter of a label is the literal every line must
+# contain before the rule runs on it: `acc` and `api` are in almost every log line (access,
+# /api/v1), and with them a 1 MB log took 2.2 s instead of 0.9 s (2026-09-28). With the accent
+# the literal is `clé`; without it, one line per separator, so the literal is the label's start.
+clé	(?<![^\W\d_])clé[ _-](?:d['’ _-]?acc(?:è|e)s(?:[ _-]secr(?:è|e)te)?|secr(?:è|e)te|api)	clé d'accès, Clé d’accès secrète, clé secrète, clé API
+cle d	(?<![^\W\d_])cle d['’ _-]?acc(?:è|e)s(?:[ _-]secr(?:è|e)te)?	cle d'acces
+cle secr	(?<![^\W\d_])cle secr(?:è|e)te	cle secrete
+cle api	(?<![^\W\d_])cle api	cle api
+cle_d	(?<![^\W\d_])cle_d['’ _-]?acc(?:è|e)s(?:[ _-]secr(?:è|e)te)?	cle_d_acces
+cle_secr	(?<![^\W\d_])cle_secr(?:è|e)te	cle_secrete
+cle_api	(?<![^\W\d_])cle_api	cle_api
+cle-d	(?<![^\W\d_])cle-d['’ _-]?acc(?:è|e)s(?:[ _-]secr(?:è|e)te)?	cle-d-acces
+cle-secr	(?<![^\W\d_])cle-secr(?:è|e)te	cle-secrete
+cle-api	(?<![^\W\d_])cle-api	cle-api
+# clé alone is an ordinary word (mot clé: keyword): only the labels of two or more words count.
+secret	(?<![^\W\d_])secret[ _-]client	secret client, Secret client
+# identifiants, plural: the credentials. The singular identifiant is the user name, not a secret.
+identifiants	(?<![^\W\d_])identifiants	identifiants, Identifiants

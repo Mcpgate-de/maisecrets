@@ -1,0 +1,9 @@
+# Thai credential labels. Thai writes no space between words, and a vowel or tone mark is not a
+# word character (\w) for the regex engine: the label runs over the Thai letters that follow it
+# (รหัสผ่านใหม่, new password), so the colon after them is still the separator.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# รหัส alone means code or number: only รหัสผ่าน (password) counts.
+รหัสผ่าน	รหัสผ่าน[\u0E00-\u0E7F]*	รหัสผ่าน, รหัสผ่านใหม่, รหัสผ่านเก่า, ยืนยันรหัสผ่าน
+โทเค็น	โทเค็น[\u0E00-\u0E7F]*	โทเค็น, โทเค็นอุปกรณ์

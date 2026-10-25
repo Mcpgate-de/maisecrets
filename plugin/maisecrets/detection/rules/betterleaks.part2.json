@@ -1,0 +1,1681 @@
+{
+ "rules": [
+  {
+   "confidence": "low",
+   "description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+   "filter": "// Provider checks use a fixed window around the match, clamped to its line.\nlet providerMatchContext = finding[\"fragment_raw\"][\n  max(finding[\"match_start_idx\"] - 150, finding[\"match_line_start_idx\"]):\n  min(finding[\"match_end_idx\"] + 50, finding[\"match_line_end_idx\"])\n];\n\n// Recreate the generic rule's former [\\w.-]{0,50} preamble. Only the\n// contiguous word, dot, and hyphen suffix immediately before the match counts.\nlet genericMatchPrefix = filter.findMatch(\n  finding[\"fragment_raw\"][\n    max(finding[\"match_start_idx\"] - 50, finding[\"match_line_start_idx\"]):\n    finding[\"match_start_idx\"]\n  ],\n  `[\\w.-]{0,50}$`\n);\n\n// Recreate the generic rule's former regex which includes the [\\w.-]{0,50} preamble.\nlet genericMatchContext =\n  genericMatchPrefix +\n  finding[\"fragment_raw\"][finding[\"match_start_idx\"]:finding[\"match_end_idx\"]];\n\nlet level = filter.matchesAny(genericMatchContext, [\n  `(?i)\\b[a-z0-9]+[_.-]+token\\b`\n]) ? \"medium\" : \"low\";\nlet _ = filter.setConfidence(level);\n\n// big ol expression to filter out FPs\nentropy(finding[\"secret\"]) <= 3.5\n|| filter.failsTokenEfficiency(finding[\"secret\"])\n|| matchesAny(finding[\"secret\"], [`^[a-zA-Z_.-]+$`])\n|| (containsAny(finding[\"secret\"], [\n  \"000000\",\n  \"aaaaaa\",\n  \"about\",\n  \"abstract\",\n  \"academy\",\n  \"acces\",\n  \"account\",\n  \"act-\",\n  \"act.\",\n  \"act_\",\n  \"action\",\n  \"active\",\n  \"actively\",\n  \"activity\",\n  \"adapter\",\n  \"add-\",\n  \"add.\",\n  \"add_\",\n  \"add-on\",\n  \"addon\",\n  \"addres\",\n  \"admin\",\n  \"adobe\",\n  \"advanced\",\n  \"adventure\",\n  \"agent\",\n  \"agile\",\n  \"air-\",\n  \"air.\",\n  \"air_\",\n  \"ajax\",\n  \"akka\",\n  \"alert\",\n  \"alfred\",\n  \"algorithm\",\n  \"all-\",\n  \"all.\",\n  \"all_\",\n  \"alloy\",\n  \"alpha\",\n  \"amazon\",\n  \"amqp\",\n  \"analysi\",\n  \"analytic\",\n  \"analyzer\",\n  \"android\",\n  \"angular\",\n  \"angularj\",\n  \"animate\",\n  \"animation\",\n  \"another\",\n  \"ansible\",\n  \"answer\",\n  \"ant-\",\n  \"ant.\",\n  \"ant_\",\n  \"any-\",\n  \"any.\",\n  \"any_\",\n  \"apache\",\n  \"app-\",\n  \"app.\",\n  \"app_\",\n  \"apple\",\n  \"arch\",\n  \"archive\",\n  \"archived\",\n  \"arduino\",\n  \"array\",\n  \"art-\",\n  \"art.\",\n  \"art_\",\n  \"article\",\n  \"asp-\",\n  \"asp.\",\n  \"asp_\",\n  \"asset\",\n  \"async\",\n  \"atom\",\n  \"attention\",\n  \"audio\",\n  \"audit\",\n  \"aura\",\n  \"auth\",\n  \"author\",\n  \"authorize\",\n  \"auto\",\n  \"automated\",\n  \"automatic\",\n  \"awesome\",\n  \"aws_\",\n  \"azure\",\n  \"back\",\n  \"backbone\",\n  \"backend\",\n  \"backup\",\n  \"bar-\",\n  \"bar.\",\n  \"bar_\",\n  \"base\",\n  \"based\",\n  \"bash\",\n  \"basic\",\n  \"batch\",\n  \"been\",\n  \"beer\",\n  \"behavior\",\n  \"being\",\n  \"benchmark\",\n  \"best\",\n  \"beta\",\n  \"better\",\n  \"big-\",\n  \"big.\",\n  \"big_\",\n  \"binary\",\n  \"binding\",\n  \"bit-\",\n  \"bit.\",\n  \"bit_\",\n  \"bitcoin\",\n  \"block\",\n  \"blog\",\n  \"board\",\n  \"book\",\n  \"bookmark\",\n  \"boost\",\n  \"boot\",\n  \"bootstrap\",\n  \"bosh\",\n  \"bot-\",\n  \"bot.\",\n  \"bot_\",\n  \"bower\",\n  \"box-\",\n  \"box.\",\n  \"box_\",\n  \"boxen\",\n  \"bracket\",\n  \"branch\",\n  \"bridge\",\n  \"browser\",\n  \"brunch\",\n  \"buffer\",\n  \"bug-\",\n  \"bug.\",\n  \"bug_\",\n  \"build\",\n  \"builder\",\n  \"building\",\n  \"buildout\",\n  \"buildpack\",\n  \"built\",\n  \"bundle\",\n  \"busines\",\n  \"but-\",\n  \"but.\",\n  \"but_\",\n  \"button\",\n  \"cache\",\n  \"caching\",\n  \"cakephp\",\n  \"calendar\",\n  \"call\",\n  \"camera\",\n  \"campfire\",\n  \"can-\",\n  \"can.\",\n  \"can_\",\n  \"canva\",\n  \"captcha\",\n  \"capture\",\n  \"card\",\n  \"carousel\",\n  \"case\",\n  \"cassandra\",\n  \"cat-\",\n  \"cat.\",\n  \"cat_\",\n  \"category\",\n  \"center\",\n  \"cento\",\n  \"challenge\",\n  \"change\",\n  \"changelog\",\n  \"channel\",\n  \"chart\",\n  \"chat\",\n  \"cheat\",\n  \"check\",\n  \"checker\",\n  \"chef\",\n  \"ches\",\n  \"chinese\",\n  \"chosen\",\n  \"chrome\",\n  \"ckeditor\",\n  \"clas\",\n  \"classe\",\n  \"classic\",\n  \"clean\",\n  \"cli-\",\n  \"cli.\",\n  \"cli_\",\n  \"client\",\n  \"clojure\",\n  \"clone\",\n  \"closure\",\n  \"cloud\",\n  \"club\",\n  \"cluster\",\n  \"cms-\",\n  \"cms_\",\n  \"coco\",\n  \"code\",\n  \"coding\",\n  \"coffee\",\n  \"color\",\n  \"combination\",\n  \"combo\",\n  \"command\",\n  \"commander\",\n  \"comment\",\n  \"commit\",\n  \"common\",\n  \"community\",\n  \"compas\",\n  \"compiler\",\n  \"complete\",\n  \"component\",\n  \"composer\",\n  \"computer\",\n  \"computing\",\n  \"con-\",\n  \"con.\",\n  \"con_\",\n  \"concept\",\n  \"conf\",\n  \"config\",\n  \"connect\",\n  \"connector\",\n  \"console\",\n  \"contact\",\n  \"container\",\n  \"contao\",\n  \"content\",\n  \"contest\",\n  \"context\",\n  \"control\",\n  \"convert\",\n  \"converter\",\n  \"conway'\",\n  \"cookbook\",\n  \"cookie\",\n  \"cool\",\n  \"copy\",\n  \"cordova\",\n  \"core\",\n  \"couchbase\",\n  \"couchdb\",\n  \"countdown\",\n  \"counter\",\n  \"course\",\n  \"craft\",\n  \"crawler\",\n  \"create\",\n  \"creating\",\n  \"creator\",\n  \"credential\",\n  \"crm-\",\n  \"crm.\",\n  \"crm_\",\n  \"cros\",\n  \"crud\",\n  \"csv-\",\n  \"csv.\",\n  \"csv_\",\n  \"cube\",\n  \"cucumber\",\n  \"cuda\",\n  \"current\",\n  \"currently\",\n  \"custom\",\n  \"daemon\",\n  \"dark\",\n  \"dart\",\n  \"dash\",\n  \"dashboard\",\n  \"data\",\n  \"database\",\n  \"date\",\n  \"day-\",\n  \"day.\",\n  \"day_\",\n  \"dead\",\n  \"debian\",\n  \"debug\",\n  \"debugger\",\n  \"deck\",\n  \"define\",\n  \"del-\",\n  \"del.\",\n  \"del_\",\n  \"delete\",\n  \"demo\",\n  \"deploy\",\n  \"design\",\n  \"designer\",\n  \"desktop\",\n  \"detection\",\n  \"detector\",\n  \"dev-\",\n  \"dev.\",\n  \"dev_\",\n  \"develop\",\n  \"developer\",\n  \"device\",\n  \"devise\",\n  \"diff\",\n  \"digital\",\n  \"directive\",\n  \"directory\",\n  \"discovery\",\n  \"display\",\n  \"django\",\n  \"dns-\",\n  \"dns_\",\n  \"doc-\",\n  \"doc.\",\n  \"doc_\",\n  \"docker\",\n  \"docpad\",\n  \"doctrine\",\n  \"document\",\n  \"doe-\",\n  \"doe.\",\n  \"doe_\",\n  \"dojo\",\n  \"dom-\",\n  \"dom.\",\n  \"dom_\",\n  \"domain\",\n  \"done\",\n  \"don't\",\n  \"dot-\",\n  \"dot.\",\n  \"dot_\",\n  \"dotfile\",\n  \"download\",\n  \"draft\",\n  \"drag\",\n  \"drill\",\n  \"drive\",\n  \"driven\",\n  \"driver\",\n  \"drop\",\n  \"dropbox\",\n  \"drupal\",\n  \"dsl-\",\n  \"dsl.\",\n  \"dsl_\",\n  \"dynamic\",\n  \"easy\",\n  \"_ec2_\",\n  \"ecdsa\",\n  \"eclipse\",\n  \"edit\",\n  \"editing\",\n  \"edition\",\n  \"editor\",\n  \"element\",\n  \"emac\",\n  \"email\",\n  \"embed\",\n  \"embedded\",\n  \"ember\",\n  \"emitter\",\n  \"emulator\",\n  \"encoding\",\n  \"endpoint\",\n  \"engine\",\n  \"english\",\n  \"enhanced\",\n  \"entity\",\n  \"entry\",\n  \"env_\",\n  \"episode\",\n  \"erlang\",\n  \"error\",\n  \"espresso\",\n  \"event\",\n  \"evented\",\n  \"example\",\n  \"exchange\",\n  \"exercise\",\n  \"experiment\",\n  \"expire\",\n  \"exploit\",\n  \"explorer\",\n  \"export\",\n  \"exporter\",\n  \"expres\",\n  \"ext-\",\n  \"ext.\",\n  \"ext_\",\n  \"extended\",\n  \"extension\",\n  \"external\",\n  \"extra\",\n  \"extractor\",\n  \"fabric\",\n  \"facebook\",\n  \"factory\",\n  \"fake\",\n  \"fast\",\n  \"feature\",\n  \"feed\",\n  \"fewfwef\",\n  \"ffmpeg\",\n  \"field\",\n  \"file\",\n  \"filter\",\n  \"find\",\n  \"finder\",\n  \"firefox\",\n  \"firmware\",\n  \"first\",\n  \"fish\",\n  \"fix-\",\n  \"fix_\",\n  \"flash\",\n  \"flask\",\n  \"flat\",\n  \"flex\",\n  \"flexible\",\n  \"flickr\",\n  \"flow\",\n  \"fluent\",\n  \"fluentd\",\n  \"fluid\",\n  \"folder\",\n  \"font\",\n  \"force\",\n  \"foreman\",\n  \"fork\",\n  \"form\",\n  \"format\",\n  \"formatter\",\n  \"forum\",\n  \"foundry\",\n  \"framework\",\n  \"free\",\n  \"friend\",\n  \"friendly\",\n  \"front-end\",\n  \"frontend\",\n  \"ftp-\",\n  \"ftp.\",\n  \"ftp_\",\n  \"fuel\",\n  \"full\",\n  \"fun-\",\n  \"fun.\",\n  \"fun_\",\n  \"func\",\n  \"future\",\n  \"gaia\",\n  \"gallery\",\n  \"game\",\n  \"gateway\",\n  \"gem-\",\n  \"gem.\",\n  \"gem_\",\n  \"gen-\",\n  \"gen.\",\n  \"gen_\",\n  \"general\",\n  \"generator\",\n  \"generic\",\n  \"genetic\",\n  \"get-\",\n  \"get.\",\n  \"get_\",\n  \"getenv\",\n  \"getting\",\n  \"ghost\",\n  \"gist\",\n  \"git-\",\n  \"git.\",\n  \"git_\",\n  \"github\",\n  \"gitignore\",\n  \"gitlab\",\n  \"glas\",\n  \"gmail\",\n  \"gnome\",\n  \"gnu-\",\n  \"gnu.\",\n  \"gnu_\",\n  \"goal\",\n  \"golang\",\n  \"gollum\",\n  \"good\",\n  \"google\",\n  \"gpu-\",\n  \"gpu.\",\n  \"gpu_\",\n  \"gradle\",\n  \"grail\",\n  \"graph\",\n  \"graphic\",\n  \"great\",\n  \"grid\",\n  \"groovy\",\n  \"group\",\n  \"grunt\",\n  \"guard\",\n  \"gui-\",\n  \"gui.\",\n  \"gui_\",\n  \"guide\",\n  \"guideline\",\n  \"gulp\",\n  \"gwt-\",\n  \"gwt.\",\n  \"gwt_\",\n  \"hack\",\n  \"hackathon\",\n  \"hacker\",\n  \"hacking\",\n  \"hadoop\",\n  \"haml\",\n  \"handler\",\n  \"hardware\",\n  \"has-\",\n  \"has_\",\n  \"hash\",\n  \"haskell\",\n  \"have\",\n  \"haxe\",\n  \"hello\",\n  \"help\",\n  \"helper\",\n  \"here\",\n  \"hero\",\n  \"heroku\",\n  \"high\",\n  \"hipchat\",\n  \"history\",\n  \"home\",\n  \"homebrew\",\n  \"homepage\",\n  \"hook\",\n  \"host\",\n  \"hosting\",\n  \"hot-\",\n  \"hot.\",\n  \"hot_\",\n  \"house\",\n  \"how-\",\n  \"how.\",\n  \"how_\",\n  \"html\",\n  \"http\",\n  \"hub-\",\n  \"hub.\",\n  \"hub_\",\n  \"hubot\",\n  \"human\",\n  \"icon\",\n  \"ide-\",\n  \"ide.\",\n  \"ide_\",\n  \"idea\",\n  \"identity\",\n  \"idiomatic\",\n  \"image\",\n  \"impact\",\n  \"import\",\n  \"important\",\n  \"importer\",\n  \"impres\",\n  \"index\",\n  \"infinite\",\n  \"info\",\n  \"injection\",\n  \"inline\",\n  \"input\",\n  \"inside\",\n  \"inspector\",\n  \"instagram\",\n  \"install\",\n  \"installer\",\n  \"instant\",\n  \"intellij\",\n  \"interface\",\n  \"internet\",\n  \"interview\",\n  \"into\",\n  \"intro\",\n  \"ionic\",\n  \"iphone\",\n  \"ipython\",\n  \"irc-\",\n  \"irc_\",\n  \"iso-\",\n  \"iso.\",\n  \"iso_\",\n  \"issue\",\n  \"jade\",\n  \"jasmine\",\n  \"java\",\n  \"jbos\",\n  \"jekyll\",\n  \"jenkin\",\n  \"jetbrains\",\n  \"job-\",\n  \"job.\",\n  \"job_\",\n  \"joomla\",\n  \"jpa-\",\n  \"jpa.\",\n  \"jpa_\",\n  \"jquery\",\n  \"json\",\n  \"just\",\n  \"kafka\",\n  \"karma\",\n  \"kata\",\n  \"kernel\",\n  \"keyboard\",\n  \"kindle\",\n  \"kit-\",\n  \"kit.\",\n  \"kit_\",\n  \"kitchen\",\n  \"knife\",\n  \"koan\",\n  \"kohana\",\n  \"lab-\",\n  \"lab.\",\n  \"lab_\",\n  \"lambda\",\n  \"lamp\",\n  \"language\",\n  \"laravel\",\n  \"last\",\n  \"latest\",\n  \"latex\",\n  \"launcher\",\n  \"layer\",\n  \"layout\",\n  \"lazy\",\n  \"ldap\",\n  \"leaflet\",\n  \"league\",\n  \"learn\",\n  \"learning\",\n  \"led-\",\n  \"led.\",\n  \"led_\",\n  \"leetcode\",\n  \"les-\",\n  \"les.\",\n  \"les_\",\n  \"level\",\n  \"leveldb\",\n  \"lib-\",\n  \"lib.\",\n  \"lib_\",\n  \"librarie\",\n  \"library\",\n  \"license\",\n  \"life\",\n  \"liferay\",\n  \"light\",\n  \"lightbox\",\n  \"like\",\n  \"line\",\n  \"link\",\n  \"linked\",\n  \"linkedin\",\n  \"linux\",\n  \"lisp\",\n  \"list\",\n  \"lite\",\n  \"little\",\n  \"load\",\n  \"loader\",\n  \"local\",\n  \"location\",\n  \"lock\",\n  \"log-\",\n  \"log.\",\n  \"log_\",\n  \"logger\",\n  \"logging\",\n  \"logic\",\n  \"login\",\n  \"logstash\",\n  \"longer\",\n  \"look\",\n  \"love\",\n  \"lua-\",\n  \"lua.\",\n  \"lua_\",\n  \"mac-\",\n  \"mac.\",\n  \"mac_\",\n  \"machine\",\n  \"made\",\n  \"magento\",\n  \"magic\",\n  \"mail\",\n  \"make\",\n  \"maker\",\n  \"making\",\n  \"man-\",\n  \"man.\",\n  \"man_\",\n  \"manage\",\n  \"manager\",\n  \"manifest\",\n  \"manual\",\n  \"map-\",\n  \"map.\",\n  \"map_\",\n  \"mapper\",\n  \"mapping\",\n  \"markdown\",\n  \"markup\",\n  \"master\",\n  \"math\",\n  \"matrix\",\n  \"maven\",\n  \"md5\",\n  \"mean\",\n  \"media\",\n  \"mediawiki\",\n  \"meetup\",\n  \"memcached\",\n  \"memory\",\n  \"menu\",\n  \"merchant\",\n  \"message\",\n  \"messaging\",\n  \"meta\",\n  \"metadata\",\n  \"meteor\",\n  \"method\",\n  \"metric\",\n  \"micro\",\n  \"middleman\",\n  \"migration\",\n  \"minecraft\",\n  \"miner\",\n  \"mini\",\n  \"minimal\",\n  \"mirror\",\n  \"mit-\",\n  \"mit.\",\n  \"mit_\",\n  \"mobile\",\n  \"mocha\",\n  \"mock\",\n  \"mod-\",\n  \"mod.\",\n  \"mod_\",\n  \"mode\",\n  \"model\",\n  \"modern\",\n  \"modular\",\n  \"module\",\n  \"modx\",\n  \"money\",\n  \"mongo\",\n  \"mongodb\",\n  \"mongoid\",\n  \"mongoose\",\n  \"monitor\",\n  \"monkey\",\n  \"more\",\n  \"motion\",\n  \"moved\",\n  \"movie\",\n  \"mozilla\",\n  \"mqtt\",\n  \"mule\",\n  \"multi\",\n  \"multiple\",\n  \"music\",\n  \"mustache\",\n  \"mvc-\",\n  \"mvc.\",\n  \"mvc_\",\n  \"mysql\",\n  \"nagio\",\n  \"name\",\n  \"native\",\n  \"need\",\n  \"neo-\",\n  \"neo.\",\n  \"neo_\",\n  \"nest\",\n  \"nested\",\n  \"net-\",\n  \"net.\",\n  \"net_\",\n  \"nette\",\n  \"network\",\n  \"new-\",\n  \"new.\",\n  \"new_\",\n  \"next\",\n  \"nginx\",\n  \"ninja\",\n  \"nlp-\",\n  \"nlp.\",\n  \"nlp_\",\n  \"node\",\n  \"nodej\",\n  \"nosql\",\n  \"not-\",\n  \"not.\",\n  \"not_\",\n  \"note\",\n  \"notebook\",\n  \"notepad\",\n  \"notice\",\n  \"notifier\",\n  \"now-\",\n  \"now.\",\n  \"now_\",\n  \"number\",\n  \"oauth\",\n  \"object\",\n  \"objective\",\n  \"obsolete\",\n  \"ocaml\",\n  \"octopres\",\n  \"official\",\n  \"old-\",\n  \"old.\",\n  \"old_\",\n  \"onboard\",\n  \"online\",\n  \"only\",\n  \"open\",\n  \"opencv\",\n  \"opengl\",\n  \"openshift\",\n  \"openwrt\",\n  \"option\",\n  \"oracle\",\n  \"org-\",\n  \"org.\",\n  \"org_\",\n  \"origin\",\n  \"original\",\n  \"orm-\",\n  \"orm.\",\n  \"orm_\",\n  \"osx-\",\n  \"osx_\",\n  \"our-\",\n  \"our.\",\n  \"our_\",\n  \"out-\",\n  \"out.\",\n  \"out_\",\n  \"output\",\n  \"over\",\n  \"overview\",\n  \"own-\",\n  \"own.\",\n  \"own_\",\n  \"pack\",\n  \"package\",\n  \"packet\",\n  \"page\",\n  \"panel\",\n  \"paper\",\n  \"paperclip\",\n  \"para\",\n  \"parallax\",\n  \"parallel\",\n  \"parse\",\n  \"parser\",\n  \"parsing\",\n  \"particle\",\n  \"party\",\n  \"password\",\n  \"patch\",\n  \"path\",\n  \"pattern\",\n  \"payment\",\n  \"paypal\",\n  \"pdf-\",\n  \"pdf.\",\n  \"pdf_\",\n  \"pebble\",\n  \"people\",\n  \"perl\",\n  \"personal\",\n  \"phalcon\",\n  \"phoenix\",\n  \"phone\",\n  \"phonegap\",\n  \"photo\",\n  \"php-\",\n  \"php.\",\n  \"php_\",\n  \"physic\",\n  \"picker\",\n  \"pipeline\",\n  \"platform\",\n  \"play\",\n  \"player\",\n  \"please\",\n  \"plu-\",\n  \"plu.\",\n  \"plu_\",\n  \"plug-in\",\n  \"plugin\",\n  \"plupload\",\n  \"png-\",\n  \"png.\",\n  \"png_\",\n  \"poker\",\n  \"polyfill\",\n  \"polymer\",\n  \"pool\",\n  \"pop-\",\n  \"pop.\",\n  \"pop_\",\n  \"popcorn\",\n  \"popup\",\n  \"port\",\n  \"portable\",\n  \"portal\",\n  \"portfolio\",\n  \"post\",\n  \"power\",\n  \"powered\",\n  \"powerful\",\n  \"prelude\",\n  \"pretty\",\n  \"preview\",\n  \"principle\",\n  \"print\",\n  \"pro-\",\n  \"pro.\",\n  \"pro_\",\n  \"problem\",\n  \"proc\",\n  \"product\",\n  \"profile\",\n  \"profiler\",\n  \"program\",\n  \"progres\",\n  \"project\",\n  \"protocol\",\n  \"prototype\",\n  \"provider\",\n  \"proxy\",\n  \"public\",\n  \"pull\",\n  \"puppet\",\n  \"pure\",\n  \"purpose\",\n  \"push\",\n  \"pusher\",\n  \"pyramid\",\n  \"python\",\n  \"quality\",\n  \"query\",\n  \"queue\",\n  \"quick\",\n  \"rabbitmq\",\n  \"rack\",\n  \"radio\",\n  \"rail\",\n  \"railscast\",\n  \"random\",\n  \"range\",\n  \"raspberry\",\n  \"rdf-\",\n  \"rdf.\",\n  \"rdf_\",\n  \"react\",\n  \"reactive\",\n  \"read\",\n  \"reader\",\n  \"readme\",\n  \"ready\",\n  \"real\",\n  \"reality\",\n  \"real-time\",\n  \"realtime\",\n  \"recipe\",\n  \"recorder\",\n  \"red-\",\n  \"red.\",\n  \"red_\",\n  \"reddit\",\n  \"redi\",\n  \"redmine\",\n  \"reference\",\n  \"refinery\",\n  \"refresh\",\n  \"registry\",\n  \"related\",\n  \"release\",\n  \"remote\",\n  \"rendering\",\n  \"repo\",\n  \"report\",\n  \"request\",\n  \"require\",\n  \"required\",\n  \"requirej\",\n  \"research\",\n  \"resource\",\n  \"response\",\n  \"resque\",\n  \"rest\",\n  \"restful\",\n  \"resume\",\n  \"reveal\",\n  \"reverse\",\n  \"review\",\n  \"riak\",\n  \"rich\",\n  \"right\",\n  \"ring\",\n  \"robot\",\n  \"role\",\n  \"room\",\n  \"router\",\n  \"routing\",\n  \"rpc-\",\n  \"rpc.\",\n  \"rpc_\",\n  \"rpg-\",\n  \"rpg.\",\n  \"rpg_\",\n  \"rspec\",\n  \"ruby-\",\n  \"ruby.\",\n  \"ruby_\",\n  \"rule\",\n  \"run-\",\n  \"run.\",\n  \"run_\",\n  \"runner\",\n  \"running\",\n  \"runtime\",\n  \"rust\",\n  \"rvm-\",\n  \"rvm.\",\n  \"rvm_\",\n  \"salt\",\n  \"sample\",\n  \"sandbox\",\n  \"sas-\",\n  \"sas.\",\n  \"sas_\",\n  \"sbt-\",\n  \"sbt.\",\n  \"sbt_\",\n  \"scala\",\n  \"scalable\",\n  \"scanner\",\n  \"schema\",\n  \"scheme\",\n  \"school\",\n  \"science\",\n  \"scraper\",\n  \"scratch\",\n  \"screen\",\n  \"script\",\n  \"scroll\",\n  \"scs-\",\n  \"scs.\",\n  \"scs_\",\n  \"sdk-\",\n  \"sdk.\",\n  \"sdk_\",\n  \"sdl-\",\n  \"sdl.\",\n  \"sdl_\",\n  \"search\",\n  \"secure\",\n  \"security\",\n  \"see-\",\n  \"see.\",\n  \"see_\",\n  \"seed\",\n  \"select\",\n  \"selector\",\n  \"selenium\",\n  \"semantic\",\n  \"sencha\",\n  \"send\",\n  \"sentiment\",\n  \"serie\",\n  \"server\",\n  \"service\",\n  \"session\",\n  \"set-\",\n  \"set.\",\n  \"set_\",\n  \"setting\",\n  \"setup\",\n  \"sha1\",\n  \"sha2\",\n  \"sha256\",\n  \"share\",\n  \"shared\",\n  \"sharing\",\n  \"sheet\",\n  \"shell\",\n  \"shield\",\n  \"shipping\",\n  \"shop\",\n  \"shopify\",\n  \"shortener\",\n  \"should\",\n  \"show\",\n  \"showcase\",\n  \"side\",\n  \"silex\",\n  \"simple\",\n  \"simulator\",\n  \"single\",\n  \"site\",\n  \"skeleton\",\n  \"sketch\",\n  \"skin\",\n  \"slack\",\n  \"slide\",\n  \"slider\",\n  \"slim\",\n  \"small\",\n  \"smart\",\n  \"smtp\",\n  \"snake\",\n  \"snapshot\",\n  \"snippet\",\n  \"soap\",\n  \"social\",\n  \"socket\",\n  \"software\",\n  \"solarized\",\n  \"solr\",\n  \"solution\",\n  \"solver\",\n  \"some\",\n  \"soon\",\n  \"source\",\n  \"space\",\n  \"spark\",\n  \"spatial\",\n  \"spec\",\n  \"sphinx\",\n  \"spine\",\n  \"spotify\",\n  \"spree\",\n  \"spring\",\n  \"sprite\",\n  \"sql-\",\n  \"sql.\",\n  \"sql_\",\n  \"sqlite\",\n  \"ssh-\",\n  \"ssh.\",\n  \"ssh_\",\n  \"stack\",\n  \"staging\",\n  \"standard\",\n  \"stanford\",\n  \"start\",\n  \"started\",\n  \"starter\",\n  \"startup\",\n  \"stat\",\n  \"statamic\",\n  \"state\",\n  \"static\",\n  \"statistic\",\n  \"statsd\",\n  \"statu\",\n  \"steam\",\n  \"step\",\n  \"still\",\n  \"stm-\",\n  \"stm.\",\n  \"stm_\",\n  \"storage\",\n  \"store\",\n  \"storm\",\n  \"story\",\n  \"strategy\",\n  \"stream\",\n  \"streaming\",\n  \"string\",\n  \"stripe\",\n  \"structure\",\n  \"studio\",\n  \"study\",\n  \"stuff\",\n  \"style\",\n  \"sublime\",\n  \"sugar\",\n  \"suite\",\n  \"summary\",\n  \"super\",\n  \"support\",\n  \"supported\",\n  \"svg-\",\n  \"svg.\",\n  \"svg_\",\n  \"svn-\",\n  \"svn.\",\n  \"svn_\",\n  \"swagger\",\n  \"swift\",\n  \"switch\",\n  \"switcher\",\n  \"symfony\",\n  \"symphony\",\n  \"sync\",\n  \"synopsi\",\n  \"syntax\",\n  \"system\",\n  \"tab-\",\n  \"tab.\",\n  \"tab_\",\n  \"table\",\n  \"tag-\",\n  \"tag.\",\n  \"tag_\",\n  \"talk\",\n  \"target\",\n  \"task\",\n  \"tcp-\",\n  \"tcp.\",\n  \"tcp_\",\n  \"tdd-\",\n  \"tdd.\",\n  \"tdd_\",\n  \"team\",\n  \"tech\",\n  \"template\",\n  \"term\",\n  \"terminal\",\n  \"testing\",\n  \"tetri\",\n  \"text\",\n  \"textmate\",\n  \"theme\",\n  \"theory\",\n  \"three\",\n  \"thrift\",\n  \"time\",\n  \"timeline\",\n  \"timer\",\n  \"tiny\",\n  \"tinymce\",\n  \"tip-\",\n  \"tip.\",\n  \"tip_\",\n  \"title\",\n  \"todo\",\n  \"todomvc\",\n  \"token\",\n  \"tool\",\n  \"toolbox\",\n  \"toolkit\",\n  \"top-\",\n  \"top.\",\n  \"top_\",\n  \"tornado\",\n  \"touch\",\n  \"tower\",\n  \"tracker\",\n  \"tracking\",\n  \"traffic\",\n  \"training\",\n  \"transfer\",\n  \"translate\",\n  \"transport\",\n  \"tree\",\n  \"trello\",\n  \"try-\",\n  \"try.\",\n  \"try_\",\n  \"tumblr\",\n  \"tut-\",\n  \"tut.\",\n  \"tut_\",\n  \"tutorial\",\n  \"tweet\",\n  \"twig\",\n  \"twitter\",\n  \"type\",\n  \"typo\",\n  \"ubuntu\",\n  \"uiview\",\n  \"ultimate\",\n  \"under\",\n  \"unit\",\n  \"unity\",\n  \"universal\",\n  \"unix\",\n  \"update\",\n  \"updated\",\n  \"upgrade\",\n  \"upload\",\n  \"uploader\",\n  \"uri-\",\n  \"uri.\",\n  \"uri_\",\n  \"url-\",\n  \"url.\",\n  \"url_\",\n  \"usage\",\n  \"usb-\",\n  \"usb.\",\n  \"usb_\",\n  \"use-\",\n  \"use.\",\n  \"use_\",\n  \"used\",\n  \"useful\",\n  \"user\",\n  \"using\",\n  \"util\",\n  \"utilitie\",\n  \"utility\",\n  \"vagrant\",\n  \"validator\",\n  \"value\",\n  \"variou\",\n  \"varnish\",\n  \"version\",\n  \"via-\",\n  \"via.\",\n  \"via_\",\n  \"video\",\n  \"view\",\n  \"viewer\",\n  \"vim-\",\n  \"vim.\",\n  \"vim_\",\n  \"vimrc\",\n  \"virtual\",\n  \"vision\",\n  \"visual\",\n  \"vpn\",\n  \"want\",\n  \"warning\",\n  \"watch\",\n  \"watcher\",\n  \"wave\",\n  \"way-\",\n  \"way.\",\n  \"way_\",\n  \"weather\",\n  \"web-\",\n  \"web_\",\n  \"webapp\",\n  \"webgl\",\n  \"webhook\",\n  \"webkit\",\n  \"webrtc\",\n  \"website\",\n  \"websocket\",\n  \"welcome\",\n  \"what\",\n  \"what'\",\n  \"when\",\n  \"where\",\n  \"which\",\n  \"why-\",\n  \"why.\",\n  \"why_\",\n  \"widget\",\n  \"wifi\",\n  \"wiki\",\n  \"win-\",\n  \"win.\",\n  \"win_\",\n  \"window\",\n  \"wip-\",\n  \"wip.\",\n  \"wip_\",\n  \"within\",\n  \"without\",\n  \"wizard\",\n  \"word\",\n  \"wordpres\",\n  \"work\",\n  \"worker\",\n  \"workflow\",\n  \"working\",\n  \"workshop\",\n  \"world\",\n  \"wrapper\",\n  \"write\",\n  \"writer\",\n  \"writing\",\n  \"written\",\n  \"www-\",\n  \"www.\",\n  \"www_\",\n  \"xamarin\",\n  \"xcode\",\n  \"xml-\",\n  \"xml.\",\n  \"xml_\",\n  \"xmpp\",\n  \"xxxxxx\",\n  \"yahoo\",\n  \"yaml\",\n  \"yandex\",\n  \"yeoman\",\n  \"yet-\",\n  \"yet.\",\n  \"yet_\",\n  \"yii-\",\n  \"yii.\",\n  \"yii_\",\n  \"youtube\",\n  \"yui-\",\n  \"yui.\",\n  \"yui_\",\n  \"zend\",\n  \"zero\",\n  \"zip-\",\n  \"zip.\",\n  \"zip_\",\n  \"zsh-\",\n  \"zsh.\",\n  \"zsh_\",\n  \"6fe4476ee5a1832882e326b506d14126\"\n]) || filter.matchesAny(genericMatchContext, [`(?i)(?:access(?:ibility|or)|access[_.-]?id|random[_.-]?access|api[_.-]?(?:id|name|version)|rapid|capital|[a-z0-9-]*?api[a-z0-9-]*?:jar:|author|X-MS-Exchange-Organization-Auth|Authentication-Results|(?:credentials?[_.-]?id|withCredentials)|(?:bucket|foreign|hot|idx|natural|primary|pub(?:lic)?|schema|sequence)[_.-]?key|(?:turkey)|key[_.-]?(?:alias|board|code|frame|id|length|mesh|name|pair|press(?:ed)?|ring|selector|signature|size|stone|storetype|word|up|down|left|right)|key[_.-]?vault[_.-]?(?:id|name)|keyVaultToStoreSecrets|key(?:store|tab)[_.-]?(?:file|path)|issuerkeyhash|(?-i:[DdMm]onkey|[DM]ONKEY)|keying|(?:secret)[_.-]?(?:length|name|size)|UserSecretsId|(?:csrf)[_.-]?token|(?:io\\.jsonwebtoken[ \\t]?:[ \\t]?[\\w-]+)|(?:api|credentials|token)[_.-]?(?:endpoint|ur[il])|public[_.-]?token|(?:key|token)[_.-]?file|(?-i:(?:[A-Z_]+=\\n[A-Z_]+=|[a-z_]+=\\n[a-z_]+=)(?:\\n|\\z))|(?-i:(?:[A-Z.]+=\\n[A-Z.]+=|[a-z.]+=\\n[a-z.]+=)(?:\\n|\\z)))`]))\n|| matchesAny(finding[\"line\"], [\n  `--mount=type=secret,`,\n  `import[ \\t]+{[ \\t\\w,]+}[ \\t]+from[ \\t]+['\"][^'\"]+['\"]`\n])\n|| (matchesAny(attributes[\"path\"], [\n  `\\.bb$`,\n  `\\.bbappend$`,\n  `\\.bbclass$`,\n  `\\.inc$`\n]) && matchesAny(finding[\"line\"], [\n  `LICENSE[^=]*=\\s*\"[^\"]+`,\n  `LIC_FILES_CHKSUM[^=]*=\\s*\"[^\"]+`,\n  `SRC[^=]*=\\s*\"[a-zA-Z0-9]+`\n]))\n|| matchesAny(finding[\"secret\"], [\n  `^sb_publishable_[A-Za-z0-9_-]{31}$`,\n  `^0x4AAAAAA[A-Za-z0-9_-]{15}$`,\n  `^FCM[a-zA-Z0-9]{13}$`,\n  `^ysc1_[A-Za-z0-9_-]{48}$`,\n  `^phc_[A-Za-z0-9_-]{43,44}$`,\n  `^APP_USR-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^access-(sandbox|development)-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^asset-report-(sandbox|development)-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^public-(sandbox|development|production)-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^link-(sandbox|development)-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^hbp_[0-9a-zA-Z]{36}$`,\n  `^woos-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^(https://)?[0-9a-zA-Z]{32}\\@sentry\\.io$`,\n  `^sub-c-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^pub-c-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^hc[a-z]ik_([a-z0-9]{26,58})$`,\n  `^mob-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^public-token-test-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^public-token-live-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,\n  `^pdl_sdbx_apikey_[a-z\\d]{26}_[a-zA-Z\\d]{22}_[a-zA-Z\\d]{3}$`,\n  `^8c6803164dbc395fb7131c9d54843627$`\n])\n|| (matchesAny(finding[\"secret\"], [`^pk_test_[A-Za-z0-9]{24}(?:[A-Za-z0-9]{10})?(?:[A-Za-z0-9]{65})?$`]) && filter.containsAny(providerMatchContext, [\"stripe\", \"woo\", \"wcm\"]))\n|| (matchesAny(finding[\"secret\"], [`^rk_test_[A-Za-z0-9]{24}(?:[A-Za-z0-9]{10})?(?:[A-Za-z0-9]{65})?$`]) && filter.containsAny(providerMatchContext, [\"stripe\"]))\n|| (matchesAny(finding[\"secret\"], [`^pk_live_[A-Za-z0-9]{24}(?:[A-Za-z0-9]{10})?(?:[A-Za-z0-9]{65})?$`]) && filter.containsAny(providerMatchContext, [\"stripe\", \"woo\", \"wcm\"]))\n|| (matchesAny(finding[\"secret\"], [`^pk_test_[A-Za-z0-9_-]{40}$`]) && filter.containsAny(providerMatchContext, [\"paystack\"]))\n|| (matchesAny(finding[\"secret\"], [`^pk_live_[A-Za-z0-9_-]{40}$`]) && filter.containsAny(providerMatchContext, [\"paystack\"]))\n|| (matchesAny(finding[\"secret\"], [`^sandbox_[A-Za-z0-9]{8}_[A-Za-z0-9_-]{16}$`]) && filter.containsAny(providerMatchContext, [\"braintree\"]))\n|| (matchesAny(finding[\"secret\"], [`^production_[A-Za-z0-9]{8}_[A-Za-z0-9_-]{16}$`]) && filter.containsAny(providerMatchContext, [\"braintree\"]))\n|| (matchesAny(finding[\"secret\"], [`^test_[0-9a-zA-Z]{32}$`]) && filter.containsAny(providerMatchContext, [\"adyen\"]))\n|| (matchesAny(finding[\"secret\"], [`^live_[0-9a-zA-Z]{32}$`]) && filter.containsAny(providerMatchContext, [\"adyen\"]))\n|| (matchesAny(finding[\"secret\"], [`^[A-Za-z0-9]{32}$`]) && filter.containsAny(providerMatchContext, [\"bugsnag\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`]) && filter.containsAny(providerMatchContext, [\"hcaptcha\", \"site_key\", \"sitekey\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`]) && filter.containsAny(providerMatchContext, [\"pendo\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`]) && filter.containsAny(providerMatchContext, [\"instrumentation\"]))\n|| (matchesAny(finding[\"secret\"], [`^TEST-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`]) && filter.containsAny(providerMatchContext, [\"mercado\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-fA-F]{32}$`]) && filter.containsAny(providerMatchContext, [\"mixpanel\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-z]{6}\\/[a-z_-]{2,100}$`]) && filter.containsAny(providerMatchContext, [\"logrocket\"]))\n|| (len(finding[\"secret\"]) == 8 && matchesAny(finding[\"secret\"], [`^[0-9a-f]{8}$`]) && filter.containsAny(providerMatchContext, [\"honeybadger\"]))\n|| ((len(finding[\"secret\"]) >= 21 && len(finding[\"secret\"]) <= 24) && matchesAny(finding[\"secret\"], [`^[a-zA-Z0-9=+]{21,24}$`]) && filter.containsAny(providerMatchContext, [\"raygun\"]))\n|| (matchesAny(finding[\"secret\"], [`^key_live_[0-9a-zA-Z]{32}$`]) && filter.containsAny(providerMatchContext, [\"branch\"]))\n|| (matchesAny(finding[\"secret\"], [`^key_test_[0-9a-zA-Z]{32}$`]) && filter.containsAny(providerMatchContext, [\"branch\"]))\n|| (matchesAny(finding[\"secret\"], [`^pub[0-9a-zA-Z]{32}$`]) && filter.containsAny(providerMatchContext, [\"datadog\", \"dd\"]))\n|| (len(finding[\"secret\"]) == 6 && matchesAny(finding[\"secret\"], [`^[0-9a-zA-Z]{6}$`]) && filter.containsAny(providerMatchContext, [\"klaviyo\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-zA-Z]{32}$`]) && filter.containsAny(providerMatchContext, [\"storefront\"]))\n|| (matchesAny(finding[\"secret\"], [`^search-[0-9a-zA-Z_-]{24}$`]) && filter.containsAny(providerMatchContext, [\"swiftype\"]))\n|| (len(finding[\"secret\"]) == 20 && matchesAny(finding[\"secret\"], [`^[0-9a-zA-Z_-]{20}$`]) && filter.containsAny(providerMatchContext, [\"swiftype\"]))\n|| (matchesAny(finding[\"secret\"], [`^pk.eyJ1Ijoi[0-9a-zA-Z_-]{1,}\\.[0-9a-zA-Z-_]{1,}$`]) && filter.containsAny(providerMatchContext, [\"map\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`]) && filter.containsAny(providerMatchContext, [\"crisp\"]))\n|| (matchesAny(finding[\"secret\"], [`^client-[a-zA-Z0-9]{43}$`]) && filter.containsAny(providerMatchContext, [\"statsdig\"]))\n|| (matchesAny(finding[\"secret\"], [`^sdk-[a-zA-Z0-9]{15,16}$`]) && filter.containsAny(providerMatchContext, [\"growthbook\"]))\n|| (len(finding[\"secret\"]) == 24 && matchesAny(finding[\"secret\"], [`^[a-zA-Z0-9\\/=]{24}$`]) && filter.containsAny(providerMatchContext, [\"growthbook\"]))\n|| ((len(finding[\"secret\"]) >= 21 && len(finding[\"secret\"]) <= 22) && matchesAny(finding[\"secret\"], [`^[a-zA-Z0-9]{21,22}$`]) && filter.containsAny(providerMatchContext, [\"optimizely\"]))\n|| (len(finding[\"secret\"]) == 24 && matchesAny(finding[\"secret\"], [`^[0-9a-fA-F]{24}$`]) && filter.containsAny(providerMatchContext, [\"launchdarkly\"]))\n|| (matchesAny(finding[\"secret\"], [`^pk_test_[0-9a-zA-Z]{20,70}$`]) && filter.containsAny(providerMatchContext, [\"clerk\"]))\n|| (matchesAny(finding[\"secret\"], [`^pk_live_[0-9a-zA-Z]{20,70}$`]) && filter.containsAny(providerMatchContext, [\"clerk\"]))\n|| (len(finding[\"secret\"]) == 40 && matchesAny(finding[\"secret\"], [`^[0-9a-zA-Z]{40}$`]) && filter.containsAny(providerMatchContext, [\"smartlook\"]))\n|| ((len(finding[\"secret\"]) >= 5 && len(finding[\"secret\"]) <= 6) && matchesAny(finding[\"secret\"], [`^[0-9A-Z]{5,6}$`]) && filter.containsAny(providerMatchContext, [\"fullstory\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`]) && filter.containsAny(providerMatchContext, [\"zendesk\", \"zdassets.com\"]))\n|| (len(finding[\"secret\"]) == 27 && matchesAny(finding[\"secret\"], [`^[0-9a-zA-Z]{27}$`]) && filter.containsAny(providerMatchContext, [\"rudderstack\"]))\n|| (matchesAny(finding[\"secret\"], [`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`]) && filter.containsAny(providerMatchContext, [\"web3forms\"]))\n|| (len(finding[\"secret\"]) == 12 && matchesAny(finding[\"secret\"], [`^[0-9]{12}$`]) && filter.containsAny(providerMatchContext, [\"2checkout\", \"twocheckout\"]))\n|| (matchesAny(finding[\"secret\"], [`^test_[a-zA-Z0-9]{27}$`]) && filter.containsAny(providerMatchContext, [\"paddle\"]))\n|| (matchesAny(finding[\"secret\"], [`^live_[a-zA-Z0-9]{27}$`]) && filter.containsAny(providerMatchContext, [\"paddle\"]))\n|| (matchesAny(finding[\"secret\"], [`^pk_live_[0-9A-F]{16}$`]) && filter.containsAny(providerMatchContext, [\"magic\"]))\n",
+   "id": "generic-api-key",
+   "keywords": [
+    "access",
+    "api",
+    "auth",
+    "key",
+    "credential",
+    "creds",
+    "secret",
+    "token"
+   ],
+   "regex": "(?i)(?:access|auth|(?-i:[Aa]pi|API)|credential|creds|key|secret|token)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([\\w.=-]{10,150}|[a-z0-9][a-z0-9+/]{11,}={0,3})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "specificity": 0
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a password embedded in a service connection URI, which may expose direct access to the referenced service.",
+   "filter": "let isExampleValue = filter.matchesAny(finding[\"secret\"], [\n  `(?i)^(?:(?:(?:an?|my)(?:[ _.-]|%(?:20|2d|5f))*)?example(?:(?:[ _.-]|%(?:20|2d|5f))*(?:password|passwd|pwd))?|(?:password|passwd|pwd)(?:[ _.-]|%(?:20|2d|5f))*example)(?:(?:[ _.-]|%(?:20|2d|5f))*[0-9]{1,4})?[!?.]*$`\n]);\nlet isInstructionalPlaceholder = filter.matchesAny(finding[\"secret\"], [\n  `(?i)^(?:[a-z0-9]+[_.-])?(?:your[_.-]?(?:password|passwd|pwd)|(?:password|passwd|pwd)[_.-]goes[_.-]?here|replace[_.-]?me|insert[_.-].*[_.-]here|placeholder)$`\n]);\nlet isSyntheticExampleURI = filter.matchesAny(finding[\"match\"], [\n  `(?i)^[a-z][a-z0-9+.-]*://(?:foo|user(?:name)?|example(?:[_.-]?user)?):(?:bar|pass(?:word)?|passwd|pwd|example(?:[_.-]?(?:password|passwd|pwd))?)@(?:(?:example|test)\\.(?:com|org|net)|example\\.invalid)(?::[0-9]{1,5})?(?:[/\\s'\"\\x60#]|$)`\n]);\nlet isSyntheticCredentialTuple = filter.matchesAny(finding[\"match\"], [\n  `(?i)^[a-z][a-z0-9+.-]*://(?:foo|test|user(?:name)?|example(?:[_.-]?user)?)[0-9]{0,4}:(?:bar|test|pass(?:word)?|passwd|pwd|token|secret)[0-9]{0,4}[!?.]?@`\n]);\nlet isTestOrDocumentationSource = filter.matchesAny(attributes[\"path\"], [\n  `(?i)(?:^|[/\\\\])(?:__tests__|tests?|testdata|specs?|fixtures?|mocks?|examples?|samples?|demos?|tutorials?|templates?|qa|e2e|documentation|docs?(?:[-_][a-z0-9-]+)?)(?:[/\\\\]|$)`,\n  `(?i)(?:^|[/\\\\])readme(?:\\.[^/\\\\]+)?$`,\n  `(?i)(?:^|[/\\\\])[^/\\\\]*(?:[_.-](?:test|spec)|(?:test|spec)[_.-])[^/\\\\]*\\.[^/\\\\]+$`,\n  `(?i)\\.(?:example|sample|template)(?:\\.[^/\\\\]+)?$`,\n  `(?i)\\.(?:md|mdx|rst|adoc|asciidoc)$`\n]);\nlet hasIgnoredHost = filter.matchesAny(finding[\"match\"], [\n  `(?i)^[a-z][a-z0-9+.-]*://[^@\\s]+@(?:[a-z0-9_-]+\\.)*example(?:\\.(?:com|org|net))?\\.?(?::[0-9]{1,5})?(?:,(?:[a-z0-9_-]+\\.)*example(?:\\.(?:com|org|net))?\\.?(?::[0-9]{1,5})?)*(?:[/?\\s'\"\\x60#<>{}\\[\\];)]|,?$)`\n]);\nlet hasLowConfidenceHost = filter.matchesAny(finding[\"match\"], [\n  `(?i)^[a-z][a-z0-9+.-]*://[^@\\s]+@(?:(?:[a-z0-9_-]+\\.)*example(?:\\.(?:com|org|net))?|(?:[a-z0-9_-]+\\.)*(?:invalid|test|localhost))\\.?(?::[0-9]{1,5})?(?:,(?:(?:[a-z0-9_-]+\\.)*example(?:\\.(?:com|org|net))?|(?:[a-z0-9_-]+\\.)*(?:invalid|test|localhost))\\.?(?::[0-9]{1,5})?)*(?:[/?\\s'\"\\x60#<>{}\\[\\];)]|,?$)`\n]);\nlet level = (\n  isExampleValue\n  || isSyntheticCredentialTuple\n  || isTestOrDocumentationSource\n  || hasLowConfidenceHost\n) ? \"low\" : \"medium\";\nlet _ = filter.setConfidence(level);\n\n// Discard mechanically non-literal credentials. Weak and default passwords\n// remain reportable because the URI establishes their credential role.\nisInstructionalPlaceholder\n|| isSyntheticExampleURI\n|| hasIgnoredHost\n|| filter.matchesAny(finding[\"secret\"], [\n  `^\\*+$`,\n  `^\\.+$`,\n  `(?i)^x{4,}$`,\n  `^•+$`,\n  `(?i)^\\[?(?:redacted|masked|filtered)\\]?$`,\n  `^\\$\\{.*}$`,\n  `^\\$\\([^\\r\\n]+\\)$`,\n  `^#\\{[^}\\r\\n]+}$`,\n  `^\\{\\{[ \\t]*.+[ \\t]*}}$`,\n  `^%\\{[^}]+}$`,\n  `^\\$[A-Za-z_][A-Za-z0-9_]*$`,\n  `(?i)^\\$env:[A-Za-z_][A-Za-z0-9_]*$`,\n  `^%[A-Za-z_][A-Za-z0-9_]*%$`,\n  `^<[^>]+>$`,\n  `^\\[[A-Za-z_][A-Za-z0-9_.-]*]$`,\n  `^\\{[^}]+}$`,\n  `(?:\\$\\{|#\\{|\\{\\{|%\\{)`\n])\n",
+   "id": "generic-credential-uri",
+   "keywords": [
+    "http://",
+    "https://",
+    "postgres://",
+    "postgresql://",
+    "mysql://",
+    "mariadb://",
+    "mongodb://",
+    "mongodb+srv://",
+    "redis://",
+    "rediss://",
+    "amqp://",
+    "amqps://",
+    "ldap://",
+    "ldaps://",
+    "smtp://",
+    "smtps://",
+    "ftp://",
+    "ftps://",
+    "ssh://"
+   ],
+   "regex": "(?i)\\b(?P<uri>(?P<scheme>https?|postgres(?:ql)?|mysql|mariadb|mongodb(?:\\+srv)?|rediss?|amqps?|ldaps?|smtps?|ftps?|ssh)://(?P<username>[^:/@\\s'\"\\x60]{0,128}):(?P<password>[^/@\\s'\"\\x60]{1,256})@(?P<host>(?:\\[[0-9a-f:.%]+\\]|[a-z0-9][a-z0-9._-]{0,252}))(?::[0-9]{1,5})?(?:,(?:\\[[0-9a-f:.%]+\\]|[a-z0-9][a-z0-9._-]{0,252})(?::[0-9]{1,5})?)*(?:[/?][a-z0-9._~!$&(*+,;=:@%/?-]*)?)(?:[\\s'\"\\x60#<>{}\\[\\],;)]|\\\\[nr]|$)",
+   "secretGroup": 4,
+   "specificity": 30
+  },
+  {
+   "components": [
+    {
+     "id": "generic-username",
+     "optional": true,
+     "within": "7L,200C"
+    }
+   ],
+   "confidence": "low",
+   "description": "Detected a potential hardcoded password literal, which may expose account credentials.",
+   "filter": "// Restrict nearby evidence to the password's line and the\n// six lines on either side. The password key itself is intentionally excluded\n// from the evidence patterns below.\nlet raw = finding[\"fragment_raw\"];\nlet beforeLines = split(raw[\n  max(finding[\"match_start_idx\"] - 8192, 0):finding[\"match_start_idx\"]\n], \"\\n\");\nlet afterLines = split(raw[\n  finding[\"match_end_idx\"]:min(finding[\"match_end_idx\"] + 8192, len(raw))\n], \"\\n\");\nlet nearbyContext =\n  join(beforeLines[max(len(beforeLines) - 7, 0):], \"\\n\")\n  + \"\\n\"\n  + join(afterLines[:min(len(afterLines), 7)], \"\\n\");\nlet linePrefix = beforeLines[len(beforeLines) - 1];\n\nlet hasAuthContext = filter.matchesAny(nearbyContext, [\n  // Authentication and connection calls.\n  `(?i)(?:^|[^a-z0-9])(?:auth(?:enticate|entication)?|login|log[_.-]?in|sign[_.-]?in|connect(?:ion)?|open[_.-]?(?:connection|session)|create[_.-]?(?:connection|session)|bind)\\b[ \\t]*\\(`,\n  // Credential and connection configuration containers.\n  `(?i)(?:^|[^a-z0-9])(?:basic[_.-]?auth|auth(?:entication)?[_.-]?(?:config|options|params)|credentials?|login[_.-]?(?:config|options|params)|connection[_.-]?(?:string|config|options|params)|data[_.-]?source|dsn)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:|\\{|\\()`,\n  // Assets commonly paired with credentials.\n  `(?i)(?:^|[^a-z0-9])(?:host(?:name)?|server|endpoint|database|db[_.-]?(?:name|host|url)?|port|jdbc[_.-]?url|connection[_.-]?url)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]{0,5}(?:\"[^\"\\r\\n]+\"|'[^'\\r\\n]+'|\\x60[^\\x60\\r\\n]+\\x60|[^\\s,;)}\\]]+)`,\n  // Nearby connection URI or service context.\n  `(?i)\\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\\+srv)?|redis|amqps?|ldaps?|smtps?|ftps?|ssh)://`\n]);\nlet hasIdentityFieldContext = filter.matchesAny(nearbyContext, [\n  `(?im)(?:^|[^a-z0-9])(?:username|user|login(?:[_.-]?name)?|email(?:[_.-]?address)?|uid|account(?:[_.-]?name)?|client(?:[_.-]?(?:id|name))?)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)`\n]);\nlet isDirectAuthArgument = filter.matchesAny(finding[\"match\"], [\n  `(?i)^(?:login|log_in)\\b[ \\t]*\\(`,\n  `(?i)^authenticate\\b[ \\t]*\\([ \\t]*[^,\\r\\n]*(?:user(?:name)?|account|email|login|uid)[^,\\r\\n]*,`\n]);\nlet isCommented = filter.matchesAny(linePrefix, [\n  `(?:^[ \\t]*(?:#|//|/\\*|\\*|--|;|<!--)|[ \\t](?:#|//|/\\*|--|<!--)[ \\t]*)`\n]);\nlet isInstructionalPlaceholder = filter.matchesAny(finding[\"secret\"], [\n  `^(?:PGPASSWORD|[A-Z][A-Z0-9_]*_(?:PASSWORD|PASSWD|PWD)(?:_[A-Z0-9]+)*|(?:PASSWORD|PASSWD|PWD)_[A-Z0-9_]+)$`,\n  `(?i)^(?:(?:(?:an?|my)[ _.-]*)?example(?:[ _.-]*(?:password|passwd|pwd))?|(?:password|passwd|pwd)[ _.-]*example)(?:[ _.-]*[0-9]{1,4})?[!?.]*$`,\n  `(?i)^(?:password|passwd|pwd)?[ _-]?(?:goes[ _-]?here|replace[ _-]?me|insert[ _-].*here|not[ _-]?set)$`\n]);\nlet isCodeFile = filter.matchesAny(attributes[\"path\"], [\n  `(?i)\\.(?:c|cc|cpp|cxx|h|hh|hpp|cs|dart|ex|exs|fs|fsx|go|gemspec|groovy|java|js|jsx|mjs|cjs|kt|kts|lua|m|mm|php|pl|pm|py|pyw|r|rake|rb|rs|scala|sql|swift|tf|tfvars|ts|tsx|vb|vue)(?:\\.(?:example|sample|template))?$`\n]);\nlet isUnquotedAssignment = filter.matchesAny(finding[\"match\"], [\n  `^(?i:passw(?:or)?d|psw|[_.-]pw)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]*[^\\x22\\x27\\x60 \\t\\r\\n]`\n]);\nlet isUnquotedCodeValue = isCodeFile && isUnquotedAssignment;\nlet isUnquotedExpression = isUnquotedAssignment && filter.matchesAny(finding[\"secret\"], [\n  `^[A-Za-z_][A-Za-z0-9_-]*:\\[[^]\\r\\n]+\\]$`,\n  `^[A-Za-z_][A-Za-z0-9_]*[)}\\]]+(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*(?:\\([^)]*\\))?)*$`\n]);\nlet hasNonPlaintextPasswordContext = filter.matchesAny(linePrefix + finding[\"match\"], [\n  `(?i)(?:^|[^a-z0-9])(?:enc|encrypt(?:ed|ion)?|hash(?:ed)?|encod(?:e|ed|ing)|cipher(?:text)?|seal(?:ed)?|vault(?:ed)?)(?:[_.-][a-z0-9]+){0,5}[_.-]?password\\b`,\n  `(?i)(?:^|[^a-z0-9])password[_.-]?(?:cipher(?:text)?|hash|digest|algorithm|scheme|encoding|format)\\b`\n]);\nlet hasNestedUnquotedAssignment = filter.matchesAny(finding[\"match\"], [\n  `^(?i:passw(?:or)?d|psw|[_.-]pw)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]{0,5}[^\"'\\x60\\r\\n]*[.,][A-Za-z_][A-Za-z0-9_-]*=`\n]);\nlet isEncryptedValue = filter.matchesAny(finding[\"secret\"], [\n  // Serialized encryption envelopes and armored ciphertext.\n  `(?i)^ENC\\[[A-Z0-9][A-Z0-9_.+/-]*(?:,|\\]|$)`,\n  `(?i)^ENC\\([A-Z0-9+/=_:.,-]{8,}\\)$`,\n  `(?i)^\\{cipher\\}.{4,}$`,\n  `^\\$ANSIBLE_VAULT(?:;|$)`,\n  `(?i)^!vault$`,\n  `^age-encryption\\.org/v[0-9]+$`,\n  `^-----BEGIN (?:AGE ENCRYPTED FILE|PGP MESSAGE|ENCRYPTED PRIVATE KEY)-----$`,\n  // OpenSSL salted output, HashiCorp Vault transit ciphertext, and Fernet.\n  `^U2FsdGVkX1[A-Za-z0-9+/=]{8,}$`,\n  `^vault:v[0-9]+:[A-Za-z0-9+/=_-]{8,}$`,\n  `^gAAAAA[A-Za-z0-9_-]{70,}={0,2}$`,\n  // Compact JWE and encrypted PASETO (local-purpose) tokens.\n  `^[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}$`,\n  `^v[124]\\.local\\.[A-Za-z0-9_-]{32,}(?:\\.[A-Za-z0-9_-]+)?$`,\n  // Windows DPAPI blobs in Base64 or exported SecureString hex form.\n  `^AQAAANCMnd8BFdERjHoAwE/Cl\\+sBA[A-Za-z0-9+/=]{16,}$`,\n  `(?i)^01000000d08c9ddf0115d1118c7a00c04fc297eb01[0-9a-f]{16,}$`\n]);\nlet isCryptographicAlgorithm = filter.matchesAny(finding[\"secret\"], [\n  // Common block ciphers with key sizes and/or modes.\n  `(?i)^(?:AES|RIJNDAEL|ARIA|CAMELLIA)[-_/]?(?:128|192|256)(?:[-_/](?:ECB|CBC(?:[-_/]HMAC[-_/]SHA[-_]?(?:256|384|512))?|PCBC|CFB(?:8|64|128)?|OFB(?:8|64|128)?|CTR|CTS|CCM|GCM|GMAC|EAX|OCB|SIV|GCM[-_]?SIV|XTS|KW|KWP))?$`,\n  `(?i)^(?:AES|RIJNDAEL|ARIA|CAMELLIA)[-_/]?(?:ECB|CBC|PCBC|CFB(?:8|64|128)?|OFB(?:8|64|128)?|CTR|CTS|CCM|GCM|GMAC|EAX|OCB|SIV|GCM[-_]?SIV|XTS|KW|KWP)$`,\n  `(?i)^(?:(?:RIJNDAEL|ARIA|CAMELLIA|DES(?:[-_]?(?:EDE3?|3|X))?|DESEDE|3DES|TRIPLE[-_]?DES|BLOWFISH|BF|TWOFISH|SERPENT|CAST(?:5|128|256)?|IDEA|SEED|SM4|RC[2456]|ARCFOUR)[-_/](?:ECB|CBC|PCBC|CFB(?:8|64|128)?|OFB(?:8|64|128)?|CTR|CTS|CCM|GCM|GMAC|EAX|OCB|SIV|GCM[-_]?SIV|XTS|KW|KWP)|X?(?:CHACHA20|SALSA20)[-_/]POLY1305|AESWRAP(?:[-_]?(?:128|192|256))?|DESEDEWRAP)$`,\n  // Java Cryptography Architecture transformations and PBE names.\n  `(?i)^(?:AES(?:[-_]?(?:128|192|256))?|ARIA(?:[-_]?(?:128|192|256))?|CAMELLIA(?:[-_]?(?:128|192|256))?|BLOWFISH|DES|DESEDE|RC2|RSA)/(?:ECB|CBC|PCBC|CFB(?:8|64|128)?|OFB(?:8|64|128)?|CTR|CTS|CCM|GCM)/(?:NO|PKCS[157]|ISO10126|OAEPWITH(?:MD5|SHA[-_]?(?:1|224|256|384|512))ANDMGF1)PADDING$`,\n  `(?i)^PBEWITH(?:HMAC)?(?:MD5|SHA(?:1|224|256|384|512))AND(?:AES(?:[-_]?(?:128|256))?|DES(?:EDE)?|TRIPLEDES|RC[24](?:[-_]?(?:40|128))?)$`,\n  // JOSE/JWE key-management and content-encryption identifiers.\n  `(?i)^(?:RSA1_5|RSA-OAEP(?:-(?:256|384|512))?|ECDH-ES(?:\\+A(?:128|192|256)(?:GCM)?KW)?|A(?:128|192|256)(?:KW|GCMKW|GCM|CBC-HS(?:256|384|512))|PBES2-HS(?:256|384|512)\\+A(?:128|192|256)KW)$`,\n  // Other explicit asymmetric encryption and key-wrapping descriptors.\n  `(?i)^(?:RSA(?:ES)?[-_/](?:OAEP(?:[-_/](?:MD5|SHA[-_]?(?:1|224|256|384|512)))?|PKCS1(?:[-_]?V?1[_.]5)?|NO[-_]?PADDING)|ECIES(?:[-_/](?:P(?:256|384|521)|SECP(?:256K1|256R1|384R1|521R1)))?|ELGAMAL[-_/](?:ECB|OAEP|PKCS1)|SM2[-_/](?:C1C2C3|C1C3C2))$`,\n  // Composite hash, MAC, signature, and password-derivation identifiers.\n  `(?i)^(?:HMAC[-_]?(?:MD5|SHA[-_]?(?:1|224|256|384|512)|SHA3[-_]?(?:224|256|384|512))|PBKDF2[-_/](?:HMAC[-_]?)?(?:SHA[-_]?(?:1|224|256|384|512))|HKDF[-_/]SHA[-_]?(?:1|224|256|384|512)|(?:RSA|DSA|ECDSA|ED25519)[-_/](?:MD5|SHA[-_]?(?:1|224|256|384|512)|SHA3[-_]?(?:224|256|384|512))|(?:MD5|SHA[-_]?(?:1|224|256|384|512)|SHA3[-_]?(?:224|256|384|512))[-_/](?:RSA|DSA|ECDSA|ED25519))$`,\n  // TLS and OpenSSH cipher-suite identifiers.\n  `(?i)^TLS_(?:(?:AES_(?:128|256)_GCM|CHACHA20_POLY1305)_SHA(?:256|384)|[A-Z0-9]+(?:_[A-Z0-9]+)*_WITH_[A-Z0-9]+(?:_[A-Z0-9]+)*)$`,\n  `(?i)^(?:AES(?:128|192|256)-(?:CBC|CTR|GCM)|CHACHA20-POLY1305)@OPENSSH\\.COM$`\n]);\nlet isContextualAlgorithmName = hasNonPlaintextPasswordContext && filter.matchesAny(finding[\"secret\"], [\n  // A field name can disambiguate an exact algorithm name, but cannot by\n  // itself prove that an arbitrary value is encrypted or hashed.\n  `(?i)^(?:AES|RIJNDAEL|ARIA|CAMELLIA|CHACHA20|XCHACHA20|SALSA20|XSALSA20|DES|DESEDE|3DES|TRIPLE[-_]?DES|TWOFISH|SERPENT|CAST(?:5|128|256)|IDEA|SEED|SM4|RC[2456]|ARCFOUR|RSA|ECIES|ELGAMAL|SM2|MD5|SHA[-_]?(?:1|224|256|384|512)|SHA3[-_]?(?:224|256|384|512)|BLAKE2[BS](?:[-_]?(?:256|512))?|BLAKE3|RIPEMD[-_]?(?:128|160|256|320)|WHIRLPOOL|SM3|PBKDF2|SCRYPT|BCRYPT|ARGON2(?:D|I|ID)?|HKDF|YESCRYPT)$`\n]);\nlet level = (\n  (\n    isDirectAuthArgument\n    || (hasAuthContext && hasIdentityFieldContext)\n  )\n  && !isCommented\n  && !isInstructionalPlaceholder\n) ? \"medium\" : \"low\";\nlet _ = filter.setConfidence(level);\n\nfilter.matchesAny(finding[\"secret\"], [\n  `^\\*+$`,\n  `^\\.+$`,\n  `(?i)^x{4,}$`,\n  `(?i)^\\[?(?:redacted|masked|filtered)\\]?$`,\n  `^•+$`,\n  `^\\$\\{.*}$`,\n  `^\\$\\([^\\r\\n]+\\)$`,\n  `^#\\{[^}\\r\\n]+}$`,\n  `^\\{\\{[ \\t]*.+[ \\t]*}}$`,\n  `^%\\{[^}]+}$`,\n  `^\\$[A-Za-z_][A-Za-z0-9_]*$`,\n  `(?i)^\\$env:[A-Za-z_][A-Za-z0-9_]*$`,\n  `^%[A-Za-z_][A-Za-z0-9_]*%$`,\n  `^<[^>]+>$`,\n  `^<[^>\\s]+$`,\n  `^\\{[^}]+}$`,\n  `(?i)^(?:your[_-]?password|placeholder|forbidden_value)$`,\n  `^\\([A-Za-z_][A-Za-z0-9_.]*(?:[ \\t]+[A-Za-z_][A-Za-z0-9_.]*)*\\)$`,\n  `^\\$\\(`,\n  `(?:\\$\\{|#\\{|\\{\\{|%\\{)`,\n  `%\\([A-Za-z_][A-Za-z0-9_]*\\)[#0 +\\-]?[0-9.]*(?:[diouxXeEfFgGcrs%])`,\n  `(?i)^--?passw(?:or)?d$`,\n  `^\\$2[abxy]\\$[0-9]{2}\\$[./A-Za-z0-9]{7,}$`,\n  `(?i)^\\$pbkdf2[-_][^$]+\\$.*$`,\n  `(?i)^(?:pbkdf2_(?:sha1|sha256)|bcrypt_sha256|argon2|scrypt|sha1|md5|crypt)\\$`,\n  `(?i)^\\$(?:1|5|6|7|y|gy|argon2(?:d|i|id)|scrypt|pbkdf2(?:[-_]sha(?:1|224|256|384|512))?|apr1)\\$`,\n  `^\\$[PH]\\$[./A-Za-z0-9]{20,}$`,\n  `(?i)^\\{(?:SSHA(?:256|384|512)?|SHA(?:256|384|512)?|MD5|CRYPT|BCRYPT|PBKDF2)}`,\n  `(?i)^SCRAM-SHA-(?:1|256|512)\\$`,\n  `(?i)^md5[0-9a-f]{32}$`,\n  `^\\*[0-9A-F]{40}$`\n])\n|| isEncryptedValue\n|| isCryptographicAlgorithm\n|| isContextualAlgorithmName\n|| isUnquotedCodeValue\n|| isUnquotedExpression\n|| hasNestedUnquotedAssignment\n|| filter.matchesAny(finding[\"match\"], [\n  `^(?i:passw(?:or)?d|psw|[_.-]pw)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]*(?i:nil|null|none|undefined|true|false|string|str|text|integer|int|number|boolean|bool|object)(?:[ \\t]*[,;)}\\]\\r\\n]|[ \\t]*$|\\\\[nr])`,\n  `^(?i:passw(?:or)?d|psw|[_.-]pw)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]*(?:[$@][A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*|\\[[^]\\r\\n]+\\]|\\([^,\\r\\n)]*\\)?)*|:[A-Za-z_][A-Za-z0-9_]*|(?:::)?[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*)*::[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*)*|(?i:process\\.env|config|settings|credentials?|secrets?|var|local|module|data)(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*|\\[[^]\\r\\n]+\\])+|[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*)*(?:\\[[^]\\r\\n]+\\]|\\([^,\\r\\n)]*\\)?)(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*|\\[[^]\\r\\n]+\\]|\\([^,\\r\\n)]*\\)?)*|[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*)*\\.(?i:(?:[a-z0-9]+_)*(?:passw(?:or)?d|psw|token|secret|hex)))[)}\\]]*\\\\?(?:[ \\t]*[,;)}\\]\\r\\n]|[ \\t]*$|\\\\[nr])`\n])\n",
+   "id": "generic-password",
+   "keywords": [
+    "passw",
+    "psw",
+    "_pw",
+    "-pw",
+    ".pw",
+    "login(",
+    "login (",
+    "log_in(",
+    "log_in (",
+    "authenticate(",
+    "authenticate ("
+   ],
+   "regex": "(?i)(?:(?:passw(?:or)?d|psw|[_.-]pw)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]{0,5}(?:\"((?:\\\\.|[^\"\\\\\\r\\n]){5,250})\"|'((?:\\\\.|[^'\\\\\\r\\n]){5,250})'|\\x60((?:\\\\.|[^\\x60\\\\\\r\\n]){5,250})\\x60|([^:=\\s'\"\\x60,;][^\\s'\"\\x60,;]{4,249}))(?:[ \\t]*[,;)}\\]\\r\\n]|[ \\t]+(?:#|//|/\\*|--)|[ \\t]*$|\\\\[nr])|\\b(?:login|log_in|authenticate)\\b[ \\t]*\\([ \\t]*[^,()\\r\\n]{1,250}[ \\t]*,[ \\t]*(?:\"((?:\\\\.|[^\"\\\\\\r\\n]){4,250})\"|'((?:\\\\.|[^'\\\\\\r\\n]){4,250})'|\\x60((?:\\\\.|[^\\x60\\\\\\r\\n]){4,250})\\x60)[ \\t]*\\))",
+   "specificity": 20
+  },
+  {
+   "confidence": "low",
+   "description": "Detected a username-like value used as a component of the generic-password rule.",
+   "filter": "// An unquoted value is an ambiguous scalar in configuration, but\n// not a string literal in the source languages recognized below.\nlet isCodeFile = filter.matchesAny(attributes[\"path\"], [\n  `(?i)\\.(?:c|cc|cpp|cxx|h|hh|hpp|cs|dart|ex|exs|fs|fsx|go|gemspec|groovy|java|js|jsx|mjs|cjs|kt|kts|lua|m|mm|php|pl|pm|py|pyw|r|rake|rb|rs|scala|sql|swift|tf|tfvars|ts|tsx|vb|vue)(?:\\.(?:example|sample|template))?$`\n]);\nlet isUnquotedCodeValue = isCodeFile && filter.matchesAny(finding[\"match\"], [\n  `^(?:[^a-zA-Z0-9])?(?i:username|user|login(?:[_.-]?name)?|email(?:[_.-]?address)?|uid|account(?:[_.-]?name)?|client(?:[_.-]?(?:id|name))?)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]*[^\\x22\\x27\\x60 \\t\\r\\n]`\n]);\n\nisUnquotedCodeValue\n|| filter.matchesAny(finding[\"secret\"], [\n  `^\\*+$`,\n  `^\\.+$`,\n  `(?i)^x{4,}$`,\n  `^•+$`,\n  `^\\$\\{.*}$`,\n  `^\\$\\([^\\r\\n]+\\)$`,\n  `^#\\{[^}\\r\\n]+}$`,\n  `^\\{\\{[ \\t]*.+[ \\t]*}}$`,\n  `^%\\{[^}]+}$`,\n  `^<[^>]+>$`,\n  `^<[^>\\s]+$`,\n  `^\\{[^}]+}$`,\n  `(?i)^\\[?(?:redacted|masked|filtered)\\]?$`,\n  `^(?:USERNAME|USER_NAME|USER|LOGIN|LOGIN_NAME|ACCOUNT_NAME|EMAIL|EMAIL_ADDRESS|UID|CLIENT|CLIENT_ID|CLIENT_NAME)$`,\n  `(?i)^(?:your|example)[_-]?(?:username|user_name|user|login|login_name|account_name|email|email_address|uid|client(?:_id|_name)?)$`\n])\n|| filter.matchesAny(finding[\"match\"], [\n  `^(?:[^a-zA-Z0-9])?(?i:username|user|login(?:[_.-]?name)?|email(?:[_.-]?address)?|uid|account(?:[_.-]name)?|client(?:[_.-]?(?:id|name))?)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]*(?i:nil|null|none|undefined|true|false|string|str|text|integer|int|number|boolean|bool|object)(?:[ \\t]*[,;)}\\]\\r\\n]|[ \\t]*$|\\\\[nr])`,\n  `^(?:[^a-zA-Z0-9])?(?i:username|user|login(?:[_.-]?name)?|email(?:[_.-]?address)?|uid|account(?:[_.-]name)?|client(?:[_.-]?(?:id|name))?)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]*(?:[$@][A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*|\\[[^]\\r\\n]+\\]|\\([^,\\r\\n)]*\\)?)*|:[A-Za-z_][A-Za-z0-9_]*|(?:::)?[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*)*::[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*)*|(?i:process\\.env|config|settings|credentials?|secrets?|var|local|module|data)(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*|\\[[^]\\r\\n]+\\])+|[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*)*(?:\\[[^]\\r\\n]+\\]|\\([^,\\r\\n)]*\\)?)(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*|\\[[^]\\r\\n]+\\]|\\([^,\\r\\n)]*\\)?)*|[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|::)[A-Za-z_][A-Za-z0-9_]*)*\\.(?i:(?:[a-z0-9]+_)*(?:username|user|login(?:_name)?|email(?:_address)?|uid|account(?:_name)?|client(?:_(?:id|name))?|id)))[)}\\]]*\\\\?(?:[ \\t]*[,;)}\\]\\r\\n]|[ \\t]*$|\\\\[nr])`\n])\n",
+   "id": "generic-username",
+   "keywords": [
+    "user",
+    "login",
+    "email",
+    "uid",
+    "account",
+    "client"
+   ],
+   "regex": "(?m)(?:^|[^a-zA-Z0-9])(?i:username|user|login(?:[_.-]?name)?|email(?:[_.-]?address)?|uid|account(?:[_.-]?name)?|client(?:[_.-]?(?:id|name))?)\\b[ \\t'\"\\\\]{0,3}(?:=>|:=|=|:)[ \\t]{0,5}(?:\"((?:\\\\.|[^\"\\\\\\r\\n]){3,250})\"|'((?:\\\\.|[^'\\\\\\r\\n]){3,250})'|\\x60((?:\\\\.|[^\\x60\\\\\\r\\n]){3,250})\\x60|([^:=\\s'\"\\x60,;][^\\s'\"\\x60,;]{2,249}))(?:[ \\t]*[,;)}\\]\\r\\n]|[ \\t]*$|\\\\[nr])",
+   "skipReport": true
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Gitea Access Token, which may expose self-hosted Git repositories and associated code to unauthorized access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.3 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "gitea-access-token",
+   "keywords": [
+    "gitea"
+   ],
+   "regex": "(?i)(?:gitea[_.-]?(?:token|key|secret|access))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitHub App Token, which may compromise GitHub application integrations and source code security.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n|| matchesAny(attributes[\"path\"], [`(?:^|/)@octokit/auth-token/README\\.md$`])\n",
+   "id": "github-app-token",
+   "keywords": [
+    "ghu_",
+    "ghs_"
+   ],
+   "regex": "(?:ghu|ghs)_[0-9a-zA-Z]{36}",
+   "validate": "let base_url = env.getOrDefault(\"GITHUB_BASE_URL\", \"https://api.github.com\"); (let r = http.get(base_url + \"/app\", {\n      \"Accept\": \"application/vnd.github+json\",\n      \"Authorization\": \"Bearer \" + finding[\"secret\"]\n    }); r.status == 200 && (r.json?.slug ?? \"\") != \"\" ? {\n      \"result\": \"valid\",\n      \"slug\": (r.json?.slug ?? \"\"),\n      \"name\": (r.json?.name ?? \"\"),\n      \"html_url\": (r.json?.html_url ?? \"\"),\n      \"external_url\": (r.json?.external_url ?? \"\")\n    } : r.status in [401, 403] ? {\n      \"result\": \"invalid\",\n      \"reason\": \"Unauthorized\"\n    } : validate.unknown(r))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a GitHub Fine-Grained Personal Access Token, risking unauthorized repository access and code manipulation.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "github-fine-grained-pat",
+   "keywords": [
+    "github_pat_"
+   ],
+   "regex": "github_pat_\\w{82}",
+   "validate": "let base_url = env.getOrDefault(\"GITHUB_BASE_URL\", \"https://api.github.com\"); (let r = http.get(base_url + \"/user\", {\n      \"Accept\": \"application/vnd.github+json\",\n      \"Authorization\": \"token \" + finding[\"secret\"]\n    }); r.status == 200 && (r.json?.login ?? \"\") != \"\" ? {\n      \"result\": \"valid\",\n      \"username\": (r.json?.login ?? \"\"),\n      \"name\": (r.json?.name ?? \"\"),\n      \"scopes\": (r.headers[\"x-oauth-scopes\"] ?? \"\")\n    } : r.status in [401, 403] ? {\n      \"result\": \"invalid\",\n      \"reason\": \"Unauthorized\"\n    } : validate.unknown(r))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a GitHub OAuth Access Token, posing a risk of compromised GitHub account integrations and data leaks.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "github-oauth",
+   "keywords": [
+    "gho_"
+   ],
+   "regex": "gho_[0-9a-zA-Z]{36}",
+   "validate": "let base_url = env.getOrDefault(\"GITHUB_BASE_URL\", \"https://api.github.com\"); (let r = http.get(base_url + \"/user\", {\n      \"Accept\": \"application/vnd.github+json\",\n      \"Authorization\": \"token \" + finding[\"secret\"]\n    }); r.status == 200 && (r.json?.login ?? \"\") != \"\" ? {\n      \"result\": \"valid\",\n      \"username\": (r.json?.login ?? \"\"),\n      \"name\": (r.json?.name ?? \"\"),\n      \"scopes\": (r.headers[\"x-oauth-scopes\"] ?? \"\")\n    } : r.status in [401, 403] ? {\n      \"result\": \"invalid\",\n      \"reason\": \"Unauthorized\"\n    } : validate.unknown(r))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a GitHub Personal Access Token, potentially leading to unauthorized repository access and sensitive content exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n|| matchesAny(attributes[\"path\"], [`(?:^|/)@octokit/auth-token/README\\.md$`])\n",
+   "id": "github-pat",
+   "keywords": [
+    "ghp_"
+   ],
+   "regex": "ghp_[0-9a-zA-Z]{36}",
+   "validate": "let base_url = env.getOrDefault(\"GITHUB_BASE_URL\", \"https://api.github.com\"); (let r = http.get(base_url + \"/user\", {\n      \"Accept\": \"application/vnd.github+json\",\n      \"Authorization\": \"token \" + finding[\"secret\"]\n    }); r.status == 200 && (r.json?.login ?? \"\") != \"\" ? {\n      \"result\": \"valid\",\n      \"username\": (r.json?.login ?? \"\"),\n      \"name\": (r.json?.name ?? \"\"),\n      \"scopes\": (r.headers[\"x-oauth-scopes\"] ?? \"\")\n    } : r.status in [401, 403] ? {\n      \"result\": \"invalid\",\n      \"reason\": \"Unauthorized\"\n    } : validate.unknown(r))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a GitHub Refresh Token, which could allow prolonged unauthorized access to GitHub services.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "github-refresh-token",
+   "keywords": [
+    "ghr_"
+   ],
+   "regex": "ghr_[0-9a-zA-Z]{36}",
+   "validate": "let base_url = env.getOrDefault(\"GITHUB_BASE_URL\", \"https://api.github.com\"); (let r = http.get(base_url + \"/user\", {\n      \"Accept\": \"application/vnd.github+json\",\n      \"Authorization\": \"token \" + finding[\"secret\"]\n    }); r.status == 200 && (r.json?.login ?? \"\") != \"\" ? {\n      \"result\": \"valid\",\n      \"username\": (r.json?.login ?? \"\"),\n      \"name\": (r.json?.name ?? \"\"),\n      \"scopes\": (r.headers[\"x-oauth-scopes\"] ?? \"\")\n    } : r.status in [401, 403] ? {\n      \"result\": \"invalid\",\n      \"reason\": \"Unauthorized\"\n    } : validate.unknown(r))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab CI/CD Job Token, potential access to projects and some APIs on behalf of a user while the CI job is running.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-cicd-job-token",
+   "keywords": [
+    "glcbt-"
+   ],
+   "regex": "glcbt-[0-9a-zA-Z]{1,5}_[0-9a-zA-Z_-]{20}",
+   "validate": "let r = http.get(\"https://gitlab.com/api/v4/user\", {\n    \"PRIVATE-TOKEN\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab Deploy Token, risking access to repositories, packages and containers with write access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-deploy-token",
+   "keywords": [
+    "gldt-"
+   ],
+   "regex": "gldt-[0-9a-zA-Z_\\-]{20}",
+   "validate": "let r = http.get(\"https://gitlab.com/api/v4/user\", {\n    \"PRIVATE-TOKEN\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab feature flag client token, risks exposing user lists and features flags used by an application.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-feature-flag-client-token",
+   "keywords": [
+    "glffct-"
+   ],
+   "regex": "glffct-[0-9a-zA-Z_\\-]{20}"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab feed token, risking exposure of user data.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-feed-token",
+   "keywords": [
+    "glft-"
+   ],
+   "regex": "glft-[0-9a-zA-Z_\\-]{20}"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab incoming mail token embedded in an email address, risking manipulation of data sent by mail.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-incoming-mail-address-token",
+   "keywords": [
+    "incoming+"
+   ],
+   "regex": "incoming\\+(?:[A-Za-z0-9._-]+-)?\\d+-([A-Za-z0-9_-]+)-(?:issue(?:-\\d+)?|merge-request)@",
+   "specificity": 50
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab incoming mail token, risking manipulation of data sent by mail.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-incoming-mail-token",
+   "keywords": [
+    "glimt-"
+   ],
+   "regex": "glimt-[0-9a-zA-Z_\\-]{25}"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab Kubernetes Agent token, risking access to repos and registry of projects connected via agent.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-kubernetes-agent-token",
+   "keywords": [
+    "glagent-"
+   ],
+   "regex": "glagent-[0-9a-zA-Z_\\-]{50}"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab OIDC Application Secret, risking access to apps using GitLab as authentication provider.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-oauth-app-secret",
+   "keywords": [
+    "gloas-"
+   ],
+   "regex": "gloas-[0-9a-zA-Z_\\-]{64}"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab Personal Access Token, risking unauthorized access to GitLab repositories and codebase exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-pat",
+   "keywords": [
+    "glpat-"
+   ],
+   "regex": "glpat-[\\w-]{20}",
+   "validate": "let r = http.get(\"https://gitlab.com/api/v4/personal_access_tokens/self\", {\n    \"PRIVATE-TOKEN\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\",\n    \"name\": (r.json?.name ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab Personal Access Token (routable), risking unauthorized access to GitLab repositories and codebase exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "gitlab-pat-routable",
+   "keywords": [
+    "glpat-"
+   ],
+   "regex": "\\bglpat-[0-9a-zA-Z_-]{27,300}\\.[0-9a-z]{2}[0-9a-z]{7}\\b",
+   "validate": "let r = http.get(\"https://gitlab.com/api/v4/personal_access_tokens/self\", {\n    \"PRIVATE-TOKEN\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\",\n    \"name\": (r.json?.name ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a GitLab Personal Access Token (routable, versioned), risking unauthorized access to GitLab repositories and codebase exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "gitlab-pat-routable-versioned",
+   "keywords": [
+    "glpat-"
+   ],
+   "regex": "\\bglpat-[0-9a-zA-Z_-]{27,300}\\.[0-9a-z]{2}\\.[0-9a-z]{9}\\b",
+   "validate": "let r = http.get(\"https://gitlab.com/api/v4/personal_access_tokens/self\", {\n    \"PRIVATE-TOKEN\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\",\n    \"name\": (r.json?.name ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a GitLab Pipeline Trigger Token, potentially compromising continuous integration workflows and project security.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-ptt",
+   "keywords": [
+    "glptt-"
+   ],
+   "regex": "glptt-[0-9a-f]{40}",
+   "validate": "let r = http.get(\"https://gitlab.com/api/v4/user\", {\n    \"PRIVATE-TOKEN\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a GitLab Runner Registration Token, posing a risk to CI/CD pipeline integrity and unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-rrt",
+   "keywords": [
+    "gr1348941"
+   ],
+   "regex": "GR1348941[\\w-]{20}",
+   "validate": "let r = http.post(\"https://gitlab.com/api/v4/runners/verify\", {\n    \"Content-Type\": \"application/x-www-form-urlencoded\"\n  }, \"token=\" + finding[\"secret\"]); r.status == 200 && !(r.body contains \"token is missing\") && !(r.body contains \"403 Forbidden\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a GitLab Runner Authentication Token, posing a risk to CI/CD pipeline integrity and unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-runner-authentication-token",
+   "keywords": [
+    "glrt-"
+   ],
+   "regex": "glrt-[0-9a-zA-Z_\\-]{20}",
+   "validate": "let r = http.get(\"https://gitlab.com/api/v4/user\", {\n    \"PRIVATE-TOKEN\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a GitLab Runner Authentication Token (Routable), posing a risk to CI/CD pipeline integrity and unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "gitlab-runner-authentication-token-routable",
+   "keywords": [
+    "glrt-"
+   ],
+   "regex": "\\bglrt-t\\d_[0-9a-zA-Z_\\-]{27,300}\\.[0-9a-z]{2}[0-9a-z]{7}\\b",
+   "validate": "let r = http.get(\"https://gitlab.com/api/v4/user\", {\n    \"PRIVATE-TOKEN\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a GitLab SCIM Token, posing a risk to unauthorized access for a organization or instance.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-scim-token",
+   "keywords": [
+    "glsoat-"
+   ],
+   "regex": "glsoat-[0-9a-zA-Z_\\-]{20}"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a GitLab Session Cookie, posing a risk to unauthorized access to a user account.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "gitlab-session-cookie",
+   "keywords": [
+    "_gitlab_session="
+   ],
+   "regex": "_gitlab_session=[0-9a-z]{32}"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Gitter Access Token, which may lead to unauthorized access to chat and communication services.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "gitter-access-token",
+   "keywords": [
+    "gitter"
+   ],
+   "regex": "(?i)(?:gitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a GoCardless API token, potentially risking unauthorized direct debit payment operations and financial data exposure.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "gocardless-api-token",
+   "keywords": [
+    "live_",
+    "gocardless"
+   ],
+   "regex": "(?i)(?:gocardless)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(live_(?i)[a-z0-9\\-_=]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.gocardless.com/customers?limit=1\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\",\n    \"GoCardless-Version\": \"2015-07-06\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Grafana API key, which could compromise monitoring dashboards and sensitive data analytics.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "grafana-api-key",
+   "keywords": [
+    "eyjrijoi"
+   ],
+   "regex": "\\b(eyJrIjoi[A-Za-z0-9+/]{40,380}={0,2})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Grafana cloud API token, risking unauthorized access to cloud-based monitoring services and data exposure.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "grafana-cloud-api-token",
+   "keywords": [
+    "glc_"
+   ],
+   "regex": "\\b(glc_[A-Za-z0-9+/]{40,150}={0,2})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://grafana.com/api/stack-regions\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  });\nr.status == 200 && (true) ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Grafana service account token, posing a risk of compromised monitoring services and data integrity.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "grafana-service-account-token",
+   "keywords": [
+    "glsa_"
+   ],
+   "regex": "\\b(glsa_[A-Za-z0-9]{32}_[A-Fa-f0-9]{8})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Greptile API Key, which may expose AI-powered code search and analysis services to unauthorized access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "greptile-api-key",
+   "keywords": [
+    "greptile"
+   ],
+   "regex": "(?i)(?:greptile)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-zA-Z0-9+/]{48})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Groq API Key, which may expose high-speed AI inference services to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "groq-api-key",
+   "keywords": [
+    "gsk_"
+   ],
+   "regex": "(?i)\\b(gsk_[A-Z0-9]{52})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.groq.com/openai/v1/models\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains '\"id\"') && (r.body contains '\"data\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Gumroad access token, which may expose Gumroad account and product data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "gumroad-access-token",
+   "keywords": [
+    "gumroad"
+   ],
+   "regex": "(?i)(?:gumroad)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:[a-f0-9]{64}|[A-Za-z0-9-]{43}))(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.gumroad.com/v2/user?access_token=\" + finding[\"secret\"], {\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"success\\\":true\") && (r.body contains \"\\\"user\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Harness Access Token (PAT or SAT), risking unauthorized access to a Harness account.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.4\n",
+   "id": "harness-api-key",
+   "keywords": [
+    "pat.",
+    "sat."
+   ],
+   "regex": "(?:pat|sat)\\.[a-zA-Z0-9_-]{22}\\.[0-9a-f]{24}\\.[a-zA-Z0-9]{20}",
+   "validate": "let r = http.get(\"https://app.harness.io/v1/orgs?limit=1&page=1\", {\n    \"Accept\": \"application/json\",\n    \"x-api-key\": finding[\"secret\"]\n  }); r.status in [200, 403] ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a HashiCorp Terraform user/org API token, which may lead to unauthorized infrastructure management and security breaches.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "hashicorp-tf-api-token",
+   "keywords": [
+    "atlasv1"
+   ],
+   "regex": "(?i)[a-z0-9]{14}\\.(?-i:atlasv1)\\.[a-z0-9\\-_=]{60,70}"
+  },
+  {
+   "confidence": "medium",
+   "description": "Identified a HashiCorp Terraform password field, risking unauthorized infrastructure configuration and security breaches.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "hashicorp-tf-password",
+   "keywords": [
+    "administrator_login_password",
+    "password"
+   ],
+   "path": "(?i)\\.(?:tf|hcl)$",
+   "regex": "(?i)(?:administrator_login_password|password)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(\"[a-z0-9=_\\-]{8,20}\")(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Heroku API Key, potentially compromising cloud application deployments and operational security.",
+   "id": "heroku-api-key",
+   "keywords": [
+    "heroku"
+   ],
+   "regex": "(?i)(?:heroku)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Heroku API Key, potentially compromising cloud application deployments and operational security.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "heroku-api-key-v2",
+   "keywords": [
+    "hrku-aa"
+   ],
+   "regex": "\\b((HRKU-AA[0-9a-zA-Z_-]{58}))(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Highnote secret API key for the live environment.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "highnote-secret-live-key",
+   "keywords": [
+    "highnote"
+   ],
+   "regex": "(?i:(?:highnote(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token|sk[_. -]*live))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(sk_live_a2V5Xz[A-Za-z0-9+/]{69}={0,2})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.us.highnote.com/graphql\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes(finding[\"secret\"])),\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{\\\"query\\\":\\\"query { ping }\\\"}\"); r.status == 200 && (r.json?.data?.ping ?? \"\") == \"pong\" ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a Honeycomb API key, which may expose Honeycomb telemetry and environment data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "honeycomb-api-key",
+   "keywords": [
+    "honeycomb"
+   ],
+   "regex": "(?i)(?:honeycomb)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:[a-f0-9]{32}|[a-z0-9]{22}))(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.honeycomb.io/1/auth\", {\n    \"X-Honeycomb-Team\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"team\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a HubSpot API Token, posing a risk to CRM data integrity and unauthorized marketing operations.",
+   "id": "hubspot-api-key",
+   "keywords": [
+    "hubspot"
+   ],
+   "regex": "(?i)(?:hubspot)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Hugging Face Access token, which could lead to unauthorized access to AI models and sensitive data.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "huggingface-access-token",
+   "keywords": [
+    "hf_"
+   ],
+   "regex": "\\b(hf_(?i:[a-z]{34}))(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://huggingface.co/api/whoami-v2\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\",\n    \"username\": (r.json?.name ?? \"\")\n  } : r.status == 401 && (r.body contains \"expired\") ? {\n    \"result\": \"revoked\",\n    \"reason\": \"Token expired\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Hugging Face Organization API token, potentially compromising AI organization accounts and associated data.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "huggingface-organization-api-token",
+   "keywords": [
+    "api_org_"
+   ],
+   "regex": "\\b(api_org_(?i:[a-z]{34}))(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://huggingface.co/api/whoami-v2\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\",\n    \"username\": (r.json?.name ?? \"\")\n  } : r.status == 401 && (r.body contains \"expired\") ? {\n    \"result\": \"revoked\",\n    \"reason\": \"Token expired\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Hunter API key, which may allow access to account and email intelligence data.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "hunter-api-key.1",
+   "keywords": [
+    "hunter"
+   ],
+   "regex": "(?i:(?:hunter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.hunter.io/v2/account\", {\n    \"X-API-KEY\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.body contains \"authentication_failed\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"No user found for the API key\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected an IBM Cloud user API key, which may expose IBM Cloud account resources.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "ibm-cloud-user-api-key",
+   "keywords": [
+    "ibm"
+   ],
+   "regex": "(?i)(?:ibm(?:cloud)?|bx)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{42,44})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://iam.cloud.ibm.com/v1/apikeys/details?apikey=\" + finding[\"secret\"], {\n    \"Authorization\": \"Basic Yng6Yng=\",\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected an InfluxDB API token, which may allow unauthorized access to time-series data and InfluxDB organization resources.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 4.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "influxdb-api-token",
+   "keywords": [
+    "influx"
+   ],
+   "regex": "(?i)(?:\\binflux(?:db)?\\b(?:.|[\\n\\r]){0,64}?\\b(?:token|api[_-]?key)\\b(?:.|[\\n\\r]){0,32}?)[=:\"'\\s]{1,8}([A-Za-z0-9+/=_-]{88,})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://us-east-1-1.aws.cloud2.influxdata.com/api/v2/orgs\", {\n    \"Authorization\": \"Token \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected an Infomaniak API token, which may expose hosting, mail, and cloud services to unauthorized access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 4.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "infomaniak-api-token",
+   "keywords": [
+    "infomaniak"
+   ],
+   "regex": "(?i)(?:infomaniak)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9_\\-]{60,100})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.infomaniak.com/1/profile\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains '\"result\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected an Infracost API Token, risking unauthorized access to cloud cost estimation tools and financial data.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "infracost-api-token",
+   "keywords": [
+    "ico-"
+   ],
+   "regex": "\\b(ico-[a-zA-Z0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Instantly API key, which may allow access to campaigns, accounts, leads, and analytics.",
+   "filter": "entropy(finding[\"secret\"]) < 3.3\n",
+   "id": "instantly-api-key.1",
+   "keywords": [
+    "instantly"
+   ],
+   "regex": "(?i:(?:instantly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9+/]{66}==)(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.instantly.ai/api/v2/accounts?limit=1\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 402 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but the workspace does not have an active paid plan\"\n  } : r.status == 401 && (r.body contains \"Invalid authorization header or API key\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid API key\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Identified an Intercom API Token, which could compromise customer communication channels and data privacy.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "intercom-api-key",
+   "keywords": [
+    "intercom"
+   ],
+   "regex": "(?i)(?:intercom)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{60})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Intra42 client secret, which could lead to unauthorized access to the 42School API and sensitive data.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "intra42-client-secret",
+   "keywords": [
+    "intra",
+    "s-s4t2ud-",
+    "s-s4t2af-"
+   ],
+   "regex": "\\b(s-s4t2(?:ud|af)-(?i)[abcdef0123456789]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Ionic personal access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "ionic-personal-access-token",
+   "keywords": [
+    "ionic"
+   ],
+   "regex": "\\b(ion_[A-Za-z0-9]{42})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.ionic.io/graphql\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\",\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"query\\\":\\\"query ValidateToken { viewer { __typename } }\\\"}\"); r.status == 200 && (r.body contains \"\\\"data\\\":{\\\"viewer\\\":{\\\"__typename\\\":\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] || (r.body contains \"\\\"Unauthorized\\\"\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a JumpCloud API key, which may expose JumpCloud directory data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "jumpcloud-api-key",
+   "keywords": [
+    "jumpcloud"
+   ],
+   "regex": "(?i)(?:jumpcloud)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://console.jumpcloud.com/api/systemusers?limit=1&skip=0\", {\n    \"x-api-key\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"results\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a JSON Web Token, which may lead to unauthorized access to web applications and sensitive user data.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "jwt",
+   "keywords": [
+    "eyj"
+   ],
+   "regex": "\\b(ey[a-zA-Z0-9]{17,}\\.ey[a-zA-Z0-9\\/\\\\_-]{17,}\\.(?:[a-zA-Z0-9\\/\\\\_-]{10,}={0,2})?)(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Base64-encoded JSON Web Token, posing a risk of exposing encoded authentication and data exchange information.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "jwt-base64",
+   "keywords": [
+    "zxlk"
+   ],
+   "regex": "\\bZXlK(?:(?P<alg>aGJHY2lPaU)|(?P<apu>aGNIVWlPaU)|(?P<apv>aGNIWWlPaU)|(?P<aud>aGRXUWlPaU)|(?P<b64>aU5qUWlP)|(?P<crit>amNtbDBJanBi)|(?P<cty>amRIa2lPaU)|(?P<epk>bGNHc2lPbn)|(?P<enc>bGJtTWlPaU)|(?P<jku>cWEzVWlPaU)|(?P<jwk>cWQyc2lPb)|(?P<iss>cGMzTWlPaU)|(?P<iv>cGRpSTZJ)|(?P<kid>cmFXUWlP)|(?P<key_ops>clpYbGZiM0J6SWpwY)|(?P<kty>cmRIa2lPaUp)|(?P<nonce>dWIyNWpaU0k2)|(?P<p2c>d01tTWlP)|(?P<p2s>d01uTWlPaU)|(?P<ppt>d2NIUWlPaU)|(?P<sub>emRXSWlPaU)|(?P<svt>emRuUWlP)|(?P<tag>MFlXY2lPaU)|(?P<typ>MGVYQWlPaUp)|(?P<url>MWNtd2l)|(?P<use>MWMyVWlPaUp)|(?P<ver>MlpYSWlPaU)|(?P<version>MlpYSnphVzl1SWpv)|(?P<x>NElqb2)|(?P<x5c>NE5XTWlP)|(?P<x5t>NE5YUWlPaU)|(?P<x5ts256>NE5YUWpVekkxTmlJNkl)|(?P<x5u>NE5YVWlPaU)|(?P<zip>NmFYQWlPaU))[a-zA-Z0-9\\/\\\\_+\\-\\r\\n]{40,}={0,2}"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Kagi API key, which may expose Kagi API usage.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "kagi-api-key",
+   "keywords": [
+    "kagi"
+   ],
+   "regex": "(?i)(?:kagi)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{11}\\.[a-z0-9_-]{43})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://kagi.com/api/v0/search?q=test\", {\n    \"Authorization\": \"Bot \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains \"\\\"data\\\":\") && (r.body contains \"\\\"results\\\":\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Kimi API key, which may expose Moonshot AI model access and usage to unauthorized parties.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "kimi-api-key",
+   "keywords": [
+    "kimi",
+    "moonshot"
+   ],
+   "regex": "(?i)(?:kimi|moonshot)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(sk-[A-Za-z0-9_-]{48})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.moonshot.ai/v1/models\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains '\"data\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Klaviyo API key, which may expose Klaviyo account and marketing data.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "klaviyo-api-key",
+   "keywords": [
+    "klaviyo"
+   ],
+   "regex": "(?i)(?:klaviyo)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pk_[a-z0-9]{34})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://a.klaviyo.com/api/accounts\", {\n    \"Revision\": \"2023-02-22\",\n    \"Authorization\": \"Klaviyo-API-Key \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Identified a Kraken Access Token, potentially compromising cryptocurrency trading accounts and financial security.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 4.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "kraken-access-token",
+   "keywords": [
+    "kraken"
+   ],
+   "regex": "(?i)(?:kraken)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9\\/=_\\+\\-]{80,90})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Possible Kubernetes Secret detected, posing a risk of leaking credentials/tokens from your deployments",
+   "filter": "matchesAny(finding[\"secret\"], [`[\\w.-]+:(?:[ \\t]*(?:\\||>[-+]?)\\s+)?[ \\t]*(?:\\{\\{[ \\t\\w\"|$:=,.-]+}}|\"\"|'')`])\n|| matchesAny(finding[\"match\"], [`(kind:(?s:.)+\\n---\\n(?s:.)+\\bdata:|data:(?s:.)+\\n---\\n(?s:.)+\\bkind:)`])\n",
+   "id": "kubernetes-secret-yaml",
+   "keywords": [
+    "secret"
+   ],
+   "path": "(?i)\\.ya?ml$",
+   "regex": "(?i)(?:\\bkind:[ \\t]*[\"']?\\bsecret\\b[\"']?(?s:.){0,1000}?\\bdata:(?s:.){0,100}?\\s+([\\w.-]+:(?:[ \\t]*(?:\\||>[-+]?)\\s+)?[ \\t]*(?:[\"']?[a-z0-9+/]{10,}={0,3}[\"']?|\\{\\{[ \\t\\w\"|$:=,.-]+}}|\"\"|''))|\\bdata:(?s:.){0,100}?\\s+([\\w.-]+:(?:[ \\t]*(?:\\||>[-+]?)\\s+)?[ \\t]*(?:[\"']?[a-z0-9+/]{10,}={0,3}[\"']?|\\{\\{[ \\t\\w\"|$:=,.-]+}}|\"\"|''))(?s:.){0,1000}?\\bkind:[ \\t]*[\"']?\\bsecret\\b[\"']?)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Kucoin Access Token, risking unauthorized access to cryptocurrency exchange services and transactions.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "kucoin-access-token",
+   "keywords": [
+    "kucoin"
+   ],
+   "regex": "(?i)(?:kucoin)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Kucoin Secret Key, which could lead to compromised cryptocurrency operations and financial data breaches.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.3 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "kucoin-secret-key",
+   "keywords": [
+    "kucoin"
+   ],
+   "regex": "(?i)(?:kucoin)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "LangSmith personal access token.",
+   "filter": "entropy(finding[\"secret\"]) < 4.0\n",
+   "id": "langchain-langsmith-personal-access-token",
+   "keywords": [
+    "lsv2_pt_"
+   ],
+   "regex": "\\b(lsv2_pt_[0-9a-fA-F]{32}_[0-9a-fA-F]{10})",
+   "validate": "let r = http.get(\"https://api.smith.langchain.com/api/v1/api-key/current\", {\n    \"X-API-Key\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "LangSmith service API key.",
+   "filter": "entropy(finding[\"secret\"]) < 4.0\n",
+   "id": "langchain-langsmith-service-key",
+   "keywords": [
+    "lsv2_sk_"
+   ],
+   "regex": "\\b(lsv2_sk_[0-9a-fA-F]{32}_[0-9a-fA-F]{10})",
+   "validate": "let r = http.get(\"https://api.smith.langchain.com/api/v1/orgs/current\", {\n    \"X-API-Key\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Langfuse public key, used as a component of the Langfuse secret-key composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "langfuse-public-key.1",
+   "keywords": [
+    "pk-lf-"
+   ],
+   "regex": "\\b(pk-lf-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "langfuse-public-key.1",
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Langfuse secret key, which authenticates project API access when paired with its public key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "langfuse-secret-key.1",
+   "keywords": [
+    "sk-lf-"
+   ],
+   "regex": "\\b(sk-lf-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://cloud.langfuse.com/api/public/projects\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes((components[\"langfuse-public-key.1\"]?.secret ?? \"\") + \":\" + finding[\"secret\"])),\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Lark application ID, used as a component of the Lark application-secret rule.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "lark-app-id",
+   "keywords": [
+    "cli_"
+   ],
+   "regex": "\\b(cli_[A-Za-z0-9]{16})",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "lark-app-id"
+    }
+   ],
+   "confidence": "high",
+   "description": "Lark application secret.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "lark-app-secret",
+   "keywords": [
+    "lark"
+   ],
+   "regex": "(?i)(?:lark|larksuite)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal\", {\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{\\\"app_id\\\":\" + json.string((components[\"lark-app-id\"]?.secret ?? \"\")) + \",\\\"app_secret\\\":\" + json.string(finding[\"secret\"]) + \"}\");\nlet code = r.json?.code ?? -1;\nr.status == 200 && code == 0 ? {\n    \"result\": \"valid\"\n  } : r.status == 200 && code in [10003, 10005, 10014, 10015] ? {\n    \"result\": \"invalid\",\n    \"reason\": (r.json?.msg ?? \"Invalid application credentials\")\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Launchdarkly Access Token, potentially compromising feature flag management and application functionality.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "launchdarkly-access-token",
+   "keywords": [
+    "launchdarkly"
+   ],
+   "regex": "(?i)(?:launchdarkly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Lichess personal access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "lichess-personal-access-token",
+   "keywords": [
+    "lip_"
+   ],
+   "regex": "\\b(lip_[A-Za-z0-9_]{16,60})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://lichess.org/api/account\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\",\n    \"username\": (r.json?.username ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a LightOn Paradigm API key, which may expose enterprise LLM services to unauthorized access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "lighton-paradigm-api-key",
+   "keywords": [
+    "lighton",
+    "paradigm"
+   ],
+   "regex": "(?i)(?:lighton|paradigm)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9_\\-]{40,80})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://paradigm.lighton.ai/api/v2/models\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains '\"object\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Linear API Token, posing a risk to project management tools and sensitive task data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "linear-api-key",
+   "keywords": [
+    "lin_api_"
+   ],
+   "regex": "lin_api_(?i)[a-z0-9]{40}",
+   "validate": "let r = http.post(\"https://api.linear.app/graphql\", {\n    \"Authorization\": finding[\"secret\"],\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"query\\\": \\\"query { viewer { id name email } }\\\"}\"); r.status == 200 && (r.body contains \"\\\"data\\\"\") && (r.body contains \"\\\"viewer\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.data?.viewer?.email ?? \"\"),\n    \"name\": (r.json?.data?.viewer?.name ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Identified a Linear Client Secret, which may compromise secure integrations and sensitive project management data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.3 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "linear-client-secret",
+   "keywords": [
+    "linear"
+   ],
+   "regex": "(?i)(?:linear)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Found a LinkedIn Client ID, risking unauthorized access to LinkedIn integrations and professional data exposure.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "linkedin-client-id",
+   "keywords": [
+    "linkedin",
+    "linked_in",
+    "linked-in"
+   ],
+   "regex": "(?i)(?:linked[_-]?in)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{14})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Discovered a LinkedIn Client secret, potentially compromising LinkedIn application integrations and user data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "linkedin-client-secret",
+   "keywords": [
+    "linkedin",
+    "linked_in",
+    "linked-in"
+   ],
+   "regex": "(?i)(?:linked[_-]?in)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{16})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "LlamaCloud API key, which may allow access to managed parsing, ingestion, and retrieval projects.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "llama-cloud-api-key.1",
+   "keywords": [
+    "llx-"
+   ],
+   "regex": "\\b(llx-[A-Za-z0-9]{44,52})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.cloud.llamaindex.ai/api/v1/projects\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Uncovered a Lob API Key, which could lead to unauthorized access to mailing and address verification services.",
+   "id": "lob-api-key",
+   "keywords": [
+    "test_",
+    "live_"
+   ],
+   "regex": "(?i)(?:lob)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((live|test)_[a-f0-9]{35})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a Lob Publishable API Key, posing a risk of exposing mail and print service integrations.",
+   "id": "lob-pub-api-key",
+   "keywords": [
+    "test_pub_",
+    "live_pub_"
+   ],
+   "regex": "(?i)(?:lob)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((test|live)_pub_[a-f0-9]{31})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Found a Looker Client ID, risking unauthorized access to a Looker account and exposing sensitive data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "looker-client-id",
+   "keywords": [
+    "looker"
+   ],
+   "regex": "(?i)(?:looker)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Found a Looker Client Secret, risking unauthorized access to a Looker account and exposing sensitive data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "looker-client-secret",
+   "keywords": [
+    "looker"
+   ],
+   "regex": "(?i)(?:looker)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Mailchimp API key, potentially compromising email marketing campaigns and subscriber data.",
+   "id": "mailchimp-api-key",
+   "keywords": [
+    "mailchimp"
+   ],
+   "regex": "(?i)(?:MailchimpSDK.initialize|mailchimp)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32}-us\\d\\d)(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let dc = substring(finding[\"secret\"], lastIndexOf(finding[\"secret\"], \"-\") + 1); (let r = http.get(\"https://\" + dc + \".api.mailchimp.com/3.0/ping\", {\n      \"Accept\": \"application/json\",\n      \"Authorization\": \"Basic \" + base64.encode(bytes(\"x:\" + finding[\"secret\"]))\n    }); r.status == 200 ? {\n      \"result\": \"valid\"\n    } : r.status in [401, 403] ? {\n      \"result\": \"invalid\",\n      \"reason\": \"Unauthorized\"\n    } : validate.unknown(r))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "MailerSend API token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "mailersend-api-token",
+   "keywords": [
+    "mlsn."
+   ],
+   "regex": "\\b(mlsn\\.[A-Za-z0-9]{30,100})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.mailersend.com/v1/api-quota\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Mailgun private API token, risking unauthorized email service operations and data breaches.",
+   "id": "mailgun-private-api-token",
+   "keywords": [
+    "mailgun"
+   ],
+   "regex": "(?i)(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(key-[a-f0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.mailgun.net/v3/domains\", {\n    \"Accept\": \"application/json\",\n    \"Authorization\": \"Basic \" + base64.encode(bytes(\"api:\" + finding[\"secret\"]))\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Mailgun public validation key, which could expose email verification processes and associated data.",
+   "id": "mailgun-pub-key",
+   "keywords": [
+    "mailgun"
+   ],
+   "regex": "(?i)(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pubkey-[a-f0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Mailgun webhook signing key, potentially compromising email automation and data integrity.",
+   "id": "mailgun-signing-key",
+   "keywords": [
+    "mailgun"
+   ],
+   "regex": "(?i)(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-h0-9]{32}-[a-h0-9]{8}-[a-h0-9]{8})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a MapBox API token, posing a risk to geospatial services and sensitive location data exposure.",
+   "id": "mapbox-api-token",
+   "keywords": [
+    "mapbox"
+   ],
+   "regex": "(?i)(?:mapbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pk\\.[a-z0-9]{60}\\.[a-z0-9]{22})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Identified a Mattermost Access Token, which may compromise team communication channels and data privacy.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "mattermost-access-token",
+   "keywords": [
+    "mattermost"
+   ],
+   "regex": "(?i)(?:mattermost)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{26})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a potential MaxMind license key.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "maxmind-license-key",
+   "keywords": [
+    "_mmk"
+   ],
+   "regex": "\\b([A-Za-z0-9]{6}_[A-Za-z0-9]{29}_mmk)(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Mem0 API key, which may allow access to stored application memories.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "mem0-api-key.1",
+   "keywords": [
+    "mem0"
+   ],
+   "regex": "(?i:(?:mem0)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(m0-[A-Za-z0-9]{24,44})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.mem0.ai/v3/memories/?page=1&page_size=1\", {\n    \"Authorization\": \"Token \" + finding[\"secret\"],\n    \"Accept\": \"application/json\",\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"filters\\\":{\\\"user_id\\\":\\\"betterleaks-validation\\\"}}\"); r.status == 200 && (r.body contains \"\\\"results\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.body contains \"Invalid API key\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid API key\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Mercury production API token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "mercury-production-api-token",
+   "keywords": [
+    "mercury_production_"
+   ],
+   "regex": "\\b(mercury_production_[a-z]{3,6}_[A-Za-z0-9]{40,50}_yrucrem)(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.mercury.com/api/v1/accounts\", {\n    \"Authorization\": \"Bearer secret-token:\" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Mergify application API key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.2\n",
+   "id": "mergify-application-key",
+   "keywords": [
+    "mergify_application_key_"
+   ],
+   "regex": "\\b(mergify_application_key_[A-Za-z0-9_-]{40,200})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.mergify.com/v1/application\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"id\\\"\") && (r.body contains \"\\\"name\\\"\") && (r.body contains \"\\\"scope\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a MessageBird API token, risking unauthorized access to communication platforms and message data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "messagebird-api-token",
+   "keywords": [
+    "messagebird",
+    "message-bird",
+    "message_bird"
+   ],
+   "regex": "(?i)(?:message[_-]?bird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{25})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a MessageBird client ID, potentially compromising API integrations and sensitive communication data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.3 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "messagebird-client-id",
+   "keywords": [
+    "messagebird",
+    "message-bird",
+    "message_bird"
+   ],
+   "regex": "(?i)(?:message[_-]?bird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Microsoft Teams Webhook, which could lead to unauthorized access to team collaboration tools and data leaks.",
+   "id": "microsoft-teams-webhook",
+   "keywords": [
+    "webhook.office.com",
+    "webhookb2",
+    "incomingwebhook"
+   ],
+   "regex": "https://[a-z0-9]+\\.webhook\\.office\\.com/webhookb2/[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}@[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}/IncomingWebhook/[a-z0-9]{32}/[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}"
+  },
+  {
+   "confidence": "high",
+   "description": "Midtrans production server or client key.",
+   "filter": "entropy(finding[\"secret\"]) < 2.8\n",
+   "id": "midtrans-production-server-client-key",
+   "keywords": [
+    "mid-server-",
+    "mid-client-"
+   ],
+   "regex": "(?i)(?:midtrans|mid[_-]?)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(Mid-(?:server|client)-[A-Za-z0-9_]{10,20})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.midtrans.com/v2/betterleaks-validation-nonexistent/status\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes(finding[\"secret\"] + \":\")),\n    \"Accept\": \"application/json\"\n  }); r.status == 200 || (r.status == 404\n    && (r.json?.status_code ?? \"\") == \"404\"\n    && (r.json?.status_message ?? \"\") == \"The requested resource is not found\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a MiniMax API key, which may expose AI model, speech, image, video, or file services to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "minimax-api-key",
+   "keywords": [
+    "sk-api-",
+    "minimax"
+   ],
+   "regex": "(?i)\\b(sk-api-[A-Za-z0-9_-]{119})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.minimax.io/v1/models\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains '\"data\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Miro OAuth access token, which may allow unauthorized access to Miro users, teams, boards, and content.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "miro-access-token",
+   "keywords": [
+    "miro"
+   ],
+   "regex": "\\b(eyJtaXJv[A-Za-z0-9-]{10,64}_[A-Za-z0-9_-]{20,64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.miro.com/v1/oauth-token\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": (r.json?.message ?? \"Unauthorized\")\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a Miro OAuth client ID, used as a component of the miro-client-secret composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 2.5\n",
+   "id": "miro-client-id",
+   "keywords": [
+    "miro"
+   ],
+   "regex": "(?i)(?:miro[_. -]*client[_. -]*id)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{15,21})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "miro-client-id",
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Detected a Miro OAuth client secret, which may allow unauthorized OAuth client authentication when paired with a client ID.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "miro-client-secret",
+   "keywords": [
+    "miro"
+   ],
+   "regex": "(?i)(?:miro)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.miro.com/v1/oauth/token\", {\n    \"Content-Type\": \"application/x-www-form-urlencoded\",\n    \"Accept\": \"application/json\"\n  }, \"grant_type=refresh_token\" +\n  \"&client_id=\" + strings.urlQueryEscape((components[\"miro-client-id\"]?.secret ?? \"\")) +\n  \"&client_secret=\" + strings.urlQueryEscape(finding[\"secret\"]) +\n  \"&refresh_token=invalid\"); r.status == 401\n    && (r.json?.code ?? \"\") == \"oauthError\"\n    && (r.json?.message ?? \"\") == \"Invalid refresh token\" ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (\n    (r.json?.code ?? \"\") == \"secretKeyNotFound\" ||\n    ((r.json?.code ?? \"\") == \"oauthError\" && (r.json?.message ?? \"\") == \"Unauthorized grant type\")\n  ) ? {\n    \"result\": \"invalid\",\n    \"reason\": (r.json?.message ?? \"Invalid client credentials\")\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a Mistral AI API Key, which may expose AI language model services to unauthorized access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "mistral-api-key",
+   "keywords": [
+    "mistral"
+   ],
+   "regex": "(?i)(?:mistral)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Z0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.mistral.ai/v1/models\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains '\"data\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "monday.com API token, which may grant the same workspace access as its associated user or application.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "monday-api-token.1",
+   "keywords": [
+    "monday"
+   ],
+   "regex": "(?i:(?:monday)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(eyJ[A-Za-z0-9_-]{10,200}\\.eyJ[A-Za-z0-9_-]{50,1000}\\.[A-Za-z0-9_-]{20,500})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "specificity": 110,
+   "validate": "let r = http.post(\"https://api.monday.com/v2\", {\n    \"Authorization\": finding[\"secret\"],\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{\\\"query\\\":\\\"query { me { id name } }\\\"}\"); r.status == 200\n    && (r.body contains \"\\\"data\\\"\") && (r.body contains \"\\\"me\\\"\")\n    && (r.body contains \"\\\"id\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a MongoDB Atlas service account client ID.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "mongodb-atlas-service-account-id",
+   "keywords": [
+    "mdb_sa_id_"
+   ],
+   "regex": "\\b(mdb_sa_id_[a-f0-9]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "mongodb-atlas-service-account-id"
+    }
+   ],
+   "confidence": "high",
+   "description": "Detected a MongoDB Atlas service account client secret, which could allow unauthorized Atlas administration API access when paired with a service account client ID.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n|| matchesAny(finding[\"secret\"], [`^mdb_sa_sk_[0-9]{40}$`])\n",
+   "id": "mongodb-atlas-service-account-secret",
+   "keywords": [
+    "mdb_sa_sk_"
+   ],
+   "regex": "\\b(mdb_sa_sk_[A-Za-z0-9_-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://cloud.mongodb.com/api/oauth/token\", {\n    \"Accept\": \"application/json\",\n    \"Content-Type\": \"application/x-www-form-urlencoded\",\n    \"Authorization\": \"Basic \" + base64.encode(bytes((components[\"mongodb-atlas-service-account-id\"]?.secret ?? \"\") + \":\" + finding[\"secret\"]))\n  }, \"grant_type=client_credentials\"); r.status == 200 && (r.json?.access_token ?? \"\") != \"\" ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": (r.json?.error ?? \"Unauthorized\")\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a MongoDB connection string with embedded credentials, potentially exposing direct database access and sensitive application data.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n|| matchesAny(finding[\"secret\"], [\n  `(?i)\\bmongodb(?:\\+srv)?:\\/\\/(?:user(?:name)?|foo):(?:pass(?:word)?|bar)(?:[^@\\/]*)?@`,\n  `(?i)\\bmongodb(?:\\+srv)?:\\/\\/[^\\s'\"\\x60]*(?:\\$\\{\\{[^}]+}}|\\$\\{[^}]+}|\\$[A-Za-z_][A-Za-z0-9_]*|{{[^}]+}}|<[^>]+>|\\[[^]]+])[^\\s'\"\\x60]*`\n])\n",
+   "id": "mongodb-connection-string",
+   "keywords": [
+    "mongodb://",
+    "mongodb+srv://"
+   ],
+   "regex": "\\b(mongodb(?:\\+srv)?://(?P<username>[!-9;-~]{3,50}):(?P<password>[!-?A-~]{3,88})@(?P<host>(?:[a-zA-Z0-9][\\w.-]+|\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})(?::\\d{1,5})?(?:,(?:[a-zA-Z0-9][\\w.-]+|\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})(?::\\d{1,5})?)*)/?(?:(?P<authdb>[\\w-]+)?(?P<options>\\?\\w+=[\\w@/.$-]+(?:&(?:amp;)?\\w+=[\\w@/.$-]+)*)?)?)(?:['\"\\s;\\x60]|\\\\[nr]|\\b|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Mux access-token ID, used as a component of the Mux access-token-secret composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "mux-access-token-id.1",
+   "keywords": [
+    "mux"
+   ],
+   "regex": "(?i)(?:mux[_.-]?(?:access[_.-]?)?token[_.-]?(?:id|identifier))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "mux-access-token-id.1",
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Mux access-token secret, which may grant access to video, data, or system APIs when paired with its token ID.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "mux-access-token-secret.1",
+   "keywords": [
+    "mux"
+   ],
+   "regex": "(?i:(?:mux[_.-]?(?:access[_.-]?)?token[_.-]?(?:secret|private|key))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9+/]{75})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.mux.com/video/v1/assets?limit=1\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes((components[\"mux-access-token-id.1\"]?.secret ?? \"\") + \":\" + finding[\"secret\"])),\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated Mux token without Video read permission\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Neon API key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "neon-api-key",
+   "keywords": [
+    "napi_"
+   ],
+   "regex": "\\b(napi_[A-Za-z0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://console.neon.tech/api/v2/projects\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 || (r.status == 400\n    && (r.json?.message ?? \"\") == \"org_id is required, you can find it on your organization settings page\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Netlify Access Token, potentially compromising web hosting services and site management.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "netlify-access-token",
+   "keywords": [
+    "netlify"
+   ],
+   "regex": "(?i)(?:netlify)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{40,46})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a New Relic ingest browser API token, risking unauthorized access to application performance data and analytics.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "new-relic-browser-api-token",
+   "keywords": [
+    "nrjs-"
+   ],
+   "regex": "(?i)(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRJS-[a-f0-9]{19})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a New Relic insight insert key, compromising data injection into the platform.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "new-relic-insert-key",
+   "keywords": [
+    "nrii-"
+   ],
+   "regex": "(?i)(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRII-[a-z0-9-]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a New Relic user API ID, posing a risk to application monitoring services and data integrity.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "new-relic-user-api-id",
+   "keywords": [
+    "new-relic",
+    "newrelic",
+    "new_relic"
+   ],
+   "regex": "(?i)(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a New Relic user API Key, which could lead to compromised application insights and performance monitoring.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "new-relic-user-api-key",
+   "keywords": [
+    "nrak"
+   ],
+   "regex": "(?i)(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRAK-[a-z0-9]{27})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "ngrok API key or agent authtoken, which may allow tunnel access or account administration.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "ngrok-api-key.1",
+   "keywords": [
+    "ngrok"
+   ],
+   "regex": "(?i:(?:ngrok[_. -]*(?:(?:api|agent)[_. -]*)?(?:secret|key|token|authtoken))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(2[A-Za-z0-9]{26}_[0-9][A-Za-z0-9]{20})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.ngrok.com/agent_ingresses\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"ngrok-version\": \"2\",\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 400 && (r.body contains \"ERR_NGROK_206\") ? {\n    \"result\": \"valid\",\n    \"reason\": \"Live ngrok agent authtoken\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Authentication failed\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Notion API token",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "notion-api-token",
+   "keywords": [
+    "ntn_"
+   ],
+   "regex": "\\b(ntn_[0-9]{11}[A-Za-z0-9]{32}[A-Za-z0-9]{3})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered an npm access token, potentially compromising package management and code repository access.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "npm-access-token",
+   "keywords": [
+    "npm_"
+   ],
+   "regex": "(?i)\\b(npm_[a-z0-9]{36})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a password within a Nuget config file, potentially compromising package management access.",
+   "filter": "entropy(finding[\"secret\"]) <= 1.0\n|| matchesAny(finding[\"secret\"], [\n  `33f!!lloppa`,\n  `hal\\+9ooo_da!sY`,\n  `^\\%\\S.*\\%$`\n])\n",
+   "id": "nuget-config-password",
+   "keywords": [
+    "<add key="
+   ],
+   "path": "(?i)nuget\\.config$",
+   "regex": "(?i)<add key=\\\"(?:(?:ClearText)?Password)\\\"\\s*value=\\\"(.{8,})\\\"\\s*/>"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected an NVIDIA NIM API Key, which may expose AI inference and GPU cloud services to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "nvidia-api-key",
+   "keywords": [
+    "nvapi-"
+   ],
+   "regex": "(?i)\\b(nvapi-[A-Z0-9_-]{60,70})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Nylas API key, which may allow application-level access to connected email, calendar, and contact data.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "nylas-api-key.1",
+   "keywords": [
+    "nyk_"
+   ],
+   "regex": "\\b(nyk_[A-Za-z0-9]{67})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let us = http.get(\"https://api.us.nylas.com/v3/webhooks?limit=1\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); us.status in [200, 403] ? {\n    \"result\": \"valid\",\n    \"region\": \"us\"\n  } : (let eu = http.get(\"https://api.eu.nylas.com/v3/webhooks?limit=1\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); eu.status in [200, 403] ? {\n    \"result\": \"valid\",\n    \"region\": \"eu\"\n  } : us.status == 401 && eu.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(eu))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Nytimes Access Token, risking unauthorized access to New York Times APIs and content services.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "nytimes-access-token",
+   "keywords": [
+    "nytimes",
+    "new-york-times",
+    "newyorktimes"
+   ],
+   "regex": "(?i)(?:nytimes|new-york-times|newyorktimes)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Discovered a potential Octopus Deploy API key, risking application deployments and operational security.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "octopus-deploy-api-key",
+   "keywords": [
+    "api-"
+   ],
+   "regex": "\\b(API-[A-Z0-9]{26})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified an Okta Access Token, which may compromise identity management services and user authentication data.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "okta-access-token",
+   "keywords": [
+    "okta"
+   ],
+   "regex": "(?i:(?:(?-i:[Oo]kta|OKTA))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(00[\\w=\\-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected an Ollama API Key, which may expose local and hosted AI model serving to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "ollama-api-key",
+   "keywords": [
+    "ollama"
+   ],
+   "regex": "(?i)(?:ollama)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32}\\.[a-zA-Z0-9_-]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "OneSignal rich authentication token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "onesignal-rich-authentication-token",
+   "keywords": [
+    "os_v2_app_",
+    "os_v2_org_"
+   ],
+   "regex": "\\b(os_v2_(?:app|org)_[a-z2-7]{103})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.onesignal.com/apps\", {\n    \"Authorization\": \"Key \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 || (r.status == 403 && size(r.json?.errors ?? []) > 0) ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Onfido live API token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "onfido-live-api-token-ca",
+   "keywords": [
+    "api_live_ca."
+   ],
+   "regex": "\\b(api_live_ca\\.[A-Za-z0-9_-]{20,80})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.ca.onfido.com/v3.6/webhooks/\", {\n    \"Authorization\": \"Token token=\" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Onfido live API token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "onfido-live-api-token-eu",
+   "keywords": [
+    "api_live."
+   ],
+   "regex": "\\b(api_live\\.[A-Za-z0-9_-]{20,80})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.eu.onfido.com/v3.6/webhooks/\", {\n    \"Authorization\": \"Token token=\" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Onfido live API token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "onfido-live-api-token-us",
+   "keywords": [
+    "api_live_us."
+   ],
+   "regex": "\\b(api_live_us\\.[A-Za-z0-9_-]{20,80})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.us.onfido.com/v3.6/webhooks/\", {\n    \"Authorization\": \"Token token=\" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found an OpenAI API Key, posing a risk of unauthorized access to AI services and data manipulation.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "openai-api-key",
+   "keywords": [
+    "t3blbkfj"
+   ],
+   "regex": "\\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58}|[A-Za-z0-9_-]{20})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58}|[A-Za-z0-9_-]{20})\\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.openai.com/v1/models\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.json?.object ?? \"\") == \"list\" ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected an OpenRouter API Key, which may expose access to multiple AI models through the OpenRouter gateway.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "openrouter-api-key",
+   "keywords": [
+    "sk-or-v1-"
+   ],
+   "regex": "(?i)\\b(sk-or-v1-[0-9a-f]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found an OpenShift user token, potentially compromising an OpenShift/Kubernetes cluster.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "openshift-user-token",
+   "keywords": [
+    "sha256~"
+   ],
+   "regex": "\\b(sha256~[\\w-]{43})(?:[^\\w-]|\\z)"
+  },
+  {
+   "confidence": "medium",
+   "description": "OpenWeather API key.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "openweather-api-key",
+   "keywords": [
+    "openweather",
+    "pyowm"
+   ],
+   "regex": "(?i:(?:openweather|pyowm)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.openweathermap.org/data/2.5/forecast?q=London&appid=\" + finding[\"secret\"], {\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Opsgenie API key, which may allow access to alerts, incidents, and account configuration.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "opsgenie-api-key.1",
+   "keywords": [
+    "opsgenie"
+   ],
+   "regex": "(?i)(?:opsgenie)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let us = http.get(\"https://api.opsgenie.com/v2/account\", {\n    \"Authorization\": \"GenieKey \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); us.status in [200, 403] ? {\n    \"result\": \"valid\",\n    \"region\": \"us\"\n  } : (let eu = http.get(\"https://api.eu.opsgenie.com/v2/account\", {\n    \"Authorization\": \"GenieKey \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); eu.status in [200, 403] ? {\n    \"result\": \"valid\",\n    \"region\": \"eu\"\n  } : us.status == 401 && eu.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(eu))\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "OVHcloud Application Key - component of authenticated OVH API requests.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "ovh-application-key",
+   "keywords": [
+    "ovh"
+   ],
+   "regex": "(?i)(?:app(?:lication)?[_.-]{0,1}key)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9-]{16})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "ovh-application-key",
+     "within": "20L"
+    },
+    {
+     "id": "ovh-consumer-key",
+     "within": "20L"
+    }
+   ],
+   "confidence": "high",
+   "description": "OVHcloud Application Secret - component of authenticated OVH API requests, which could allow unauthorized access to OVHcloud infrastructure when combined with Application and Consumer keys.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "ovh-application-secret",
+   "keywords": [
+    "ovh"
+   ],
+   "regex": "(?i)(?:app(?:lication)?[_.-]{0,1}secret)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9-]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let ts = time.nowUnix(); (let url = \"https://api.us.ovhcloud.com/1.0/auth/details\"; (let sig_payload = finding[\"secret\"] + \"+\" + (components[\"ovh-consumer-key\"]?.secret ?? \"\") + \"+GET+\" + url + \"++\" + ts; (let sig = \"$1$\" + hex.encode(crypto.sha1(bytes(sig_payload))); (let r = http.get(url, {\n            \"X-Ovh-Application\": (components[\"ovh-application-key\"]?.secret ?? \"\"),\n            \"X-Ovh-Consumer\": (components[\"ovh-consumer-key\"]?.secret ?? \"\"),\n            \"X-Ovh-Timestamp\": ts,\n            \"X-Ovh-Signature\": sig\n          }); r.status == 200 ? {\n            \"result\": \"valid\"\n          } : r.status in [400, 401, 403] ? {\n            \"result\": \"invalid\",\n            \"reason\": \"Unauthorized\"\n          } : validate.unknown(r)))))\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "OVHcloud Consumer Key - component of authenticated OVH API requests.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "ovh-consumer-key",
+   "keywords": [
+    "ovh"
+   ],
+   "regex": "(?i)(?:consumer[_.-]{0,1}key)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9-]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "confidence": "high",
+   "description": "Paddle live API key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "paddle-live-api-key",
+   "keywords": [
+    "pdl_live_apikey_"
+   ],
+   "regex": "\\b(pdl_live_apikey_[a-z0-9]{26}_[A-Za-z0-9]{22}_[A-Za-z0-9]{3})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.paddle.com/event-types\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 401 || (r.status == 403\n    && (r.json?.error?.code ?? \"\") in [\"authentication_malformed\", \"authentication_invalid\"]) ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "PagerDuty authorization token, which may allow access to PagerDuty account and incident data.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "pagerduty-authorization-token.1",
+   "keywords": [
+    "pagerduty"
+   ],
+   "regex": "(?i:(?:pagerduty)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(u\\+[A-Za-z0-9_+-]{18})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.pagerduty.com/users?limit=1\", {\n    \"Authorization\": \"Token token=\" + finding[\"secret\"],\n    \"Accept\": \"application/vnd.pagerduty+json;version=2\"\n  }); r.status == 200 && (r.body contains \"\\\"users\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "PayPal OAuth client ID, used as a component of the PayPal client-secret composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "paypal-client-id.1",
+   "keywords": [
+    "paypal"
+   ],
+   "regex": "(?i:(?:paypal[_.-]?(?:client[_.-]?)?(?:id|user))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(A[A-Za-z0-9_-]{78,99})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "paypal-client-id.1",
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "PayPal OAuth client secret, which may allow access to PayPal REST APIs when paired with its client ID.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "paypal-client-secret.1",
+   "keywords": [
+    "paypal"
+   ],
+   "regex": "(?i:(?:paypal[_.-]?(?:client[_.-]?)?(?:secret|private|access|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9_.-]{78,120})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api-m.paypal.com/v1/oauth2/token\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes((components[\"paypal-client-id.1\"]?.secret ?? \"\") + \":\" + finding[\"secret\"])),\n    \"Accept\": \"application/json\",\n    \"Content-Type\": \"application/x-www-form-urlencoded\"\n  }, \"grant_type=client_credentials\"); r.status == 200 && (r.json?.access_token ?? \"\") != \"\" ? {\n    \"result\": \"valid\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Perplexity API key, which could lead to unauthorized access to Perplexity AI services and data exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "perplexity-api-key",
+   "keywords": [
+    "pplx-"
+   ],
+   "regex": "\\b(pplx-[a-zA-Z0-9]{48})(?:[\\x60'\"\\s;]|\\\\[nr]|$|\\b)",
+   "validate": "let r = http.post(\"https://api.perplexity.ai/chat/completions\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"model\\\":\\\"invalid-model-for-validation\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\".\\\"}]}\"); r.status in [200, 400, 404, 422] ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Persona production API key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "persona-production-api-key",
+   "keywords": [
+    "persona_production_"
+   ],
+   "regex": "\\b(persona_production_[a-z0-9_-]{20,80})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.withpersona.com/api/v1/accounts?page[size]=1\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Persona-Version\": \"2023-01-05\",\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 403 && size(r.json?.errors ?? []) > 0 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but access is restricted\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Pinecone API key version 1 (UUID format).",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "pinecone-api-key.1",
+   "keywords": [
+    "pinecone"
+   ],
+   "regex": "(?i:(?:pinecone(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.pinecone.io/indexes\", {\n    \"Api-Key\": finding[\"secret\"],\n    \"X-Pinecone-Api-Version\": \"2025-10\",\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"indexes\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but control-plane access is restricted\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Pinecone API key version 2 (pcsk format).",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "pinecone-api-key.2",
+   "keywords": [
+    "pcsk_"
+   ],
+   "regex": "\\b(pcsk_[A-Za-z0-9]{5,6}_[A-Za-z0-9]{63})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.pinecone.io/indexes\", {\n    \"Api-Key\": finding[\"secret\"],\n    \"X-Pinecone-Api-Version\": \"2025-10\",\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"indexes\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but control-plane access is restricted\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Pinterest access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "pinterest-access-token",
+   "keywords": [
+    "pina_"
+   ],
+   "regex": "\\b(pina_[A-Za-z0-9_-]{20,200})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.pinterest.com/v5/user_account\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"username\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but user-account access is restricted\"\n  } : r.status == 401 && (r.json?.code ?? 0) == 2 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Authentication failed\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a PKCS #12 file, which commonly contain bundled private keys.",
+   "id": "pkcs12-file",
+   "path": "(?i)(?:^|\\/)[^\\/]+\\.p(?:12|fx)$"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Plaid API Token, potentially compromising financial data aggregation and banking services.",
+   "id": "plaid-api-token",
+   "keywords": [
+    "plaid"
+   ],
+   "regex": "(?i)(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(access-(?:sandbox|development|production)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Uncovered a Plaid Client ID, which could lead to unauthorized financial service integrations and data breaches.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "plaid-client-id",
+   "keywords": [
+    "plaid"
+   ],
+   "regex": "(?i)(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  }
+ ]
+}

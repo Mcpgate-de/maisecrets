@@ -1,0 +1,11 @@
+# Czech credential labels.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# heslo and hesla (Potvrzení hesla, the confirmation).
+hesl	(?<![^\W\d_])hesl[oa]	heslo, Heslo, hesla, db_heslo, nové heslo
+# klíč alone is an ordinary word (key): only the two-word labels count.
+stupov	(?<![^\W\d_])p(?:ř|r)(?:í|i)stupov(?:ý|y)[ _-]kl(?:í|i)(?:č|c)	přístupový klíč, pristupovy klic
+tajn	(?<![^\W\d_])tajn(?:ý|y)[ _-]kl(?:í|i)(?:č|c)	tajný klíč, Tajny klic
+tajemstv	(?<![^\W\d_])klientsk(?:é|e)[ _-]tajemstv(?:í|i)	klientské tajemství, klientske tajemstvi
+ihla	(?<![^\W\d_])p(?:ř|r)ihla(?:š|s)ovac(?:í|i)[ _-](?:ú|u)daje	přihlašovací údaje, prihlasovaci udaje

@@ -1,0 +1,10 @@
+# Swedish credential labels.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# lösenord: no word start, because Swedish joins compounds (administratörslösenord).
+senord	l(?:ö|o)senord	lösenord, Lösenord, losenord, db_lösenord, nytt lösenord
+# nyckel alone is an ordinary word (key): only the compounds and the two-word labels count.
+nyckel	(?<![^\W\d_])(?:hemlig[ _-](?:(?:å|a)tkomst)?|(?:å|a)tkomst|api[ _-]?)nyckel	hemlig nyckel, Hemlig åtkomstnyckel, åtkomstnyckel, atkomstnyckel, API-nyckel
+klienthemlighet	klienthemlighet	klienthemlighet, Klienthemlighet
+uppgifter	(?<![^\W\d_])(?:inloggnings|autentiserings)uppgifter	inloggningsuppgifter, Autentiseringsuppgifter
