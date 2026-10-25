@@ -828,7 +828,7 @@ def _md_table_hits(text: str) -> list:
             head = [(pos[hdr_line] + a, pos[hdr_line] + b) for a, b in _md_cells(hdr)]
             kv = [r for r in [head] + rows if len(r) == 2]
             fields = [_md_column(text[r[0][0]:r[0][1]].strip("*` ")) for r in kv]
-            if sum(f in _STRONG_COLS or f in _WEAK_COLS for f in fields) >= 2:
+            if sum(f in _STRONG_COLS or f in _WEAK_COLS for f in fields) >= 2 or any(map(_password_column, fields)):
                 out += _grid_hits(text, fields, [[r[1] for r in kv]], "md-table-personal-column", strip="*`")
     return out
 
@@ -844,6 +844,43 @@ class _lazy:
         if self._rx is None:
             object.__setattr__(self, "_rx", re.compile(*self._args))
         return getattr(self._rx, name)
+
+
+# a column or field that names a password holds one on each row, whatever the other columns are (structured corpus,
+# set A dev, 2026-10-25: tables and SQL found 0 of 230 passwords). The word last, after at most two parts
+# (db_password, admin_user_pwd); a stored hash (password_hash, hashed_password) is no password
+# `pass` alone names a boarding pass or a test result: only after a part that names an account (db_pass)
+_PASSWORD_WORDS = ("password|passwort|passwd|pwd|kennwort|wachtwoord|losenord|haslo|contrasena|mot_de_passe"
+                   "|mdp|senha|palavra_passe|parola_d_ordine|adgangskode|passord|salasana|heslo|sifre|passphrase")
+_PASSWORD_COL_RE = re.compile(r"(?:(?!(?:hash|hashed|encrypted|enc|crypt|crypted|salted|salt)_)[a-z0-9]{1,16}_){0,2}"
+                              r"(?:" + _PASSWORD_WORDS + r")|(?:[a-z0-9]{1,16}_)?(?:db|database|user|admin|root|login"
+                              r"|account|mail|smtp|ftp|wifi|wlan|app|api|sql|redis|ldap)_pass")
+# a value that is no password: a hash or a reference to one, a placeholder or a type
+_NOT_A_PASSWORD_RE = re.compile(
+    r"(?i)\$(?:2[abxy]?|argon2\w*|pbkdf2[\w-]*|scrypt|[156]|sha\d+)\$|(?:pbkdf2|bcrypt|argon2|sha\d+|md5)[_$:]"
+    r"|\{[A-Z0-9-]+\}|[0-9a-f]{32,}$|[$%{<\[(*]|\w+\(\d*\)$|^(?:enc|env|vault|secret|ref|file|op):|^x{4,}$")
+
+
+_TABLE_KINDS = frozenset({"csv-personal-column", "md-table-personal-column", "html-table-personal-column",
+                          "sql-insert-personal-column"})
+
+
+def _password_column(name: str) -> bool:
+    return bool(_PASSWORD_COL_RE.fullmatch(_fold(re.sub(r"_{2,}", "_", name))))
+
+
+def _password_cell(v: str) -> bool:
+    """A cell under a password column that reads as one: no space, 6 to 128 characters, a letter and a digit (a single
+    word, `required` or `string`, is none), no slash, and no hash, placeholder or type."""
+    if not 6 <= len(v) <= 128 or any(c.isspace() for c in v) or v.lower() in _NOT_A_CELL:
+        return False
+    kinds = sum((any(c.islower() for c in v), any(c.isupper() for c in v), any(c.isdigit() for c in v),
+                 any(not c.isalnum() for c in v)))
+    from .core import _ds_value_ok
+    # a letter and a digit: a word with a sign (Seat:, rgb/top) is a heading or a value of another table
+    return kinds >= 2 and any(c.isdigit() for c in v) and any(c.isalpha() for c in v) and "/" not in v \
+        and not _NOT_A_PASSWORD_RE.match(v) and not _NOT_A_PASSWORD_RE.search(v[:1]) and len(set(v)) > 2 \
+        and _ds_value_ok(v, min_len=6)
 
 
 _BIRTH_ANCHOR_COLS = frozenset({"dob", "date_of_birth", "birth_date", "birthdate", "geburtsdatum"})
@@ -883,7 +920,9 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
     # (sku, product, customer_name, dob, ssn) has more personal columns and stays a person's (the traces, 2026-10-22)
     software = any(h in _SOFTWARE_COLS for h in names) and \
         sum(h in _STRONG_COLS or h in _WEAK_COLS for h in names) < 2
-    if not cols and not accounts:
+    # a password column in a table; a record of JSON, XML or lines has its `key: value` read by the keyword rules
+    secrets = {i for i, h in enumerate(names) if _password_column(h)} if kind in _TABLE_KINDS else set()
+    if not cols and not accounts and not secrets:
         return out
     for n, cells in enumerate(rows):
         if n >= _CSV_ROWS:
@@ -896,6 +935,8 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
             s0 = a + text[a:b].index(v) if v else a
             if col in accounts and _account_cell(v):
                 out.append((s0, s0 + len(v), kind, ID_NUMBER))
+            if col in secrets and _password_cell(v):
+                out.append((s0, s0 + len(v), "secret-under-password-column", "SECRET"))
             if col in cols:
                 typ = _column_type(names[col])
                 if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ, names[col]):
@@ -1186,6 +1227,7 @@ FORMS = {
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "json-personal-field": ("COLUMN", "tool", "generic", "label"),
     "xml-personal-field": ("COLUMN", "tool", "generic", "label"),
+    "secret-under-password-column": ("SECRET", "tool", "generic", "label"),
     "username-after-label": (USERNAME, "tool", "generic", "label"),
     "secret-password-with-sign": ("SECRET", "tool", "generic", "label"),
 }

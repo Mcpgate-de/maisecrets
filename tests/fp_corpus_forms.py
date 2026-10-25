@@ -347,6 +347,11 @@ FORMS_NO_HIT = [
     # a name after the label that is no account: a product or a sign-in provider. Without a digit, a dot or an
     # underscore the sentence form takes no value (the label with a colon still does)
     ("user name label and a provider", "sign in with the user name Okta gives you, or the user name harlow"),
+    # a password column of a schema or a form description: types, flags and placeholders, no password
+    ("password column of a schema", "| field | password |\n|---|---|\n| type | string |\n| required | true |\n"
+     "| default | ******** |\n| example | ${DB_PASSWORD} |\n"),
+    ("password hash column", "INSERT INTO users (login, password_hash) VALUES ('svc-billing', 'sha256:"
+     + "9f" * 32 + "');\n"),
 ]
 
 FORMS_HIT = [
@@ -440,4 +445,6 @@ FORMS_HIT = [
     ("vcard bday digits", "BEGIN:VCARD\nBDAY:" + "19850412" + "\nEND:VCARD", ["19850412"]),
     ("encoded mail contact column", "Report for user list, generated 2026-10-01\nname,contact\nDana, " + "dana.okafor"
      + "%40mailbox-test.net", ["dana.okafor" + "%40mailbox-test.net"]),
+    ("password column in a table", "| login | wachtwoord |\n|---|---|\n| dokafor" + "84 | Qz7k" + "Lm2pRx! |",
+     ["Qz7k" + "Lm2pRx!"]),
 ]

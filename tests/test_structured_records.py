@@ -109,5 +109,41 @@ class ColumnVocabularyTests(Base):
                 self.assertEqual(personal._md_column(raw), want)
 
 
+# ------------------------------------------------------------------------------------------ a password column --
+class PasswordColumnTests(Base):
+    def test_a_password_under_its_column_in_a_table_is_masked(self):
+        for text in (f"| login | wachtwoord |\n|---|---|\n| {USER} | {PASSWORD} |\n",
+                     f"<table><tr><th>user</th><th>hasło</th></tr><tr><td>{USER}</td><td>{PASSWORD}</td></tr>"
+                     "</table>",
+                     f"INSERT INTO accounts (login, db_password) VALUES ('{USER}', '{PASSWORD}');\n",
+                     f"| Field | Value |\n|---|---|\n| lösenord | {PASSWORD} |\n"):
+            with self.subTest(text[:20]):
+                self.assertMasked(text, PASSWORD)
+                self.assertIn("secret-under-password-column", self.kinds(text))
+
+    def test_a_typed_prompt_is_not_blocked_by_the_column(self):
+        text = f"| login | wachtwoord |\n|---|---|\n| {USER} | {PASSWORD} |\n"
+        self.assertNotIn("secret-under-password-column", {m.kind for m in scan(text, "prompt")})
+
+    def test_a_value_that_is_no_password_stays_text(self):
+        bcrypt = "$2b$12$" + "".join(random.Random(3).choice(string.ascii_letters + "./") for _ in range(53))
+        for cell in ("required", "string", "varchar(255)", "********", "${DB_PASSWORD}", "<secret>", "true",
+                     "Departure:", "rgb/top12",
+                     "ENC(" + "abc123def" + ")", bcrypt):
+            text = f"| field | password |\n|---|---|\n| admin | {cell} |\n"
+            with self.subTest(cell[:10]):
+                self.assertNotIn("secret-under-password-column", self.kinds(text))
+        # a column that holds the hash of a password, and a column of a password rule
+        for head in ("password_hash", "hashed_password", "password_policy", "passport", "pass", "boarding_pass"):
+            text = f"| user | {head} |\n|---|---|\n| {USER} | {PASSWORD} |\n"
+            with self.subTest(head):
+                self.assertNotIn("secret-under-password-column", self.kinds(text))
+
+    def test_a_record_of_json_or_lines_is_left_to_the_keyword_rules(self):
+        # the keyword rules read `password: value` with their own filters; the column rule reads tables only
+        text = f'{{"user": "{USER}", "password": "test1234"}}'
+        self.assertNotIn("secret-under-password-column", self.kinds(text))
+
+
 if __name__ == "__main__":
     unittest.main()
