@@ -4,10 +4,42 @@ from __future__ import annotations
 
 import platform
 
+# one word per thing the AI does not get, for every text a person reads (the block notice, the ms:( check). By type
+# first: a type of pii.national_id that is no ID of a person (a postal code, a licence plate, a VAT number) has its own
 TYPE_WORDS = {"SECRET": ("secret", "secrets"), "EMAIL": ("e-mail address", "e-mail addresses"),
               "IBAN": ("IBAN", "IBANs"), "CARD": ("card number", "card numbers"),
               "PHONE": ("phone number", "phone numbers"), "IP": ("IP address", "IP addresses"),
-              "NAME": ("name", "names")}
+              "NAME": ("name", "names"),
+              "DE_PLZ": ("postal code", "postal codes"),
+              "DE_KFZ": ("licence plate", "licence plates"),
+              "UK_VEHICLE_REGISTRATION": ("licence plate", "licence plates"),
+              "TR_LICENSE_PLATE": ("licence plate", "licence plates"),
+              "IN_VEHICLE_REGISTRATION": ("licence plate", "licence plates"),
+              "NG_VEHICLE_REGISTRATION": ("licence plate", "licence plates"),
+              "DE_VAT_ID": ("VAT number", "VAT numbers"), "IT_VAT_CODE": ("VAT number", "VAT numbers"),
+              "IN_GSTIN": ("VAT number", "VAT numbers"),
+              "MEDICAL_LICENSE": ("medical licence number", "medical licence numbers")}
+# then by the class of the type (maisecrets/detection/types.json): 13 classes, one word each
+CLASS_WORDS = {"secret": ("secret", "secrets"), "pii.email": TYPE_WORDS["EMAIL"], "pii.phone": TYPE_WORDS["PHONE"],
+               "pii.iban": TYPE_WORDS["IBAN"], "pii.card": TYPE_WORDS["CARD"], "pii.ip": TYPE_WORDS["IP"],
+               "pii.name": TYPE_WORDS["NAME"], "pii.address": ("postal address", "postal addresses"),
+               "pii.birth_date": ("date of birth", "dates of birth"), "pii.username": ("user name", "user names"),
+               "pii.bank_account": ("bank account number", "bank account numbers"),
+               "pii.tax_id": ("tax number", "tax numbers"),
+               "pii.national_id": ("official ID number", "official ID numbers")}
+
+
+def type_word(type_: str) -> str:
+    """The word of a placeholder type with its article (`a secret`, `an e-mail address`); a type of a rule of your
+    own, which no class names, as itself."""
+    words = TYPE_WORDS.get(type_)
+    if words is None:
+        from .detection.vocabulary import TYPES
+        words = CLASS_WORDS.get((TYPES.get(type_) or {}).get("class", ""))
+    if words is None:
+        return f"a value of the type {type_}"
+    word = words[0]
+    return ("an " if word[0] in "aeioAEIO" or word.startswith(("IBAN", "IP ")) else "a ") + word
 STORE_NAMES = {"KeychainBackend": "the macOS Keychain", "WindowsVaultBackend": "the Windows Credential Locker",
                "EncryptedFileBackend": "an encrypted file in ~/.maisecrets",
                "JsonFileBackend": "a PLAIN TEXT test file"}
