@@ -2219,7 +2219,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             v = m.group(1)
             # 17 digits and more: a snowflake id of a chat platform or a database key, no document number
             if sum(c.isdigit() for c in v) >= 5 and not (v.isdigit() and len(v) >= 17) and not _placeholder_digits(v):
-                out.append((m.start(1), m.end(1), "id-number-after-label", ID_NUMBER))
+                # MRN4829173: the label glued to the number is the id's own prefix, masked with it
+                start = m.start() if text[m.start():m.start(1)].isalpha() else m.start(1)
+                out.append((start, m.end(1), "id-number-after-label", ID_NUMBER))
     if "user-in-url" in want and "://" in text:
         for m in _URL_USER_RE.finditer(text):
             u = m.group(1)

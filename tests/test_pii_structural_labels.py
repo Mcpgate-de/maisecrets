@@ -222,5 +222,24 @@ class BareStudentLabelTests(Base):
                 self.assertNoName(text)
 
 
+class IdWithItsLabelAsPrefixTests(Base):
+    DIGITS = "4829" + "173"
+
+    def test_an_id_that_starts_with_its_label_is_masked_whole(self):
+        for token in ("MRN" + self.DIGITS, "mrn" + self.DIGITS):
+            for text in (token + "\n", "Cartella clinica " + token + " del paziente\n", "record " + token + ", seen"):
+                with self.subTest(text=text):
+                    hit = [m for m in scan(text) if m.type == "ID_NUMBER"]
+                    self.assertEqual([token], [m.value for m in hit])
+
+    def test_an_id_after_its_label_keeps_its_span(self):
+        for text, value in (("MRN: AB" + self.DIGITS + "\n", "AB" + self.DIGITS),
+                            ("MRN " + self.DIGITS + "\n", self.DIGITS)):
+            with self.subTest(text=text):
+                self.assertEqual([value], [m.value for m in scan(text) if m.type == "ID_NUMBER"])
+        # a placeholder number stays text, with or without the glued label
+        self.assertNotIn("ID_NUMBER", {m.type for m in scan("MRN" + "1234567\n")})
+
+
 if __name__ == "__main__":
     unittest.main()
