@@ -113,5 +113,27 @@ class CompoundNameKeyTests(Base):
                 self.assertNoName(text)
 
 
+class XmlElementLabelTests(Base):
+    def test_a_name_inside_an_element_named_by_a_person_label_is_masked(self):
+        for text in ("<payment>\n  <card_holder>" + NAME + "</card_holder>\n</payment>\n",
+                     "<ns:fullName>" + NAME + "</ns:fullName>",
+                     '<customerName xml:lang="en">' + NAME + "</customerName>",
+                     "<person><name>" + NAME + "</name></person>",
+                     "<project><developers><developer><name>" + NAME + "</name></developer></developers></project>"):
+            with self.subTest(text=text):
+                self.assertMasked(text, NAME)
+
+    def test_the_name_of_a_project_or_a_product_and_words_stay_text(self):
+        for text in ("<project>\n  <name>Kogito Quarkify</name>\n</project>\n",
+                     '<product id="7"><name>Zentrix Lumo</name></product>',
+                     "<item><name>Garden Hose</name></item>",
+                     "<security><fullName>Zentrix Lumo</fullName></security>",
+                     "<counterparty><name>Zentrix Lumo</name></counterparty>",
+                     "<owner>Platform Team</owner>",
+                     "<card_holder>Not Provided</card_holder>"):
+            with self.subTest(text=text):
+                self.assertNoName(text)
+
+
 if __name__ == "__main__":
     unittest.main()

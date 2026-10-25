@@ -339,6 +339,34 @@ _COMPOUND_PERSON_KEY_RE = re.compile(
     r"|insured|borrower|member|student|passenger|tenant|guarantor|signer|consignee|shipper|buyer|seller|person"
     r"|representative|rep|manager|advisor|adviser|physician|doctor|witness)_(?:full_)?name"
     r"|full_name")
+# an element whose name is a person label, around a name alone: <card_holder>, <customerName>, <ns:fullName>
+_XML_NAME_ELEMENT_RE = re.compile(r"<([A-Za-z_][\w.:-]{0,64})(?:\s[^<>]{0,200})?>[ \t]*" + _NAME_VALUE
+                                  + r"[ \t]*</\1>")
+_PERSON_TAG_RE = re.compile(r"(?i)(" + _PERSON_LABELS + r")|(" + _WEAK_LABELS + r")")
+# the parent of a name element that is a thing, not a person: a pom.xml project, a product, a package, and the
+# instruments and parties of a financial message (a party or a counterparty is a company as often as a person)
+_THING_PARENTS = frozenset({"project", "product", "item", "package", "plugin", "dependency", "module", "artifact",
+                            "application", "app", "service", "component", "repository", "organization",
+                            "organisation", "company", "team", "group", "parent", "build", "profile", "site",
+                            "instrument", "security", "commodity", "unit", "issuer", "party", "counterparty", "fund",
+                            "asset"})
+_XML_OPEN_RE = re.compile(r"<(/?)([A-Za-z_][\w.:-]{0,64})(?:\s[^<>]{0,200})?(/?)>")
+
+
+def _xml_parent(text: str, at: int) -> str:
+    """The local name of the element still open at `at`, looking at most 2000 characters back."""
+    depth = 0
+    tags = list(_XML_OPEN_RE.finditer(text, max(0, at - 2000), at))
+    for t in reversed(tags):
+        if t.group(3):
+            continue
+        if t.group(1):
+            depth += 1
+        elif depth:
+            depth -= 1
+        else:
+            return t.group(2).rsplit(":", 1)[-1].lower()
+    return ""
 # the end of a word that makes it a noun, not a name: Streaming, Expedition, Management, Wörterbuch, Verwaltung
 _NOUN_END_RE = re.compile(r"(?i)(?:ing|tion|sion|ment|ness|ity|ism|ogy|ware|ance|ence|able|ible|buch|ung|heit|keit"
                           r"|schaft|isch|tät|ive|ics|ers|ies)$")
@@ -2250,6 +2278,19 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             v = m.group(2).rstrip("'’")
             plain = re.sub(r"-[^\s]*", "", v)
             if _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True)):
+                out.append((m.start(2), m.start(2) + len(v), "name-after-label", NAME))
+    if "name-after-label" in want and "</" in text:
+        # <card_holder>Jane Roe</card_holder>: the element's name is the label of its text
+        for m in _XML_NAME_ELEMENT_RE.finditer(text):
+            person = _PERSON_TAG_RE.fullmatch(m.group(1).rsplit(":", 1)[-1])
+            if not person:
+                continue
+            if _xml_parent(text, m.start()) in _THING_PARENTS:
+                continue   # <project><name>, <security><fullName>: the name of a thing
+            v = m.group(2).rstrip("'’")
+            plain = re.sub(r"-[^\s]*", "", v)
+            every = bool(person.group(1))
+            if _name_ok(v) and not (_reads_as_words(v, every=every) and _reads_as_words(plain, every=every)):
                 out.append((m.start(2), m.start(2) + len(v), "name-after-label", NAME))
     if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
                                                                          "ms", "mx", "miss", "dear", "hi ", "hello",
