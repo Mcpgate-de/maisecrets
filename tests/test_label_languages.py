@@ -1,7 +1,7 @@
-"""The label files of the languages that the pinned test locale does not turn on.
+"""The label files of the languages other than those of the pinned test locale (English and German).
 
-tests/detection_matrix.py takes the label files of the active languages only, and the tests pin
-MAISECRETS_LOCALE=de_DE (tests/_isolate.py): English and German. Here each other label file runs
+tests/detection_matrix.py takes the label files of English and German, the languages of the pinned test locale
+(MAISECRETS_LOCALE=de_DE, tests/_isolate.py). Here each other label file runs
 through the detector with its language on: every example, with generated values in the shapes of
 the matrix, gives exactly its value (and the e-mail address after it); ordinary sentences with the
 word as prose give no hit. The prose includes the words left out of the files on purpose (clave,
@@ -106,8 +106,9 @@ PROSE = {
 
 
 def _other_languages() -> list[str]:
-    active = set(detect.active_regions().languages)
-    return [lang for lang in regions.label_languages_available() if lang not in active]
+    # the languages of the pinned locale (de_DE) have the matrix and their own tests; since 0.8.2 every label file is
+    # on by default, so this is the list of the others, not of the files the default leaves off
+    return [lang for lang in regions.label_languages_available() if lang not in ("en", "de")]
 
 
 def _scan(languages: tuple[str, ...], texts: list[str]) -> list[list[tuple[str, str]]]:
