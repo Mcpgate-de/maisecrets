@@ -189,5 +189,22 @@ class LineRecordTests(Base):
                       lambda n: "".join(f"key{i}: value{i}\nk{i}=v{i} a{i}=b{i}\n" for i in range(n)), 1500)
 
 
+# ------------------------------------------------------------------------------- JSON inside a string or a dict --
+class QuotedJsonTests(Base):
+    def test_json_inside_a_json_string_is_read(self):
+        text = ('{"event": "signup", "payload": "{\\"nazwisko\\": \\"' + LAST + '\\", \\"data_urodzenia\\": \\"'
+                + BIRTH + '\\"}"}')
+        self.assertMasked(text, LAST, BIRTH)
+
+    def test_a_python_dict_repr_is_read(self):
+        self.assertMasked(f"DEBUG payload={{'last_name': '{LAST}', 'dob': '{BIRTH}', 'plan': 'pro'}}", LAST, BIRTH)
+
+    def test_a_quoted_record_without_a_person_stays_text(self):
+        text = '{"payload": "{\\"company_name\\": \\"' + LAST + ' Logistics\\", \\"street\\": \\"' + STREET + '\\"}"}'
+        self.assertNotIn("json-personal-field", self.kinds(text))
+        self.assertNotIn("json-personal-field", self.kinds(f"{{'name': 'billing', 'address': '{STREET}', 'kind': "
+                                                           "'depot'}"))
+
+
 if __name__ == "__main__":
     unittest.main()

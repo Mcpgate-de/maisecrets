@@ -1275,6 +1275,26 @@ def _kv_record_hits(text: str) -> list:
     return out
 
 
+# JSON inside a JSON string and a Python dict repr: the JSON reader on a copy of the same length
+_JSON_STRING_RE = _lazy(r'"((?:[^"\\\n]|\\.){8,200000})"')
+
+
+def _quoted_json_hits(text: str) -> list:
+    """JSON inside a JSON string (\\"key\\": \\"value\\") and a Python dict repr ({'key': 'value'}) read as JSON: a
+    copy of the same length with the quotes made plain, so each span is the span of the text."""
+    out = []
+    if '\\":' in text:
+        # each string that holds JSON, alone: the text around it blanked, its escaped quotes plain
+        inner = [" "] * len(text)
+        for m in _JSON_STRING_RE.finditer(text):
+            if '\\":' in m.group(1):
+                inner[m.start(1):m.end(1)] = m.group(1).replace('\\"', ' "')
+        out += _json_record_hits("".join(inner))
+    if "{'" in text and "': " in text:
+        out += _json_record_hits(text.replace("'", '"'))
+    return out
+
+
 # ------------------------------------------------------------------------------------------ the forms of 0.6.24 --
 # A value in a fixed form or after a label that names it, from the holdout values that 0.6.21 still leaked
 # (2026-10-15). Each rule declares (type, channel, region, needs): channel "tool" (tool results and files) or "both".
@@ -2324,6 +2344,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         out += _json_record_hits(text)
     if "xml-personal-field" in want and ("</" in text or "/>" in text):
         out += _xml_record_hits(text)
+    if "json-personal-field" in want and ('\\":' in text or "{'" in text):
+        out += _quoted_json_hits(text)
     if "kv-personal-field" in want:
         out += _kv_record_hits(text)
     if "phone-wrapped-line" in want and "-\n" in text:
