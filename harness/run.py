@@ -859,8 +859,10 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             if marker in txt:
                 fails.append(f"transcript {t.parent.name}/{t.name} still holds the secret (…{marker[-6:]})")
                 break
+        # the try-it line of the session start names ms:( on purpose; the typed check is any other ms:(
+        shown = txt.replace("Try it: send ms:(", "")
         for marker in sc.get("expect_not_in_transcript", []):
-            if marker in txt:
+            if marker in shown:
                 # the address itself never goes to the CI log
                 fails.append(f"transcript {t.parent.name}/{t.name} holds "
                              f"{'the address' if marker == MAIL else repr(marker)}")
