@@ -122,5 +122,18 @@ class UserNameApposedTests(Base):
         self.assertText("* user name (e.g. a nickname)\n")
 
 
+class StreetAfterPlaceWordTests(Base):
+    """A2: the property located at a street line; a company's office stays text."""
+
+    def test_a_street_after_located_at_situated_at_and_property_at_is_masked(self):
+        self.assertMasked("Whereas the borrower owns the property located at " + STREET + ", Anytown", STREET)
+        self.assertMasked("the house situated at " + STREET + " passes to her son", STREET)
+        self.assertMasked("the property at " + STREET + " is held in trust", STREET)
+
+    def test_our_office_located_at_stays_text(self):
+        self.assertText("Our office is located at " + STREET + ", Anytown.")
+        self.assertText("a licensed insurance provider located at " + STREET + ", Anytown")
+
+
 if __name__ == "__main__":
     unittest.main()

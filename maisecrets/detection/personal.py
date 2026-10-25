@@ -1306,12 +1306,20 @@ _STREET_LABEL_RE = _lazy(
     r"(?i)(?<![a-z_])(?:(?:street|home|residential|mailing|postal|billing|shipping|delivery|permanent|current)[ _-]?"
     r"address|address(?: on file)?|anschrift|wohnadresse|wohnanschrift|adresse|domicilio|direcci[oó]n|indirizzo"
     r"|endere[cç]o|adres)[\"']?[ \t]{0,3}(?:is[ \t]{1,3}|[:=][ \t]{0,3})[\"']?[ \t]{0,2}(?-i:(" + _STREET_LINE + "))"
-    r"|(?<![a-z])(?:resides?|residing|reside|lives?|living|domiciled|wohnt|wohnhaft)"
+    r"|(?<![a-z])(?:resides?|residing|reside|lives?|living|domiciled|wohnt|wohnhaft"
+    # a place word before a street line: the property located at, situated at (the company check below holds)
+    r"|located|situated|property)"
     r"(?: (?:at|in|on|im|am|in der|an der))?[ \t]{1,3}(?-i:(" + _STREET_LINE + "))")
 
 
 # e.g, i.e: an abbreviation, no account name
 _ABBREVIATION_RE = _lazy(r"(?i)[a-z]{1,2}(?:\.[a-z]{1,2})+")
+
+
+# a place word (located at, situated at, property at) after a business, its goods or a bank code: no home
+_PLACE_OF_A_BUSINESS_RE = _lazy(r"(?i)(?<![a-z])(?:provider|insurance|insurer|vendor|supplier|contractor|swift|bic|iban"
+                                r"|commercial|assets?|equipment|inventory|goods|facility|facilities|plant|premises"
+                                r"|warehouse|branch|headquarters?|office|offices)(?![a-z])")
 
 
 # the state of a form field after its label, not a name: the word list holds the stems only (require, mandate)
@@ -1375,7 +1383,7 @@ _THING_SUBJECT_RE = _lazy(r"(?i)(?<![a-z])(?:server|service|function|file|files|
                           r"[ \t]{1,3}$")
 _HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
 _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
-                       "resid", "live", "living", "domiciled", "wohn")
+                       "resid", "live", "living", "domiciled", "wohn", "located", "situated", "property")
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
                 "contact", "call", "reach", "text", "dial",
                 # the personal cues of phone-after-phone-word without a phone word (my number is, … him at)
@@ -1924,7 +1932,9 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     or _PLACEHOLDER_STREET_RE.match(v) \
                     or _PARENT_NOT_A_STREET_RE.search(text, max(0, m.start() - 60), m.start()) \
                     or _NOT_A_STREET_LABEL_RE.search(text, max(0, m.start() - 12), m.start()) \
-                    or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())):
+                    or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())) \
+                    or (g == 2 and m.group().lower().startswith(("located", "situated", "property"))
+                        and _PLACE_OF_A_BUSINESS_RE.search(text, max(0, m.start() - 60), m.start())):
                 continue
             # the company's name often stands on the line before its address label (Acme Inc.\nAddress: ...): the
             # window holds that line too, as for street-address, at most 160 characters back
