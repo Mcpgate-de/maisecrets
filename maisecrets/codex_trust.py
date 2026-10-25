@@ -137,10 +137,11 @@ def status_lines(root: Path, codex_home: Path, windows: bool | None = None) -> l
                 elif (entry.get("trusted_content_hash") or baseline) != current:
                     changed += 1
     fix = "open /hooks in Codex and trust the maisecrets entries; until then Codex lets prompts and tool calls through"
+    warn = "WARNING: maisecrets does not protect Codex now: "
     if untrusted:
-        out.append(f"codex hooks: {untrusted} of {total} not trusted: {fix}")
+        out.append(f"{warn}codex hooks: {untrusted} of {total} not trusted: {fix}")
     elif changed:
-        out.append(f"codex hooks: trusted for other contents of this folder (an update, or a changed file), "
+        out.append(f"{warn}codex hooks: trusted for other contents of this folder (an update, or a changed file), "
                    f"so Codex 0.164 and newer skip them: {fix}")
     elif old:
         out.append("codex hooks: trusted (an approval from before Codex 0.164: after the next maisecrets update, "
