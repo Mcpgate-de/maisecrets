@@ -579,12 +579,14 @@ mirror_tag:
 # (Codex 0.164 binds the approval to the plugin folder), and until then lets prompts through; so Codex gets a version
 # a month, not every release. The tree is build_release_tree.py --flavor codex: the runtime files plus .codex-plugin/,
 # under plugin/. The job takes the version that GitHub main already has: its tag reached GitHub only through
-# mirror_tag, after verify_release. It runs on the pipeline schedule with MAISECRETS_SCHEDULE=release-codex (monthly)
-# and by hand in a release's tag pipeline, or with "Run" on that schedule, for a security fix.
+# mirror_tag, after verify_release. It runs on the pipeline schedule with MAISECRETS_SCHEDULE=release-codex, by hand
+# in a release's tag pipeline or with "Run" on that schedule, and in every tag pipeline while the project variable
+# MAISECRETS_CODEX_EVERY_RELEASE is "true" (no Codex user installs from GitHub yet; unset it to make Codex slow).
 release_codex:
   <<: *mirror_base
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $MAISECRETS_SCHEDULE == "release-codex"
+    - if: $CI_COMMIT_TAG && $MAISECRETS_CODEX_EVERY_RELEASE == "true"
     - if: $CI_COMMIT_TAG
       when: manual
   needs:

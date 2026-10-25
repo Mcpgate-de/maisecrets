@@ -183,7 +183,7 @@ and OpenAI plugin directories.
   |---|---|---|---|---|
   | `release` | `directory` | runtime files; the directory's own `hooks/hooks.json`, `README.md`, `prefixes.json` and betterleaks parts | `mirror_tag`, every release, unless the directory hold is on | the Anthropic directory |
   | `release-claude` | `claude` | runtime files with `main`'s own `hooks/hooks.json` and `README.md`; betterleaks in parts (size) | `mirror_tag`, every release, before the directory hold | Claude Code, once `.claude-plugin/marketplace.json` names it (not yet) |
-  | `release-codex` | `codex` | the `claude` tree plus `.codex-plugin/` and the skills' `agents/openai.yaml`, all under `plugin/` | `release_codex`: the pipeline schedule with `MAISECRETS_SCHEDULE=release-codex` (monthly), or by hand in a tag pipeline for a security fix | Codex, once `.agents/plugins/marketplace.json` names it as a Git source with `path: plugin` (not yet) |
+  | `release-codex` | `codex` | the `claude` tree plus `.codex-plugin/` and the skills' `agents/openai.yaml`, all under `plugin/` | `release_codex`: every tag pipeline while the project variable `MAISECRETS_CODEX_EVERY_RELEASE` is `true`; else the pipeline schedule with `MAISECRETS_SCHEDULE=release-codex`, or by hand in a tag pipeline for a security fix | Codex, once `.agents/plugins/marketplace.json` names it as a Git source with `path: plugin` (not yet) |
 
   `release_codex` takes the version that GitHub `main` already has, and its tag must be the
   tag of this project: a tag reaches GitHub only through `mirror_tag`, after `verify_release`.
