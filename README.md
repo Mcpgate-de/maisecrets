@@ -679,9 +679,10 @@ macOS and Windows the system setting, not `LANG`). The default is `["auto"]`.
 An empty list keeps the generic rules only. The old key `pii_regions` still
 works.
 
-Credential labels come in languages. English labels (`password:`, `pass:`,
-`token:`) are always on. maisecrets adds the labels of your system language
-and of each region, for example `passwort:` and `kennwort:` for German. The
+Credential labels come in languages. The labels of every language below are
+on, whatever your system language and regions: `password:`, `passwort:`,
+`wachtwoord:`, `hasło:` and the others (since 0.8.2; before, only English and the
+labels of your system language and of each region). The
 labels are data files in `maisecrets/detection/rules/labels/`, one file per language.
 A new language is one new file. Files exist for Chinese, Czech, Danish, Dutch,
 English, Finnish, French, German, Italian, Japanese, Korean, Norwegian (Bokmål),

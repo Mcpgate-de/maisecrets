@@ -1127,36 +1127,88 @@ def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
     out: list[Rule] = []
     for r in data["rules"]:
         flags = re.IGNORECASE if r.get("ignorecase") else 0
-        # the product's own name carries "secret": `/maisecrets:shortcut` was stored as a secret
-        # named "shortcut" (field report, 2026-09-27); "mai" + keyword is never a label
-        keywords = "(?<!mai)(" + "|".join([denylist] + [lab.regex for lab in labels]) + ")"
-        regex = r["regex"].replace("(" + denylist + ")", keywords, 1)
-        # the vendored value group must start with a word character, so `$+4jJzBixvQD9#`,
-        # `@f6a-VtyEOYr!` and `-NA#C-X-gb4T%` were never values (2026-09-27); any first character
-        # a character a password starts with may start one (not {, [, (, \\, /, <: code and paths), and
-        # _ds_value_ok refuses a shell variable ($VAR, ${VAR}) as before
-        regex = regex.replace("(?=\\w+)", "(?=[\\w!#$%&*+\\-@^~?.])")
-        # French typography puts a space (often a no-break space) before the colon, and people type
-        # `password : x` in every language; the vendored colon rules allowed none, so
-        # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
-        regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
-
-        if _COLON_AFTER_LABEL_SPACED in regex:
-            regex = regex.replace(_COLON_AFTER_LABEL_SPACED, _COLON_AFTER_LABEL_ESCAPED, 1)
-            for q in _COLON_THEN_QUOTE:   # the skip goes right before the group of the opening quote
-                at = q.rindex("([")
-                regex = regex.replace(q, q[:at] + _ESCAPED_QUOTE_SKIP + q[at:], 1)
-            if cjk:
-                regex = regex.replace(_COLON_AFTER_LABEL_ESCAPED, _COLON_AFTER_LABEL_ESCAPED[:-1] + "[:\uff1a]", 1)
-        if regex.startswith(keywords + "\\w*") and len(regex) > len(keywords) + 3:
-            rx = _KeywordTail(regex, keywords, list(data["denylist"]) + [lab.regex for lab in labels], flags)
-        else:
-            rx = _Lazy(regex, flags)
+        rx = _keyword_regex(r["regex"], denylist, labels, flags, cjk)
+        if labels:
+            rx = _LabelSubset(rx, labels, lambda labs, r=r, flags=flags: _keyword_regex(r["regex"], denylist, labs,
+                                                                                         flags, cjk))
         out.append(Rule(id=r["id"], type="SECRET", regex=rx,
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value",
                         quote_group=_DS_QUOTE_GROUP.get(r["id"], 0)))
     return out
+
+
+def _keyword_regex(vendored: str, denylist: str, labels: list, flags: int, cjk: bool):
+    """The regex of a vendored keyword rule with the label words of `labels` beside its denylist."""
+    # the product's own name carries "secret": `/maisecrets:shortcut` was stored as a secret
+    # named "shortcut" (field report, 2026-09-27); "mai" + keyword is never a label
+    keywords = "(?<!mai)(" + "|".join([denylist] + [lab.regex for lab in labels]) + ")"
+    regex = vendored.replace("(" + denylist + ")", keywords, 1)
+    # the vendored value group must start with a word character, so `$+4jJzBixvQD9#`,
+    # `@f6a-VtyEOYr!` and `-NA#C-X-gb4T%` were never values (2026-09-27); any first character
+    # a character a password starts with may start one (not {, [, (, \\, /, <: code and paths), and
+    # _ds_value_ok refuses a shell variable ($VAR, ${VAR}) as before
+    regex = regex.replace("(?=\\w+)", "(?=[\\w!#$%&*+\\-@^~?.])")
+    # French typography puts a space (often a no-break space) before the colon, and people type
+    # `password : x` in every language; the vendored colon rules allowed none, so
+    # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
+    regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
+
+    if _COLON_AFTER_LABEL_SPACED in regex:
+        regex = regex.replace(_COLON_AFTER_LABEL_SPACED, _COLON_AFTER_LABEL_ESCAPED, 1)
+        for q in _COLON_THEN_QUOTE:   # the skip goes right before the group of the opening quote
+            at = q.rindex("([")
+            regex = regex.replace(q, q[:at] + _ESCAPED_QUOTE_SKIP + q[at:], 1)
+        if cjk:
+            regex = regex.replace(_COLON_AFTER_LABEL_ESCAPED, _COLON_AFTER_LABEL_ESCAPED[:-1] + "[:\uff1a]", 1)
+    if regex.startswith(keywords + "\\w*") and len(regex) > len(keywords) + 3:
+        return _KeywordTail(regex, keywords, denylist.split("|") + [lab.regex for lab in labels], flags)
+    return _Lazy(regex, flags)
+
+
+class _LabelSubset:
+    """A keyword rule with the label words of every label language, matched with only the labels whose prefilter
+    literal the text holds (the denylist always). A label matches only where its literal is, and no label has a group
+    of its own, so the matches and their groups are those of the whole regex. With 19 languages the whole alternation
+    made the keyword rules a third slower on a 1 MB text (2026-10-25). `pattern` and `flags` are those of the whole
+    regex, so the ruleset digest stays the same."""
+    __slots__ = ("_full", "_labels", "_build", "_find", "_cache", "pattern", "flags")
+
+    def __init__(self, full, labels: list, build) -> None:
+        self._full, self._labels, self._build = full, labels, build
+        self.pattern, self.flags = full.pattern, full.flags
+        self._find = None
+        self._cache: dict = {}
+
+    def _for(self, text: str):
+        if self._find is None:
+            self._find = re.compile("|".join(re.escape(p) for p in sorted({lab.prefilter for lab in self._labels},
+                                                                          key=len, reverse=True)))
+        low = _lower(text)
+        # overlapping literals (pass, passe): each literal is looked for on its own where the alternation found one
+        found = frozenset(lab.prefilter for lab in self._labels if lab.prefilter in low) \
+            if self._find.search(low) else frozenset()
+        rx = self._cache.get(found)
+        if rx is None:
+            if len(self._cache) > 512:
+                self._cache.clear()
+            rx = self._cache[found] = self._build([lab for lab in self._labels if lab.prefilter in found])
+        return rx
+
+    def finditer(self, text: str):
+        return self._for(text).finditer(text)
+
+    def search(self, text: str):
+        return self._for(text).search(text)
+
+    @property
+    def groups(self) -> int:
+        # no label has a group: the regex of the denylist alone has the groups of the whole, and compiling the whole
+        # (a head per alternative) took 6 s of a hook's first scan
+        rx = self._cache.get(frozenset())
+        if rx is None:
+            rx = self._cache[frozenset()] = self._build([])
+        return rx.groups
 
 
 def _load_prefixes() -> list[Rule]:
@@ -2757,6 +2809,10 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     and not _label_value_ok(secret)):
                 continue   # {\"passwordLastChanged\":\"2024-10-01T12:00:00Z\"}: the new escaped path, no password
             if rule.quote_group and not m.group(rule.quote_group):
+                if secret and _is_cjk(secret[0]) and sum(map(_is_cjk, secret)) >= 2:
+                    # 密码：至少8位（含1个大写字母）: a sentence in Chinese or Japanese after the label is a rule for
+                    # the password, no value (a value of CJK letters alone is no password a person types)
+                    continue
                 if _has_cjk(secret) and not _is_cjk(secret[0]):
                     # 密码：<value>，请保密: Chinese and Japanese put no space after the value, so its end is the
                     # first CJK letter or fullwidth sign. A value that starts with one is cut by no rule here

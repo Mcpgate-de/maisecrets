@@ -51,9 +51,19 @@ _BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date[ _-]?of[ _-]?birth|birth[ _-]
                        r"|\bbday\b" + _VCARD_PARAMS
                        + r"|\bgeb(?:\.|oren am|urtsdatum)"
                        r"|n[ée]\(?e?\)? le|date de naissance|fecha de nacimiento|\bnac[ií](?:d[oa])? el"
-                       r"|data de nascimento|data di nascita|\bnato il)[\"'\]]?"
+                       r"|data de nascimento|data di nascita|\bnat[oa] il|\bnascid[oa] em"
+                       # the label in the other label languages and in Greek, Romanian, Ukrainian and Arabic (nym dev,
+                       # 2026-10-25: 1,693 of 2,140 birth dates stayed text, most after such a label). A verb of birth
+                       # with its preposition only (geboren op, född den), as `born on`: alone it is history
+                       r"|geboortedatum|\bgeboren op|f[öo]delsedatum|\bf[öo]dd den|f[øo]dselsdato"
+                       r"|syntym[äa]aika(?:ni|nsa|si)?|data urodzenia|\burodzon[ya] dnia|datum narozen[íi]"
+                       r"|\bnarozen[ýáa]? dne|do[ğg]um tarih(?:i|im|iniz)?|дат[аеуы] рождения|дата народження"
+                       r"|data na[șşs]terii|data na[șşs]tere|ημερομηνία γέννησης|تاريخ (?:ال)?ميلاد\w*"
+                       r"|生年月日|出生日期|생년월일(?:은|는)?)[\"'\]]?"
                        # a comma (Date of birth, 1984-07-12, …) and Markdown bold around the colon (**DOB:**)
-                       r"\*{0,2}\s{0,3}(?:(?:is|was|as)\s{1,3})?[:=,]?\*{0,2}\s{0,3}[\"'(]?\s{0,3}"
+                       r"\*{0,2}\s{0,3}(?:(?:is|was|as|ist|war|est|es|era|è|é|er|var|är|on|oli|jest|je|este|είναι)"
+                       r"\s{1,3})?"
+                       r"[:=,\uff1a]?\*{0,2}\s{0,3}[\"'(]?\s{0,3}"
                        r"(" + _DATE + r"|(?:19|20)\d{6})(?!\d)")   # and YYYYMMDD after the label (Gretel, 2026-10-19)
 
 # --------------------------------------------------------------------------------- ID number after a label --
@@ -471,7 +481,15 @@ _CUE_NAME = r"((?:" + _NAME_STEM + r")(?: (?:" + _NAME_STEM + r")){0,3})"
 _PERSON_CUE_RES = (
     re.compile(r"(?<![\w,])I, " + _CUE_NAME + r", (?=(?:hereby|am|the undersigned|residing|currently|born|a resident"
                r"|being|declare|certify|of legal age)\b)"),
-    re.compile(r"(?<![\w])(?i:my (?:full )?name is) " + _CUE_NAME + r"(?![\w'’-])"),
+    # and in the other label languages (nym dev, 2026-10-25: a self-introduction in another language stayed text)
+    # (not `ich heiße`: ich heiße Neue Kollegen willkommen is a welcome)
+    re.compile(r"(?<![\w])(?i:my (?:full )?name is|mein (?:vollständiger )?name ist"
+               r"|je m['’]appelle|mon nom (?:complet )?est|mi nombre (?:completo )?es|me llamo"
+               r"|il mio nome (?:completo )?è|mi chiamo|mijn (?:volledige )?naam is|ik heet|jag heter"
+               r"|mitt (?:fullständiga )?namn är|jeg heter|jeg hedder|mit (?:fulde )?navn er|mitt navn er"
+               r"|nazywam się|mam na imię|(?:o )?meu nome (?:completo )?é|chamo-me|eu me chamo|jmenuji se"
+               r"|nimeni on|numele meu (?:complet )?este|mă numesc) " + _CUE_NAME
+               + r"(?![\w'’-])"),
     re.compile(_CUE_NAME + r", (?=(?:born on|born in|date of birth|a resident of|residing at|resides at|who resides"
                r"|who lives|currently residing|currently resides)\b)"),
     # a title before a full name (Mr Dana Okafor, Mrs. …); not Dr, which is also a street (… Dr. We are)
@@ -674,6 +692,79 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                "förnamn": "first_name", "efternamn": "last_name", "namn": "name", "adress": "address",
                "födelsedatum": "date_of_birth",
                "sobrenome": "last_name", "endereço": "endereco", "data_de_nascimento": "date_of_birth"}
+# the field names of a person in the languages of the label files and their common short forms, written without
+# diacritics (a name is looked up as written and folded: hasło, haslo). Each maps to a name the lists above hold, so
+# the policy stays one: a weak column counts only beside a strong one and a person (structured corpus, set A dev,
+# 2026-10-25). Left out: words that name a thing as often as a person's field (via, str, login, uid, titular)
+_MD_ALIASES_FOLDED = {
+    # first, last and full names
+    "fname": "first_name", "first_nm": "first_name", "firstnm": "first_name", "vname": "first_name",
+    "forename": "first_name", "rufname": "first_name", "imie": "first_name", "tilltalsnamn": "first_name",
+    "roepnaam": "first_name", "primeiro_nome": "first_name", "nombre_pila": "first_name",
+    "nombre_de_pila": "first_name",
+    "lname": "last_name", "last_nm": "last_name", "lastnm": "last_name", "nname": "last_name",
+    "familienname": "last_name", "nazwisko": "last_name", "apelido": "last_name", "primer_apellido": "last_name",
+    "segundo_apellido": "last_name", "nom_famille": "last_name", "cust_nm": "customer_name",
+    "custnm": "customer_name", "customer_nm": "customer_name", "kundenname": "customer_name",
+    "kundnamn": "customer_name", "klantnaam": "customer_name", "nome_cliente": "customer_name",
+    "nombre_cliente": "customer_name", "nom_client": "customer_name", "nominativo": "full_name",
+    "nome_completo": "full_name", "nombre_completo": "full_name", "nom_complet": "full_name",
+    "volledige_naam": "full_name", "imie_i_nazwisko": "full_name", "vollstandiger_name": "full_name",
+    "fullstandigt_namn": "full_name",
+    # user names
+    "uname": "username", "usr": "username", "gebruikersnaam": "username", "anvandarnamn": "username",
+    "benutzername": "username", "anmeldename": "username", "nom_utilisateur": "username",
+    "identifiant": "username", "nombre_usuario": "username", "nombre_de_usuario": "username",
+    "usuario": "username", "nome_utente": "username", "utente": "username", "utilizador": "username",
+    "nome_usuario": "username", "nome_de_usuario": "username", "nazwa_uzytkownika": "username",
+    "login_name": "username", "loginname": "username", "benutzer": "username",
+    # addresses
+    "addr": "address", "adr": "address", "domicilio": "address", "postadress": "address", "postadres": "address",
+    "hemadress": "address", "woonadres": "address", "adres_zamieszkania": "address", "residenza": "address",
+    "wohnadresse": "address", "wohnort": "address", "morada": "address", "endereco_residencial": "address",
+    "straatnaam": "street", "gatuadress": "street_address", "calle": "street", "ulica": "street", "rue": "street",
+    "strasse_hausnummer": "street",
+    # dates of birth
+    "geb_dat": "date_of_birth", "gebdat": "date_of_birth", "geb_datum": "date_of_birth",
+    "data_urodzenia": "date_of_birth", "fecha_nacimiento": "date_of_birth", "f_nac": "date_of_birth",
+    "fec_nac": "date_of_birth", "data_nascita": "date_of_birth", "data_nascimento": "date_of_birth",
+    "date_naissance": "date_of_birth", "fodelsedag": "date_of_birth", "fodelsedatum": "date_of_birth",
+    "geburtsdatum": "geburtsdatum", "dob_date": "date_of_birth",
+    # phones
+    "tel": "telephone", "tel_no": "telephone", "tel_nr": "telephone", "telnr": "telephone", "nr_tel": "telephone",
+    "numer_telefonu": "telephone", "telefonnummer": "telephone", "numero_de_telephone": "telephone",
+    "numero_telephone": "telephone", "numero_de_telefono": "telephone", "numero_telefono": "telephone",
+    "numero_di_telefono": "telephone", "mobilnummer": "mobile", "mobiltelefon": "mobile", "gsm": "mobile",
+    "cellulare": "mobile", "movil": "mobile", "celular": "mobile", "telemovel": "mobile", "portable": "mobile",
+    "mobiel": "mobile", "komorka": "mobile", "telefon_komorkowy": "mobile",
+    # national ids
+    "ssn_no": "ssn", "ssn_nr": "ssn", "personnummer": "national_id", "bsn": "national_id",
+    "burgerservicenummer": "national_id", "dni": "national_id", "pesel": "national_id",
+    "codice_fiscale": "national_id", "numero_securite_sociale": "national_id", "nie": "national_id",
+    "cpf": "national_id", "nif": "tax_id", "henkilotunnus": "national_id"}
+
+
+def _fold(name: str) -> str:
+    """A field name without its diacritics: hasło haslo, lösenord losenord, straße strasse."""
+    import unicodedata
+    name = name.replace("ß", "ss").replace("ł", "l").replace("ø", "o").replace("æ", "ae")
+    return "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
+
+
+# an entity before a field name (customer__surname, kunde.geburtsdatum, klient__nazwisko): the field alone names the
+# value. Only the entities of a person: company_name and account_name stay text
+_PERSON_PREFIX_RE = re.compile(r"(?:customer|cust|client|cliente|klient|klant|kunde|kunden|kund|patient|paciente"
+                               r"|member|person|persona|persoon|employee|mitarbeiter|applicant|student|guest|buyer"
+                               r"|contact|kontakt|user|utente|usuario|benutzer)_(?=[a-z])")
+
+
+def _known_column(name: str) -> str:
+    """The column of a folded name in the lists, or ""."""
+    for n in (name, _fold(name)):
+        n = _MD_ALIASES.get(n, _MD_ALIASES_FOLDED.get(n, n))
+        if n in _STRONG_COLS or n in _WEAK_COLS or _ACCOUNT_NUMBER_COL_RE.fullmatch(n):
+            return n
+    return ""
 
 
 def _md_column(cell: str) -> str:
@@ -682,7 +773,17 @@ def _md_column(cell: str) -> str:
     cell = re.sub(r"^\s*[A-Za-z][\w.-]{0,40}:(?=[A-Za-z_])", "", cell.replace("\\_", "_"))
     name = re.sub(r"[\s/.-]+", "_", cell.strip().strip("*_`'\" ").strip().lower()).strip("_")
     name = re.sub(r"_?\(.*\)$", "", name)   # Date of Birth (YYYY-MM-DD)
-    return _MD_ALIASES.get(name, name)
+    alias = _MD_ALIASES.get(name, name)
+    if alias in _STRONG_COLS or alias in _WEAK_COLS or len(name) > 64:
+        return alias
+    # a doubled separator (customer__date__of__birth), a name in another language or a short form, a person's
+    # entity before the field
+    name = re.sub(r"_{2,}", "_", name)
+    known = _known_column(name)
+    if not known:
+        p = _PERSON_PREFIX_RE.match(name)
+        known = _known_column(name[p.end():]) if p else ""
+    return known or alias
 
 
 def _md_cells(line: str) -> list:
@@ -745,7 +846,7 @@ def _md_table_hits(text: str) -> list:
             head = [(pos[hdr_line] + a, pos[hdr_line] + b) for a, b in _md_cells(hdr)]
             kv = [r for r in [head] + rows if len(r) == 2]
             fields = [_md_column(text[r[0][0]:r[0][1]].strip("*` ")) for r in kv]
-            if sum(f in _STRONG_COLS or f in _WEAK_COLS for f in fields) >= 2:
+            if sum(f in _STRONG_COLS or f in _WEAK_COLS for f in fields) >= 2 or any(map(_password_column, fields)):
                 out += _grid_hits(text, fields, [[r[1] for r in kv]], "md-table-personal-column", strip="*`")
     return out
 
@@ -761,6 +862,43 @@ class _lazy:
         if self._rx is None:
             object.__setattr__(self, "_rx", re.compile(*self._args))
         return getattr(self._rx, name)
+
+
+# a column or field that names a password holds one on each row, whatever the other columns are (structured corpus,
+# set A dev, 2026-10-25: tables and SQL found 0 of 230 passwords). The word last, after at most two parts
+# (db_password, admin_user_pwd); a stored hash (password_hash, hashed_password) is no password
+# `pass` alone names a boarding pass or a test result: only after a part that names an account (db_pass)
+_PASSWORD_WORDS = ("password|passwort|passwd|pwd|kennwort|wachtwoord|losenord|haslo|contrasena|mot_de_passe"
+                   "|mdp|senha|palavra_passe|parola_d_ordine|adgangskode|passord|salasana|heslo|sifre|passphrase")
+_PASSWORD_COL_RE = re.compile(r"(?:(?!(?:hash|hashed|encrypted|enc|crypt|crypted|salted|salt)_)[a-z0-9]{1,16}_){0,2}"
+                              r"(?:" + _PASSWORD_WORDS + r")|(?:[a-z0-9]{1,16}_)?(?:db|database|user|admin|root|login"
+                              r"|account|mail|smtp|ftp|wifi|wlan|app|api|sql|redis|ldap)_pass")
+# a value that is no password: a hash or a reference to one, a placeholder or a type
+_NOT_A_PASSWORD_RE = re.compile(
+    r"(?i)\$(?:2[abxy]?|argon2\w*|pbkdf2[\w-]*|scrypt|[156]|sha\d+)\$|(?:pbkdf2|bcrypt|argon2|sha\d+|md5)[_$:]"
+    r"|\{[A-Z0-9-]+\}|[0-9a-f]{32,}$|[$%{<\[(*]|\w+\(\d*\)$|^(?:enc|env|vault|secret|ref|file|op):|^x{4,}$")
+
+
+_TABLE_KINDS = frozenset({"csv-personal-column", "md-table-personal-column", "html-table-personal-column",
+                          "sql-insert-personal-column"})
+
+
+def _password_column(name: str) -> bool:
+    return bool(_PASSWORD_COL_RE.fullmatch(_fold(re.sub(r"_{2,}", "_", name))))
+
+
+def _password_cell(v: str) -> bool:
+    """A cell under a password column that reads as one: no space, 6 to 128 characters, a letter and a digit (a single
+    word, `required` or `string`, is none), no slash, and no hash, placeholder or type."""
+    if not 6 <= len(v) <= 128 or any(c.isspace() for c in v) or v.lower() in _NOT_A_CELL:
+        return False
+    kinds = sum((any(c.islower() for c in v), any(c.isupper() for c in v), any(c.isdigit() for c in v),
+                 any(not c.isalnum() for c in v)))
+    from .core import _ds_value_ok
+    # a letter and a digit: a word with a sign (Seat:, rgb/top) is a heading or a value of another table
+    return kinds >= 2 and any(c.isdigit() for c in v) and any(c.isalpha() for c in v) and "/" not in v \
+        and not _NOT_A_PASSWORD_RE.match(v) and not _NOT_A_PASSWORD_RE.search(v[:1]) and len(set(v)) > 2 \
+        and _ds_value_ok(v, min_len=6)
 
 
 _BIRTH_ANCHOR_COLS = frozenset({"dob", "date_of_birth", "birth_date", "birthdate", "geburtsdatum"})
@@ -800,7 +938,9 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
     # (sku, product, customer_name, dob, ssn) has more personal columns and stays a person's (the traces, 2026-10-22)
     software = any(h in _SOFTWARE_COLS for h in names) and \
         sum(h in _STRONG_COLS or h in _WEAK_COLS for h in names) < 2
-    if not cols and not accounts:
+    # a password column in a table; a record of JSON, XML or lines has its `key: value` read by the keyword rules
+    secrets = {i for i, h in enumerate(names) if _password_column(h)} if kind in _TABLE_KINDS else set()
+    if not cols and not accounts and not secrets:
         return out
     for n, cells in enumerate(rows):
         if n >= _CSV_ROWS:
@@ -813,6 +953,8 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
             s0 = a + text[a:b].index(v) if v else a
             if col in accounts and _account_cell(v):
                 out.append((s0, s0 + len(v), kind, ID_NUMBER))
+            if col in secrets and _password_cell(v):
+                out.append((s0, s0 + len(v), "secret-under-password-column", "SECRET"))
             if col in cols:
                 typ = _column_type(names[col])
                 if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ, names[col]):
@@ -1061,6 +1203,116 @@ def _xml_record_hits(text: str) -> list:
     return out
 
 
+# the records of the line formats: YAML, .env, INI, a compose `environment:` list, PHP print_r (one `key: value`,
+# `KEY=value` or `[key] => value` per line, a run of lines at one indent is one record, `- ` opens the next), a log
+# line with two `key=value` pairs or more (one record per line), and the pairs of a SQL UPDATE … SET … WHERE and of a
+# WHERE clause (one record per statement). The same policy as the tables (_grid_hits): structured corpus, set A dev,
+# 2026-10-25, 3,226 values under a known field name stayed text because no reader read these formats
+_KV_LINE_RE = _lazy(r"(?m)^([ \t]*)(?:(-[ \t]+)|export[ \t]+)?(?:\[([^\]\n]{1,64})\][ \t]*=>|([^\W\d][\w.-]{0,63}"
+                    r"(?: [^\W\d][\w.-]{0,30}){0,3})[ \t]*([:=]))[ \t]*(?:\"([^\"\n]{1,512})\"|'([^'\n]{1,512})'"
+                    r"|([^\s\"'#|>&][^\n]{0,511}?))[ \t]*$")
+_KV_INLINE_RE = _lazy(r"(?<![\w.:/-])([^\W\d][\w.-]{0,63})=(?:\"([^\"\n]{1,512})\"|'([^'\n]{1,512})'"
+                      r"|([^\s\"',;&]{1,512}))")
+_SQL_STMT_RE = _lazy(r"(?is)\b(?:update\s+[\w.`\"\[\]]{1,128}\s+set|select\s[^;]{1,2000}?\swhere|delete\s+from\s"
+                     r"[^;]{1,200}?\swhere)\s([^;]{1,4000})")
+_SQL_PAIR_RE = _lazy(r"([\w.`\"\[\]-]{1,64})\s*=\s*(?:'((?:[^'\n]|''){1,512})'|(-?[\w.]{1,64}))")
+
+
+def _kv_line_hits(text: str) -> list:
+    out, rows = [], 0
+    record: list = []
+    indent = None
+    last_end = -1
+
+    def flush():
+        nonlocal record, rows
+        if len(record) >= 2 and rows < _JSON_RECORDS_MAX:
+            rows += 1
+            return _grid_hits(text, [_md_column(k) for k, _ in record], [[s for _, s in record]],
+                              "kv-personal-field")
+        return []
+
+    for m in _KV_LINE_RE.finditer(text):
+        ind = len(m.group(1)) + (len(m.group(2)) if m.group(2) else 0)
+        between = text[last_end:m.start()] if last_end >= 0 else ""
+        # a line between two pairs that is not deeper than the record (a heading) or a blank line ends the record; a
+        # deeper one (the lines of a block scalar) does not
+        lines = between.split("\n")[1:-1]
+        gap = any(not ln.strip() or len(ln) - len(ln.lstrip()) <= (indent or 0) for ln in lines)
+        if record and ((m.group(2) and m.group(5) != "=") or ind != indent or gap):
+            out += flush()
+            record = []
+        indent = ind
+        last_end = m.end()
+        key = m.group(3) or m.group(4)
+        g = next(i for i in (6, 7, 8) if m.group(i) is not None)
+        record.append((key, m.span(g)))
+    out += flush()
+    return out
+
+
+def _kv_inline_hits(text: str) -> list:
+    out, rows = [], 0
+    start = 0
+    for line in text.split("\n"):
+        a, start = start, start + len(line) + 1
+        # a line with two `=` at least: a regex for that line backtracked over every long line with one (a base64
+        # block with its padding) and took quadratic time
+        if line.count("=") < 2:
+            continue
+        pairs = []
+        for m in _KV_INLINE_RE.finditer(text, a, a + len(line)):
+            g = next(i for i in (2, 3, 4) if m.group(i) is not None)
+            pairs.append((m.group(1), m.span(g)))
+        if len(pairs) >= 2 and rows < _JSON_RECORDS_MAX:
+            rows += 1
+            out += _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]], "kv-personal-field")
+    return out
+
+
+def _sql_pair_hits(text: str) -> list:
+    out = []
+    for st in _SQL_STMT_RE.finditer(text):
+        pairs = []
+        for m in _SQL_PAIR_RE.finditer(text, st.start(1), st.end(1)):
+            g = 2 if m.group(2) is not None else 3
+            pairs.append((m.group(1).strip("`\"[]").rsplit(".", 1)[-1], m.span(g)))
+        if pairs:
+            out += _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]], "kv-personal-field")
+    return out
+
+
+def _kv_record_hits(text: str) -> list:
+    out = []
+    if ":" in text or "=" in text:
+        out += _kv_line_hits(text)
+    if text.count("=") >= 2:
+        out += _kv_inline_hits(text)
+    if "=" in text and ("SET" in text or "set" in text or "WHERE" in text or "where" in text):
+        out += _sql_pair_hits(text)
+    return out
+
+
+# JSON inside a JSON string and a Python dict repr: the JSON reader on a copy of the same length
+_JSON_STRING_RE = _lazy(r'"((?:[^"\\\n]|\\.){8,200000})"')
+
+
+def _quoted_json_hits(text: str) -> list:
+    """JSON inside a JSON string (\\"key\\": \\"value\\") and a Python dict repr ({'key': 'value'}) read as JSON: a
+    copy of the same length with the quotes made plain, so each span is the span of the text."""
+    out = []
+    if '\\":' in text:
+        # each string that holds JSON, alone: the text around it blanked, its escaped quotes plain
+        inner = [" "] * len(text)
+        for m in _JSON_STRING_RE.finditer(text):
+            if '\\":' in m.group(1):
+                inner[m.start(1):m.end(1)] = m.group(1).replace('\\"', ' "')
+        out += _json_record_hits("".join(inner))
+    if "{'" in text and "': " in text:
+        out += _json_record_hits(text.replace("'", '"'))
+    return out
+
+
 # ------------------------------------------------------------------------------------------ the forms of 0.6.24 --
 # A value in a fixed form or after a label that names it, from the holdout values that 0.6.21 still leaked
 # (2026-10-15). Each rule declares (type, channel, region, needs): channel "tool" (tool results and files) or "both".
@@ -1103,6 +1355,8 @@ FORMS = {
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "json-personal-field": ("COLUMN", "tool", "generic", "label"),
     "xml-personal-field": ("COLUMN", "tool", "generic", "label"),
+    "kv-personal-field": ("COLUMN", "tool", "generic", "label"),
+    "secret-under-password-column": ("SECRET", "tool", "generic", "label"),
     "username-after-label": (USERNAME, "tool", "generic", "label"),
     "secret-password-with-sign": ("SECRET", "tool", "generic", "label"),
 }
@@ -2108,6 +2362,10 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         out += _json_record_hits(text)
     if "xml-personal-field" in want and ("</" in text or "/>" in text):
         out += _xml_record_hits(text)
+    if "json-personal-field" in want and ('\\":' in text or "{'" in text):
+        out += _quoted_json_hits(text)
+    if "kv-personal-field" in want:
+        out += _kv_record_hits(text)
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
             d = re.sub(r"\D", "", m.group())
@@ -2121,7 +2379,9 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
 # ------------------------------------------------------------------------------------------------- the scan --
 # words one of which a text must hold before a rule's regex runs (a cheap test on the lowered text)
 _BIRTH_WORDS = ("dob", "d.o.b", "birth", "born", "bday", "geb", "n\u00e9", "ne le", "nee le", "naissance", "nacimiento",
-                "naci", "nac\u00ed", "nascimento", "nascita", "nato")
+                "naci", "nac\u00ed", "nascimento", "nascita", "nato", "nata il", "nascid", "geboorte", "geboren",
+                "delsedatum", "dd den", "dselsdato", "syntym", "urodz", "narozen", "tarih", "рождения", "народження",
+                "na\u0219ter", "na\u015fter", "naster", "γέννησης", "ميلاد", "生年月日", "出生日期", "생년월일")
 _ID_WORDS = ("mrn", "member", "passport", "licen", "dl", "sin", "tfn", "nir", "tax", "insurance", "account",
              "patient", "id on file", "beneficiary", "medical", "national", "tin", "social",
              "reisepass", "passnummer", "pass-nr", "pass nr", "hrerschein", "passeport", "permis", "pasaporte",
@@ -2348,7 +2608,12 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 out.append((m.start(2), m.start(2) + len(v), "name-after-label", NAME))
     if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
                                                                          "ms", "mx", "miss", "dear", "hi ", "hello",
-                                                                         "hey ")):
+                                                                         "hey ", "name ist", "appelle",
+                                                                         "mon nom", "mi nombre", "llamo", "mio nome",
+                                                                         "chiamo", "mijn naam", "ik heet", "heter",
+                                                                         "mitt namn", "hedder", "navn er", "nazywam",
+                                                                         "na imię", "meu nome", "chamo", "jmenuji",
+                                                                         "nimeni", "numele", "numesc")):
         for rx in _PERSON_CUE_RES:
             for m in rx.finditer(text):
                 words, start = m.group(1).split(" "), m.start(1)
