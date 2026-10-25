@@ -72,6 +72,7 @@ OWNER = {
     "userName in a log": "username-after-label", "benutzername": "username-after-label",
     "csv with a german social insurance column": "csv-personal-column",
     "tax id under a steuer_id key": "de-tax-id", "username with a year": "username-after-label",
+    "username with a team suffix": "username-after-label", "username with a bot-like start": "username-after-label",
     "username with a path part": "username-after-label", "username with a realm": "username-after-label",
     "username with an umlaut": "username-after-label", "username short with digits": "username-after-label",
     "username after an unrelated example key": "username-after-label",
