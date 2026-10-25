@@ -136,7 +136,7 @@ def main(argv=None) -> int:
     ap.add_argument("--maisecrets", type=Path, default=ROOT, help="the checkout the maisecrets adapter scans with")
     ap.add_argument("--regions", default="de,us")
     ap.add_argument("--languages", default="", help="maisecrets only: the label languages (a comma list); empty "
-                    "keeps the worker's default (en, and de with the region de)")
+                    "keeps the checkout's default label languages for the regions")
     ap.add_argument("--source", required=True, choices=sources.SOURCES + ("holdout", "holdout-v2", "structured-b"))
     ap.add_argument("--split", choices=casefmt.SPLITS + ("all",), default="dev")
     ap.add_argument("--data", type=Path)
