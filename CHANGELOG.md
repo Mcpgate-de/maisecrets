@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [0.8.1] - 2026-10-25
+
+### Features
+
+- the client shows what maisecrets does while a hook runs (8d7a29e)
+- ms:( says what a value is masked as and whether it is found alone (9d8295c)
+
+### Fixes
+
+- the cap of stored values in a session names placeholders and uses, not keys and resolves (410048e)
+- when maisecrets cannot run or cannot finish, the message says what to do next (60f9581)
+- a refusal or a permission prompt for a tool call says what to check, without codes (503c23b)
+- the notices, tips and command outputs say what happens in words you know (e93783e)
+- every text names a command that works for the person who reads it (8990742)
+- a name or phone number found by the words around it is no longer listed as a format found alone (20450b3)
+
 ## [0.8.0] - 2026-10-24
 
 ### Breaking
