@@ -115,7 +115,7 @@ class RunsTests(unittest.TestCase):
         cand, out = Path("/cand"), Path("/out/x.json")
         self.assertIsNone(xb.run_args(jobs["dialogpii-dev-full-maisecrets.json"], cand, {}, out))
         args = xb.run_args(jobs["dialogpii-dev-full-maisecrets.json"], cand, {"dialogpii": Path("/d")}, out)
-        self.assertEqual(args[args.index("--data") + 1], "/d")
+        self.assertEqual(args[args.index("--data") + 1], str(Path("/d")))   # a Windows path prints \\d
         b = xb.run_args(jobs["structured-b-holdout-full-presidio.json"], cand, {"structured_b": Path("/b")}, out)
         self.assertIn("--release-candidate", b)
         nym = xb.run_args(jobs["nym-dev-every25-presidio.json"], cand, {"nym": Path("/n")}, out)
