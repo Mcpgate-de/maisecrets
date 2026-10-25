@@ -87,6 +87,15 @@ class RunsTests(unittest.TestCase):
         self.assertFalse(any("prowl" in j["name"].lower() for j in jobs))
         self.assertEqual(len({j["name"] for j in jobs}), len(jobs))
 
+    def test_a_slow_scanner_reads_a_smaller_sample_that_maisecrets_also_reads(self):
+        jobs = xb.new_jobs()
+        names = {j["name"] for j in jobs}
+        for j in jobs:
+            if j["scanner"] in xb.SLOW and j["source"] in xb.SLOW[j["scanner"]]:
+                self.assertEqual(j["every"], xb.SLOW[j["scanner"]][j["source"]])
+                self.assertIn(j["name"].replace(j["scanner"], "maisecrets"), names)
+        self.assertEqual(jobs[-1]["scanner"], "preserve")
+
     def test_the_structured_corpus_carries_its_label_and_has_no_holdout_of_set_a(self):
         for j in xb.new_jobs():
             if j["source"].startswith("structured"):

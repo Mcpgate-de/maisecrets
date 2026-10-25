@@ -82,15 +82,21 @@ def job(section: str, source: str, split: str, scanner: str, every: int = 1, sal
             "name": f"{source}-{split}-{sample}-{scanner}.json"}
 
 
+# Preserve scans about 2 KB/s (Benchmark V3, 2026-10-21): on the two large PII sets it reads a smaller salted sample,
+# and maisecrets runs on the same sample, so each comparison is paired
+SLOW = {"preserve": {"nym": 125, "dialogpii": 5}}
+
+
 def new_jobs() -> list:
-    """The runs of section 2. nym is large: maisecrets on 1 in 5 (salted, as its holdout row), every scanner on the
-    same 1 in 25; the other sets in full."""
+    """The runs of section 2. nym is large: maisecrets on 1 in 5 (salted, as its holdout row), the PII scanners on
+    the same 1 in 25; the other sets in full; a slow scanner on its smaller sample (SLOW), and last."""
     jobs = []
+    pii_fast = tuple(s for s in PII_SCANNERS if s not in SLOW)
     for split in ("dev", "val", "holdout"):
         jobs.append(job("new-pii", "nym", split, "maisecrets", 5, SALT))
-        for s in ("maisecrets",) + PII_SCANNERS:
+        for s in ("maisecrets",) + pii_fast:
             jobs.append(job("new-pii", "nym", split, s, 25, SALT))
-        for s in ("maisecrets",) + PII_SCANNERS:
+        for s in ("maisecrets",) + pii_fast:
             jobs.append(job("new-pii", "dialogpii", split, s))
     for split in ("dev", "val"):
         for s in ("maisecrets",) + PII_SCANNERS:
@@ -103,6 +109,11 @@ def new_jobs() -> list:
     for source in ("catalogs", "catalogs-example"):
         for s in ("maisecrets",) + SECRET_SCANNERS:
             jobs.append(job("new-secret", source, "all", s))
+    for s, samples in SLOW.items():
+        for source, every in samples.items():
+            for split in ("dev", "val", "holdout"):
+                for scanner in ("maisecrets", s):
+                    jobs.append(job("new-pii", source, split, scanner, every, SALT))
     return jobs
 
 
