@@ -674,6 +674,79 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                "förnamn": "first_name", "efternamn": "last_name", "namn": "name", "adress": "address",
                "födelsedatum": "date_of_birth",
                "sobrenome": "last_name", "endereço": "endereco", "data_de_nascimento": "date_of_birth"}
+# the field names of a person in the languages of the label files and their common short forms, written without
+# diacritics (a name is looked up as written and folded: hasło, haslo). Each maps to a name the lists above hold, so
+# the policy stays one: a weak column counts only beside a strong one and a person (structured corpus, set A dev,
+# 2026-10-25). Left out: words that name a thing as often as a person's field (via, str, login, uid, titular)
+_MD_ALIASES_FOLDED = {
+    # first, last and full names
+    "fname": "first_name", "first_nm": "first_name", "firstnm": "first_name", "vname": "first_name",
+    "forename": "first_name", "rufname": "first_name", "imie": "first_name", "tilltalsnamn": "first_name",
+    "roepnaam": "first_name", "primeiro_nome": "first_name", "nombre_pila": "first_name",
+    "nombre_de_pila": "first_name",
+    "lname": "last_name", "last_nm": "last_name", "lastnm": "last_name", "nname": "last_name",
+    "familienname": "last_name", "nazwisko": "last_name", "apelido": "last_name", "primer_apellido": "last_name",
+    "segundo_apellido": "last_name", "nom_famille": "last_name", "cust_nm": "customer_name",
+    "custnm": "customer_name", "customer_nm": "customer_name", "kundenname": "customer_name",
+    "kundnamn": "customer_name", "klantnaam": "customer_name", "nome_cliente": "customer_name",
+    "nombre_cliente": "customer_name", "nom_client": "customer_name", "nominativo": "full_name",
+    "nome_completo": "full_name", "nombre_completo": "full_name", "nom_complet": "full_name",
+    "volledige_naam": "full_name", "imie_i_nazwisko": "full_name", "vollstandiger_name": "full_name",
+    "fullstandigt_namn": "full_name",
+    # user names
+    "uname": "username", "usr": "username", "gebruikersnaam": "username", "anvandarnamn": "username",
+    "benutzername": "username", "anmeldename": "username", "nom_utilisateur": "username",
+    "identifiant": "username", "nombre_usuario": "username", "nombre_de_usuario": "username",
+    "usuario": "username", "nome_utente": "username", "utente": "username", "utilizador": "username",
+    "nome_usuario": "username", "nome_de_usuario": "username", "nazwa_uzytkownika": "username",
+    "login_name": "username", "loginname": "username", "benutzer": "username",
+    # addresses
+    "addr": "address", "adr": "address", "domicilio": "address", "postadress": "address", "postadres": "address",
+    "hemadress": "address", "woonadres": "address", "adres_zamieszkania": "address", "residenza": "address",
+    "wohnadresse": "address", "wohnort": "address", "morada": "address", "endereco_residencial": "address",
+    "straatnaam": "street", "gatuadress": "street_address", "calle": "street", "ulica": "street", "rue": "street",
+    "strasse_hausnummer": "street",
+    # dates of birth
+    "geb_dat": "date_of_birth", "gebdat": "date_of_birth", "geb_datum": "date_of_birth",
+    "data_urodzenia": "date_of_birth", "fecha_nacimiento": "date_of_birth", "f_nac": "date_of_birth",
+    "fec_nac": "date_of_birth", "data_nascita": "date_of_birth", "data_nascimento": "date_of_birth",
+    "date_naissance": "date_of_birth", "fodelsedag": "date_of_birth", "fodelsedatum": "date_of_birth",
+    "geburtsdatum": "geburtsdatum", "dob_date": "date_of_birth",
+    # phones
+    "tel": "telephone", "tel_no": "telephone", "tel_nr": "telephone", "telnr": "telephone", "nr_tel": "telephone",
+    "numer_telefonu": "telephone", "telefonnummer": "telephone", "numero_de_telephone": "telephone",
+    "numero_telephone": "telephone", "numero_de_telefono": "telephone", "numero_telefono": "telephone",
+    "numero_di_telefono": "telephone", "mobilnummer": "mobile", "mobiltelefon": "mobile", "gsm": "mobile",
+    "cellulare": "mobile", "movil": "mobile", "celular": "mobile", "telemovel": "mobile", "portable": "mobile",
+    "mobiel": "mobile", "komorka": "mobile", "telefon_komorkowy": "mobile",
+    # national ids
+    "ssn_no": "ssn", "ssn_nr": "ssn", "personnummer": "national_id", "bsn": "national_id",
+    "burgerservicenummer": "national_id", "dni": "national_id", "pesel": "national_id",
+    "codice_fiscale": "national_id", "numero_securite_sociale": "national_id", "nie": "national_id",
+    "cpf": "national_id", "nif": "tax_id", "henkilotunnus": "national_id"}
+
+
+def _fold(name: str) -> str:
+    """A field name without its diacritics: hasło haslo, lösenord losenord, straße strasse."""
+    import unicodedata
+    name = name.replace("ß", "ss").replace("ł", "l").replace("ø", "o").replace("æ", "ae")
+    return "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
+
+
+# an entity before a field name (customer__surname, kunde.geburtsdatum, klient__nazwisko): the field alone names the
+# value. Only the entities of a person: company_name and account_name stay text
+_PERSON_PREFIX_RE = re.compile(r"(?:customer|cust|client|cliente|klient|klant|kunde|kunden|kund|patient|paciente"
+                               r"|member|person|persona|persoon|employee|mitarbeiter|applicant|student|guest|buyer"
+                               r"|contact|kontakt|user|utente|usuario|benutzer)_(?=[a-z])")
+
+
+def _known_column(name: str) -> str:
+    """The column of a folded name in the lists, or ""."""
+    for n in (name, _fold(name)):
+        n = _MD_ALIASES.get(n, _MD_ALIASES_FOLDED.get(n, n))
+        if n in _STRONG_COLS or n in _WEAK_COLS or _ACCOUNT_NUMBER_COL_RE.fullmatch(n):
+            return n
+    return ""
 
 
 def _md_column(cell: str) -> str:
@@ -682,7 +755,17 @@ def _md_column(cell: str) -> str:
     cell = re.sub(r"^\s*[A-Za-z][\w.-]{0,40}:(?=[A-Za-z_])", "", cell.replace("\\_", "_"))
     name = re.sub(r"[\s/.-]+", "_", cell.strip().strip("*_`'\" ").strip().lower()).strip("_")
     name = re.sub(r"_?\(.*\)$", "", name)   # Date of Birth (YYYY-MM-DD)
-    return _MD_ALIASES.get(name, name)
+    alias = _MD_ALIASES.get(name, name)
+    if alias in _STRONG_COLS or alias in _WEAK_COLS or len(name) > 64:
+        return alias
+    # a doubled separator (customer__date__of__birth), a name in another language or a short form, a person's
+    # entity before the field
+    name = re.sub(r"_{2,}", "_", name)
+    known = _known_column(name)
+    if not known:
+        p = _PERSON_PREFIX_RE.match(name)
+        known = _known_column(name[p.end():]) if p else ""
+    return known or alias
 
 
 def _md_cells(line: str) -> list:
