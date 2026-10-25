@@ -26,9 +26,10 @@ _SKIPPED = ("__pycache__", ".venv")
 
 def declaration_hash(event: str, group: dict, handler: dict, windows: bool) -> str:
     command = (handler.get("commandWindows") or handler["command"]) if windows else handler["command"]
-    identity = {"event_name": EVENTS[event],
-                "hooks": [{"type": "command", "command": command, "timeout": handler.get("timeout", 600),
-                           "async": False}]}
+    hook = {"type": "command", "command": command, "timeout": handler.get("timeout", 600), "async": False}
+    if handler.get("statusMessage") is not None:
+        hook["statusMessage"] = handler["statusMessage"]   # part of the declaration (codex-rs config/hook_config.rs)
+    identity = {"event_name": EVENTS[event], "hooks": [hook]}
     if group.get("matcher") is not None:
         identity["matcher"] = group["matcher"]
     blob = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
