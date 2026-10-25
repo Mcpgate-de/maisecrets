@@ -51,9 +51,19 @@ _BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date[ _-]?of[ _-]?birth|birth[ _-]
                        r"|\bbday\b" + _VCARD_PARAMS
                        + r"|\bgeb(?:\.|oren am|urtsdatum)"
                        r"|n[ée]\(?e?\)? le|date de naissance|fecha de nacimiento|\bnac[ií](?:d[oa])? el"
-                       r"|data de nascimento|data di nascita|\bnato il)[\"'\]]?"
+                       r"|data de nascimento|data di nascita|\bnat[oa] il|\bnascid[oa] em"
+                       # the label in the other label languages and in Greek, Romanian, Ukrainian and Arabic (nym dev,
+                       # 2026-10-25: 1,693 of 2,140 birth dates stayed text, most after such a label). A verb of birth
+                       # with its preposition only (geboren op, född den), as `born on`: alone it is history
+                       r"|geboortedatum|\bgeboren op|f[öo]delsedatum|\bf[öo]dd den|f[øo]dselsdato"
+                       r"|syntym[äa]aika(?:ni|nsa|si)?|data urodzenia|\burodzon[ya] dnia|datum narozen[íi]"
+                       r"|\bnarozen[ýáa]? dne|do[ğg]um tarih(?:i|im|iniz)?|дат[аеуы] рождения|дата народження"
+                       r"|data na[șşs]terii|data na[șşs]tere|ημερομηνία γέννησης|تاريخ (?:ال)?ميلاد\w*"
+                       r"|生年月日|出生日期|생년월일(?:은|는)?)[\"'\]]?"
                        # a comma (Date of birth, 1984-07-12, …) and Markdown bold around the colon (**DOB:**)
-                       r"\*{0,2}\s{0,3}(?:(?:is|was|as)\s{1,3})?[:=,]?\*{0,2}\s{0,3}[\"'(]?\s{0,3}"
+                       r"\*{0,2}\s{0,3}(?:(?:is|was|as|ist|war|est|es|era|è|é|er|var|är|on|oli|jest|je|este|είναι)"
+                       r"\s{1,3})?"
+                       r"[:=,\uff1a]?\*{0,2}\s{0,3}[\"'(]?\s{0,3}"
                        r"(" + _DATE + r"|(?:19|20)\d{6})(?!\d)")   # and YYYYMMDD after the label (Gretel, 2026-10-19)
 
 # --------------------------------------------------------------------------------- ID number after a label --
@@ -2361,7 +2371,9 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
 # ------------------------------------------------------------------------------------------------- the scan --
 # words one of which a text must hold before a rule's regex runs (a cheap test on the lowered text)
 _BIRTH_WORDS = ("dob", "d.o.b", "birth", "born", "bday", "geb", "n\u00e9", "ne le", "nee le", "naissance", "nacimiento",
-                "naci", "nac\u00ed", "nascimento", "nascita", "nato")
+                "naci", "nac\u00ed", "nascimento", "nascita", "nato", "nata il", "nascid", "geboorte", "geboren",
+                "delsedatum", "dd den", "dselsdato", "syntym", "urodz", "narozen", "tarih", "рождения", "народження",
+                "na\u0219ter", "na\u015fter", "naster", "γέννησης", "ميلاد", "生年月日", "出生日期", "생년월일")
 _ID_WORDS = ("mrn", "member", "passport", "licen", "dl", "sin", "tfn", "nir", "tax", "insurance", "account",
              "patient", "id on file", "beneficiary", "medical", "national", "tin", "social",
              "reisepass", "passnummer", "pass-nr", "pass nr", "hrerschein", "passeport", "permis", "pasaporte",
