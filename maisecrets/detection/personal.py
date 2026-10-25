@@ -52,7 +52,8 @@ _BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date[ _-]?of[ _-]?birth|birth[ _-]
                        + r"|\bgeb(?:\.|oren am|urtsdatum)"
                        r"|n[ée]\(?e?\)? le|date de naissance|fecha de nacimiento|\bnac[ií](?:d[oa])? el"
                        r"|data de nascimento|data di nascita|\bnato il)[\"'\]]?"
-                       r"\s{0,3}(?:(?:is|was|as)\s{1,3})?[:=]?\s{0,3}[\"'(]?\s{0,3}"
+                       # a comma (Date of birth, 1984-07-12, …) and Markdown bold around the colon (**DOB:**)
+                       r"\*{0,2}\s{0,3}(?:(?:is|was|as)\s{1,3})?[:=,]?\*{0,2}\s{0,3}[\"'(]?\s{0,3}"
                        r"(" + _DATE + r"|(?:19|20)\d{6})(?!\d)")   # and YYYYMMDD after the label (Gretel, 2026-10-19)
 
 # --------------------------------------------------------------------------------- ID number after a label --

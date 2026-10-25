@@ -68,5 +68,15 @@ class MarkdownKeyValueRowTests(Base):
         self.assertText("| First name | Dana |\n| Plan | basic |\n")
 
 
+class BirthAfterCommaOrBoldTests(Base):
+    """B1: Date of birth, value and **DOB:** value."""
+
+    def test_a_date_after_date_of_birth_and_a_comma_is_masked(self):
+        self.assertMasked("Date of birth, " + BIRTH + ", place of birth unknown", BIRTH)
+
+    def test_a_date_after_a_bold_dob_label_is_masked(self):
+        self.assertMasked("**DOB:** " + BIRTH, BIRTH)
+
+
 if __name__ == "__main__":
     unittest.main()
