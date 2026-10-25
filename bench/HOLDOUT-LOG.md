@@ -128,3 +128,19 @@ are not published: the numbers of record come from the release baseline (`script
 | 2026-10-25 | noseyparker 0.24.0 | ghissues | 25401 | not published | not published | – |
 | 2026-10-25 | maisecrets 0.7.2 2da66c0c3886ba853b860c2f877501830c03eacc | dialogpii | 638 | not published | not published | – |
 | 2026-10-25 | maisecrets 0.7.2 2da66c0c3886ba853b860c2f877501830c03eacc | nym | 31294 | not published | not published | – |
+| 2026-10-25 | presidio 2.2.364  | nym | 6211 | 0.521 | 0.59 | 11649 |
+| 2026-10-25 | pii-anon 1.7.0rc1 2171ace5847a0d2add555419c02b41c47155cabe | nym | 6211 | 0.4158 | 0.8569 | 1439 |
+| 2026-10-25 | presidio 2.2.364  | dialogpii | 638 | 0.5995 | 0.1304 | 36994 |
+| 2026-10-25 | pii-anon 1.7.0rc1 2171ace5847a0d2add555419c02b41c47155cabe | dialogpii | 638 | 0.4235 | 0.6466 | 2010 |
+| 2026-10-25 | presidio 2.2.364  | structured-b | 2000 | 0.555 | 0.6991 | 2796 |
+| 2026-10-25 | preserve 0.6.1 01dbd7710de79e21bef851aaa8b6cbfb4b1188ad | structured-b | 2000 | 0.5307 | 0.7414 | 1783 |
+| 2026-10-25 | pii-anon 1.7.0rc1 2171ace5847a0d2add555419c02b41c47155cabe | structured-b | 2000 | 0.4787 | 0.5336 | 3003 |
+| 2026-10-25 | detect-secrets 1.5.0  | ghissues | 25401 | 0.2943 | 0.4834 | 1528 |
+| 2026-10-25 | gitleaks 8.30.1  | ghissues | 25401 | 0.5323 | 0.8895 | 245 |
+| 2026-10-25 | betterleaks 1.9.0  | ghissues | 25401 | 0.5456 | 0.6321 | 1193 |
+| 2026-10-25 | trufflehog 3.99.2  | ghissues | 25401 | 0.1231 | 0.66 | 239 |
+| 2026-10-25 | kingfisher 2.11.1  | ghissues | 25401 | 0.2175 | 0.7891 | 212 |
+| 2026-10-25 | kingfisher 1.113.0  | ghissues | 25401 | 0.2965 | 0.7833 | 359 |
+| 2026-10-25 | noseyparker 0.24.0  | ghissues | 25401 | 0.3111 | 0.5905 | 867 |
+| 2026-10-25 | preserve 0.6.1 01dbd7710de79e21bef851aaa8b6cbfb4b1188ad | nym | 1239 | 0.4615 | 0.4904 | 2329 |
+| 2026-10-25 | preserve 0.6.1 01dbd7710de79e21bef851aaa8b6cbfb4b1188ad | dialogpii | 124 | 0.5658 | 0.1072 | 7759 |

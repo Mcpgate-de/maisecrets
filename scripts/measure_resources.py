@@ -149,8 +149,10 @@ def measure_cell(scanner: str, text: str, kind: str, cand: Path, repeats: tuple)
             if scanner in BINARIES:
                 per_run = []
                 for i in range(runs):
+                    before = len(rec.calls)
                     _, timing = module.scan([_case(text, kind, i)])
-                    per_run.append(rec.calls[-1]["wall_s"])
+                    # every process of the run: noseyparker runs `scan`, then `report`
+                    per_run.append(sum(c["wall_s"] for c in rec.calls[before:]))
                 out = {"mode": "one process per run (a binary keeps no state)", "cold_start_ms":
                        round(1000 * per_run[0], 1), "warm": _stats(per_run[1:] or per_run)}
             else:
