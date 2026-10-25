@@ -323,6 +323,52 @@ _WEAK_LABELS = (r"fn" + _VCARD_PARAMS
 _NAME_LABEL_RE = re.compile(
     r"(?i:(?<![a-z_./-])(?:(" + _PERSON_LABELS + r")|(" + _WEAK_LABELS + r")))"
     r"[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}" + _NAME_VALUE + r"(?![\w'’])")
+# a key that names a role only a person has: the value after it is that person (payer: …, "policyholder": "…")
+_ROLE_KEYS = (r"payer|payee|policyholder|policy[ _-]?holder|borrower|insured|physician|recipient|consignee"
+              r"|shipper|buyer|seller|sender|guarantor")
+_ROLE_KEY_NAME_RE = re.compile(r"(?i:(?<![\w.-])(?:" + _ROLE_KEYS + r"))[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}"
+                               + _NAME_VALUE + r"(?![\w'’])")
+# a key of words joined by _ - or camel case before a name; the key is judged after folding (_COMPOUND_PERSON_KEY_RE)
+_COMPOUND_NAME_KEY_RE = re.compile(r"(?<![\w.-])[\"']?([A-Za-z][A-Za-z0-9]{0,30}(?:[_-]{1,3}[A-Za-z0-9]{1,30}){0,4})"
+                                   r"[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}" + _NAME_VALUE + r"(?![\w'’])")
+# a person's role, then name (account_holder_name, investorName, card_holder_name), or a full name (full__name). Not
+# account, company, fund or issuer: their name is no person's; not user (a login) or agent (a program)
+_COMPOUND_PERSON_KEY_RE = re.compile(
+    r"(?:[a-z0-9]+_){0,3}(?:account_holder|card_holder|cardholder|holder|investor|contact|client|customer|cust"
+    r"|recipient|sender|trader|beneficiary|payer|payee|applicant|patient|employee|owner|policyholder|policy_holder"
+    r"|insured|borrower|member|student|passenger|tenant|guarantor|signer|consignee|shipper|buyer|seller|person"
+    r"|representative|rep|manager|advisor|adviser|physician|doctor|witness)_(?:full_)?name"
+    r"|full_name")
+# an element whose name is a person label, around a name alone: <card_holder>, <customerName>, <ns:fullName>
+_XML_NAME_ELEMENT_RE = re.compile(r"<([A-Za-z_][\w.:-]{0,64})(?:\s[^<>]{0,200})?>[ \t]*" + _NAME_VALUE
+                                  + r"[ \t]*</\1>")
+_PERSON_TAG_RE = re.compile(r"(?i)(" + _PERSON_LABELS + r")|(" + _WEAK_LABELS + r")")
+# the parent of a name element that is a thing, not a person: a pom.xml project, a product, a package, and the
+# instruments and parties of a financial message (a party or a counterparty is a company as often as a person)
+_THING_PARENTS = frozenset({"project", "product", "item", "package", "plugin", "dependency", "module", "artifact",
+                            "application", "app", "service", "component", "repository", "organization",
+                            "organisation", "company", "team", "group", "parent", "build", "profile", "site",
+                            "instrument", "security", "commodity", "unit", "issuer", "party", "counterparty", "fund",
+                            "asset"})
+_XML_OPEN_RE = re.compile(r"<(/?)([A-Za-z_][\w.:-]{0,64})(?:\s[^<>]{0,200})?(/?)>")
+
+
+def _xml_parent(text: str, at: int) -> str:
+    """The local name of the element still open at `at`, looking at most 2000 characters back."""
+    depth = 0
+    tags = list(_XML_OPEN_RE.finditer(text, max(0, at - 2000), at))
+    for t in reversed(tags):
+        if t.group(3):
+            continue
+        if t.group(1):
+            depth += 1
+        elif depth:
+            depth -= 1
+        else:
+            return t.group(2).rsplit(":", 1)[-1].lower()
+    return ""
+# a lower-case word right after a value, or after its comma: the sentence goes on, the value is no field of a record
+_PROSE_GOES_ON_RE = re.compile(r"(?:,[ \t]?| )[a-zà-ÿ]")
 # the end of a word that makes it a noun, not a name: Streaming, Expedition, Management, Wörterbuch, Verwaltung
 _NOUN_END_RE = re.compile(r"(?i)(?:ing|tion|sion|ment|ness|ity|ism|ogy|ware|ance|ence|able|ible|buch|ung|heit|keit"
                           r"|schaft|isch|tät|ive|ics|ers|ies)$")
@@ -742,6 +788,12 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
     out = []
     strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
     cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
+    # the one exception to "a name part alone is no person": a record with a first-name and a last-name column. Its
+    # row is a person when both cells read as name parts (the placeholder pair check below still applies)
+    pair = not strong and any(h in _FIRST_PART_COLS for h in names) and \
+        any(h in _NAME_PART_COLS - _FIRST_PART_COLS for h in names)
+    if pair:
+        cols = {i for i, h in enumerate(names) if h in _NAME_PART_COLS}
     accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)} if accounts_column else set()
     # a table of software with one personal column (| Product | Certificate License Number | Version |): only a name
     # makes a row a person's there, neither an id nor a date of birth (codex Gate A, 2026-10-22). A record of an order
@@ -775,6 +827,10 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
         # birth, not "birthday", which a table of releases has (Benchmark V3 Phase C, 2026-10-22)
         # in a table of software the ids this lexicon took on 2026-10-22 and a date of birth under its name are no
         # person; the anchors a format had before keep their role (a CSV row's birth date, an SSN)
+        if pair:
+            if len({names[h[4]] in _FIRST_PART_COLS for h in row if h[3] == NAME}) == 2:
+                out += [h[:4] for h in row]
+            continue
         if any(c in strong for *_, c in row) and any(
                 (h[3] in anchors and not (software and names[h[4]] in _NEW_ID_COLS))
                 or (not software and _birth_anchor(text, names, h)) for h in row):
@@ -788,10 +844,37 @@ _SQL_INSERT_RE = _lazy(r"(?i)\binsert\s+into\s+[\w.`\"\[\]]{1,128}\s*\(([^()]{1,
 _SQL_CELL_RE = _lazy(r"\s*(?:'((?:[^'\n]|''){0,512})'|(-?[\w.:+-]{1,64}))\s*([,)])")
 
 
+# a dump (mysqldump, pg_dump --inserts) writes INSERT INTO t VALUES (…) without a column list: the CREATE TABLE of t
+# above it names the columns
+_SQL_INSERT_BARE_RE = _lazy(r"(?i)\binsert\s+into\s+([\w.`\"\[\]]{1,128})\s+values\s*")
+_SQL_CREATE_RE = _lazy(r"(?is)\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?([\w.`\"\[\]]{1,128})\s*\((.{1,20000}?)\)\s*"
+                       r"(?:[\w=\s]{0,200})?;")
+_SQL_NOT_A_COLUMN = frozenset({"primary", "key", "unique", "constraint", "foreign", "index", "check", "fulltext"})
+
+
+def _sql_create_columns(text: str) -> dict:
+    """{table: [column names]} of each CREATE TABLE in the text."""
+    out = {}
+    for m in _SQL_CREATE_RE.finditer(text):
+        cols = []
+        for item in re.split(r",\s*(?![^()]*\))", m.group(2)):
+            w = item.strip().split(None, 1)
+            if w and w[0].strip("`\"[]").lower() not in _SQL_NOT_A_COLUMN:
+                cols.append(_md_column(w[0].strip("`\"[]")))
+        out[m.group(1).strip("`\"[]").lower()] = cols
+    return out
+
+
 def _sql_insert_hits(text: str) -> list:
     out = []
-    for m in _SQL_INSERT_RE.finditer(text):
-        names = [_md_column(c.strip().strip("`\"[]")) for c in m.group(1).split(",")]
+    found = [(m, [_md_column(c.strip().strip("`\"[]")) for c in m.group(1).split(",")])
+             for m in _SQL_INSERT_RE.finditer(text)]
+    tables = _sql_create_columns(text) if "create" in text.lower() else {}
+    for m in _SQL_INSERT_BARE_RE.finditer(text) if tables else ():
+        cols = tables.get(m.group(1).strip("`\"[]").lower())
+        if cols:
+            found.append((m, cols))
+    for m, names in found:
         rows, j = [], m.end()
         while j < len(text) and len(rows) < _CSV_ROWS and text[j] == "(":
             cells, j = [], j + 1
@@ -850,6 +933,17 @@ def _html_table_hits(text: str) -> list:
                 rows.append([_html_cell_text(text, *c.span(2)) for c in cells])
         if names:
             out += _grid_hits(text, names, rows, "html-table-personal-column")
+            continue
+        # a table of fields and values (<tr><th>Full name</th><td>…</td></tr>, one field per row) is one record, as
+        # a two-column Markdown table is
+        fields, values = [], []
+        for r in _HTML_ROW_RE.finditer(text, t.start(1), t.end(1)):
+            cells = list(_HTML_CELL_RE.finditer(text, r.start(1), r.end(1)))
+            if len(cells) == 2 and cells[0].group(1).lower() == "th" and cells[1].group(1).lower() == "td":
+                fields.append(_md_column(text[slice(*_html_cell_text(text, *cells[0].span(2)))]))
+                values.append(_html_cell_text(text, *cells[1].span(2)))
+        if sum(f in _STRONG_COLS or f in _WEAK_COLS for f in fields) >= 2:
+            out += _grid_hits(text, fields, [values], "html-table-personal-column")
     return out
 
 
@@ -1151,6 +1245,15 @@ _SINGLE_NAME_RE = _lazy(r"(?i:(?<![a-z_./-])(?:" + _SINGLE_NAME_LABELS + r"))[\"
                         r"(?:-[" + _UP + r"][" + _LO + r"\u1e00-\u1eff\u0300-\u036f'’]{1,30})?)"
                         r"(?![\w'’-])"   # Nguyễn, Ạnh, and a combining accent
                         r"(?![ \t]{1,2}[" + _UP + r"])")
+# a first or last name that is also a word (Grace, Hunter, Rose): capitalised, no noun ending, the whole value of its
+# field (the line, the quotes or the cell end after it). It counts only in a person's record (_form_hits)
+_FIELD_END_RE = _lazy(r"[\"']?[ \t]*(?:[,;}\]|]|$)", re.M)
+_WORD_NAME_NEAR = 300
+
+
+def _word_as_name(text: str, m, v: str) -> bool:
+    return v[:1].isupper() and v[1:] == v[1:].lower() and len(v) >= 3 and not _NOUN_END_RE.search(v) \
+        and bool(_FIELD_END_RE.match(text, m.end(1)))
 # a user name after a label that names one (`"username": "jdoe42"`, `user_name: jdoe42`): the label of a record, not
 # the word `user` or `login` alone (`"user": {`, `login: true`). The whole value is read first (a quoted string, else
 # the scalar up to a space, a comma, a semicolon or a bracket) and judged as one: it is masked whole or not at all, so
@@ -1912,7 +2015,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
     if "name-single-after-label" in want and ("name" in low or "nom" in low or "apellido" in low or "cognome" in low
                                               or "voornaam" in low or "achternaam" in low or "namn" in low):
-        found = []
+        found, wordy = [], []
         for m in _SINGLE_NAME_RE.finditer(text):
             v = m.group(1)
             low_v = v.lower().strip("'’-")
@@ -1928,14 +2031,24 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 continue   # first_name: Too long (maximum…), Renamed to given_name: a sentence, not a name
             if low_v in _PLACEHOLDER_NAME_WORDS or low_v in PLACEHOLDER_NAMES \
                     or low_v in _NOT_A_NAME_START or low_v in _NOT_A_NAME_WORD or low_v in _SHORT_EN \
-                    or len(low_v) < 2 or _reads_as_words(_no_marks(v)) or _inflected_word(low_v):
+                    or len(low_v) < 2 or _inflected_word(low_v):
+                continue
+            if _reads_as_words(_no_marks(v)):
+                if _word_as_name(text, m, v):
+                    wordy.append((m.start(1), m.end(1), "name-single-after-label", NAME))
                 continue
             # a double surname is words when each part is a word (Self-Employed, Non-Applicable), as in name-after-label
             parts = [w for w in _no_marks(v).split("-") if w]
             if len(parts) > 1 and all(_reads_as_words(w) or _inflected_word(w.lower()) for w in parts):
                 continue
             found.append((m.start(1), m.end(1), "name-single-after-label", NAME))
+        # a name that is also a word counts only in a person's record: a name part that is no word, and it or an
+        # e-mail address within 300 characters (first_name: Unique / last_name: Index is a schema)
         out += found
+        for h in wordy if found else ():
+            lo, hi = max(0, h[0] - _WORD_NAME_NEAR), h[0] + _WORD_NAME_NEAR
+            if any(abs(f[0] - h[0]) <= _WORD_NAME_NEAR for f in found) or text.find("@", lo, hi + 1) >= 0:
+                out.append(h)
     if "username-after-label" in want and ("name" in low or _USER_ID_WORD_RE.search(low)):
         for m in _USERNAME_LABEL_RE.finditer(text):
             g = next(i for i in (2, 3, 4) if m.group(i) is not None)
@@ -2106,7 +2219,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             v = m.group(1)
             # 17 digits and more: a snowflake id of a chat platform or a database key, no document number
             if sum(c.isdigit() for c in v) >= 5 and not (v.isdigit() and len(v) >= 17) and not _placeholder_digits(v):
-                out.append((m.start(1), m.end(1), "id-number-after-label", ID_NUMBER))
+                # MRN4829173: the label glued to the number is the id's own prefix, masked with it
+                start = m.start() if text[m.start():m.start(1)].isalpha() else m.start(1)
+                out.append((start, m.end(1), "id-number-after-label", ID_NUMBER))
     if "user-in-url" in want and "://" in text:
         for m in _URL_USER_RE.finditer(text):
             u = m.group(1)
@@ -2198,8 +2313,39 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 cut = short.group(0)
                 if not _reads_as_words(cut) or not _reads_as_words(re.sub(r"-[^\s]*", "", cut)):
                     v, words_only = cut, False
+            if m.group(1) and m.group(1).lower() == "student" and _PROSE_GOES_ON_RE.match(text, m.start(3) + len(v)):
+                continue   # Student: Informatik Bachelor an der …: a course of study in a sentence, not a name
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
+    if "name-after-label" in want and (":" in text or "=" in text):
+        for m in _ROLE_KEY_NAME_RE.finditer(text):
+            v = m.group(1).rstrip("'’")
+            plain = re.sub(r"-[^\s]*", "", v)
+            if _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True)):
+                out.append((m.start(1), m.start(1) + len(v), "name-after-label", NAME))
+    if "name-after-label" in want and "name" in low and (":" in text or "=" in text):
+        # account_holder_name: …, "investorName": "…": a key whose last words name a person in a role and a name
+        for m in _COMPOUND_NAME_KEY_RE.finditer(text):
+            key = re.sub(r"[_\s.-]+", "_", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", m.group(1)).lower()).strip("_")
+            if not _COMPOUND_PERSON_KEY_RE.fullmatch(key):
+                continue
+            v = m.group(2).rstrip("'’")
+            plain = re.sub(r"-[^\s]*", "", v)
+            if _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True)):
+                out.append((m.start(2), m.start(2) + len(v), "name-after-label", NAME))
+    if "name-after-label" in want and "</" in text:
+        # <card_holder>Jane Roe</card_holder>: the element's name is the label of its text
+        for m in _XML_NAME_ELEMENT_RE.finditer(text):
+            person = _PERSON_TAG_RE.fullmatch(m.group(1).rsplit(":", 1)[-1])
+            if not person:
+                continue
+            if _xml_parent(text, m.start()) in _THING_PARENTS:
+                continue   # <project><name>, <security><fullName>: the name of a thing
+            v = m.group(2).rstrip("'’")
+            plain = re.sub(r"-[^\s]*", "", v)
+            every = bool(person.group(1))
+            if _name_ok(v) and not (_reads_as_words(v, every=every) and _reads_as_words(plain, every=every)):
+                out.append((m.start(2), m.start(2) + len(v), "name-after-label", NAME))
     if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
                                                                          "ms", "mx", "miss", "dear", "hi ", "hello",
                                                                          "hey ")):
