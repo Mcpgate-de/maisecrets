@@ -180,5 +180,31 @@ class SqlDumpCreateTableTests(Base):
                 self.assertNotIn("sql-insert-personal-column", {m.kind for m in scan(text)})
 
 
+class FirstAndLastNameColumnTests(Base):
+    """The one exception to "a name part alone is no person": a record with a first-name and a last-name column."""
+
+    def test_a_row_with_a_first_and_a_last_name_is_a_person(self):
+        for text in ("INSERT INTO customers (first_name, last_name, email) VALUES ('" + FIRST + "', '" + LAST
+                     + "', 'someone@example.org');",
+                     "<table><tr><th>First name</th><th>Last name</th></tr><tr><td>" + FIRST + "</td><td>" + LAST
+                     + "</td></tr></table>",
+                     "| First Name | Last Name |\n|---|---|\n| " + FIRST + " | " + LAST + " |\n",
+                     # the case that tests/test_personal_after_its_label.py kept as text before this exception
+                     "| Field | Value |\n|---|---|\n| First Name | " + FIRST + " |\n| Last Name | " + LAST + " |\n"):
+            out = masked(text)
+            for v in (FIRST, LAST):
+                with self.subTest(text=text[:30], v=len(v)):
+                    self.assertNotIn(v, out)
+
+    def test_one_name_part_a_fixture_or_form_words_stay_text(self):
+        for text in ("| First Name | Plan |\n|---|---|\n| " + FIRST + " | basic |\n",
+                     "INSERT INTO t (first_name, last_name) VALUES ('Foo', 'Bar');",
+                     "INSERT INTO t (first_name, last_name) VALUES ('Jane', 'Doe');",
+                     "| First Name | Last Name |\n|---|---|\n| Required | Optional |\n",
+                     "| Field | Value |\n|---|---|\n| First Name | Required |\n| Last Name | Optional |\n"):
+            with self.subTest(text=text[:40]):
+                self.assertNoName(text)
+
+
 if __name__ == "__main__":
     unittest.main()

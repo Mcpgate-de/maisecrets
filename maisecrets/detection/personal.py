@@ -786,6 +786,12 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
     out = []
     strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
     cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
+    # the one exception to "a name part alone is no person": a record with a first-name and a last-name column. Its
+    # row is a person when both cells read as name parts (the placeholder pair check below still applies)
+    pair = not strong and any(h in _FIRST_PART_COLS for h in names) and \
+        any(h in _NAME_PART_COLS - _FIRST_PART_COLS for h in names)
+    if pair:
+        cols = {i for i, h in enumerate(names) if h in _NAME_PART_COLS}
     accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)} if accounts_column else set()
     # a table of software with one personal column (| Product | Certificate License Number | Version |): only a name
     # makes a row a person's there, neither an id nor a date of birth (codex Gate A, 2026-10-22). A record of an order
@@ -819,6 +825,10 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
         # birth, not "birthday", which a table of releases has (Benchmark V3 Phase C, 2026-10-22)
         # in a table of software the ids this lexicon took on 2026-10-22 and a date of birth under its name are no
         # person; the anchors a format had before keep their role (a CSV row's birth date, an SSN)
+        if pair:
+            if len({names[h[4]] in _FIRST_PART_COLS for h in row if h[3] == NAME}) == 2:
+                out += [h[:4] for h in row]
+            continue
         if any(c in strong for *_, c in row) and any(
                 (h[3] in anchors and not (software and names[h[4]] in _NEW_ID_COLS))
                 or (not software and _birth_anchor(text, names, h)) for h in row):
