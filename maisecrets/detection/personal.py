@@ -1306,14 +1306,45 @@ _STREET_LINE = (r"(?:\d{1,6}[A-Za-z]?(?:-\d{1,4})? (?:(?:[A-Z][A-Za-z'.-]{0,30}|
                 r"|[A-ZÄÖÜ][\wäöüß-]{1,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) \d{1,4}[a-z]?"
                 r"|(?:Calle|Avenida|Via|Viale|Piazza|Rua|Carrer) (?:[A-ZÀ-Þ][\wà-ÿ'’-]{1,30} |d[aeio]l?l?[aeo]? |de "
                 r"|das? |dos? ){1,5}?\d{1,5}[A-Za-z]?)(?![\w-])")
+# the street forms of more EU languages, after an address label or a verb of residence only, and not in a
+# business's record or before a template (_eu_street_ok): Dutch and Swedish names that end in their street word
+# (Kerkstraat 12, Storgatan 5), a comma between a Romance street name and its number (Calle Mayor, 12) and the
+# French form with the number first (12 rue de la Paix)
+_STREET_LINE_EU = (r"(?:[A-ZÅÄÖ][\wåäöé-]{1,40}(?:straat|laan|gracht|plein|kade|singel|dijk|gatan|vägen|gränd|torget"
+                   r"|backe),? \d{1,4}[a-zA-Z]?"
+                   r"|(?:Calle|Avenida|Via|Viale|Piazza|Corso|Vicolo|Largo|Plaza|Paseo|Rua|Carrer) "
+                   r"(?:[A-ZÀ-Þ][\wà-ÿ'’-]{1,30} |d[aeio]l?l?[aeo]? |de |das? |dos? ){0,4}?[A-ZÀ-Þ][\wà-ÿ'’-]{1,30},? "
+                   r"\d{1,5}[A-Za-z]?"
+                   r"|\d{1,4}(?: ?(?:bis|ter))?,? (?:rue|avenue|boulevard|bd|chemin|allée|place|impasse|quai|cours) "
+                   r"(?:(?:de la|de l'|des|du|de|d'|la|le|les) ?)?[A-ZÀ-Þ][\wà-ÿ'’-]{1,30}"
+                   r"(?: [A-ZÀ-Þ][\wà-ÿ'’-]{1,30}){0,3}"
+                   r")(?![\w-])")
+_STREET_LINE_RE = _lazy(_STREET_LINE)
+# a company, a supplier or a legal form in the record before an EU street form: a business's address
+_EU_BUSINESS_RE = _lazy(r"(?i)(?<![a-z])(?:fornitore|azienda|societ[aà]|ditta|proveedor|empresa|entreprise"
+                        r"|soci[eé]t[eé]|fournisseur|bedrijf|leverancier|f[oö]retag|leverant[oö]r|provider|supplier|vendor|company"
+                        r"|s\.?p\.?a\.?|s\.?r\.?l\.?|ab|nv|bv|sarl|sas|sl|s\.l\.|gmbh|ag|inc|ltd|llc)(?![a-z])")
 _STREET_LABEL_RE = _lazy(
     r"(?i)(?<![a-z_])(?:(?:street|home|residential|mailing|postal|billing|shipping|delivery|permanent|current)[ _-]?"
     r"address|address(?: on file)?|anschrift|wohnadresse|wohnanschrift|adresse|domicilio|direcci[oó]n|indirizzo"
-    r"|endere[cç]o|adres)[\"']?[ \t]{0,3}(?:is[ \t]{1,3}|[:=][ \t]{0,3})[\"']?[ \t]{0,2}(?-i:(" + _STREET_LINE + "))"
+    r"|endere[cç]o|adres|adress|gatuadress|straatadres|stra(?:ß|ss)e|residenza)[\"']?[ \t]{0,3}"
+    r"(?:is[ \t]{1,3}|[:=][ \t]{0,3})[\"']?[ \t]{0,2}(?-i:(" + _STREET_LINE + "|" + _STREET_LINE_EU + "))"
     r"|(?<![a-z])(?:resides?|residing|reside|lives?|living|domiciled|wohnt|wohnhaft"
     # a place word before a street line: the property located at, situated at (the company check below holds)
     r"|located|situated|property)"
-    r"(?: (?:at|in|on|im|am|in der|an der))?[ \t]{1,3}(?-i:(" + _STREET_LINE + "))")
+    r"(?: (?:at|in|on|im|am|in der|an der))?[ \t]{1,3}(?-i:(" + _STREET_LINE + "|" + _STREET_LINE_EU + "))")
+
+
+def _eu_street_ok(text: str, a: int, b: int) -> bool:
+    """An EU street form after its label is a person's street when no template follows it on its line or the next
+    ([city], <postal code>) and no business or legal form stands in its record before it."""
+    end = text.find("\n", text.find("\n", b) + 1)
+    after = text[b:end if end != -1 else len(text)][:200]
+    if "[" in after or "<" in after or "{" in after:
+        return False
+    line = text.rfind("\n", 0, a) + 1
+    lo = max(_block_back(text, line), a - 300)
+    return not (_EU_BUSINESS_RE.search(text, lo, a) or _not_a_home(text, lo, a))
 
 
 # e.g, i.e: an abbreviation, no account name
@@ -1387,6 +1418,7 @@ _THING_SUBJECT_RE = _lazy(r"(?i)(?<![a-z])(?:server|service|function|file|files|
                           r"[ \t]{1,3}$")
 _HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
 _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
+                       "adress", "straße", "strasse", "residenza",
                        "resid", "live", "living", "domiciled", "wohn", "located", "situated", "property")
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
                 "contact", "call", "reach", "text", "dial",
@@ -1938,7 +1970,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     or _NOT_A_STREET_LABEL_RE.search(text, max(0, m.start() - 12), m.start()) \
                     or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())) \
                     or (g == 2 and m.group().lower().startswith(("located", "situated", "property"))
-                        and _PLACE_OF_A_BUSINESS_RE.search(text, max(0, m.start() - 60), m.start())):
+                        and _PLACE_OF_A_BUSINESS_RE.search(text, max(0, m.start() - 60), m.start())) \
+                    or (not _STREET_LINE_RE.fullmatch(v) and not _eu_street_ok(text, m.start(g), m.end(g))):
                 continue
             # the company's name often stands on the line before its address label (Acme Inc.\nAddress: ...): the
             # window holds that line too, as for street-address, at most 160 characters back

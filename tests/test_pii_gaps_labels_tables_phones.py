@@ -151,5 +151,25 @@ class HomeAddressOverCompanyWordTests(Base):
         self.assertText("Home address on file. Acme Insurance Inc.\n" + self.US_ADDRESS)
 
 
+class EuStreetFormTests(Base):
+    """A3: Dutch, Swedish, Romance and French street forms after an address label or a verb of residence."""
+
+    def test_an_eu_street_after_its_label_is_masked(self):
+        for text, value in (
+                ("Adres: Synthetischestraat 12\nPostcode: 1234 AB\nPlaats: Utrecht", "Synthetischestraat 12"),
+                ("Adress: Syntetiskgatan 5\nPostnummer: 123 45\nOrt: Uppsala", "Syntetiskgatan 5"),
+                ("Indirizzo: Via Sintetica, 12\nCittà: Torino", "Via Sintetica, 12"),
+                ("Adresse : 12 rue Synthétique\n75002 Paris", "12 rue Synthétique"),
+                ("Adres: Synthetischestraat 12", "Synthetischestraat 12"),
+                ("She lives at Via Sintetica, 12, in Torino.", "Via Sintetica, 12")):
+            self.assertMasked(text, value)
+
+    def test_a_business_record_a_template_and_no_label_stay_text(self):
+        self.assertText("Exempel AB\nAdress: Syntetiskgatan 5\nPostnummer: 123 45")
+        self.assertText("Fornitore: Esempio S.p.A.\nIndirizzo: Via Sintetica, 12\nCittà: Torino")
+        self.assertText("Indirizzo: Via Sintetica, 12, [città]")
+        self.assertText("Synthetischestraat 12\n1234 AB Utrecht")
+
+
 if __name__ == "__main__":
     unittest.main()

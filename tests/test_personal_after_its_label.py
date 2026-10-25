@@ -287,7 +287,10 @@ class DutchAndSwedishNameLabelTests(Base):
         name = "Daan " + "Bakker"
         for text in ("Naam: " + name + "\nAdres: Kerkstraat 1", "Namn: " + name + "\n"):
             with self.subTest(text=text):
-                self.assertEqual(text.replace(name, "•"), masked(text))
+                # the name stops at its line; the street after Adres: is masked by its own rule
+                out = masked(text)
+                self.assertEqual(text.replace(name, "•").split("\n", 1)[0], out.split("\n", 1)[0])
+                self.assertNotIn(name, out)
 
     def test_words_after_naam_stay_text(self):
         for text in ("Naam: Product Owner\n", "naam: Build Pipeline"):
