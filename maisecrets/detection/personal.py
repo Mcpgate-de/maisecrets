@@ -175,6 +175,10 @@ _US_ONE_LINE_RE = re.compile(
     r",?[ \t]+(?:[A-Z][a-z'.-]{1,30} ){0,3}[A-Z][a-z'.-]{1,30}, (?:" + _US_STATES + r") \d{5}(?:-\d{4})?"
     r"|(?:PSC \d{3,5}, Box \d{3,5}|Unit \d{3,5} Box \d{3,5}|US(?:NS|NV|CGC|S) [A-Z][a-z]{1,30})"
     r",?[ \t]+(?:APO|FPO|DPO) (?:AA|AE|AP) \d{5})(?![\w-])")
+# a label that names a person's home right before the address (residential address (…), home address: …): the address
+# is the person's, whatever company the sentence names before it
+_HOME_ADDRESS_BEFORE_RE = re.compile(r"(?i)(?<![a-z])(?:residential|home|permanent|private)[ _-]?(?:address|addr\.?)"
+                                     r"[\"']?[ \t]{0,3}[:(=-]?[ \t]{0,3}$")
 _NAMED_PLACE_BEFORE_RE = re.compile(r"\bat the (?:[A-Z][\w'&.-]*[ \t]+){0,4}[A-Z][\w'&.-]*,[ \t]*$")
 _DEPARTMENT_LINE_RE = re.compile(r"(?i)[ \t]*(?:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]")
 _ADDRESS_FORMS = tuple(
@@ -2091,7 +2095,8 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             line = text.rfind("\n", 0, m.start()) + 1
             lo = max(_block_back(text, line), m.start() - 160)
             # a company, an office or a public place on the lines above or before it keeps the address text
-            if _NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start()):
+            home = _HOME_ADDRESS_BEFORE_RE.search(text, max(line, m.start() - 40), m.start())
+            if not home and (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())):
                 _company_window(text, lo, m.start(), m.end(), "address-us-two-lines", company)
             else:
                 out.append((m.start(), m.end(), "address-us-two-lines", ADDRESS))
@@ -2100,8 +2105,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             line = text.rfind("\n", 0, m.start()) + 1
             lo = max(_block_back(text, line), m.start() - 160)
             # "at the Harbor View Inn, 12 …": a named place before the address, as a venue's name on the line above
-            if (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())
-                    or _NAMED_PLACE_BEFORE_RE.search(text, max(line, m.start() - 60), m.start())):
+            home = _HOME_ADDRESS_BEFORE_RE.search(text, max(line, m.start() - 40), m.start())
+            if not home and (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())
+                             or _NAMED_PLACE_BEFORE_RE.search(text, max(line, m.start() - 60), m.start())):
                 _company_window(text, lo, m.start(), m.end(), "address-us-one-line", company)
             else:
                 out.append((m.start(), m.end(), "address-us-one-line", ADDRESS))

@@ -2,7 +2,8 @@
 
 Each class is one change: a two-column Markdown row read as label and value (T1), a birth date after a comma or a bold
 label (B1), a user id label with an account name (U2), the US national phone form after a call cue (P1), the user name
-in an apposition (U1), and a street line after "located at", "situated at", "property at" (A2). Each positive is an
+in an apposition (U1), a street line after "located at", "situated at", "property at" (A2), a home address label over a
+company word (A1), the street forms of more EU languages (A3) and compound and EU id labels (N3). Each positive is an
 invented value; each negative is the developer text or business text of the same shape.
 
 Run: python3 -m unittest tests.test_pii_gaps_labels_tables_phones -v
@@ -133,6 +134,21 @@ class StreetAfterPlaceWordTests(Base):
     def test_our_office_located_at_stays_text(self):
         self.assertText("Our office is located at " + STREET + ", Anytown.")
         self.assertText("a licensed insurance provider located at " + STREET + ", Anytown")
+
+
+class HomeAddressOverCompanyWordTests(Base):
+    """A1: a home or residential address label right before a US address wins over a company word on the line."""
+
+    US_ADDRESS = STREET + "\nSpringfield, IL " + "62704"
+
+    def test_a_labelled_home_address_after_a_company_word_is_masked(self):
+        self.assertMasked("Acme Insurance Inc. registered your details, including your home address ("
+                          + self.US_ADDRESS + "), contact number", self.US_ADDRESS)
+
+    def test_the_company_check_holds_for_an_address_without_the_label(self):
+        self.assertText("Acme Insurance Inc. registered your details, including your address ("
+                        + self.US_ADDRESS + "), contact number")
+        self.assertText("Home address on file. Acme Insurance Inc.\n" + self.US_ADDRESS)
 
 
 if __name__ == "__main__":
