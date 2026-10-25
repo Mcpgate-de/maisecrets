@@ -158,5 +158,27 @@ class HtmlFieldValueTableTests(Base):
                 self.assertNotIn("html-table-personal-column", {m.kind for m in scan(text)})
 
 
+class SqlDumpCreateTableTests(Base):
+    OTHER = "Bram " + "Tellenbosch"
+    CREATE = ("CREATE TABLE `users` (\n  `id` int NOT NULL,\n  `full_name` varchar(100),\n  `dob` date,\n"
+              "  PRIMARY KEY (`id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n")
+
+    def test_an_insert_without_columns_takes_them_from_its_create_table(self):
+        text = (self.CREATE + "INSERT INTO `users` VALUES (1,'" + NAME + "','" + BIRTH + "'),(2,'" + self.OTHER
+                + "','1990-07-" + "21');\n")
+        out = masked(text)
+        for v in (NAME, self.OTHER, BIRTH):
+            with self.subTest(v=len(v)):
+                self.assertNotIn(v, out)
+
+    def test_another_table_a_table_of_things_or_no_create_table_names_no_cell(self):
+        for text in (self.CREATE + "INSERT INTO `orders` VALUES (1,'" + NAME + "','" + BIRTH + "');\n",
+                     "CREATE TABLE products (id int, name varchar(50), released date);\n"
+                     "INSERT INTO products VALUES (1,'Garden Hose','2024-05-01');\n",
+                     "INSERT INTO users VALUES (1,'" + NAME + "','" + BIRTH + "');\n"):
+            with self.subTest(text=text[-40:]):
+                self.assertNotIn("sql-insert-personal-column", {m.kind for m in scan(text)})
+
+
 if __name__ == "__main__":
     unittest.main()

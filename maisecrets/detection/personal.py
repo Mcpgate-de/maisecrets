@@ -832,10 +832,37 @@ _SQL_INSERT_RE = _lazy(r"(?i)\binsert\s+into\s+[\w.`\"\[\]]{1,128}\s*\(([^()]{1,
 _SQL_CELL_RE = _lazy(r"\s*(?:'((?:[^'\n]|''){0,512})'|(-?[\w.:+-]{1,64}))\s*([,)])")
 
 
+# a dump (mysqldump, pg_dump --inserts) writes INSERT INTO t VALUES (…) without a column list: the CREATE TABLE of t
+# above it names the columns
+_SQL_INSERT_BARE_RE = _lazy(r"(?i)\binsert\s+into\s+([\w.`\"\[\]]{1,128})\s+values\s*")
+_SQL_CREATE_RE = _lazy(r"(?is)\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?([\w.`\"\[\]]{1,128})\s*\((.{1,20000}?)\)\s*"
+                       r"(?:[\w=\s]{0,200})?;")
+_SQL_NOT_A_COLUMN = frozenset({"primary", "key", "unique", "constraint", "foreign", "index", "check", "fulltext"})
+
+
+def _sql_create_columns(text: str) -> dict:
+    """{table: [column names]} of each CREATE TABLE in the text."""
+    out = {}
+    for m in _SQL_CREATE_RE.finditer(text):
+        cols = []
+        for item in re.split(r",\s*(?![^()]*\))", m.group(2)):
+            w = item.strip().split(None, 1)
+            if w and w[0].strip("`\"[]").lower() not in _SQL_NOT_A_COLUMN:
+                cols.append(_md_column(w[0].strip("`\"[]")))
+        out[m.group(1).strip("`\"[]").lower()] = cols
+    return out
+
+
 def _sql_insert_hits(text: str) -> list:
     out = []
-    for m in _SQL_INSERT_RE.finditer(text):
-        names = [_md_column(c.strip().strip("`\"[]")) for c in m.group(1).split(",")]
+    found = [(m, [_md_column(c.strip().strip("`\"[]")) for c in m.group(1).split(",")])
+             for m in _SQL_INSERT_RE.finditer(text)]
+    tables = _sql_create_columns(text) if "create" in text.lower() else {}
+    for m in _SQL_INSERT_BARE_RE.finditer(text) if tables else ():
+        cols = tables.get(m.group(1).strip("`\"[]").lower())
+        if cols:
+            found.append((m, cols))
+    for m, names in found:
         rows, j = [], m.end()
         while j < len(text) and len(rows) < _CSV_ROWS and text[j] == "(":
             cells, j = [], j + 1
