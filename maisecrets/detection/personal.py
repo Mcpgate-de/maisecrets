@@ -1160,8 +1160,10 @@ _USERNAME_LABEL_RE = _lazy(r"(?i)(?<![a-z_.-])(?:user[ _-]?name|benutzername|nut
 # the label in a sentence ("the user name jdoe84", "your user name is j.harlow"): only a value with a digit, a dot or
 # an underscore, as a sentence goes on after the label with a word ("the user name field"). Benchmark V1, Nemotron
 # dev split: about 1,800 user names missed after these forms, 2026-10-20
-_USERNAME_PROSE_RE = _lazy(r"(?i)(?<![a-z_.-])(?:user[ _-]?name|username)(?:[ \t]+(?:is|was))?[ \t]+"
-                           r"([A-Za-z][\w.@+-]{1,62}[A-Za-z0-9])(?=[\s,;:!?)]|\.(?:\s|$)|$)")
+_USERNAME_PROSE_RE = _lazy(r"(?i)(?<![a-z_.-])(?P<label>user[ _-]?name|username)(?:[ \t]+(?:is|was))?"
+                           # an apposition too: the user name, jdoe42, … and the user name (jdoe42)
+                           r"(?P<sep>[ \t]+|[ \t]*[,(][ \t]*)"
+                           r"(?P<v>[A-Za-z][\w.@+-]{1,62}[A-Za-z0-9])(?=[\s,;:!?)]|\.(?:\s|$)|$)")
 # a user id that is an account name (user_id: jdoe42, userId: "j.harlow"): letters first, a dot, an underscore or up to
 # four digits in it; a number, a UUID or a hash after the label stays text
 _USER_ID_VALUE = r"[A-Za-z]{2,}(?:[._][A-Za-z]{2,}){0,2}\d{0,4}"
@@ -1306,6 +1308,10 @@ _STREET_LABEL_RE = _lazy(
     r"|endere[cç]o|adres)[\"']?[ \t]{0,3}(?:is[ \t]{1,3}|[:=][ \t]{0,3})[\"']?[ \t]{0,2}(?-i:(" + _STREET_LINE + "))"
     r"|(?<![a-z])(?:resides?|residing|reside|lives?|living|domiciled|wohnt|wohnhaft)"
     r"(?: (?:at|in|on|im|am|in der|an der))?[ \t]{1,3}(?-i:(" + _STREET_LINE + "))")
+
+
+# e.g, i.e: an abbreviation, no account name
+_ABBREVIATION_RE = _lazy(r"(?i)[a-z]{1,2}(?:\.[a-z]{1,2})+")
 
 
 # the state of a form field after its label, not a name: the word list holds the stems only (require, mandate)
@@ -1901,11 +1907,15 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     and _username_value_ok(v, g != 4, m.group(1)):
                 out.append((m.start(g), m.end(g), "username-after-label", USERNAME))
         for m in _USERNAME_PROSE_RE.finditer(text):
-            v = m.group(1)
+            v = m.group("v")
+            # an apposition after `user_name` is the next argument of a call (login(user_name, api_key)), and
+            # (e.g. …) is no value
+            if m.group("sep").strip() and ("_" in m.group("label") or _ABBREVIATION_RE.fullmatch(v)):
+                continue
             if (re.search(r"[\d._]", v) and "@" not in v and not _VERSION_RE.match(v)
                     and not _under_example_key(text, m.start())
                     and _username_value_ok(v, False, " ")):
-                out.append((m.start(1), m.end(1), "username-after-label", USERNAME))
+                out.append((m.start("v"), m.end("v"), "username-after-label", USERNAME))
     if "address-street-after-label" in want and any(w in low for w in _STREET_LABEL_WORDS):
         for m in _STREET_LABEL_RE.finditer(text):
             g = 1 if m.group(1) is not None else 2

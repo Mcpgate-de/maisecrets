@@ -108,5 +108,19 @@ class PhoneAfterCallCueTests(Base):
         self.assertEqual(["phone-us-national"], [m.kind for m in hits])
 
 
+class UserNameApposedTests(Base):
+    """U1: the user name, value, and the user name (value)."""
+
+    def test_a_user_name_in_an_apposition_is_masked(self):
+        self.assertMasked("Her user name, " + USER + ", was locked.", USER)
+        self.assertMasked("the user name (" + USER + ") was locked", USER)
+
+    def test_a_relative_clause_a_plain_word_and_code_stay_text(self):
+        self.assertText("Enter the user name, which is case sensitive.")
+        self.assertText("Enter the user name, password and code.")
+        self.assertText("login(user_name, api_key2)\n")
+        self.assertText("* user name (e.g. a nickname)\n")
+
+
 if __name__ == "__main__":
     unittest.main()
