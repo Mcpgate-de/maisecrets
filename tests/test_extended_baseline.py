@@ -3,6 +3,7 @@ B. Synthetic data only: no dataset, no scanner binary."""
 import hashlib
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import extended_baseline as xb  # noqa: E402
+import measure_resources as mr  # noqa: E402
 from bench import run as brun  # noqa: E402
 from bench import structured_b  # noqa: E402
 
@@ -182,6 +184,56 @@ class SetBTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as e:
             brun.main(["--source", "structured-b", "--holdout", "/nonexistent"])
         self.assertIn("release-candidate", str(e.exception))
+
+
+class ResourcesTests(unittest.TestCase):
+    def test_the_peak_rss_is_read_on_macos_and_on_linux(self):
+        self.assertEqual(mr.peak_rss_bytes("  1.0 real\n  52428800  maximum resident set size\n"), 52428800)
+        self.assertEqual(mr.peak_rss_bytes("\tMaximum resident set size (kbytes): 2048\n"), 2048 * 1024)
+        self.assertIsNone(mr.peak_rss_bytes("no time output"))
+
+    def test_the_recorder_wraps_each_process_and_restores_the_runner(self):
+        from bench.adapters import _proc
+        orig = _proc.run
+        seen = []
+
+        def fake(cmd, name, env, cwd, timeout=0):
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "", "  1048576  maximum resident set size\n")
+        _proc.run = fake
+        try:
+            with mr.Recorder() as rec:
+                _proc.run(["scanner", "in"], "x", {}, "/")
+            self.assertEqual(seen[0][:len(mr.TIME_CMD)], mr.TIME_CMD)
+            self.assertEqual(rec.calls[0]["rss"], 1048576)
+            self.assertIs(_proc.run, fake)
+        finally:
+            _proc.run = orig
+
+    def test_the_table_names_the_machine_the_load_and_what_was_not_measured(self):
+        res = {"machine": {"cpu": "Test CPU", "cpus": 4, "ram_gb": 8, "os": "TestOS 1"},
+               "load_average": {"start": 9.0, "end": 1.0},
+               "scanners": {"maisecrets": {"cells": {"prompt": {"mode": "one process, calls in a row",
+                                                                "cold_start_ms": 50, "warm": {"median_ms": 0.4,
+                                                                                              "p95_ms": 0.9},
+                                                                "peak_rss_mb": 40},
+                                                     "tool_1mb": {"error": "MemoryError"}},
+                                           "footprint": {"what": "x", "disk_mb": 5, "models_mb": 0, "torch": False},
+                                           "network": "no"},
+                            "presidio": {"skipped": "not installed here"}},
+               "ner_doc": mr.NER_DOC}
+        text = mr.markdown(res)
+        self.assertIn("Test CPU, 4 CPUs, 8 GB RAM, TestOS 1", text)
+        self.assertIn("the times say little", text)
+        self.assertIn("| presidio | – | not installed here", text)
+        self.assertIn("failed: MemoryError", text)
+        self.assertIn("not measured here", text)
+
+    def test_a_scanner_counts_as_installed_only_with_its_environment(self):
+        self.assertTrue(mr.available("maisecrets", {}))
+        self.assertFalse(mr.available("presidio", {}))
+        self.assertTrue(mr.available("presidio", {"BENCH_PRESIDIO_PYTHON": "/p"}))
+        self.assertFalse(mr.available("maisecrets_ner", {"BENCH_NER_PYTHON": "/p"}))
 
 
 if __name__ == "__main__":

@@ -144,7 +144,9 @@ and OpenAI plugin directories.
   val, set B as a sealed holdout; a targeted regression benchmark, labelled so). It compares the candidate with the
   last release and with the published 0.7.3 baseline, V3 only; the new sets never enter those tables. The holdouts run
   once, on the final candidate, for totals only. With `--keep` it writes `bench/results/<date>-v3-<version>/extended/`
-  as the gate does. `--plan` lists the runs and the reuse decisions; `--only GLOB` runs a part.
+  as the gate does. `--plan` lists the runs and the reuse decisions; `--only GLOB` runs a part. `--resources`
+  adds speed and resources per scanner (`scripts/measure_resources.py`: cold start, warm latency for a prompt, 10 KB
+  and 1 MB, peak RSS, install footprint), one scanner at a time, with the machine and the load average.
 - **The gate's measurement is the next baseline.** The release commit changes only the version, so a second run of
   Benchmark V3 on the tag measures the same code. With `--keep` the gate writes its results to
   `bench/results/<date>-v3-<next version>`, with `measured.json` (the commit and the git tree of each runtime

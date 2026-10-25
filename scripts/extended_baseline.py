@@ -25,7 +25,9 @@ so. A holdout split runs for totals only (bench/run.py) and adds one row to benc
 on the final candidate. Nobody tunes a rule on a holdout total.
 
 OUT gets one result file per run, `index.json` (section, label, level, reuse decision of each file), `report.md`,
-`environment.json` (bench/manifest.py) and `tools.json`. With --keep, OUT goes to
+`environment.json` (bench/manifest.py) and `tools.json`; with --resources also `resources.json` and `resources.md`
+(scripts/measure_resources.py: cold start, warm latency, peak RSS and install footprint of each scanner, run after the
+result runs, one scanner at a time). With --keep, OUT goes to
 bench/results/<date>-v3-<next version>/extended/ as scripts/release_gate.py keeps its baseline: JSON as gzip,
 measured.json (commit, runtime trees, tool versions, environment) and SHA256SUMS. Counts only, never a value.
 
@@ -389,6 +391,9 @@ def main(argv: list) -> int:
     ap.add_argument("--reuse", type=Path, default=REUSE_DEFAULT, help="the published V3 run of the other scanners")
     ap.add_argument("--only", action="append", default=[], help="keep the runs whose file name matches (a glob)")
     ap.add_argument("--plan", action="store_true", help="print the runs and the reuse decisions, run nothing")
+    ap.add_argument("--resources", action="store_true", help="also speed and resources of each scanner "
+                    "(scripts/measure_resources.py), after the runs")
+    ap.add_argument("--resources-quick", action="store_true", help="the same with few repeats (a check)")
     ap.add_argument("--keep", action="store_true", help="write OUT to bench/results/<date>-v3-<next version>/extended")
     a = ap.parse_args(argv)
     cand = a.candidate.resolve()
@@ -475,6 +480,10 @@ def main(argv: list) -> int:
                                             encoding="utf-8")
     (a.out / "tools.json").write_text(json.dumps(tools, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     text = report(index, a.out, v3_dir, base_081)
+    if a.resources or a.resources_quick:   # after the runs, alone: the times need a machine without our own load
+        import measure_resources
+        measure_resources.main([str(cand), str(a.out)] + (["--quick"] if a.resources_quick else []))
+        text += "\n" + (a.out / "resources.md").read_text(encoding="utf-8")
     (a.out / "report.md").write_text(text, encoding="utf-8")
     print(text)
     print(f"{len(index)} runs, {round(time.monotonic() - t_all)} s; report: {a.out / 'report.md'}")
@@ -483,8 +492,9 @@ def main(argv: list) -> int:
         dest = ROOT / "bench" / "results" / f"{datetime.date.today().isoformat()}-v3-{version}" / "extended"
         flat = a.out / "keep"
         flat.mkdir(exist_ok=True)
-        for f in list(results.glob("*.json")) + [a.out / n for n in ("index.json", "environment.json", "tools.json",
-                                                                      "report.md")]:
+        extra = [a.out / n for n in ("index.json", "environment.json", "tools.json", "report.md", "resources.json",
+                                     "resources.md") if (a.out / n).exists()]
+        for f in list(results.glob("*.json")) + extra:
             (flat / f.name).write_bytes(f.read_bytes())
         release_gate.keep(flat, dest, cand, version, env.get("BENCH_PYTHON", ""))
         m = json.loads((dest / "measured.json").read_text(encoding="utf-8"))
