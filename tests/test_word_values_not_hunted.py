@@ -226,9 +226,10 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         """/maisecrets:put from stdin: the entry kind `manual`."""
         # put copies the placeholder: the fake clipboard on PATH, and MS_TEST_CLIP for clip.exe on Windows (hook)
         env = {**os.environ, "MAISECRETS_HOME": str(self.home), "MS_TEST_CLIP": str(Path(self.home, "clip")),
-               "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+               "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "PYTHONUTF8": "1"}
+        # the answer names the placeholder; on Windows a pipe has the code page cp1252, which has no ⟦ (UTF-8 both ways)
         r = subprocess.run([sys.executable, "-m", "maisecrets.cli", "put"], input=value, capture_output=True,
-                           text=True, env=env, cwd=str(ROOT), timeout=60)
+                           text=True, encoding="utf-8", env=env, cwd=str(ROOT), timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def marks(self) -> dict:
