@@ -52,7 +52,8 @@ _BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date[ _-]?of[ _-]?birth|birth[ _-]
                        + r"|\bgeb(?:\.|oren am|urtsdatum)"
                        r"|n[ée]\(?e?\)? le|date de naissance|fecha de nacimiento|\bnac[ií](?:d[oa])? el"
                        r"|data de nascimento|data di nascita|\bnato il)[\"'\]]?"
-                       r"\s{0,3}(?:(?:is|was|as)\s{1,3})?[:=]?\s{0,3}[\"'(]?\s{0,3}"
+                       # a comma (Date of birth, 1984-07-12, …) and Markdown bold around the colon (**DOB:**)
+                       r"\*{0,2}\s{0,3}(?:(?:is|was|as)\s{1,3})?[:=,]?\*{0,2}\s{0,3}[\"'(]?\s{0,3}"
                        r"(" + _DATE + r"|(?:19|20)\d{6})(?!\d)")   # and YYYYMMDD after the label (Gretel, 2026-10-19)
 
 # --------------------------------------------------------------------------------- ID number after a label --
@@ -174,6 +175,10 @@ _US_ONE_LINE_RE = re.compile(
     r",?[ \t]+(?:[A-Z][a-z'.-]{1,30} ){0,3}[A-Z][a-z'.-]{1,30}, (?:" + _US_STATES + r") \d{5}(?:-\d{4})?"
     r"|(?:PSC \d{3,5}, Box \d{3,5}|Unit \d{3,5} Box \d{3,5}|US(?:NS|NV|CGC|S) [A-Z][a-z]{1,30})"
     r",?[ \t]+(?:APO|FPO|DPO) (?:AA|AE|AP) \d{5})(?![\w-])")
+# a label that names a person's home right before the address (residential address (…), home address: …): the address
+# is the person's, whatever company the sentence names before it
+_HOME_ADDRESS_BEFORE_RE = re.compile(r"(?i)(?<![a-z])(?:residential|home|permanent|private)[ _-]?(?:address|addr\.?)"
+                                     r"[\"']?[ \t]{0,3}[:(=-]?[ \t]{0,3}$")
 _NAMED_PLACE_BEFORE_RE = re.compile(r"\bat the (?:[A-Z][\w'&.-]*[ \t]+){0,4}[A-Z][\w'&.-]*,[ \t]*$")
 _DEPARTMENT_LINE_RE = re.compile(r"(?i)[ \t]*(?:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]")
 _ADDRESS_FORMS = tuple(
@@ -1159,8 +1164,16 @@ _USERNAME_LABEL_RE = _lazy(r"(?i)(?<![a-z_.-])(?:user[ _-]?name|benutzername|nut
 # the label in a sentence ("the user name jdoe84", "your user name is j.harlow"): only a value with a digit, a dot or
 # an underscore, as a sentence goes on after the label with a word ("the user name field"). Benchmark V1, Nemotron
 # dev split: about 1,800 user names missed after these forms, 2026-10-20
-_USERNAME_PROSE_RE = _lazy(r"(?i)(?<![a-z_.-])(?:user[ _-]?name|username)(?:[ \t]+(?:is|was))?[ \t]+"
-                           r"([A-Za-z][\w.@+-]{1,62}[A-Za-z0-9])(?=[\s,;:!?)]|\.(?:\s|$)|$)")
+_USERNAME_PROSE_RE = _lazy(r"(?i)(?<![a-z_.-])(?P<label>user[ _-]?name|username)(?:[ \t]+(?:is|was))?"
+                           # an apposition too: the user name, jdoe42, … and the user name (jdoe42)
+                           r"(?P<sep>[ \t]+|[ \t]*[,(][ \t]*)"
+                           r"(?P<v>[A-Za-z][\w.@+-]{1,62}[A-Za-z0-9])(?=[\s,;:!?)]|\.(?:\s|$)|$)")
+# a user id that is an account name (user_id: jdoe42, userId: "j.harlow"): letters first, a dot, an underscore or up to
+# four digits in it; a number, a UUID or a hash after the label stays text
+_USER_ID_VALUE = r"[A-Za-z]{2,}(?:[._][A-Za-z]{2,}){0,2}\d{0,4}"
+_USER_ID_LABEL_RE = _lazy(r"(?i)(?<![a-z_.-])user[ _-]?id[\"']?([ \t]{0,3}[:=][ \t]{0,3})(?:\"(" + _USER_ID_VALUE
+                          + r")\"|'(" + _USER_ID_VALUE + r")'|(" + _USER_ID_VALUE + r")(?=[\s,;}\])]|$))")
+_USER_ID_WORD_RE = _lazy(r"user[ _-]?id")
 _EXAMPLE_KEY_RE = _lazy(r"(?i)[\"']?examples?[\"']?[ \t]{0,3}:[ \t]*(?:\{|\|)?")
 _USERNAME_SHAPE_RE = _lazy(r"[\w][\w.@+\\/-]{1,63}")
 # a name in code, not a value: `username = os.environ[...]`, `user_name: self.user.name`
@@ -1293,12 +1306,55 @@ _STREET_LINE = (r"(?:\d{1,6}[A-Za-z]?(?:-\d{1,4})? (?:(?:[A-Z][A-Za-z'.-]{0,30}|
                 r"|[A-ZÄÖÜ][\wäöüß-]{1,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) \d{1,4}[a-z]?"
                 r"|(?:Calle|Avenida|Via|Viale|Piazza|Rua|Carrer) (?:[A-ZÀ-Þ][\wà-ÿ'’-]{1,30} |d[aeio]l?l?[aeo]? |de "
                 r"|das? |dos? ){1,5}?\d{1,5}[A-Za-z]?)(?![\w-])")
+# the street forms of more EU languages, after an address label or a verb of residence only, and not in a
+# business's record or before a template (_eu_street_ok): Dutch and Swedish names that end in their street word
+# (Kerkstraat 12, Storgatan 5), a comma between a Romance street name and its number (Calle Mayor, 12) and the
+# French form with the number first (12 rue de la Paix)
+_STREET_LINE_EU = (r"(?:[A-ZÅÄÖ][\wåäöé-]{1,40}(?:straat|laan|gracht|plein|kade|singel|dijk|gatan|vägen|gränd|torget"
+                   r"|backe),? \d{1,4}[a-zA-Z]?"
+                   r"|(?:Calle|Avenida|Via|Viale|Piazza|Corso|Vicolo|Largo|Plaza|Paseo|Rua|Carrer) "
+                   r"(?:[A-ZÀ-Þ][\wà-ÿ'’-]{1,30} |d[aeio]l?l?[aeo]? |de |das? |dos? ){0,4}?[A-ZÀ-Þ][\wà-ÿ'’-]{1,30},? "
+                   r"\d{1,5}[A-Za-z]?"
+                   r"|\d{1,4}(?: ?(?:bis|ter))?,? (?:rue|avenue|boulevard|bd|chemin|allée|place|impasse|quai|cours) "
+                   r"(?:(?:de la|de l'|des|du|de|d'|la|le|les) ?)?[A-ZÀ-Þ][\wà-ÿ'’-]{1,30}"
+                   r"(?: [A-ZÀ-Þ][\wà-ÿ'’-]{1,30}){0,3}"
+                   r")(?![\w-])")
+_STREET_LINE_RE = _lazy(_STREET_LINE)
+# a company, a supplier or a legal form in the record before an EU street form: a business's address
+_EU_BUSINESS_RE = _lazy(r"(?i)(?<![a-z])(?:fornitore|azienda|societ[aà]|ditta|proveedor|empresa|entreprise"
+                        r"|soci[eé]t[eé]|fournisseur|bedrijf|leverancier|f[oö]retag|leverant[oö]r|provider|supplier|vendor|company"
+                        r"|s\.?p\.?a\.?|s\.?r\.?l\.?|ab|nv|bv|sarl|sas|sl|s\.l\.|gmbh|ag|inc|ltd|llc)(?![a-z])")
 _STREET_LABEL_RE = _lazy(
     r"(?i)(?<![a-z_])(?:(?:street|home|residential|mailing|postal|billing|shipping|delivery|permanent|current)[ _-]?"
     r"address|address(?: on file)?|anschrift|wohnadresse|wohnanschrift|adresse|domicilio|direcci[oó]n|indirizzo"
-    r"|endere[cç]o|adres)[\"']?[ \t]{0,3}(?:is[ \t]{1,3}|[:=][ \t]{0,3})[\"']?[ \t]{0,2}(?-i:(" + _STREET_LINE + "))"
-    r"|(?<![a-z])(?:resides?|residing|reside|lives?|living|domiciled|wohnt|wohnhaft)"
-    r"(?: (?:at|in|on|im|am|in der|an der))?[ \t]{1,3}(?-i:(" + _STREET_LINE + "))")
+    r"|endere[cç]o|adres|adress|gatuadress|straatadres|stra(?:ß|ss)e|residenza)[\"']?[ \t]{0,3}"
+    r"(?:is[ \t]{1,3}|[:=][ \t]{0,3})[\"']?[ \t]{0,2}(?-i:(" + _STREET_LINE + "|" + _STREET_LINE_EU + "))"
+    r"|(?<![a-z])(?:resides?|residing|reside|lives?|living|domiciled|wohnt|wohnhaft"
+    # a place word before a street line: the property located at, situated at (the company check below holds)
+    r"|located|situated|property)"
+    r"(?: (?:at|in|on|im|am|in der|an der))?[ \t]{1,3}(?-i:(" + _STREET_LINE + "|" + _STREET_LINE_EU + "))")
+
+
+def _eu_street_ok(text: str, a: int, b: int) -> bool:
+    """An EU street form after its label is a person's street when no template follows it on its line or the next
+    ([city], <postal code>) and no business or legal form stands in its record before it."""
+    end = text.find("\n", text.find("\n", b) + 1)
+    after = text[b:end if end != -1 else len(text)][:200]
+    if "[" in after or "<" in after or "{" in after:
+        return False
+    line = text.rfind("\n", 0, a) + 1
+    lo = max(_block_back(text, line), a - 300)
+    return not (_EU_BUSINESS_RE.search(text, lo, a) or _not_a_home(text, lo, a))
+
+
+# e.g, i.e: an abbreviation, no account name
+_ABBREVIATION_RE = _lazy(r"(?i)[a-z]{1,2}(?:\.[a-z]{1,2})+")
+
+
+# a place word (located at, situated at, property at) after a business, its goods or a bank code: no home
+_PLACE_OF_A_BUSINESS_RE = _lazy(r"(?i)(?<![a-z])(?:provider|insurance|insurer|vendor|supplier|contractor|swift|bic|iban"
+                                r"|commercial|assets?|equipment|inventory|goods|facility|facilities|plant|premises"
+                                r"|warehouse|branch|headquarters?|office|offices)(?![a-z])")
 
 
 # the state of a form field after its label, not a name: the word list holds the stems only (require, mandate)
@@ -1362,7 +1418,8 @@ _THING_SUBJECT_RE = _lazy(r"(?i)(?<![a-z])(?:server|service|function|file|files|
                           r"[ \t]{1,3}$")
 _HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
 _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
-                       "resid", "live", "living", "domiciled", "wohn")
+                       "adress", "straße", "strasse", "residenza",
+                       "resid", "live", "living", "domiciled", "wohn", "located", "situated", "property")
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
                 "contact", "call", "reach", "text", "dial",
                 # the personal cues of phone-after-phone-word without a phone word (my number is, … him at)
@@ -1831,8 +1888,14 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         for rx in (_PHONE_TIGHT_RE, _PHONE_LOOSE_RE):
             for m in rx.finditer(text):
                 v = m.group(1).rstrip(" .-/")
-                if _US_PHONE_RE.fullmatch(v) or (_NANP_SHAPE_RE.fullmatch(v) and not us):
-                    continue   # (312) 846-2291 is phone-us-national's; a North American number needs us or ca
+                if _US_PHONE_RE.fullmatch(v):
+                    # (312) 846-2291 is phone-us-national's when its phone word is there; after a cue of this rule
+                    # only (reached at, me at) it is this rule's. The 555 exchange stays an example, as there
+                    if not us or re.search(r"\)\s?555[-. ]", v) or _PHONE_WORD_RE.search(
+                            text, max(0, m.start(1) - 30), m.start(1)):
+                        continue
+                elif _NANP_SHAPE_RE.fullmatch(v) and not us:
+                    continue   # a North American number needs us or ca
                 gap = text[m.start():m.start(1)]
                 sep = [x.start() for x in _GAP_SEP_RE.finditer(gap)] if rx is _PHONE_LOOSE_RE else ()
                 if sep and not _PHONE_GAP_END_RE.search(_PAREN_END_RE.sub("", gap[:sep[-1]]).rstrip(" )\"'")):
@@ -1873,7 +1936,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 continue
             found.append((m.start(1), m.end(1), "name-single-after-label", NAME))
         out += found
-    if "username-after-label" in want and "name" in low:
+    if "username-after-label" in want and ("name" in low or _USER_ID_WORD_RE.search(low)):
         for m in _USERNAME_LABEL_RE.finditer(text):
             g = next(i for i in (2, 3, 4) if m.group(i) is not None)
             # inside an `example:` value (OpenAPI, Swagger): the value of the documentation, not of a person
@@ -1881,12 +1944,22 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 continue
             if _username_value_ok(m.group(g), g != 4, m.group(1)):
                 out.append((m.start(g), m.end(g), "username-after-label", USERNAME))
+        for m in _USER_ID_LABEL_RE.finditer(text):
+            g = next(i for i in (2, 3, 4) if m.group(i) is not None)
+            v = m.group(g)
+            if re.search(r"[\d._]", v) and not _under_example_key(text, m.start()) \
+                    and _username_value_ok(v, g != 4, m.group(1)):
+                out.append((m.start(g), m.end(g), "username-after-label", USERNAME))
         for m in _USERNAME_PROSE_RE.finditer(text):
-            v = m.group(1)
+            v = m.group("v")
+            # an apposition after `user_name` is the next argument of a call (login(user_name, api_key)), and
+            # (e.g. …) is no value
+            if m.group("sep").strip() and ("_" in m.group("label") or _ABBREVIATION_RE.fullmatch(v)):
+                continue
             if (re.search(r"[\d._]", v) and "@" not in v and not _VERSION_RE.match(v)
                     and not _under_example_key(text, m.start())
                     and _username_value_ok(v, False, " ")):
-                out.append((m.start(1), m.end(1), "username-after-label", USERNAME))
+                out.append((m.start("v"), m.end("v"), "username-after-label", USERNAME))
     if "address-street-after-label" in want and any(w in low for w in _STREET_LABEL_WORDS):
         for m in _STREET_LABEL_RE.finditer(text):
             g = 1 if m.group(1) is not None else 2
@@ -1895,7 +1968,10 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     or _PLACEHOLDER_STREET_RE.match(v) \
                     or _PARENT_NOT_A_STREET_RE.search(text, max(0, m.start() - 60), m.start()) \
                     or _NOT_A_STREET_LABEL_RE.search(text, max(0, m.start() - 12), m.start()) \
-                    or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())):
+                    or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())) \
+                    or (g == 2 and m.group().lower().startswith(("located", "situated", "property"))
+                        and _PLACE_OF_A_BUSINESS_RE.search(text, max(0, m.start() - 60), m.start())) \
+                    or (not _STREET_LINE_RE.fullmatch(v) and not _eu_street_ok(text, m.start(g), m.end(g))):
                 continue
             # the company's name often stands on the line before its address label (Acme Inc.\nAddress: ...): the
             # window holds that line too, as for street-address, at most 160 characters back
@@ -2052,7 +2128,8 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             line = text.rfind("\n", 0, m.start()) + 1
             lo = max(_block_back(text, line), m.start() - 160)
             # a company, an office or a public place on the lines above or before it keeps the address text
-            if _NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start()):
+            home = _HOME_ADDRESS_BEFORE_RE.search(text, max(line, m.start() - 40), m.start())
+            if not home and (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())):
                 _company_window(text, lo, m.start(), m.end(), "address-us-two-lines", company)
             else:
                 out.append((m.start(), m.end(), "address-us-two-lines", ADDRESS))
@@ -2061,8 +2138,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             line = text.rfind("\n", 0, m.start()) + 1
             lo = max(_block_back(text, line), m.start() - 160)
             # "at the Harbor View Inn, 12 …": a named place before the address, as a venue's name on the line above
-            if (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())
-                    or _NAMED_PLACE_BEFORE_RE.search(text, max(line, m.start() - 60), m.start())):
+            home = _HOME_ADDRESS_BEFORE_RE.search(text, max(line, m.start() - 40), m.start())
+            if not home and (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())
+                             or _NAMED_PLACE_BEFORE_RE.search(text, max(line, m.start() - 60), m.start())):
                 _company_window(text, lo, m.start(), m.end(), "address-us-one-line", company)
             else:
                 out.append((m.start(), m.end(), "address-us-one-line", ADDRESS))
