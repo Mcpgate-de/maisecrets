@@ -2947,7 +2947,7 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
                 "that maisecrets cannot reach its store." if hint
                 else " The command did NOT run. Tell the user; do not retry.")
         return _deny(reason + tail)
-    tail = (" The tool ran and finished; its output is withheld because the redaction did not finish. "
+    tail = (" The tool ran and finished; its output is withheld because the masking did not finish. "
             "Do NOT run it again to see the output; tell the user to check the result in their terminal.")
     if codex:
         return {"decision": "block", "reason": reason + tail}

@@ -910,9 +910,9 @@ class Vault:
         per_hour = int(self.cfg.get("max_resolves_per_hour", DEFAULT_CONFIG["max_resolves_per_hour"]))
         keys_in_session = {r["key"] for r in rec if r["session"] == session}
         if key not in keys_in_session and len(keys_in_session) >= per_session:
-            return f"limit: {per_session} distinct keys in this session this hour (max_keys_per_session)"
+            return f"limit: {per_session} different placeholders in this session this hour (max_keys_per_session)"
         if len(rec) >= per_hour:
-            return f"limit: {per_hour} resolves in the last hour (max_resolves_per_hour)"
+            return f"limit: {per_hour} uses in the last hour (max_resolves_per_hour)"
         return "ok"
 
     def _limit_all(self, keys: list[str], session: str | None) -> list[str]:
@@ -933,10 +933,10 @@ class Vault:
         if new and len(known) + len(new) > per_session:
             # a cap lowered below the keys already known: the first new key is over it (review round 4:
             # IndexError when the call named only known keys)
-            return [f"{new[max(0, per_session - len(known))]} (limit: {per_session} distinct keys in this session this "
-                    "hour (max_keys_per_session))"]
+            return [f"{new[max(0, per_session - len(known))]} (limit: {per_session} different placeholders in this "
+                    "session this hour (max_keys_per_session))"]
         if len(rec) + len(keys) > per_hour:
-            return [f"{keys[per_hour - len(rec)]} (limit: {per_hour} resolves in the last hour "
+            return [f"{keys[per_hour - len(rec)]} (limit: {per_hour} uses in the last hour "
                     "(max_resolves_per_hour))"]
         return []
 
