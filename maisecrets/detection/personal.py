@@ -1162,6 +1162,12 @@ _USERNAME_LABEL_RE = _lazy(r"(?i)(?<![a-z_.-])(?:user[ _-]?name|benutzername|nut
 # dev split: about 1,800 user names missed after these forms, 2026-10-20
 _USERNAME_PROSE_RE = _lazy(r"(?i)(?<![a-z_.-])(?:user[ _-]?name|username)(?:[ \t]+(?:is|was))?[ \t]+"
                            r"([A-Za-z][\w.@+-]{1,62}[A-Za-z0-9])(?=[\s,;:!?)]|\.(?:\s|$)|$)")
+# a user id that is an account name (user_id: jdoe42, userId: "j.harlow"): letters first, a dot, an underscore or up to
+# four digits in it; a number, a UUID or a hash after the label stays text
+_USER_ID_VALUE = r"[A-Za-z]{2,}(?:[._][A-Za-z]{2,}){0,2}\d{0,4}"
+_USER_ID_LABEL_RE = _lazy(r"(?i)(?<![a-z_.-])user[ _-]?id[\"']?([ \t]{0,3}[:=][ \t]{0,3})(?:\"(" + _USER_ID_VALUE
+                          + r")\"|'(" + _USER_ID_VALUE + r")'|(" + _USER_ID_VALUE + r")(?=[\s,;}\])]|$))")
+_USER_ID_WORD_RE = _lazy(r"user[ _-]?id")
 _EXAMPLE_KEY_RE = _lazy(r"(?i)[\"']?examples?[\"']?[ \t]{0,3}:[ \t]*(?:\{|\|)?")
 _USERNAME_SHAPE_RE = _lazy(r"[\w][\w.@+\\/-]{1,63}")
 # a name in code, not a value: `username = os.environ[...]`, `user_name: self.user.name`
@@ -1874,13 +1880,19 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 continue
             found.append((m.start(1), m.end(1), "name-single-after-label", NAME))
         out += found
-    if "username-after-label" in want and "name" in low:
+    if "username-after-label" in want and ("name" in low or _USER_ID_WORD_RE.search(low)):
         for m in _USERNAME_LABEL_RE.finditer(text):
             g = next(i for i in (2, 3, 4) if m.group(i) is not None)
             # inside an `example:` value (OpenAPI, Swagger): the value of the documentation, not of a person
             if _under_example_key(text, m.start()):
                 continue
             if _username_value_ok(m.group(g), g != 4, m.group(1)):
+                out.append((m.start(g), m.end(g), "username-after-label", USERNAME))
+        for m in _USER_ID_LABEL_RE.finditer(text):
+            g = next(i for i in (2, 3, 4) if m.group(i) is not None)
+            v = m.group(g)
+            if re.search(r"[\d._]", v) and not _under_example_key(text, m.start()) \
+                    and _username_value_ok(v, g != 4, m.group(1)):
                 out.append((m.start(g), m.end(g), "username-after-label", USERNAME))
         for m in _USERNAME_PROSE_RE.finditer(text):
             v = m.group(1)

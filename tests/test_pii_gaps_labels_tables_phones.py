@@ -78,5 +78,19 @@ class BirthAfterCommaOrBoldTests(Base):
         self.assertMasked("**DOB:** " + BIRTH, BIRTH)
 
 
+class UserIdLabelTests(Base):
+    """U2: user_id: an account name; a number, a UUID, code or a service account stays text."""
+
+    def test_an_account_name_after_a_user_id_label_is_masked(self):
+        self.assertMasked("user_id: " + USER + "\n", USER)
+        self.assertMasked('{"userId": "' + USER + '"}', USER)
+
+    def test_a_number_a_uuid_code_and_a_service_account_stay_text(self):
+        self.assertText("user_id: 48213\n")
+        self.assertText("user_id: 3f2b8c1e-" + "9d4a-4b7e-8c21-5a6f0e9d1b37\n")
+        self.assertText("user_id = request.user.id\n")
+        self.assertText("user_id: svc_backup\n")
+
+
 if __name__ == "__main__":
     unittest.main()
