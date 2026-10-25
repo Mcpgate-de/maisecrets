@@ -323,6 +323,11 @@ _WEAK_LABELS = (r"fn" + _VCARD_PARAMS
 _NAME_LABEL_RE = re.compile(
     r"(?i:(?<![a-z_./-])(?:(" + _PERSON_LABELS + r")|(" + _WEAK_LABELS + r")))"
     r"[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}" + _NAME_VALUE + r"(?![\w'’])")
+# a key that names a role only a person has: the value after it is that person (payer: …, "policyholder": "…")
+_ROLE_KEYS = (r"payer|payee|policyholder|policy[ _-]?holder|borrower|insured|physician|recipient|consignee"
+              r"|shipper|buyer|seller|sender|guarantor")
+_ROLE_KEY_NAME_RE = re.compile(r"(?i:(?<![\w.-])(?:" + _ROLE_KEYS + r"))[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}"
+                               + _NAME_VALUE + r"(?![\w'’])")
 # the end of a word that makes it a noun, not a name: Streaming, Expedition, Management, Wörterbuch, Verwaltung
 _NOUN_END_RE = re.compile(r"(?i)(?:ing|tion|sion|ment|ness|ity|ism|ogy|ware|ance|ence|able|ible|buch|ung|heit|keit"
                           r"|schaft|isch|tät|ive|ics|ers|ies)$")
@@ -2219,6 +2224,12 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                     v, words_only = cut, False
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
+    if "name-after-label" in want and (":" in text or "=" in text):
+        for m in _ROLE_KEY_NAME_RE.finditer(text):
+            v = m.group(1).rstrip("'’")
+            plain = re.sub(r"-[^\s]*", "", v)
+            if _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True)):
+                out.append((m.start(1), m.start(1) + len(v), "name-after-label", NAME))
     if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
                                                                          "ms", "mx", "miss", "dear", "hi ", "hello",
                                                                          "hey ")):

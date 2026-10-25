@@ -75,5 +75,24 @@ class WordAsSingleNameTests(Base):
         self.assertNotIn(self.WORD, {m.value for m in scan(text)})
 
 
+class RoleKeyTests(Base):
+    def test_a_name_after_a_key_that_names_a_persons_role_is_masked(self):
+        for key in ("payer", "payee", "policyholder", "policy_holder", "borrower", "insured", "physician", "recipient",
+                    "consignee", "shipper", "buyer", "seller", "sender", "guarantor"):
+            for text in (key + ": " + NAME + "\n", '{"' + key + '": "' + NAME + '"}', key + " = " + NAME):
+                with self.subTest(text=text):
+                    self.assertMasked(text, NAME)
+
+    def test_words_a_team_and_the_keys_of_the_broad_set_stay_text(self):
+        for text in ("sender: Release Desk\n", "recipient: Platform Team\n", '{"buyer": "Build Bot"}',
+                     # roles a company or a system has as often as a person: not in the set
+                     "lender: " + NAME + "\n", "agent: " + NAME + "\n", "client: " + NAME + "\n",
+                     "user: " + NAME + "\n", "contact: " + NAME + "\n", "customer: " + NAME + "\n",
+                     # the role word inside a longer key
+                     "message_sender: " + NAME + "\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("name-after-label", {m.kind for m in scan(text)})
+
+
 if __name__ == "__main__":
     unittest.main()
