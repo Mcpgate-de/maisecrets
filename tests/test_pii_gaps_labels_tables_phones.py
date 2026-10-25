@@ -171,5 +171,23 @@ class EuStreetFormTests(Base):
         self.assertText("Synthetischestraat 12\n1234 AB Utrecht")
 
 
+class IdContextWordTests(Base):
+    """N3: compound and EU labels as context words of the US licence and passport rules; the value shape decides."""
+
+    LICENCE = "D1234" + "567"
+
+    def test_a_licence_after_a_compound_or_german_label_is_masked(self):
+        self.assertMasked('{"driverLicense": "' + self.LICENCE + '"}', self.LICENCE)
+        self.assertMasked("Führerschein: " + self.LICENCE, self.LICENCE)
+
+    def test_a_label_alone_a_patent_number_and_a_phone_after_its_plus_stay_out(self):
+        self.assertText('{"driverLicense": "required"}')
+        self.assertText("Führerschein: ja")
+        self.assertText("Patente: " + "12345678")
+        phone = "+4917" + "01234567"
+        hits = scan("Permiso de conducir en trámite.\nNúmero de teléfono: " + phone)
+        self.assertEqual([("phone", phone)], [(m.kind, m.value) for m in hits])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -52,7 +52,8 @@ OWNER = {
     "encoded mail sent to": "email-percent-encoded", "encoded mail csv cell": "email-percent-encoded",
     "card in groups": "credit-card", "card after pan": "credit-card", "card after a swedish word": "credit-card",
     "postman password counter": "secret-postman-variable", "user slash with words": "secret-after-user-slash",
-    "fhir pretty passport": "id-number-fhir-identifier", "name patient_name": "name-non-latin-after-label",
+    # passportNumber in the FHIR system URL is a context word of us-passport, which takes the same value first
+    "fhir pretty passport": "us-passport" + "#1", "name patient_name": "name-non-latin-after-label",
     "dl in json": "id-number-after-record-label", "address level": "address-after-label",
     "encoded mail after a line": "email-percent-encoded",
     "card in a csv row": "credit-card", "encoded mail quoted cell": "email-percent-encoded",

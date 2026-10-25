@@ -765,6 +765,8 @@ def _card_shaped(text: str, start: int, secret: str) -> bool:
 
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
+# the digits of a phone number after its +: a licence or passport pattern took them from the phone rule
+PRESIDIO_NOT_AFTER_PLUS = {"us-license", "us-passport"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
 # checksum are also FIX tags and XML identifiers; a real VAT ID stands next to USt-IdNr or VAT. The spaced form
 # (de-vat-id#1) has a low score and needs its word already
@@ -773,6 +775,15 @@ PRESIDIO_PATTERN_CONTEXT = {"de-vat-id#0"}
 # statement reached the model. The number must still pass Luhn. A short word that means something else in a
 # neighbour language (kort: short in Danish and Dutch) stays out
 PRESIDIO_EXTRA_CONTEXT = {
+    # the context words of Presidio's US recognizers joined as a key spells them (driverLicense, passport_no lowered:
+    # driverlicense, passportnumber), and the names of the document in the EU label languages of id-number-after-label
+    "us-license": ("driverlicense", "driverslicense", "driverlicence", "driverslicence",
+                   "licensenumber", "licenseno", "licencenumber", "dlnumber", "dlno",
+                   "führerschein", "fuehrerschein", "fahrerlaubnis", "fahrerlaubnisnummer",
+                   "permis de conduire", "rijbewijs", "körkort", "korkort", "patente di guida", "conducir", "condução"),
+    "us-passport": ("passportnumber", "passportno", "passportnum", "passportid", "reisepass", "passnummer",
+                    "reisepassnummer", "passeport", "pasaporte", "passaporte", "passaporto", "paspoort", "paszport"),
+    "us-itin": ("itinnumber", "taxpayerid", "taxid", "taxidnumber"),
     # 2026-10-19, Benchmark V1: a CSV or JSON key `steuer_id` over a valid tax id; the checksum still decides
     "de-tax-id": ("steuer_id", "steuer_identifikationsnummer", "steuer-identifikationsnummer", "steuer_idnr"),
     "credit-card": ("karte", "kreditkarte", "kartennummer", "kartennr", "debitkarte", "bankkarte", "ec-karte",
@@ -916,6 +927,8 @@ def _presidio_regex(rec_id: str, regex: str) -> str:
         # Mendeley's 2,081 such numbers (Luhn-valid, each after a card word) stayed in the clear (2026-10-20). It
         # keeps the rule's Luhn check and its card word: alone in a tool result the issuer check takes 16 digits only
         return "(?:" + regex.replace(_CARD_FIRST_UPSTREAM, first) + r")|\b4\d{18}\b"
+    if rec_id in PRESIDIO_NOT_AFTER_PLUS:
+        return r"(?<!\+)(?:" + regex + ")"
     return regex
 
 
