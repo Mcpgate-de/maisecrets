@@ -491,7 +491,7 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_file": ("used.txt", "<missing>"),
-        "expect_text": "foreign-session",
+        "expect_text": "(not given in this session)",
     },
 
     # Windows without Git Bash: Claude Code offers PowerShell instead of Bash (2.1.284). A placeholder is

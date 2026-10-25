@@ -574,7 +574,7 @@ class FileToolTests(unittest.TestCase):
         out = _hso(self._pre("Write", {"file_path": "/w/a", "content": "⟦SECRET_c77⟧"}))
         self.assertEqual(out["permissionDecision"], "deny")
         reason = out["permissionDecisionReason"]
-        self.assertIn("SECRET_c77 (unknown)", reason)
+        self.assertIn("SECRET_c77 (no such placeholder)", reason)
         self.assertIn("Nothing was written.", reason)
         self.assertNotIn("The command did not run", reason)
 
@@ -607,7 +607,7 @@ class McpAskTests(unittest.TestCase):
         self.assertIn("used as a field name", out["permissionDecisionReason"])
         self.assertEqual(self._pre({"q": "no placeholder", "n": 3}), {})
         out = _hso(self._pre({"to": "⟦SECRET_c55⟧"}))
-        self.assertIn("SECRET_c55 (unknown)", out["permissionDecisionReason"])
+        self.assertIn("SECRET_c55 (no such placeholder)", out["permissionDecisionReason"])
         self.assertIn("do not guess other keys", out["permissionDecisionReason"])
 
     def test_field_paths_and_text_field_words(self):

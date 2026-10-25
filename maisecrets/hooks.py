@@ -1350,7 +1350,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
         return _ask(new_input, reason)
     if decision in ("defer", "allow"):
         return _updated(payload, new_input)
-    return _deny("maisecrets: the rehydration policy refuses this call. Nothing ran.")
+    return _deny("maisecrets: the setting rehydration does not let a stored value into this call. Nothing ran.")
 
 
 _ARGS_END = "MAISECRETS_ARGS_END"
@@ -1822,8 +1822,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _ask(new_input, base + "The remote command can still pass the value on: allow it only if you trust "
                                       "that host and that command.")
     return _rehydrated(payload, cfg, "bash", new_input,
-                       f"maisecrets: this command gets the real value of {keys} through a shell variable; the "
-                       "command shown here carries no value. Check the command before you allow it.")
+                       f"maisecrets: if you allow it, this command gets the value of {keys}. The command shown "
+                       "here holds only the placeholder. Check where the command sends the value.")
 
 
 def key_nonce() -> str:
@@ -1915,22 +1915,24 @@ def _deny_reason(failed: list[str]) -> str:
     value, or changing maisecrets settings (review, 2026-09-26)."""
     hints: list[str] = []
     if any("(unknown)" in f for f in failed):
-        hints.append("A key marked (unknown) does not exist; do not guess other keys, use only "
+        hints.append("A placeholder marked (no such placeholder) does not exist; do not guess other keys, use only "
                      "placeholders the user gave you.")
     if any("(expired)" in f for f in failed):
-        hints.append("A key marked (expired) has no value any more. Ask the user to store it again with "
+        hints.append("A placeholder marked (expired) has no value any more. Ask the user to store it again with "
                      "/maisecrets:put or to paste it into a prompt (maisecrets blocks it and gives a new "
                      "placeholder), then use the new placeholder. Do not ask for the value in any other way.")
     if any("foreign-session" in f or "no-session" in f for f in failed):
-        hints.append("A key marked (foreign-session) resolves only in a session where a human typed "
-                     "it: ask the user to paste the placeholder, never the value.")
+        hints.append("A placeholder marked (not given in this session) works only in a session where a human "
+                     "typed or pasted it: ask the user to paste the placeholder, never the value.")
     if any("limit:" in f for f in failed):
         hints.append("The cap is set by the user. Stop and tell the user that they can raise it with their "
                      "own prompt /maisecrets:settings max_keys_per_session NUMBER (or max_resolves_per_hour; "
                      "in Codex: maisecrets: set KEY NUMBER); do not change maisecrets settings yourself.")
     if any("audit" in f for f in failed):
         hints.append("The audit log could not be written, so no value is released. Tell the user.")
-    return ("maisecrets: cannot resolve " + ", ".join(failed) + ". The command did not run. "
+    shown = [f.replace("(unknown)", "(no such placeholder)").replace("(foreign-session)", "(not given in this "
+                       "session)").replace("(no-session)", "(not given in this session)") for f in failed]
+    return ("maisecrets: cannot use " + ", ".join(shown) + ". The command did not run. "
             + " ".join(hints))
 
 
@@ -1990,8 +1992,8 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()), refs)
     new_input = _walk_strings(tool_input, substitute)
     names = ", ".join(f"⟦{k}⟧" for k in values)
-    warn = (f" WARNING: {', '.join(text_fields)} is text that the tool publishes or stores; the real value "
-            "goes out with it." if text_fields else "")
+    warn = (f" WARNING: {', '.join(text_fields)} is text that other people can read (a message, a comment, a "
+            "page). The real value goes out with it." if text_fields else "")
     return _rehydrated(payload, cfg, "mcp", new_input,
                        f"maisecrets: this call gets the real value of {names} in {', '.join(fields)} "
                        f"of {tool}.{warn} Check the target and the value before you allow it.")
@@ -2096,8 +2098,8 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
         _walk_strings(tool_input, look)
     if not hits:
         return None
-    return _deny(f"maisecrets: {tool} would read the maisecrets store or its value directory, the user's own store. "
-                 "The user manages it with /maisecrets:list and /maisecrets:forget. The call did not run. If this is "
+    return _deny(f"maisecrets: {tool} would read the stored values of maisecrets. "
+                 "The user manages them with /maisecrets:list and /maisecrets:forget. The call did not run. If this is "
                  "a false positive, /maisecrets:report records it.")
 
 
@@ -2614,7 +2616,7 @@ def post_tool(payload: dict) -> dict:
             "hookEventName": "PostToolUse",
             "updatedToolOutput": new_response,
             "additionalContext": (
-                f"maisecrets redacted {hit['n']} value(s) in this tool result. The tool ran and finished; "
+                f"maisecrets masked {hit['n']} value(s) in this tool result. The tool ran and finished; "
                 "do not run it again to see the values. Use the ⟦TYPE_cN⟧ placeholders as they are: in a Bash "
                 "command, an MCP argument or the content of Write/Edit they are resolved at run time."
                 + (f" {note}" if note else "")

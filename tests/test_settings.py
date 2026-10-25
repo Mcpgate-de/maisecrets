@@ -433,11 +433,11 @@ class Hint(unittest.TestCase):
     def test_the_hint_keeps_what_the_answer_does(self):
         # a redacted result keeps its output and its own context; the hint comes after it
         result = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": {"stdout": "x"},
-                                         "additionalContext": "maisecrets redacted 1 value(s)"}}
+                                         "additionalContext": "maisecrets masked 1 value(s)"}}
         with mock.patch.object(hooks, "post_tool", return_value=result):
             out = _post("ssh web1 reboot")
         self.assertEqual(out["hookSpecificOutput"]["updatedToolOutput"], {"stdout": "x"})
-        self.assertTrue(_context(out).startswith("maisecrets redacted 1 value(s)"))
+        self.assertTrue(_context(out).startswith("maisecrets masked 1 value(s)"))
         self.assertIn("maisecrets can ask", _context(out))
         # a hint that fails does not withhold the output
         _reset()

@@ -1186,8 +1186,8 @@ class HookEventTests(unittest.TestCase):
 PAIR_STATES = ("empty", "live", "expired-unswept", "expired-purged", "damaged-index", "policy")
 PAIR_EVENTS = ("session-start", "user-prompt", "pre-tool", "post-tool")
 # what a Bash reference to the newest key of each state gets: the value, or a deny that names why
-PAIR_PRE = {"empty": "(unknown)", "live": None, "expired-unswept": "(expired)", "expired-purged": "(expired)",
-            "damaged-index": "did NOT run", "policy": "(foreign-session)"}
+PAIR_PRE = {"empty": "(no such placeholder)", "live": None, "expired-unswept": "(expired)",
+            "expired-purged": "(expired)", "damaged-index": "did NOT run", "policy": "(not given in this session)"}
 
 
 def pair_cells() -> list[tuple[str, str, str]]:

@@ -110,6 +110,18 @@ class StoreRefusalTests(unittest.TestCase):
         self.assertNotIn("the user's own store", reason)
 
 
+class StatusWordsTests(unittest.TestCase):
+    def test_a_placeholder_that_cannot_be_used_is_named_in_words_and_its_hint_matches(self):
+        # the transcript showed `(foreign-session)`: a code the person cannot act on
+        reason = hooks._deny_reason(["SECRET_c1 (unknown)", "SECRET_c2 (foreign-session)", "SECRET_c3 (no-session)"])
+        self.assertIn("cannot use SECRET_c1 (no such placeholder), SECRET_c2 (not given in this session), SECRET_c3 "
+                      "(not given in this session).", reason)
+        for code in ("(unknown)", "foreign-session", "no-session"):
+            self.assertNotIn(code, reason)
+        self.assertIn("A placeholder marked (no such placeholder) does not exist", reason)
+        self.assertIn("A placeholder marked (not given in this session) works only", reason)
+
+
 class CameFromTests(unittest.TestCase):
     def test_a_raw_source_is_said_in_words(self):
         self.assertEqual(settings.came_from({"source": "cron"}), "a scheduled task")
