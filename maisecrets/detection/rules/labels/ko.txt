@@ -1,0 +1,13 @@
+# Korean credential labels. Korean joins a noun and its particle with no space, so the Hangul
+# words have no word start unless they say so.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+비밀번호	비밀번호	비밀번호, 새 비밀번호, db_비밀번호, 관리자비밀번호
+패스워드	패스워드	패스워드, 앱 패스워드
+# 암호 is also the start of 암호화 (encryption) and 암호문 (ciphertext): only the word alone.
+암호	(?<![가-힣])암호(?![가-힣])	암호, db_암호
+토큰	토큰	토큰, 앱 토큰
+# 키 alone is an ordinary word (key, and height): only after API, 비밀 (secret) or 접근 (access).
+키	(?:api|비밀|접근)[ _]?키	API 키, 비밀 키, 접근 키, 비밀키
+인증	인증[ _]?정보	인증 정보, 인증정보

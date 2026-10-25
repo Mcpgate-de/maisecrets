@@ -1,0 +1,19 @@
+{
+  "name": "maisecrets",
+  "owner": {
+    "name": "mcpgate",
+    "url": "https://mcpgate.de"
+  },
+  "metadata": {
+    "description": "maisecrets marketplace (this repository)"
+  },
+  "plugins": [
+    {
+      "name": "maisecrets",
+      "source": "./",
+      "description": "Intercepts detected secrets and PII before they reach the cloud model: deterministic detection, a local vault with TTL, placeholders resolved only where the real call happens. Free and open source, by mcpgate.de.",
+      "version": "0.8.1",
+      "category": "security"
+    }
+  ]
+}
