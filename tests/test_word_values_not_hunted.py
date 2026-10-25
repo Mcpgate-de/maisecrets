@@ -224,7 +224,9 @@ class WordValuesNotHuntedTests(unittest.TestCase):
 
     def put_by_hand(self, value: str) -> None:
         """/maisecrets:put from stdin: the entry kind `manual`."""
-        env = {**os.environ, "MAISECRETS_HOME": str(self.home), "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        # put copies the placeholder: the fake clipboard on PATH, and MS_TEST_CLIP for clip.exe on Windows (hook)
+        env = {**os.environ, "MAISECRETS_HOME": str(self.home), "MS_TEST_CLIP": str(Path(self.home, "clip")),
+               "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
         r = subprocess.run([sys.executable, "-m", "maisecrets.cli", "put"], input=value, capture_output=True,
                            text=True, env=env, cwd=str(ROOT), timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
