@@ -2657,7 +2657,7 @@ def _failure(event: str, payload: dict, exc: BaseException) -> dict:
             f"no write access to {where}. Another program may hold it open (an antivirus scan, a second copy of "
             "maisecrets), or it belongs to another user. maisecrets blocks until it can write; to work without its "
             "protection meanwhile, switch its hooks off in the client's hook settings."), hint=False)
-    return _fail_closed(event, payload, f"failed ({type(exc).__name__}).")
+    return _fail_closed(event, payload, f"an internal error ({type(exc).__name__}).")
 
 
 def _how_failed(exc: BaseException) -> str:
@@ -2915,24 +2915,33 @@ def _test_watchdog_seconds(default: float) -> float:
     return value if math.isfinite(value) and 0 < value <= _TEST_WATCHDOG_MAX else default
 
 
+_CHECKED = {"pre-tool": "this tool call", "post-tool": "this tool result", "post-tool-failure": "this tool result"}
+
+
 def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict:
     """The answer that keeps the guard up when the hook itself cannot finish: block the prompt,
     deny the tool, withhold the tool output. Never a value, never an exception text (a keychain
     error carried the value in its argument list; Codex review, 2026-09-26). Each text says
     whether the tool ran, so the model does not repeat a push or a deploy (review, 2026-09-26)."""
     codex = client_of(payload) == "codex"
-    reason = f"maisecrets {event}: {why}" + _incident_line(codex)
-    if event == "post-tool-failure":
-        # the client shows the failed output whatever this answer says: there is nothing to withhold
-        return {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": reason}}
     if event == "user-prompt":
-        tail = (" The prompt was not sent; try again. If this message comes again, tell the user that "
-                "maisecrets cannot finish (a locked store or a slow disk)." if hint
-                else " The prompt was not sent. Tell the user; do not retry.")
-        out = {"decision": "block", "reason": reason + tail}
+        # the person reads this one: what happened, and the one next step
+        again = (" If this comes again, " + (f"run {_run_sh()} report incident in a terminal to see a report you can "
+                                             "send." if codex else "/maisecrets:report incident shows a report you "
+                                                                   "can send.")
+                 if hint else "")
+        out = {"decision": "block", "reason": f"maisecrets could not check this prompt: {why} It was not sent. "
+                                              + ("Send it again." if hint else "Fix the cause, then send it again.")
+                                              + again}
         if not codex:
             out["hookSpecificOutput"] = {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}
         return out
+    what = _CHECKED.get(event)
+    reason = (f"maisecrets could not check {what}: {why}" if what else f"maisecrets {event}: {why}") + \
+        _incident_line(codex)
+    if event == "post-tool-failure":
+        # the client shows the failed output whatever this answer says: there is nothing to withhold
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": reason}}
     if event == "pre-tool":
         tail = (" The command did NOT run. Retry once; if this message comes again, stop and tell the user "
                 "that maisecrets cannot reach its store." if hint
@@ -3258,7 +3267,8 @@ def main(argv: list[str]) -> int:
     def on_timeout() -> None:
         if not fired.acquire(blocking=False):
             return                                   # the other watchdog runs it already, to its end
-        if answer(_fail_closed(event, payload, f"took longer than {seconds:.0f}s."), "watchdog"):
+        if answer(_fail_closed(event, payload, f"it took longer than {seconds:.0f}s (the computer may be busy)."),
+                  "watchdog"):
             def last() -> None:
                 _heartbeat(event, payload, done=True)
                 _quarantine_running_rule(time.perf_counter() - clock)

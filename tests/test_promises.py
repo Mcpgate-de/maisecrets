@@ -125,10 +125,11 @@ class LauncherFailsClosedTests(unittest.TestCase):
                     self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
                 elif event == "session-start":
                     self.assertEqual(r.returncode, 0)
-                    self.assertTrue(json.loads(r.stdout)["systemMessage"].endswith("every prompt is blocked."))
+                    self.assertTrue(json.loads(r.stdout)["systemMessage"].endswith(
+                        "every prompt and every tool call is blocked."))
                 else:
                     assert_refuses(self, event, r)
-                    self.assertIn("Until then every prompt is blocked.", r.stdout)
+                    self.assertIn("Until then every prompt and every tool call is blocked.", r.stdout)
 
     def test_no_python_on_the_path_blocks_every_event(self):
         self.check_all_events("none")

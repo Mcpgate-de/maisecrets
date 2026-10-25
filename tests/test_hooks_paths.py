@@ -108,13 +108,17 @@ class FailClosedAnswerTests(unittest.TestCase):
             with self.subTest(client=client):
                 up = hooks._fail_closed("user-prompt", payload, "x")
                 self.assertEqual(up["decision"], "block")
-                self.assertIn("The prompt was not sent; try again", up["reason"])
+                # the person reads it: no event id, no "tell the user", one next step
+                self.assertTrue(up["reason"].startswith("maisecrets could not check this prompt: x It was not sent. "
+                                                        "Send it again. If this comes again, "), up["reason"])
+                self.assertNotIn("user-prompt", up["reason"])
+                self.assertNotIn("tell the user", up["reason"])
                 if client == "claude":
                     self.assertTrue(up["hookSpecificOutput"]["suppressOriginalPrompt"])
                 else:
                     self.assertNotIn("hookSpecificOutput", up, "Codex rejects a Claude-only field")
                 up = hooks._fail_closed("user-prompt", payload, "x", hint=False)
-                self.assertIn("do not retry", up["reason"])
+                self.assertIn("It was not sent. Fix the cause, then send it again.", up["reason"])
                 pre = hooks._fail_closed("pre-tool", payload, "x", hint=False)["hookSpecificOutput"]
                 self.assertEqual(pre["permissionDecision"], "deny")
                 self.assertIn("did NOT run. Tell the user; do not retry", pre["permissionDecisionReason"])
@@ -139,7 +143,7 @@ class FailClosedAnswerTests(unittest.TestCase):
             with self.subTest(event), mock.patch.dict(hooks.HANDLERS, {event: boom}):
                 rc, out, _err = self._main(event, '{"prompt_id": "p"}')
                 self.assertEqual(rc, 0)
-                self.assertIn("failed (RuntimeError)", out)
+                self.assertIn("an internal error (RuntimeError)", out)
                 self.assertNotIn(PLAIN, out, "an exception message may carry a value")
                 json.loads(out)
 
@@ -159,7 +163,7 @@ class FailClosedAnswerTests(unittest.TestCase):
         with mock.patch.object(hooks, "post_tool", side_effect=KeyError(PLAIN)):
             out = hooks._post_tool_guarded({"turn_id": "t"})
         self.assertEqual(out["decision"], "block")
-        self.assertIn("failed (KeyError)", out["reason"])
+        self.assertIn("an internal error (KeyError)", out["reason"])
         self.assertNotIn(PLAIN, json.dumps(out))
 
     def test_the_watchdog_withholds_a_slow_post_tool_and_denies_a_slow_pre_tool(self):
@@ -853,7 +857,7 @@ class PayloadMatrixTests(unittest.TestCase):
         self.assertEqual(self._one(_dispatch("user-prompt", '{"session_id": "SM"}')), {})
         wrong = self._one(_dispatch("user-prompt", '{"prompt": 42, "prompt_id": "p"}'))
         self.assertEqual(wrong["decision"], "block")
-        self.assertIn("failed (TypeError)", wrong["reason"])
+        self.assertIn("an internal error (TypeError)", wrong["reason"])
         broken = self._one(_dispatch("user-prompt", json.dumps({"prompt": "x " + GLPAT, "prompt_id": "p",
                                                                 "transcript_path": ""}), home=self.broken))
         self.assertEqual(broken["decision"], "block")

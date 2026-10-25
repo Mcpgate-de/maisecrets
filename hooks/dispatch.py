@@ -40,7 +40,7 @@ def _refuse_without_the_code(why: str) -> None:
     maisecrets is imported here, and the text carries the exception type only."""
     event = sys.argv[1] if len(sys.argv) == 2 else ""
     msg = (f"maisecrets cannot load its own code ({why}); the plugin folder may be half updated. "
-           "Run /reload-plugins or start a new session.")
+           "Start a new session (in Claude Code: claude --resume to keep this one).")
     if event == "post-tool-failure":
         import json
         print(json.dumps({"systemMessage": msg}))    # a failed output cannot be withheld: only the reason is named
@@ -57,11 +57,11 @@ def _refuse_without_the_code(why: str) -> None:
         sys.exit(0)
     if event == "session-start":
         import json
-        print(json.dumps({"systemMessage": msg + " Until then every prompt is blocked."}))
+        print(json.dumps({"systemMessage": msg + " Until then every prompt and tool call is blocked."}))
         _marker("launcher.import")
         sys.exit(0)
     import json
-    text = msg + " Until then every prompt is blocked."
+    text = msg + " Until then every prompt and tool call is blocked."
     # JSON, not exit 2: Codex runs the tool when a hook exits 2 (harness/codex.py); both clients read this
     if event == "pre-tool":
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
