@@ -63,6 +63,7 @@ OWNER = {
     "phone after a phone word": "phone-after-phone-word", "phone national after a label": "phone-after-phone-word",
     "one first name": "name-single-after-label", "street line after a label": "address-street-after-label",
     "markdown table of persons": "md-table-personal-column",
+    "yaml record of a person": "kv-personal-field",
     "password column in a table": "secret-under-password-column",
     "street postcode city": "address-street-postcode-city",
     "sql insert of persons": "sql-insert-personal-column", "html table of persons": "html-table-personal-column",

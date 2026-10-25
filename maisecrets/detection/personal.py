@@ -1185,6 +1185,96 @@ def _xml_record_hits(text: str) -> list:
     return out
 
 
+# the records of the line formats: YAML, .env, INI, a compose `environment:` list, PHP print_r (one `key: value`,
+# `KEY=value` or `[key] => value` per line, a run of lines at one indent is one record, `- ` opens the next), a log
+# line with two `key=value` pairs or more (one record per line), and the pairs of a SQL UPDATE … SET … WHERE and of a
+# WHERE clause (one record per statement). The same policy as the tables (_grid_hits): structured corpus, set A dev,
+# 2026-10-25, 3,226 values under a known field name stayed text because no reader read these formats
+_KV_LINE_RE = _lazy(r"(?m)^([ \t]*)(?:(-[ \t]+)|export[ \t]+)?(?:\[([^\]\n]{1,64})\][ \t]*=>|([^\W\d][\w.-]{0,63}"
+                    r"(?: [^\W\d][\w.-]{0,30}){0,3})[ \t]*([:=]))[ \t]*(?:\"([^\"\n]{1,512})\"|'([^'\n]{1,512})'"
+                    r"|([^\s\"'#|>&][^\n]{0,511}?))[ \t]*$")
+_KV_INLINE_RE = _lazy(r"(?<![\w.:/-])([^\W\d][\w.-]{0,63})=(?:\"([^\"\n]{1,512})\"|'([^'\n]{1,512})'"
+                      r"|([^\s\"',;&]{1,512}))")
+_SQL_STMT_RE = _lazy(r"(?is)\b(?:update\s+[\w.`\"\[\]]{1,128}\s+set|select\s[^;]{1,2000}?\swhere|delete\s+from\s"
+                     r"[^;]{1,200}?\swhere)\s([^;]{1,4000})")
+_SQL_PAIR_RE = _lazy(r"([\w.`\"\[\]-]{1,64})\s*=\s*(?:'((?:[^'\n]|''){1,512})'|(-?[\w.]{1,64}))")
+
+
+def _kv_line_hits(text: str) -> list:
+    out, rows = [], 0
+    record: list = []
+    indent = None
+    last_end = -1
+
+    def flush():
+        nonlocal record, rows
+        if len(record) >= 2 and rows < _JSON_RECORDS_MAX:
+            rows += 1
+            return _grid_hits(text, [_md_column(k) for k, _ in record], [[s for _, s in record]],
+                              "kv-personal-field")
+        return []
+
+    for m in _KV_LINE_RE.finditer(text):
+        ind = len(m.group(1)) + (len(m.group(2)) if m.group(2) else 0)
+        between = text[last_end:m.start()] if last_end >= 0 else ""
+        # a line between two pairs that is not deeper than the record (a heading) or a blank line ends the record; a
+        # deeper one (the lines of a block scalar) does not
+        lines = between.split("\n")[1:-1]
+        gap = any(not ln.strip() or len(ln) - len(ln.lstrip()) <= (indent or 0) for ln in lines)
+        if record and ((m.group(2) and m.group(5) != "=") or ind != indent or gap):
+            out += flush()
+            record = []
+        indent = ind
+        last_end = m.end()
+        key = m.group(3) or m.group(4)
+        g = next(i for i in (6, 7, 8) if m.group(i) is not None)
+        record.append((key, m.span(g)))
+    out += flush()
+    return out
+
+
+def _kv_inline_hits(text: str) -> list:
+    out, rows = [], 0
+    start = 0
+    for line in text.split("\n"):
+        a, start = start, start + len(line) + 1
+        # a line with two `=` at least: a regex for that line backtracked over every long line with one (a base64
+        # block with its padding) and took quadratic time
+        if line.count("=") < 2:
+            continue
+        pairs = []
+        for m in _KV_INLINE_RE.finditer(text, a, a + len(line)):
+            g = next(i for i in (2, 3, 4) if m.group(i) is not None)
+            pairs.append((m.group(1), m.span(g)))
+        if len(pairs) >= 2 and rows < _JSON_RECORDS_MAX:
+            rows += 1
+            out += _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]], "kv-personal-field")
+    return out
+
+
+def _sql_pair_hits(text: str) -> list:
+    out = []
+    for st in _SQL_STMT_RE.finditer(text):
+        pairs = []
+        for m in _SQL_PAIR_RE.finditer(text, st.start(1), st.end(1)):
+            g = 2 if m.group(2) is not None else 3
+            pairs.append((m.group(1).strip("`\"[]").rsplit(".", 1)[-1], m.span(g)))
+        if pairs:
+            out += _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]], "kv-personal-field")
+    return out
+
+
+def _kv_record_hits(text: str) -> list:
+    out = []
+    if ":" in text or "=" in text:
+        out += _kv_line_hits(text)
+    if text.count("=") >= 2:
+        out += _kv_inline_hits(text)
+    if "=" in text and ("SET" in text or "set" in text or "WHERE" in text or "where" in text):
+        out += _sql_pair_hits(text)
+    return out
+
+
 # ------------------------------------------------------------------------------------------ the forms of 0.6.24 --
 # A value in a fixed form or after a label that names it, from the holdout values that 0.6.21 still leaked
 # (2026-10-15). Each rule declares (type, channel, region, needs): channel "tool" (tool results and files) or "both".
@@ -1227,6 +1317,7 @@ FORMS = {
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "json-personal-field": ("COLUMN", "tool", "generic", "label"),
     "xml-personal-field": ("COLUMN", "tool", "generic", "label"),
+    "kv-personal-field": ("COLUMN", "tool", "generic", "label"),
     "secret-under-password-column": ("SECRET", "tool", "generic", "label"),
     "username-after-label": (USERNAME, "tool", "generic", "label"),
     "secret-password-with-sign": ("SECRET", "tool", "generic", "label"),
@@ -2233,6 +2324,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         out += _json_record_hits(text)
     if "xml-personal-field" in want and ("</" in text or "/>" in text):
         out += _xml_record_hits(text)
+    if "kv-personal-field" in want:
+        out += _kv_record_hits(text)
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
             d = re.sub(r"\D", "", m.group())

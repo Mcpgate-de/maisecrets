@@ -238,7 +238,9 @@ class SingleNameTests(Base):
                 self.assertMasked(text, value)
                 # a JSON record with a first-name and a last-name field is a person's record since 2026-10-25, and
                 # the record rule reports the same value
-                self.assertTrue({"name-single-after-label", "json-personal-field"} & {m.kind for m in scan(text)})
+                # and two `key: value` lines of a first and a last name are such a record too (kv-personal-field)
+                self.assertTrue({"name-single-after-label", "json-personal-field", "kv-personal-field"}
+                                & {m.kind for m in scan(text)})
 
     def test_a_word_a_type_a_state_or_a_documentation_name_stays_text(self):
         for text in ("first_name: String", "last name: Required", 'first_name = "John"', "last_name: Doe",

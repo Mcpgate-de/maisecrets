@@ -352,6 +352,10 @@ FORMS_NO_HIT = [
      "| default | ******** |\n| example | ${DB_PASSWORD} |\n"),
     ("password hash column", "INSERT INTO users (login, password_hash) VALUES ('svc-billing', 'sha256:"
      + "9f" * 32 + "');\n"),
+    # the line formats of a service: a name and a host, a log line of a request
+    ("yaml of a service", "services:\n  - name: billing\n    address: 10.0.0.12:8080\n    port: 8080\n"),
+    ("log line of a request", "INFO method=GET path=/users/42 status=200 user=svc-billing took_ms=12\n"),
+    ("sql update of a release", "UPDATE releases SET name = 'Spring Cleaning', date = '2024-05-01' WHERE id = 7;"),
 ]
 
 FORMS_HIT = [
@@ -447,4 +451,6 @@ FORMS_HIT = [
      + "%40mailbox-test.net", ["dana.okafor" + "%40mailbox-test.net"]),
     ("password column in a table", "| login | wachtwoord |\n|---|---|\n| dokafor" + "84 | Qz7k" + "Lm2pRx! |",
      ["Qz7k" + "Lm2pRx!"]),
+    ("yaml record of a person", "customer:\n  nachname: Oka" + "for\n  geburtsdatum: '1984-03-" + "12'\n",
+     ["Oka" + "for", "1984-03-" + "12"]),
 ]

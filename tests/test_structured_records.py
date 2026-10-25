@@ -145,5 +145,49 @@ class PasswordColumnTests(Base):
         self.assertNotIn("secret-under-password-column", self.kinds(text))
 
 
+# ------------------------------------------------------------------------------------- the line formats --
+class LineRecordTests(Base):
+    def test_a_yaml_record_and_a_list_of_records_are_read(self):
+        self.assertMasked(f"customer:\n  nachname: {LAST}\n  vorname: {FIRST}\n  geburtsdatum: '{BIRTH}'\n",
+                          LAST, BIRTH)
+        self.assertMasked(f"people:\n  - lname: \"{LAST}\"\n    dob: {BIRTH}\n  - lname: {LAST}x\n    dob: {BIRTH}\n",
+                          LAST, BIRTH)
+
+    def test_an_env_file_and_a_compose_environment_list_are_read(self):
+        self.assertMasked(f"CUSTOMER_NAME={FIRST} {LAST}\nPHONE={PHONE}\nAPP_PORT=8080\n", f"{FIRST} {LAST}")
+        self.assertMasked(f"environment:\n  - CONTACT_NAME={FIRST} {LAST}\n  - TELEFON={PHONE}\n", f"{FIRST} {LAST}")
+
+    def test_a_log_line_with_two_pairs_or_more_is_one_record(self):
+        self.assertMasked(f"2026-10-25T10:00:00Z INFO [api] signup nachname={LAST} geb_datum={BIRTH} plan=pro\n",
+                          LAST, BIRTH)
+        self.assertMasked(f'level=info msg="user created" full_name="{FIRST} {LAST}" phone="{PHONE}"\n',
+                          f"{FIRST} {LAST}", PHONE)
+
+    def test_a_sql_update_and_a_where_clause_are_one_record(self):
+        self.assertMasked(f"UPDATE customers SET apellido = '{LAST}', fecha_nacimiento = '{BIRTH}' WHERE id = 42;",
+                          LAST, BIRTH)
+        self.assertMasked(f"SELECT * FROM users WHERE last_name = '{LAST}' AND dob = '{BIRTH}';", LAST, BIRTH)
+
+    def test_a_php_print_r_is_read(self):
+        self.assertMasked(f"Array\n(\n    [nachname] => {LAST}\n    [geburtsdatum] => {BIRTH}\n)\n", LAST, BIRTH)
+
+    def test_a_record_without_a_person_stays_text(self):
+        # a company's config: an address and a phone, no person (a phone after its label is the phone rule's)
+        for text in (f"company_name: {LAST} Logistics\naddress: {STREET}\nphone: {PHONE}\n",
+                     # a service list: a name and a host address
+                     "services:\n  - name: billing\n    address: 10.0.0.12:8080\n    port: 8080\n",
+                     # a log line with one person field and no strong one
+                     f"INFO login ok user={USER} took_ms=12 status=200\n",
+                     # two blocks apart: the name of one and the birth date of the other are no record
+                     f"[owner]\nnachname = {LAST}\n\n[release]\ngeburtsdatum = 2024-05-01\n"):
+            with self.subTest(text[:20]):
+                self.assertNotIn("kv-personal-field", self.kinds(text))
+
+    def test_a_long_text_of_pairs_stays_linear(self):
+        from _timing import assert_linear
+        assert_linear(self, lambda t: scan(t, "tool"),
+                      lambda n: "".join(f"key{i}: value{i}\nk{i}=v{i} a{i}=b{i}\n" for i in range(n)), 1500)
+
+
 if __name__ == "__main__":
     unittest.main()
