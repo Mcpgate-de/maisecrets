@@ -92,5 +92,21 @@ class UserIdLabelTests(Base):
         self.assertText("user_id: svc_backup\n")
 
 
+class PhoneAfterCallCueTests(Base):
+    """P1: (ddd) ddd-dddd after a cue of a person (reached at, me at)."""
+
+    def test_the_us_national_form_after_a_call_cue_is_masked(self):
+        self.assertMasked("Dana can be reached at " + PHONE + " after five.", PHONE)
+
+    def test_a_555_number_and_a_number_after_us_at_stay_text(self):
+        self.assertText("Dana can be reached at " + PHONE_555 + " after five.")
+        self.assertText("Write to us at " + PHONE + " for support.")
+
+    def test_no_double_hit_with_phone_us_national(self):
+        # a phone word and a call cue before the number: phone-us-national masks it, this rule adds nothing
+        hits = scan("You can reach me by phone at " + PHONE + " after five.")
+        self.assertEqual(["phone-us-national"], [m.kind for m in hits])
+
+
 if __name__ == "__main__":
     unittest.main()

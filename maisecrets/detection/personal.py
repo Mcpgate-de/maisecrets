@@ -1838,8 +1838,14 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         for rx in (_PHONE_TIGHT_RE, _PHONE_LOOSE_RE):
             for m in rx.finditer(text):
                 v = m.group(1).rstrip(" .-/")
-                if _US_PHONE_RE.fullmatch(v) or (_NANP_SHAPE_RE.fullmatch(v) and not us):
-                    continue   # (312) 846-2291 is phone-us-national's; a North American number needs us or ca
+                if _US_PHONE_RE.fullmatch(v):
+                    # (312) 846-2291 is phone-us-national's when its phone word is there; after a cue of this rule
+                    # only (reached at, me at) it is this rule's. The 555 exchange stays an example, as there
+                    if not us or re.search(r"\)\s?555[-. ]", v) or _PHONE_WORD_RE.search(
+                            text, max(0, m.start(1) - 30), m.start(1)):
+                        continue
+                elif _NANP_SHAPE_RE.fullmatch(v) and not us:
+                    continue   # a North American number needs us or ca
                 gap = text[m.start():m.start(1)]
                 sep = [x.start() for x in _GAP_SEP_RE.finditer(gap)] if rx is _PHONE_LOOSE_RE else ()
                 if sep and not _PHONE_GAP_END_RE.search(_PAREN_END_RE.sub("", gap[:sep[-1]]).rstrip(" )\"'")):
