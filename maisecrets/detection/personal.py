@@ -894,6 +894,17 @@ def _html_table_hits(text: str) -> list:
                 rows.append([_html_cell_text(text, *c.span(2)) for c in cells])
         if names:
             out += _grid_hits(text, names, rows, "html-table-personal-column")
+            continue
+        # a table of fields and values (<tr><th>Full name</th><td>…</td></tr>, one field per row) is one record, as
+        # a two-column Markdown table is
+        fields, values = [], []
+        for r in _HTML_ROW_RE.finditer(text, t.start(1), t.end(1)):
+            cells = list(_HTML_CELL_RE.finditer(text, r.start(1), r.end(1)))
+            if len(cells) == 2 and cells[0].group(1).lower() == "th" and cells[1].group(1).lower() == "td":
+                fields.append(_md_column(text[slice(*_html_cell_text(text, *cells[0].span(2)))]))
+                values.append(_html_cell_text(text, *cells[1].span(2)))
+        if sum(f in _STRONG_COLS or f in _WEAK_COLS for f in fields) >= 2:
+            out += _grid_hits(text, fields, [values], "html-table-personal-column")
     return out
 
 

@@ -135,5 +135,28 @@ class XmlElementLabelTests(Base):
                 self.assertNoName(text)
 
 
+BIRTH = "1984-03-" + "12"
+
+
+class HtmlFieldValueTableTests(Base):
+    def test_a_table_of_fields_and_values_is_one_record(self):
+        text = ("<table>\n<tr><th>Full name</th><td>" + NAME + "</td></tr>\n"
+                "<tr><th>Date of birth</th><td>" + BIRTH + "</td></tr>\n</table>\n")
+        out = masked(text)
+        for v in (NAME, BIRTH):
+            with self.subTest(v=len(v)):
+                self.assertNotIn(v, out)
+        self.assertIn("html-table-personal-column", {m.kind for m in scan(text)})
+
+    def test_a_table_of_a_thing_or_a_place_stays_text(self):
+        for text in ("<table><tr><th>Name</th><td>Desk Lamp</td></tr><tr><th>Price</th><td>12.50</td></tr></table>",
+                     "<table><tr><th>Name</th><td>North Depot</td></tr><tr><th>Address</th>"
+                     "<td>12 Oak Lane, Springfield</td></tr></table>",
+                     # one personal field alone is no record
+                     "<table><tr><th>Full name</th><td>" + NAME + "</td></tr></table>"):
+            with self.subTest(text=text[:40]):
+                self.assertNotIn("html-table-personal-column", {m.kind for m in scan(text)})
+
+
 if __name__ == "__main__":
     unittest.main()
