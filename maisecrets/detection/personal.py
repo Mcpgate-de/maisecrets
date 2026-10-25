@@ -481,7 +481,15 @@ _CUE_NAME = r"((?:" + _NAME_STEM + r")(?: (?:" + _NAME_STEM + r")){0,3})"
 _PERSON_CUE_RES = (
     re.compile(r"(?<![\w,])I, " + _CUE_NAME + r", (?=(?:hereby|am|the undersigned|residing|currently|born|a resident"
                r"|being|declare|certify|of legal age)\b)"),
-    re.compile(r"(?<![\w])(?i:my (?:full )?name is) " + _CUE_NAME + r"(?![\w'’-])"),
+    # and in the other label languages (nym dev, 2026-10-25: a self-introduction in another language stayed text)
+    # (not `ich heiße`: ich heiße Neue Kollegen willkommen is a welcome)
+    re.compile(r"(?<![\w])(?i:my (?:full )?name is|mein (?:vollständiger )?name ist"
+               r"|je m['’]appelle|mon nom (?:complet )?est|mi nombre (?:completo )?es|me llamo"
+               r"|il mio nome (?:completo )?è|mi chiamo|mijn (?:volledige )?naam is|ik heet|jag heter"
+               r"|mitt (?:fullständiga )?namn är|jeg heter|jeg hedder|mit (?:fulde )?navn er|mitt navn er"
+               r"|nazywam się|mam na imię|(?:o )?meu nome (?:completo )?é|chamo-me|eu me chamo|jmenuji se"
+               r"|nimeni on|numele meu (?:complet )?este|mă numesc) " + _CUE_NAME
+               + r"(?![\w'’-])"),
     re.compile(_CUE_NAME + r", (?=(?:born on|born in|date of birth|a resident of|residing at|resides at|who resides"
                r"|who lives|currently residing|currently resides)\b)"),
     # a title before a full name (Mr Dana Okafor, Mrs. …); not Dr, which is also a street (… Dr. We are)
@@ -2600,7 +2608,12 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 out.append((m.start(2), m.start(2) + len(v), "name-after-label", NAME))
     if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
                                                                          "ms", "mx", "miss", "dear", "hi ", "hello",
-                                                                         "hey ")):
+                                                                         "hey ", "name ist", "appelle",
+                                                                         "mon nom", "mi nombre", "llamo", "mio nome",
+                                                                         "chiamo", "mijn naam", "ik heet", "heter",
+                                                                         "mitt namn", "hedder", "navn er", "nazywam",
+                                                                         "na imię", "meu nome", "chamo", "jmenuji",
+                                                                         "nimeni", "numele", "numesc")):
         for rx in _PERSON_CUE_RES:
             for m in rx.finditer(text):
                 words, start = m.group(1).split(" "), m.start(1)
