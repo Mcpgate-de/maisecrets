@@ -236,21 +236,32 @@ def marketplace() -> str:
         import build_release_tree
         # the tree is built inside a bare repository that holds HEAD alone: a push from this checkout would run its
         # pre-push hook, and the bare repository is what Codex clones
+        # the tree is built in a bare repository that holds HEAD alone (a push from this checkout would run its
+        # pre-push hook). That repository is shallow, and git 2.39 (the CI image) serving a filtered clone from a
+        # shallow repository grows pack-objects until the kernel kills it (CI job 17447748452, exit 137): Codex
+        # clones from a second, complete repository that holds the parentless release-codex commit alone
+        build = work / "build.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(build)], check=True)
+        subprocess.run(["git", "-C", str(build), "fetch", "-q", "--depth", "1", ROOT.as_uri(), "HEAD:refs/heads/src"],
+                       check=True)
+        cwd = os.getcwd()
+        os.chdir(build)
+        try:
+            commit = build_release_tree.commit("src", None, "harness: release-codex of HEAD", "codex")
+            subprocess.run(["git", "update-ref", "refs/heads/release-codex", commit], check=True)
+        finally:
+            os.chdir(cwd)
         repo = work / "repo.git"
         subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
         # Codex clones a Git source with a `path` as `--filter=blob:none --sparse`; a local repository serves that
         # only with the filter allowed (GitHub does), and without it the clone hangs (codex-cli 0.164.0)
         subprocess.run(["git", "-C", str(repo), "config", "uploadpack.allowFilter", "true"], check=True)
         subprocess.run(["git", "-C", str(repo), "config", "uploadpack.allowAnySHA1InWant", "true"], check=True)
-        subprocess.run(["git", "-C", str(repo), "fetch", "-q", "--depth", "1", ROOT.as_uri(), "HEAD:refs/heads/src"],
-                       check=True)
-        cwd = os.getcwd()
-        os.chdir(repo)
-        try:
-            commit = build_release_tree.commit("src", None, "harness: release-codex of HEAD", "codex")
-            subprocess.run(["git", "update-ref", "refs/heads/release-codex", commit], check=True)
-        finally:
-            os.chdir(cwd)
+        subprocess.run(["git", "-C", str(repo), "fetch", "-q", str(build),
+                        "refs/heads/release-codex:refs/heads/release-codex"], check=True)
+        if subprocess.run(["git", "-C", str(repo), "rev-parse", "--is-shallow-repository"], capture_output=True,
+                          text=True, check=True).stdout.strip() != "false":
+            raise SystemExit("the repository Codex clones from is shallow")
         mkt = work / "marketplace" / ".agents" / "plugins"
         mkt.mkdir(parents=True)
         (mkt / "marketplace.json").write_text(json.dumps({
