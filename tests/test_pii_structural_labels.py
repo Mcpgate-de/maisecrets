@@ -94,5 +94,24 @@ class RoleKeyTests(Base):
                 self.assertNotIn("name-after-label", {m.kind for m in scan(text)})
 
 
+class CompoundNameKeyTests(Base):
+    def test_a_name_after_a_key_of_a_role_and_name_is_masked(self):
+        for key in ("account_holder_name", "investorName", "cardHolderName", "card-holder-name", "beneficiary_name",
+                    "primary_investor_name", "policyholderFullName", "full__name"):
+            for text in (key + ": " + NAME + "\n", '{"' + key + '": "' + NAME + '"}'):
+                with self.subTest(text=text):
+                    self.assertMasked(text, NAME)
+
+    def test_the_name_of_an_account_a_company_a_fund_or_a_program_stays_text(self):
+        for key in ("account_name", "company_name", "issuer_name", "fund_name", "agent_name", "accountName",
+                    "instrument_name"):
+            with self.subTest(key=key):
+                self.assertNotIn("name-after-label", {m.kind for m in scan(key + ": " + NAME + "\n")})
+        # a role key before words or a team stays text
+        for text in ("owner_name: Platform Team\n", '{"investorName": "Global Equity Fund"}'):
+            with self.subTest(text=text):
+                self.assertNoName(text)
+
+
 if __name__ == "__main__":
     unittest.main()

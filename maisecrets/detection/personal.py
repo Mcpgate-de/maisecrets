@@ -328,6 +328,17 @@ _ROLE_KEYS = (r"payer|payee|policyholder|policy[ _-]?holder|borrower|insured|phy
               r"|shipper|buyer|seller|sender|guarantor")
 _ROLE_KEY_NAME_RE = re.compile(r"(?i:(?<![\w.-])(?:" + _ROLE_KEYS + r"))[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}"
                                + _NAME_VALUE + r"(?![\w'’])")
+# a key of words joined by _ - or camel case before a name; the key is judged after folding (_COMPOUND_PERSON_KEY_RE)
+_COMPOUND_NAME_KEY_RE = re.compile(r"(?<![\w.-])[\"']?([A-Za-z][A-Za-z0-9]{0,30}(?:[_-]{1,3}[A-Za-z0-9]{1,30}){0,4})"
+                                   r"[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}" + _NAME_VALUE + r"(?![\w'’])")
+# a person's role, then name (account_holder_name, investorName, card_holder_name), or a full name (full__name). Not
+# account, company, fund or issuer: their name is no person's; not user (a login) or agent (a program)
+_COMPOUND_PERSON_KEY_RE = re.compile(
+    r"(?:[a-z0-9]+_){0,3}(?:account_holder|card_holder|cardholder|holder|investor|contact|client|customer|cust"
+    r"|recipient|sender|trader|beneficiary|payer|payee|applicant|patient|employee|owner|policyholder|policy_holder"
+    r"|insured|borrower|member|student|passenger|tenant|guarantor|signer|consignee|shipper|buyer|seller|person"
+    r"|representative|rep|manager|advisor|adviser|physician|doctor|witness)_(?:full_)?name"
+    r"|full_name")
 # the end of a word that makes it a noun, not a name: Streaming, Expedition, Management, Wörterbuch, Verwaltung
 _NOUN_END_RE = re.compile(r"(?i)(?:ing|tion|sion|ment|ness|ity|ism|ogy|ware|ance|ence|able|ible|buch|ung|heit|keit"
                           r"|schaft|isch|tät|ive|ics|ers|ies)$")
@@ -2230,6 +2241,16 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             plain = re.sub(r"-[^\s]*", "", v)
             if _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True)):
                 out.append((m.start(1), m.start(1) + len(v), "name-after-label", NAME))
+    if "name-after-label" in want and "name" in low and (":" in text or "=" in text):
+        # account_holder_name: …, "investorName": "…": a key whose last words name a person in a role and a name
+        for m in _COMPOUND_NAME_KEY_RE.finditer(text):
+            key = re.sub(r"[_\s.-]+", "_", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", m.group(1)).lower()).strip("_")
+            if not _COMPOUND_PERSON_KEY_RE.fullmatch(key):
+                continue
+            v = m.group(2).rstrip("'’")
+            plain = re.sub(r"-[^\s]*", "", v)
+            if _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True)):
+                out.append((m.start(2), m.start(2) + len(v), "name-after-label", NAME))
     if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
                                                                          "ms", "mx", "miss", "dear", "hi ", "hello",
                                                                          "hey ")):
