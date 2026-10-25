@@ -319,6 +319,11 @@ can ship the hooks as managed hooks (`requirements.toml`, MDM), which are
 trusted by policy and cannot be disabled. The plain ChatGPT chat, web and
 mobile have no local runtime and no hooks.
 
+**Codex gets a monthly version.** Codex asks you to trust the hooks again for
+each version, so Codex will install from the GitHub branch `release-codex`,
+which moves once a month and at once for a security fix; Claude Code gets
+every release.
+
 For development:
 
 ```bash
