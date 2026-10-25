@@ -2809,6 +2809,10 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     and not _label_value_ok(secret)):
                 continue   # {\"passwordLastChanged\":\"2024-10-01T12:00:00Z\"}: the new escaped path, no password
             if rule.quote_group and not m.group(rule.quote_group):
+                if secret and _is_cjk(secret[0]) and sum(map(_is_cjk, secret)) >= 2:
+                    # 密码：至少8位（含1个大写字母）: a sentence in Chinese or Japanese after the label is a rule for
+                    # the password, no value (a value of CJK letters alone is no password a person types)
+                    continue
                 if _has_cjk(secret) and not _is_cjk(secret[0]):
                     # 密码：<value>，请保密: Chinese and Japanese put no space after the value, so its end is the
                     # first CJK letter or fullwidth sign. A value that starts with one is cut by no rule here

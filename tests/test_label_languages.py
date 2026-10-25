@@ -252,6 +252,19 @@ class LabelSubsetTests(unittest.TestCase):
         self.assertIsNone(rule.regex._full._any)
 
 
+class CjkSentenceAfterALabelTests(unittest.TestCase):
+    """A sentence in Chinese or Japanese after a password label is a rule for the password, not a value: with every
+    label file on by default, the hint of a sign-up form (密码：至少8位…) reached every person's detector."""
+
+    def test_a_sentence_after_the_label_gives_no_hit_and_a_value_is_still_one(self):
+        value = dm._value(random.Random("cjk-sentence"), "mixed")
+        for text in ("密码：至少8位（含1个大写字母）", "パスワード：８文字以上で入力してください",
+                     "密码: 请联系管理员获取"):
+            with self.subTest(text[:4]):
+                self.assertEqual(_scan(("en", "zh", "ja"), [text]), [[]])
+        self.assertEqual(_scan(("en", "zh", "ja"), [f"密码：{value}"]), [[("SECRET", value)]])
+
+
 class SentenceFormsWithoutSpacesTests(unittest.TestCase):
     """Chinese and Japanese write no space between words and use the fullwidth colon; Russian writes a dash or
     это where other languages have a copula. Each form gives exactly its value, with the language on."""
