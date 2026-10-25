@@ -8,6 +8,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session-start",
             "timeout": 30,
+            "statusMessage": "maisecrets starts",
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" session-start"
           }
         ]
@@ -20,6 +21,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" user-prompt",
             "timeout": 10,
+            "statusMessage": "maisecrets checks the prompt",
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" user-prompt"
           }
         ]
@@ -33,6 +35,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pre-tool",
             "timeout": 10,
+            "statusMessage": "maisecrets checks the tool call",
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" pre-tool"
           }
         ]
@@ -44,6 +47,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pre-tool",
             "timeout": 10,
+            "statusMessage": "maisecrets checks the tool call",
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" pre-tool"
           }
         ]
@@ -56,6 +60,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool",
             "timeout": 20,
+            "statusMessage": "maisecrets masks values in the result",
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" post-tool"
           }
         ]
@@ -68,6 +73,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool-failure",
             "timeout": 20,
+            "statusMessage": "maisecrets checks the failed call",
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" post-tool-failure"
           }
         ]
