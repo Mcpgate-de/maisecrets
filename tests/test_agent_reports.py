@@ -222,6 +222,16 @@ class AgentReportTests(unittest.TestCase):
         out = hooks.user_prompt({"prompt": text, "session_id": "s1", "transcript_path": str(s.transcript), **CLAUDE})
         self.assertEqual(out, {})
 
+    def test_a_stored_value_written_as_an_entity_in_a_result_is_blocked(self):
+        # the report path had the same decode (codex review, 2026-10-26)
+        stored = "CounterClockwiseContourIntegral"
+        Vault().put(stored, "SECRET", "manual", session="s1")
+        hooks._live_cache.clear()
+        s = Session(self.dir / "ent", "\u2233")
+        text = s.notification("\u2233").replace("<result>\u2233</result>", f"<result>&{stored};</result>")
+        out = hooks.user_prompt({"prompt": text, "session_id": "s1", "transcript_path": str(s.transcript), **CLAUDE})
+        self.assertEqual(out.get("decision"), "block", out)
+
     def test_a_missing_transcript_is_blocked(self):
         self.assertBlocked(self.prompt(self.s.notification(self.answer), transcript_path=""))
 
@@ -313,6 +323,25 @@ class CommandNoticeTests(unittest.TestCase):
         for text in (self.command + f" {other}", self.command.replace(VALUE, other), f"echo {VALUE}"):
             with self.subTest(text=text[-12:]):
                 self.assertBlocked(self.prompt(self.notice(text)))
+
+    def test_a_stored_value_written_as_an_entity_is_blocked(self):
+        # html.unescape takes any entity name: the description is one sign, the notice names the stored value
+        # (codex review, 2026-10-26)
+        stored = "CounterClockwiseContourIntegral"
+        Vault().put(stored, "SECRET", "manual", session="s1")
+        with open(self.agent.transcript, "a", encoding="utf-8") as f:
+            f.write(_line({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "toolu_01Sign", "name": "Bash",
+                 "input": {"command": "true", "description": "\u2233"}}]}}))
+        hooks._live_cache.clear()
+        text = self.notice("x", tool_use="toolu_01Sign").replace('"x"', f'"&{stored};"')
+        self.assertBlocked(self.prompt(text))
+
+    def test_a_status_that_does_not_match_the_summary_is_blocked(self):
+        for end, status in (("completed (exit code 0)", "failed"), ("failed with exit code 1", "completed")):
+            with self.subTest(status=status):
+                self.fresh()
+                self.assertBlocked(self.prompt(self.notice(self.command, end=end, status=status)))
 
     def test_a_stored_value_added_to_the_summary_is_blocked(self):
         stored = "CedarMeadow" + "Blue77"

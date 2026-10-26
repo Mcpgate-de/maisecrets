@@ -26,8 +26,8 @@ _AGENT_TOOLS = ("Agent", "Task", "SendMessage")
 _COMMAND_TOOLS = ("Bash",)
 # the summary of a background command (Claude Code transcripts, 2026-10): `Background command "<description or
 # command>" completed (exit code 0)`, also with `: No matches found` after the code, or `failed with exit code 1`
-_COMMAND_END_RE = re.compile(r'" (?:completed \(exit code \d{1,3}(?:: [^()<"]{0,80})?\)'
-                             r'|failed with exit code \d{1,3})\Z')
+_COMMAND_END_RE = re.compile(r'" (?:(?P<completed>completed) \(exit code \d{1,3}(?:: [^()<"]{0,80})?\)'
+                             r'|(?P<failed>failed) with exit code \d{1,3})\Z')
 _COMMAND_START = 'Background command "'
 
 
@@ -48,6 +48,14 @@ def _result_span(body: str) -> tuple[int, int] | None:
 
 def _plain(text: str) -> str:
     return text.replace("\r\n", "\n").strip()
+
+
+def _same_text(raw: str, said: str) -> bool:
+    """Whether a notice carries `said` as the client writes it: the text itself or its escaped form. Decoding the
+    notice would take any entity (`&CounterClockwiseContourIntegral;` is one sign), and a stored value written as
+    an entity name left the check with the span (codex review, 2026-10-26)."""
+    said = _plain(said)
+    return bool(said) and _plain(raw) in (said, html.escape(said, quote=False), html.escape(said))
 
 
 def _last_answer(path: str) -> str | None:
@@ -125,7 +133,7 @@ def _one_report_proves_itself(body: str, transcript: str) -> bool:
         if not os.path.isfile(real):
             return False
     answer = _last_answer(real)
-    if answer is None or _plain(answer) != _plain(html.unescape(body[span[0]:span[1]])):
+    if answer is None or not _same_text(body[span[0]:span[1]], answer):
         return False
     return _called_an_agent(transcript, tool_use_id)
 
@@ -148,15 +156,15 @@ def _command_span(body: str, transcript: str) -> tuple[int, int] | None:
         return None
     a += len("<summary>")
     end = _COMMAND_END_RE.search(body, a, b)
-    if not body.startswith(_COMMAND_START, a) or end is None:
+    # the status and the summary name the same outcome
+    if not body.startswith(_COMMAND_START, a) or end is None or not end.group(_notification_tag(body, "status")):
         return None
     span = (a + len(_COMMAND_START), end.start())
     call = _tool_input(transcript, tool_use_id, _COMMAND_TOOLS)
     if call is None:
         return None
-    text = _plain(html.unescape(body[span[0]:span[1]]))
-    said = [_plain(str(call.get(k) or "")) for k in ("description", "command")]
-    return span if text and text in said else None
+    said = (str(call.get(k) or "") for k in ("description", "command"))
+    return span if any(_same_text(body[span[0]:span[1]], t) for t in said) else None
 
 
 def _report_rest(payload: dict, prompt: str) -> str | None:
