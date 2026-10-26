@@ -188,6 +188,16 @@ class IdContextWordTests(Base):
         hits = scan("Permiso de conducir en trámite.\nNúmero de teléfono: " + phone)
         self.assertEqual([("phone", phone)], [(m.kind, m.value) for m in hits])
 
+    def test_a_passport_number_after_an_edifact_separator_is_masked(self):
+        # the + after a letter separates segments: the number after it is no phone number's digits
+        passport = "4" + "87512963"
+        self.assertMasked("DOC+P+" + passport + ":110:111+passport'", passport)
+
+    def test_a_phone_number_after_its_word_takes_a_licence_hit_in_its_digits(self):
+        phone = "312 " + "8462291"
+        hits = scan("Phone: " + phone + ", driver license on file")
+        self.assertEqual([("PHONE", phone)], [(m.type, m.value) for m in hits])
+
 
 if __name__ == "__main__":
     unittest.main()
