@@ -144,4 +144,5 @@ are not published: the numbers of record come from the release baseline (`script
 | 2026-10-25 | noseyparker 0.24.0  | ghissues | 25401 | 0.3111 | 0.5905 | 867 |
 | 2026-10-25 | preserve 0.6.1 01dbd7710de79e21bef851aaa8b6cbfb4b1188ad | nym | 1239 | 0.4615 | 0.4904 | 2329 |
 | 2026-10-25 | preserve 0.6.1 01dbd7710de79e21bef851aaa8b6cbfb4b1188ad | dialogpii | 124 | 0.5658 | 0.1072 | 7759 |
-| 2026-10-26 | maisecrets 0.8.2 a52ea5a814dcd140498d0e5c1cacda33d8615935 (gate stopped: CPU time) | holdout-v2 | 872 | 0.6473 | 0.9957 | 3 |
+| 2026-10-26 | maisecrets 0.8.2 a52ea5a814dcd140498d0e5c1cacda33d8615935 (gate stopped: CPU time, two spans worse) | holdout-v2 | 872 | 0.6473 | 0.9957 | 3 |
+| 2026-10-26 | maisecrets 0.8.2 357bbe2429be50fefd8033b1dac4b9432527de40 (gate stopped: two spans worse) | holdout-v2 | 872 | 0.6473 | 0.9957 | 3 |
