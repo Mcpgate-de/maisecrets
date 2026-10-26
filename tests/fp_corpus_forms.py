@@ -374,6 +374,13 @@ FORMS_HIT = [
     ("username short with digits", "username: " + "js" + "42", ["js" + "42"]),
     ("username with a team suffix", '{"username": "' + "jd" + "oe-gl" + '"}', ["jd" + "oe-gl"]),
     ("username with a bot-like start", "username: " + "bo" + "tond.jd", ["bo" + "tond.jd"]),
+    # a person's handle can start with a service word or end in one after a long name
+    ("username service word first", '{"username": "' + "service-" + "jd" + "oe42" + '"}', ["service-" + "jd" + "oe42"]),
+    ("username svc first", "username: " + "svc-" + "js" + "42", ["svc-" + "js" + "42"]),
+    ("username bot first", "username: " + "bot-" + "an" + "na99", ["bot-" + "an" + "na99"]),
+    ("username long name worker", "username: " + "al" + "exandra-marie-smith-worker", ["al" + "exandra-marie-smith-worker"]),
+    ("username long name agent", '{"username": "' + "al" + "exandra-garcia-travel-agent" + '"}',
+     ["al" + "exandra-garcia-travel-agent"]),
     ("us bank account number", "Checking account number: " + "4839" + "2017563", ["4839" + "2017563"]),
     ("compact birth date after its label", "Customer: Canada\n  Date of Birth: " + "1984" + "0312", ["1984" + "0312"]),
     ("password after use the", "Please use the password " + "Quill" + "ary@4821" + " to log in.", ["Quill" + "ary@4821"]),
