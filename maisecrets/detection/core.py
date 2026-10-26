@@ -766,7 +766,8 @@ def _card_shaped(text: str, start: int, secret: str) -> bool:
 
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
-# the digits of a phone number after its +: a licence or passport pattern took them from the phone rule
+# the digits of a phone number after its +: a licence or passport pattern took them from the phone rule. A + right
+# after a letter or a digit is a separator (EDIFACT segments), and a number after it stays a document number
 PRESIDIO_NOT_AFTER_PLUS = {"us-license", "us-passport"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
 # checksum are also FIX tags and XML identifiers; a real VAT ID stands next to USt-IdNr or VAT. The spaced form
@@ -929,7 +930,8 @@ def _presidio_regex(rec_id: str, regex: str) -> str:
         # keeps the rule's Luhn check and its card word: alone in a tool result the issuer check takes 16 digits only
         return "(?:" + regex.replace(_CARD_FIRST_UPSTREAM, first) + r")|\b4\d{18}\b"
     if rec_id in PRESIDIO_NOT_AFTER_PLUS:
-        return r"(?<!\+)(?:" + regex + ")"
+        # a + after a letter or a digit is a field separator (EDIFACT: NAD+XX+<number>), not a phone number's
+        return r"(?:(?<!\+)|(?<=[A-Za-z0-9]\+))(?:" + regex + ")"
     return regex
 
 
@@ -3083,17 +3085,22 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
             continue   # a form that only completes a hit another rule made: alone it would mask company addresses
         if overlaps(start, end):
             # an address takes the postcode that a region rule found inside it (de-plz): the whole address is the
-            # value. A phone number wrapped over two lines takes the first line that the phone rule found. Any other
-            # hit keeps its span
+            # value. A phone number wrapped over two lines takes the first line that the phone rule found. A phone
+            # number after a phone word takes a US licence or passport number that a document rule found in its
+            # digits (`phone: 555 1234567` near a licence word lost all but its last seven digits, release gate of
+            # 0.8.2). Any other hit keeps its span
             lo, hi = bisect.bisect_left(taken_starts, start), bisect.bisect_left(taken_starts, end)
-            if (typ != personal.ADDRESS and kind != "phone-wrapped-line") or hi == lo or hi - lo > 32 or (
-                    lo > 0 and taken_ends[lo - 1] > start):
+            if (typ != personal.ADDRESS and kind not in ("phone-wrapped-line", "phone-after-phone-word")) \
+                    or hi == lo or hi - lo > 32 or (lo > 0 and taken_ends[lo - 1] > start):
                 continue
             if by_start is None:   # once per scan: a list scan per overlap was quadratic in the hits (review)
                 by_start = {f.start: f for f in found}
             inside = [by_start[x] for x in taken_starts[lo:hi] if x in by_start]
             inside = [f for f in inside if f.end <= end and f.type not in SECRET_TYPES]
-            wider = typ == personal.ADDRESS or all(f.type == typ for f in inside)
+            if kind == "phone-after-phone-word":
+                wider = all(f.type in PHONE_TAKES_DOCUMENT for f in inside)
+            else:
+                wider = typ == personal.ADDRESS or all(f.type == typ for f in inside)
             if not wider or not inside or hi - lo != len(inside):
                 continue
             gone.update(id(f) for f in inside)   # removed from `found` once, after the loop
@@ -3122,6 +3129,8 @@ _VAT_GAP_RE = _LazyRx(r"(?i)" + _SEP + r"(?:(?:deutschland|germany)" + _SEP + r"
 _COMPANY_REACH = 800
 _CUSTOMER_VALUE_RE = _LazyRx(r"(?i)(?<![\w-])(?:kunde|customer)[\"']?[ \t]{0,3}[:=][ \t\"']{0,3}$")
 COMPANY_NUMBER_TYPES = frozenset({"DE_PLZ", "DE_VAT_ID"})
+# the document numbers whose pattern is a plain digit run: a phone number after a phone word takes such a hit inside it
+PHONE_TAKES_DOCUMENT = frozenset({"US_DRIVER_LICENSE", "US_PASSPORT"})
 
 
 def _free_company_numbers(text: str, found: list, taken_starts: list, taken_ends: list, company: list,
