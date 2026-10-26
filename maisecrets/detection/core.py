@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import bisect
 import contextvars
+import functools
 import itertools
 import hashlib
 import json
@@ -2013,6 +2014,24 @@ def code_words() -> frozenset:
 
 
 # the index of a text (_text_index, _newlines, _line_start, _line_end, _positions) is in text_index.py
+def _keyword_lines(text: str, low: list, keywords: tuple) -> list:
+    """Per line of `text`, whether its lower-case form holds one of `keywords`. Computed once per text and keyword
+    tuple: the seven keyword rules share one tuple, and with the label words of 19 languages the test of each word in
+    each line by each rule cost a fifth of a 1 MB scan (release gate of 0.8.2)."""
+    cache = _text_index(text)
+    key = ("keyword lines", keywords)
+    got = cache.get(key)
+    if got is None:
+        rx = _keyword_finder(keywords)
+        got = cache[key] = [rx.search(line) is not None for line in low]
+    return got
+
+
+@functools.lru_cache(maxsize=32)
+def _keyword_finder(keywords: tuple):
+    return re.compile("|".join(re.escape(k) for k in sorted(keywords, key=len, reverse=True)))
+
+
 def _split_lines(text: str) -> tuple:
     """The lines of `text` and of its lower-case form, split once per text: the seven keyword rules each split a
     megabyte again (review of 3e5d53e, 2026-09-30)."""
@@ -2158,11 +2177,11 @@ def _matches(rule: Rule, text: str, channel: str = "prompt"):
         return
     pos = 0
     lines, low = _split_lines(text)
-    low = low if rule.keywords else None
+    has = _keyword_lines(text, low, rule.keywords) if rule.keywords and len(low) == len(lines) else None
     for i, line in enumerate(lines):
         # the regex needs one of the rule's keywords in this line (every denylist word contains
         # one); skipping the other lines cut a history scan from 71 s to a fraction (2026-09-27)
-        if low is not None and len(low) == len(lines) and not any(k in low[i] for k in rule.keywords):
+        if has is not None and not has[i]:
             pos += len(line) + 1
             continue
         for m in rule.regex.finditer(line):
