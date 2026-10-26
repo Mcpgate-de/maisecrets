@@ -69,7 +69,7 @@ MEANING = {
     "tips": "A short tip at session start, and a hint when a setting first matters.",
     "shortcut": "The first session start names /maisecrets:shortcut once.",
     "guard": "A synced install registers the guard outside its folder.",
-    "pass_agent_reports": "A subagent's report is not blocked.",
+    "pass_agent_reports": "A subagent's report or a background command's notice is not blocked.",
     "gateway_servers": "MCP servers that resolve placeholders themselves.",
     "client_header": "A key header on your own MCP server once it sends a masked value and supports it, so it "
                      "can give its masked values back into your files and commands, never to the AI.",
