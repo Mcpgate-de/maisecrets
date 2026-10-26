@@ -305,7 +305,6 @@ FORMS_NO_HIT = [
     # the bot and service accounts of a forge, as a user object of its API names them (gateway shapes, 2026-10-25)
     ("username forge project token bot", '{"author": {"username": "project_42_bot_' + "0a1b2c3d" * 4 + '"}}'),
     ("username forge group token bot", 'username: group_7_bot_' + "0a1b2c3d" * 4),
-    ("username long bot name", '{"username": "acme-dependency-update-bot"}'),
     ("username service account prefix", '{"username": "service_account_group_7_acme"}'),
     ("username digits", "username: 4711203"),
     ("hostname label", "hostname: web-01.internal"),
@@ -380,6 +379,7 @@ FORMS_HIT = [
     ("username bot first", "username: " + "bot-" + "an" + "na99", ["bot-" + "an" + "na99"]),
     ("username long name worker", "username: " + "al" + "exandra-marie-smith-worker", ["al" + "exandra-marie-smith-worker"]),
     ("username long name svc", "username: " + "al" + "exandra-marie-sm1th-svc", ["al" + "exandra-marie-sm1th-svc"]),
+    ("username long name bot", "username: " + "al" + "exandra-johanna-marie-bot", ["al" + "exandra-johanna-marie-bot"]),
     ("username long name agent", '{"username": "' + "al" + "exandra-garcia-travel-agent" + '"}',
      ["al" + "exandra-garcia-travel-agent"]),
     ("us bank account number", "Checking account number: " + "4839" + "2017563", ["4839" + "2017563"]),

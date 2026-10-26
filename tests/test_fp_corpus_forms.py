@@ -77,6 +77,7 @@ OWNER = {
     "username bot first": "username-after-label",
     "username long name worker": "username-after-label", "username long name agent": "username-after-label",
     "username long name svc": "username-after-label",
+    "username long name bot": "username-after-label",
     "username with a path part": "username-after-label", "username with a realm": "username-after-label",
     "username with an umlaut": "username-after-label", "username short with digits": "username-after-label",
     "username after an unrelated example key": "username-after-label",
