@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+## [0.8.2] - 2026-10-26
+
+### Features
+
+- password labels in all 19 supported languages are read by default, whatever the system language (bff0988)
+
+### Fixes
+
+- a phone number after a phone word and a passport number after an EDIFACT + are masked whole again (9c4c9b0)
+- a long tool result is scanned about a tenth faster with all label languages on (cea661b)
+- a full name after a self-introduction in French, Spanish, Italian, Dutch, Swedish, Danish, Norwegian, Polish, Portuguese, Czech, Finnish, Romanian or German is masked (ec1241e)
+- a date of birth after its label in Dutch, Swedish, Danish, Norwegian, Finnish, Polish, Czech, Turkish, Russian, Ukrainian, Romanian, Greek, Arabic, Japanese, Chinese or Korean is masked (b9c7d84)
+- personal data in JSON inside a JSON string or in a Python dict print is masked by its field names (94c3105)
+- personal data in YAML, .env, INI, log key=value lines, SQL UPDATE and WHERE, and PHP print_r is masked by its field names (9b53c7d)
+- a password under a password column of a table or a SQL INSERT is masked, in every label language (1cf90f0)
+- a person's field name in Polish, Dutch, Swedish, Spanish, Italian, French or Portuguese, or as a short form, names its column (f49c8a1)
+- a Chinese or Japanese sentence after a password label, such as the hint of a sign-up form, is no password (c404a94)
+- the password labels of all languages cost no time on text without them (89d7f5e)
+- an ordinary word after a label in a tool result is no longer masked in every later tool result (c39a27a)
+- a medical record number that starts with its own label, such as MRN and digits in one token, is masked whole (52f255f)
+- two words after a bare Student: label that a sentence goes on from stay text (167360c)
+- a table or record with a first-name and a last-name column masks both names (d4a20c6)
+- the values of a SQL dump's INSERT without a column list are named by the CREATE TABLE above it (b1ec7ae)
+- an HTML table of fields and values, one <th> and one <td> per row, is read as one record (338ac17)
+- a name inside an XML element named by a person label, such as <card_holder> or <customerName>, is masked (f1adb45)
+- a name after a key that joins a role and name, such as account_holder_name or investorName, is masked (f988689)
+- a name after a key that names a person's role, such as payer, policyholder or recipient, is masked (c396c18)
+- a first or last name that is also a word is masked next to another name part of the record (ec4945d)
+- a driving licence or passport number after driverLicense, passportNumber, Führerschein or Pasaporte is masked (a561945)
+- a Dutch, Swedish, French, Spanish or Italian street after an address label is masked (59bf002)
+- a US address right after a "home address" or "residential address" label is masked, also next to a company name (7a9fee9)
+- a street line after "located at", "situated at" or "property at" is masked (f5a434b)
+- a user name in an apposition is masked (the user name, value, or the user name (value)) (742a2b3)
+- a US phone number in the (ddd) ddd-dddd form after "reached at" or "me at" is masked (c6b6cc6)
+- an account name after a user id label is masked, and a number, UUID or code stays text (443f529)
+- a birth date after "Date of birth," or a bold "**DOB:**" label is masked (fbcb91f)
+- a birth date, phone number or ID in a two-column Markdown table without a header row is masked (96b3104)
+
 ## [0.8.1] - 2026-10-25
 
 ### Features
