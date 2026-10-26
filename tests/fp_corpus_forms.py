@@ -379,6 +379,7 @@ FORMS_HIT = [
     ("username svc first", "username: " + "svc-" + "js" + "42", ["svc-" + "js" + "42"]),
     ("username bot first", "username: " + "bot-" + "an" + "na99", ["bot-" + "an" + "na99"]),
     ("username long name worker", "username: " + "al" + "exandra-marie-smith-worker", ["al" + "exandra-marie-smith-worker"]),
+    ("username long name svc", "username: " + "al" + "exandra-marie-sm1th-svc", ["al" + "exandra-marie-sm1th-svc"]),
     ("username long name agent", '{"username": "' + "al" + "exandra-garcia-travel-agent" + '"}',
      ["al" + "exandra-garcia-travel-agent"]),
     ("us bank account number", "Checking account number: " + "4839" + "2017563", ["4839" + "2017563"]),

@@ -1545,13 +1545,14 @@ _USERNAME_NOT_A_NAME_END = ("_actor", "_account", "_owner", "_value", "_name", "
 _USERNAME_ATTRIBUTE_END = frozenset({"name", "user", "username", "login", "principal", "id", "email", "value",
                                      "current", "subject", "sub", "identity", "account", "owner"})
 # a service account by its form only (the short-name rule of a home path, `ab12`, is no help here: js42 is a person).
-# Only `bot` and `svc` after a separator end a name of any length (deps-update-bot): a person's handle can end in
-# -worker or -agent. A service word starts a name only in a forge's own forms (service_account_…, the token bots
-# project_<id>_bot_<hex> and group_<id>_bot_<hex>): svc-jsmith and bot-anna99 can be people.
+# The service forms: a short name that ends in a service word (up to 20 characters before it, as before); `bot` after
+# a separator at any length (deps-update-bot), but not -worker or -agent, which a person's long handle can end in; and
+# a forge's own forms (service_account_<id>, the token bots project_<id>_bot_<hex> and group_<id>_bot_<hex>).
+# A service word at the start is no service form by itself: svc-jsmith and bot-anna99 can be people.
 _USERNAME_SERVICE_RE = re.compile(r"(?i)^(?:.{0,12}[-_]?user\d*|user[-_]?\d+|.{0,20}(?:bot|svc|service|admin|runner|"
                                   r"agent|daemon|worker|deploy|build)(?:[-_]?\d+)?|.*\[bot\]"
-                                  r"|.*[-_](?:bot|svc)(?:[-_]?\d+)?"
-                                  r"|service_account_.*|(?:project|group)_\d+_bot_[0-9a-f]{8,})$")
+                                  r"|.*[-_]bot(?:[-_]?\d+)?"
+                                  r"|service_account_[a-z0-9_]+|(?:project|group)_\d+_bot_[0-9a-f]{8,})$")
 _USERNAME_NOT_A_VALUE = frozenset({"string", "null", "none", "true", "false", "required", "optional", "undefined",
                                    "unknown", "changeme", "placeholder", "value", "empty", "text", "varchar",
                                    "your_username", "yourusername", "my_username", "myusername", "username_here",
