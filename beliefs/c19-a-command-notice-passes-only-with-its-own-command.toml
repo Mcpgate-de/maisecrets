@@ -6,5 +6,5 @@ runner = ["tests/test_agent_reports.py::CommandNoticeTests::test_a_summary_that_
 
 [proof]
 file = "maisecrets/agent_reports.py"
-find = "    return span if text and text in said else None\n"
+find = "    return span if any(_same_text(body[span[0]:span[1]], t) for t in said) else None\n"
 replace = "    return span\n"

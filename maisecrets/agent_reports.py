@@ -26,8 +26,8 @@ _AGENT_TOOLS = ("Agent", "Task", "SendMessage")
 _COMMAND_TOOLS = ("Bash",)
 # the summary of a background command (Claude Code transcripts, 2026-10): `Background command "<description or
 # command>" completed (exit code 0)`, also with `: No matches found` after the code, or `failed with exit code 1`
-_COMMAND_END_RE = re.compile(r'" (?:(?P<completed>completed) \(exit code \d{1,3}(?:: [^()<"]{0,80})?\)'
-                             r'|(?P<failed>failed) with exit code \d{1,3})\Z')
+_COMMAND_END_RE = _LazyRx(r'" (?:(?P<completed>completed) \(exit code \d{1,3}(?:: [^()<"]{0,80})?\)'
+                         r'|(?P<failed>failed) with exit code \d{1,3})\Z')
 _COMMAND_START = 'Background command "'
 
 
