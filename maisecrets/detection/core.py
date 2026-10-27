@@ -89,7 +89,7 @@ from .value_checks import (  # noqa: F401
     _pw_words_of, _COMMON_PAIRS, _common_pairs, reads_as_word, english_words, _Literal, LITERAL_RULES, _LITERAL_IDS,
     _env_key_ok, _laravel_key_ok, _config_key_value_ok, _random_hex, _RESERVED_MAIL_DOMAINS, _RESERVED_MAIL_TLDS,
     _reserved_domain, _SERVICE_MAILBOXES, _SYSTEM_USERS, PLACEHOLDER_VALUES, PLACEHOLDER_PARTS, _TEMPLATE_NAME,
-    _PARTS, _PLACEHOLDER_PART_RE, looks_like_placeholder,
+    _PARTS, _PLACEHOLDER_PART_RE, looks_like_placeholder, _ssh_algorithm_name,
 )
 from .encoded_mail import (  # noqa: F401
     _ENCODED_MAIL_CONTEXT_RE, _ENCODED_MAIL_TO_RE, _encoded_mail_expected, _MAIL_COLUMN_RE, _OWNER_WORDS,
@@ -507,7 +507,8 @@ VALIDATORS = {
     "public_ip": _public_ip,
     "not_placeholder": lambda v: v.lower() not in {"placeholder", "changeme", "redacted", "example"}
     and not v.startswith("<"),
-    "person_email": lambda v: v.split("@", 1)[0].lower() not in _SYSTEM_USERS and not _reserved_domain(v),
+    "person_email": lambda v: (v.split("@", 1)[0].lower() not in _SYSTEM_USERS and not _reserved_domain(v)
+                               and not _ssh_algorithm_name(v)),
     # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
     "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
     "us_ssn": _us_ssn_ok,

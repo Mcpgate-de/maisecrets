@@ -347,6 +347,18 @@ class ValidatorTests(unittest.TestCase):
         for system in ("git@github.com", "noreply@acme.de", "Root@host.de", "mailer-daemon@x.org"):
             self.assertFalse(pe(system), system)
 
+    def test_an_ssh_algorithm_name_is_no_person_email(self):
+        # ssh -Q kex, sshd_config and ssh -vvv print name@domain (RFC 4251): the agent could not see which
+        # algorithms a server offers (field report, 2026-10-27)
+        pe = detect.VALIDATORS["person_email"]
+        for name in ("sntrup761x25519-sha512@openssh.com", "curve25519-sha256@libssh.org",
+                     "chacha20-poly1305@openssh.com", "umac-128-etm@openssh.com", "zlib@openssh.com",
+                     "aes256-ctr@lysator.liu.se"):
+            self.assertFalse(pe(name), name)
+        # a person on such a domain has a short name with no dash and no digit; another domain stays an address
+        for person in ("maintainer@openssh.com", "dev@libssh.org", "curve25519-sha256@acme.de"):
+            self.assertTrue(pe(person), person)
+
     def test_a_validator_that_cannot_parse_its_value_rejects_the_hit(self):
         def boom(_v):
             raise ValueError("unparseable")
