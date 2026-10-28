@@ -1002,6 +1002,45 @@ class FalsePositiveCorpusTests(unittest.TestCase):
         self.assertTrue(all("found and kept from the AI" in n for n in notices), notices[:1])
         self._check(notices)
 
+    def test_a_test_result_after_pass_is_no_password(self):
+        # go test -v, pytest and a summary in a merge request: the bare word pass before a test name is a result
+        # (gateway shadow, 2026-10-28). Each line was a password hit before
+        for text in ("--- PASS: TestDownloadArtifactsParallel", "- PASS: TestUpload/large_file",
+                     "PASS: TestShadowCount", "pass: BenchmarkScan", "PASS: test_login_redirects",
+                     "PASS: tests/test_api.py::test_get_user", "--- PASS: FuzzParse/seed#3"):
+            with self.subTest(text=text):
+                self.assertEqual([m.kind for m in scan(text, channel="tool")], [])
+        # a password after the same label, and a test name after a password label, stay values
+        pw = _mixed(14, 41)
+        for text, value in ((f"PASS: {pw}", pw), ("pass§word: TestUpload9Xk", "TestUpload9Xk")):
+            with self.subTest(text=text):
+                self.assertEqual([m.value for m in scan(text, channel="tool")], [value])
+
+    def test_a_word_after_an_auth_scheme_is_no_token(self):
+        # a heading such as Basic Responsibilities is no credential; a token after the scheme stays one
+        for text in ("Basic Responsibilities", "## Basic Configuration", "Bearer Authentication"):
+            with self.subTest(text=text):
+                self.assertEqual([m.kind for m in scan(text, channel="tool")], [])
+        token = rnd(24) + "9"
+        self.assertEqual([m.value for m in scan(f"Authorization: Bearer {token}")], [token])
+
+    def test_a_calendar_or_message_id_is_no_person_email(self):
+        # calendar_list_events: rooms, shared calendars and the iCalUID of an event; the Message-ID of a Gmail
+        # message. One finding per room, event and message, none of them a person (gateway shadow, 2026-10-28)
+        pe = detect.VALIDATORS["person_email"]
+        uid = rnd(26, "0123456789abcdefghijklmnopqrstuv")
+        at = "@"
+        for addr in ("c_188a2b3c4d5e6f" + at + "resource.calendar.google.com",
+                     rnd(26, "0123456789abcdef") + at + "group.calendar.google.com",
+                     uid + at + "google.com", uid + "_20261028T090000Z" + at + "google.com",
+                     "CAF" + rnd(30) + at + "mail.gmail.com"):
+            with self.subTest(addr=addr):
+                self.assertFalse(pe(addr))
+        # a person at google.com and at gmail.com stays an address
+        for addr in ("jane.roe" + at + "google.com", "jane.roe" + at + "gmail.com", "jroe" + at + "google.com"):
+            with self.subTest(addr=addr):
+                self.assertTrue(pe(addr))
+
 
 if __name__ == "__main__":
     unittest.main()
