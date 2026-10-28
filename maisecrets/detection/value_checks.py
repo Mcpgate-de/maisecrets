@@ -1125,6 +1125,21 @@ def _ssh_algorithm_name(v: str) -> bool:
     return "-" in local or any(c.isdigit() for c in local) or local in _SSH_BARE_NAMES
 
 
+# Ids in the form of an address that name no person: a room or a shared calendar in a Google Calendar event
+# (c_<id>@resource.calendar.google.com, <id>@group.calendar.google.com), the iCalUID of an event (<event id>@google.com,
+# the id in base32hex) and the Message-ID of a Gmail message (<id>@mail.gmail.com). calendar_list_events gave one
+# finding per room, event and message (gateway shadow, 2026-10-28)
+_ID_MAIL_DOMAINS = frozenset({"resource.calendar.google.com", "group.calendar.google.com",
+                              "group.v.calendar.google.com", "import.calendar.google.com", "mail.gmail.com"})
+_ICAL_UID_RE = _LazyRx(r"[0-9a-v]{20,1024}(?:_\d{8}(?:t\d{6}z)?)?")
+
+
+def _mail_shaped_id(v: str) -> bool:
+    """A calendar resource, a shared calendar, an event's iCalUID or a Gmail Message-ID: an id, not a mailbox."""
+    local, _, d = v.lower().rpartition("@")
+    return d in _ID_MAIL_DOMAINS or (d == "google.com" and bool(_ICAL_UID_RE.fullmatch(local)))
+
+
 _SERVICE_MAILBOXES = frozenset({"alerts", "alert", "monitoring", "backup", "ci", "bot", "renovate", "dependabot",
                                 "release", "deploy", "build", "jenkins", "gitlab-runner", "github-actions"})
 _SYSTEM_USERS = frozenset({"git", "root", "ubuntu", "ec2-user", "admin", "noreply", "no-reply", "postmaster",
