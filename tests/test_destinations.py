@@ -575,10 +575,45 @@ class Shown(unittest.TestCase):
         self.assertIn("Where secrets were sent · observe · not decided", text)
         self.assertIn("Seen so far: 1 secret(s), 1 destination(s), 0 with more than one.", text)
         self.assertIn("comes in a later version", text)
+        self.assertIn("would have asked 0 time(s) in the last 1 day(s), for 0 secret(s)", text)
         self.assertNotIn("secret_destinations protect", text, "0.6.7 offers no protect mode")
         self.assertEqual(settings.parse_prompt("/maisecrets:settings secret_destinations protect"),
                          ("secret_destinations", "protect"))
         self.assertIn("takes observe, off", settings.apply_typed("secret_destinations", "protect")[1])
+
+
+class WouldHaveAsked(unittest.TestCase):
+    """The settings card says how often asking before a new host would have asked, from the person's own record."""
+
+    def setUp(self):
+        _reset()
+
+    def _at(self, days_ago: float, key: str, *found: tuple[str, str]) -> None:
+        with mock.patch.object(destinations.time, "time", return_value=self.now - days_ago * 86400):
+            destinations.note([key], "S1", None, list(found))
+
+    def test_a_new_host_of_a_used_secret_asks_and_its_first_hosts_do_not(self):
+        self.now = time.time()
+        self._at(40, "A", ("network", "one.example.com"))
+        self._at(35, "A", ("network", "old.example.com"))                 # before the window
+        self._at(10, "A", ("network", "two.example.com"))
+        self._at(5, "A", ("network", "three.example.com"), ("network", "four.example.com"))   # one call
+        self._at(4, "A", ("network", "two.example.com"), ("local", "a file in ~/x/"))          # nothing new
+        self._at(1, "B", ("network", "one.example.com"), ("network", "two.example.com"))      # its first call
+        self._at(1, "C", ("local", "a command on this computer"))
+        self._at(0.5, "C", ("network", "one.example.com"))                # its first host
+        self.assertEqual(destinations.would_have_asked(now=self.now), (2, 1, 30))
+        self._at(0.2, "B", ("network", "five.example.com"))
+        self.assertEqual(destinations.would_have_asked(now=self.now), (3, 2, 30))
+
+    def test_the_days_end_where_the_record_begins(self):
+        self.assertEqual(destinations.would_have_asked(), (0, 0, 0), "no record, no period")
+        self.assertIn("Asking before a new host (protect) comes in a later version.", settings.render())
+        self.now = time.time()
+        self._at(2.5, "A", ("local", "a file in ~/x/"))
+        self._at(1, "A", ("network", "one.example.com"))
+        self._at(0.5, "A", ("network", "two.example.com"))
+        self.assertEqual(destinations.would_have_asked(now=self.now), (1, 1, 3))
 
 
 if __name__ == "__main__":
