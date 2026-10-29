@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [0.8.3] - 2026-10-29
+
+### Features
+
+- ask before a stored secret goes to a host it never went to (secret_destinations protect) (0d40b63)
+- the settings show how often asking before a new host would have asked in your last 30 days (594c9e8)
+- detects Labelbox API keys and the Tailscale key form tskey-k…CNTRL- (bff9b2b)
+
+### Fixes
+
+- test results after PASS:, a heading after Basic, and calendar or message ids are no longer masked (3e781e6)
+- SSH algorithm names such as curve25519-sha256@libssh.org are no e-mail addresses (5b9b4f2)
+- a report or notice matches the model's text only as written or escaped (84d0c08)
+- a background command's notice no longer blocks the session (f5849d0)
+- hides a database URL password that holds a raw # or ? (afaa446)
+- keeps masking a person's long user name that ends in -bot (fea968b)
+- keeps masking a person's long user name that ends in -svc (5a113c8)
+- keeps masking a person's user name that starts with a service word or ends in one after a long name (aec3aa8)
+- leaves the user names of bots and service accounts as text (b0141aa)
+
 ## [0.8.2] - 2026-10-26
 
 ### Features
