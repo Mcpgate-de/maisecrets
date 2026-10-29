@@ -640,7 +640,9 @@ last 24 hours. When a secret that you used at one destination
 (3 times on one day) goes to a new one for the first time, the AI tells you
 once, in a sentence; this note does not come again. maisecrets does not
 judge whether a destination is safe. Asking before a new destination comes
-in a later version. `/maisecrets:settings secret_destinations off` stops the
+in a later version. Until then, `/maisecrets:settings` shows how often it would
+have asked in your own last 30 days: once per call that took a secret to a
+host it never went to, never for the first call of a secret. `/maisecrets:settings secret_destinations off` stops the
 record; nothing leaves the computer either way. When a value expires, its
 record goes with it (if the record is busy at that moment, it goes 30 days
 later with the metadata); forget and wipe delete it too.

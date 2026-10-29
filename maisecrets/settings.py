@@ -245,7 +245,12 @@ def _card(key: str, cfg: dict) -> list[str]:
         n, total, multi = destinations.summary()
         lines.append(f"    Seen so far: {n} secret(s), {total} destination(s), {multi} with more than one. "
                      "/maisecrets:list shows them.")
-        lines.append("    Asking before a new destination (protect) comes in a later version.")
+        asks, secrets, days = destinations.would_have_asked()
+        if days:
+            lines.append(f"    Asking before a new host (protect) would have asked {asks} time(s) in the last {days} "
+                         f"day(s), for {secrets} secret(s). It comes in a later version.")
+        else:
+            lines.append("    Asking before a new host (protect) comes in a later version.")
         if value == "off":
             lines.append("    Turn on: /maisecrets:settings secret_destinations observe")
     elif key == "ssh_autonomous_hosts":

@@ -342,6 +342,28 @@ def summary() -> tuple[int, int, int]:
     return len(counts), sum(counts), sum(1 for c in counts if c > 1)
 
 
+ASK_DAYS = 30
+
+
+def would_have_asked(days: int = ASK_DAYS, now: float | None = None) -> tuple[int, int, int]:
+    """(questions, secrets, days covered): how often a protect mode would have asked in the last `days` days. It
+    asks when a secret goes to a network host it never went to; the hosts of a secret's first call are its own, so a
+    new secret asks nothing. One call is one question, also with two new hosts (a call notes all its destinations at
+    one time). The days covered end at the oldest record: the record begins with its first use, not with the
+    install. A secret whose first host fell out of the bounded record (MAX_PER_SECRET) counts one question less."""
+    now = time.time() if now is None else now
+    since = now - days * 86400
+    questions, asked, oldest = 0, 0, now
+    for rec in _load()["secrets"].values():
+        seen = rec.get("seen", {}).values()
+        oldest = min([oldest] + [d["first"] for d in seen])     # a local use is recorded too: it counts as covered
+        firsts = sorted({d["first"] for d in seen if d.get("kind") == "network"})
+        n = sum(1 for t in firsts[1:] if t >= since)
+        questions += n
+        asked += 1 if n else 0
+    return questions, asked, min(days, int((now - oldest) // 86400) + 1) if oldest < now else 0
+
+
 NEW_SECONDS = 24 * 3600   # `new` in the list: first seen in the last day. Not "since the list was opened": the
                           # model runs the list too (commands/list.md), and a list it ran would clear the marks (Opus)
 
