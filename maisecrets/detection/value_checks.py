@@ -133,13 +133,14 @@ _LABEL_WORDS_TAIL_RE = _LazyRx(r"(\\?[\"'])?([A-Za-z_][\w.-]*)\\?[\"']?\s*(?::=|
 
 # a version in four parts, not an address, only with evidence: a label with `version` in it (`version: `,
 # `os_version: `, `versionName: `, AssemblyVersion), `ver`, `release` or `build` before it, an update word in the 40
-# characters before it (`Upgrade MyPkg to `), or the extension of a package file after it or after the same number
+# characters before it that ends in `to` right before the number (`Upgrade MyPkg to `; "updated. The IPv4 address is"
+# is an address, Nemotron, release gate of 0.8.5), or the extension of a package file after it or after the same number
 # later on its line (`/1.3.0.0/mypkg.1.3.0.0.nupkg`, `/metadata/mypkg/1.3.0.0.json`, the GitLab NuGet API; gateway
 # field report, 2026-10-29)
 _VERSION_BEFORE_RE = _LazyRx(r"(?i)(?:\b(?:[a-z0-9]+[_-])*version(?:[_-]?[a-z0-9]+)*|(?<=[a-z0-9])(?-i:Version)\w*"
                              r"|\bver|\brelease|\bbuild)[\"']?[ \t]*[:=]?[ \t]*[\"']?v?$")
 _UPDATE_WORD_RE = _LazyRx(r"(?i)\b(?:upgrade[sd]?|downgrade[sd]?|update[sd]?|bump(?:ed|s)?|install(?:ed|s)?"
-                          r"|pin(?:ned|s)?)\b")
+                          r"|pin(?:ned|s)?)\b[^\n.;]{0,30}?\bto[ \t]+v?$")
 _PACKAGE_EXT = r"\.(?:nupkg|nuspec|json|dll|exe|msi|jar|war|zip|tar|tgz|gz|whl|so|dylib|pkg|deb|rpm|apk|ipa)\b"
 _PACKAGE_AFTER_RE = _LazyRx(r"(?i)" + _PACKAGE_EXT)
 
