@@ -66,7 +66,7 @@ from .own_rules import (  # noqa: F401
     OWN_RULES, FALLBACK_RULES,
 )
 from .value_checks import (  # noqa: F401
-    _a_version, _LABEL_WORDS_TAIL_RE,
+    _a_version, _LABEL_WORDS_TAIL_RE, _bitlocker_key_ok,
     _re2_to_python, _POSIX_CLASSES, shannon_entropy, ENTROPY_BY_ALPHABET, ENTROPY_BY_ALPHABET_RULES, _B62, _ALPHABETS,
     alphabet_of, _base64_of_text, _entropy_ok, _luhn_ok, IBAN_LENGTH, _iban_ok, _RESOLVER_IPS, _public_ip,
     _de_tax_id_ok, _de_social_security_ok, _de_health_insurance_ok, _de_lanr_ok, _de_vat_id_ok, _B64_PEM_PRIVATE_RE,
@@ -506,6 +506,7 @@ VALIDATORS = {
     "de_bsnr": lambda v: len(v.strip()) == 9 and v.strip().isdigit() and v.strip() != "000000000",
     "de_vat_id": _de_vat_id_ok,
     "luhn": lambda v: _luhn_ok(re.sub(r"\D", "", v)),
+    "bitlocker_key": _bitlocker_key_ok,
     "iban": _iban_ok,
     "public_ip": _public_ip,
     "not_placeholder": lambda v: v.lower() not in {"placeholder", "changeme", "redacted", "example"}
