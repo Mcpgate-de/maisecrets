@@ -59,3 +59,32 @@ class VendoredRulesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PresidioPatternsCompileTests(unittest.TestCase):
+    """Presidio runs the `regex` package and maisecrets runs `re`: a pattern `re` refuses raised in every scan, and a
+    sync (2.2.365) turned the whole suite red without naming the rule."""
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT))
+        from maisecrets.detection import core
+        self.core = core
+        data = json.loads((ROOT / cvr.RULES / "presidio.json").read_text(encoding="utf-8"))
+        self.regions = tuple(sorted({core.presidio_region(r["id"]) for r in data["recognizers"]}))
+
+    def test_every_presidio_pattern_of_every_region_compiles(self):
+        import re
+        rules = self.core._load_presidio(self.regions)
+        self.assertGreater(len(rules), 100)
+        for rule in rules:
+            with self.subTest(rule.id):
+                re.compile(rule.regex.pattern)
+
+    def test_a_consumed_label_is_no_part_of_the_hit(self):
+        rules = [r for r in self.core._load_presidio(("us",)) if r.id.split("#")[0] in self.core.PRESIDIO_LABEL_CONSUMED]
+        self.assertTrue(any(r.secret_group for r in rules))
+        n = "".join(str((7 * i + 3) % 10) for i in range(8))
+        for text, value in ((f"claim number: {n} was paid", n), (f"referral no. REF-{n[:7]}", f"REF-{n[:7]}"),
+                            (f"prior auth #: PA-{n[:7]}", f"PA-{n[:7]}")):
+            with self.subTest(text):
+                self.assertEqual([m.value for m in self.core.scan(text, channel="tool", rule_list=rules)], [value])
