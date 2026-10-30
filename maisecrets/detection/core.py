@@ -709,10 +709,10 @@ ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CA
 # uk-postcode: a postcode alone identifies no one (a fork's bench, 2026-10-12: every hit was a false alarm); a street
 # address with its postcode is personal.py's
 PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "de-id-card", "de-passport",
-                 "crypto", "de-handelsregister", "uk-postcode",
-                 # 2.2.365: the own label rules mask an id after its label (member id, tax id); these took the span
-                 # first, and the member id matched FHIR identifier text and build tags
-                 "us-health-insurance-member-id", "us-provider-tax-id"}
+                 "crypto", "de-handelsregister", "uk-postcode"}
+# 2.2.365: the own label rules mask an id after its label (member id, tax id); these took the span first, and the
+# member id matched FHIR identifier text and build tags
+PRESIDIO_SKIP |= {"us-health-insurance-member-id", "us-provider-tax-id"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
