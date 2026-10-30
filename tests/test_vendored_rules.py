@@ -81,7 +81,8 @@ class PresidioPatternsCompileTests(unittest.TestCase):
                 re.compile(rule.regex.pattern)
 
     def test_a_consumed_label_is_no_part_of_the_hit(self):
-        rules = [r for r in self.core._load_presidio(("us",)) if r.id.split("#")[0] in self.core.PRESIDIO_LABEL_CONSUMED]
+        consumed = self.core.PRESIDIO_LABEL_CONSUMED
+        rules = [r for r in self.core._load_presidio(("us",)) if r.id.split("#")[0] in consumed]
         self.assertTrue(any(r.secret_group for r in rules))
         n = "".join(str((7 * i + 3) % 10) for i in range(8))
         for text, value in ((f"claim number: {n} was paid", n), (f"referral no. REF-{n[:7]}", f"REF-{n[:7]}"),

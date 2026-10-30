@@ -776,8 +776,9 @@ PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # after a letter or a digit is a separator (EDIFACT segments), and a number after it stays a document number
 PRESIDIO_NOT_AFTER_PLUS = {"us-license", "us-passport"}
 # Presidio runs the `regex` package; these patterns start with a look-behind of variable width over their label
-# ("claim number: "), which Python's `re` refuses (their other patterns have none). The label becomes a consumed group before the value, and the hit
-# is the value group (2.2.365: the scan raised on every text and the whole suite went red)
+# ("claim number: "), which Python's `re` refuses (their other patterns have none). The label becomes a consumed
+# group before the value, and the hit is the value group (2.2.365: the scan raised on every text and the whole suite
+# went red)
 PRESIDIO_LABEL_CONSUMED = frozenset({"us-claim-number", "us-prescription-number", "us-prior-authorization-number",
                                      "us-referral-number"})
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
