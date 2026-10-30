@@ -82,9 +82,8 @@ class PresidioPatternsCompileTests(unittest.TestCase):
         rules = [r for r in self.core._load_presidio(("us",)) if r.id.split("#")[0] in consumed]
         self.assertTrue(any(r.secret_group for r in rules))
         n = "".join(str((7 * i + 3) % 10) for i in range(8))
-        for text, value in ((f"claim number: {n} was paid", n), (f"Claim Number: {n}", n),
-                            (f"CLAIM #: {n}", n), (f"referral no. REF-{n[:7]}", f"REF-{n[:7]}"),
-                            (f"prior auth #: PA-{n[:7]}", f"PA-{n[:7]}"), (f"Prescription number: {n}", n)):
+        for text, value in ((f"referral no. REF-{n[:7]}", f"REF-{n[:7]}"), (f"Referral Number: {n}", n),
+                            (f"REFERRAL #: {n}", n), (f"Prescription number: {n}", n)):
             with self.subTest(text):
                 self.assertEqual([m.value for m in self.core.scan(text, channel="tool", rule_list=rules)], [value])
 
@@ -94,6 +93,14 @@ class PresidioPatternsCompileTests(unittest.TestCase):
                      "auth request PA123456 failed", "billing job CLM-123456 done", "pharmacy sync RX-1234567 ok",
                      "referral link REF-1234567 sent"):
             with self.subTest(text=text):
+                self.assertEqual([m.kind for m in self.core.scan(text, channel="tool", rule_list=rules)], [])
+
+    def test_a_number_after_the_word_claim_or_authorization_is_no_id(self):
+        # 474 false alarms on Mendeley val, 39 on Nemotron val (release gate, 2026-10-30)
+        rules = self.core._load_presidio(("us",))
+        n = "".join(str((3 * i + 1) % 10) for i in range(9))
+        for text in (f"The insurance claim {n} was settled.", f"Claim number: {n}", f"prior authorization {n} ok"):
+            with self.subTest(text=text[:12]):
                 self.assertEqual([m.kind for m in self.core.scan(text, channel="tool", rule_list=rules)], [])
 
     def test_the_spaced_postal_code_and_a_passport_after_its_word_stay_hits(self):
