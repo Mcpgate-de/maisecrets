@@ -712,9 +712,10 @@ ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CA
 # address with its postcode is personal.py's
 PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "de-id-card", "de-passport",
                  "crypto", "de-handelsregister", "uk-postcode"}
-# 2.2.365: the own label rules mask an id after its label (member id, tax id); these took the span first, and the
-# member id matched FHIR identifier text and build tags
-PRESIDIO_SKIP |= {"us-health-insurance-member-id", "us-provider-tax-id"}
+# 2.2.365 (rulespec.presidio_patches has the reasons): own label rules cover the member and the tax id; the claim
+# and prior authorization ids took any number after the word (474 false alarms on Mendeley val, #17)
+PRESIDIO_SKIP |= {"us-health-insurance-member-id", "us-provider-tax-id", "us-claim-number",
+                  "us-prior-authorization-number"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
@@ -781,8 +782,7 @@ PRESIDIO_NOT_AFTER_PLUS = {"us-license", "us-passport"}
 # ("claim number: "), which Python's `re` refuses (their other patterns have none). The label becomes a consumed
 # group before the value, and the hit is the value group (2.2.365: the scan raised on every text and the whole suite
 # went red)
-PRESIDIO_LABEL_CONSUMED = frozenset({"us-claim-number", "us-prescription-number", "us-prior-authorization-number",
-                                     "us-referral-number"})
+PRESIDIO_LABEL_CONSUMED = frozenset({"us-prescription-number", "us-referral-number"})
 # 2.2.365 patterns that fired on developer text next to a common context word: a code in the shape of an ID number
 # (PA123456 near "auth", A1B2C3 near "zip"). The labelled forms of the same recognizers stay
 PRESIDIO_SKIP_PATTERNS = frozenset({"ca-postal-code#1", "us-claim-number#1", "us-prescription-number#2",
