@@ -154,6 +154,13 @@ def _a_version(text: str, start: int, end: int, value: str) -> bool:
                 or re.search(re.escape(value) + "(?i:" + _PACKAGE_EXT + ")", text[end:line_end]))
 
 
+def _bitlocker_key_ok(v: str) -> bool:
+    """Each of the 8 groups is divisible by 11 and below 65536 * 11 (the key is 8 16-bit words, each times 11)."""
+    groups = v.split("-")
+    return len(groups) == 8 and all(g.isascii() and g.isdigit() and int(g) % 11 == 0 and int(g) < 720896
+                                    for g in groups)
+
+
 # public resolvers: a server every network uses, never a person's address
 _RESOLVER_IPS = frozenset({"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112",
                            "208.67.222.222", "208.67.220.220", "2001:4860:4860::8888", "2001:4860:4860::8844",
