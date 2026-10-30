@@ -66,6 +66,7 @@ from .own_rules import (  # noqa: F401
     OWN_RULES, FALLBACK_RULES,
 )
 from .value_checks import (  # noqa: F401
+    _a_version, _LABEL_WORDS_TAIL_RE,
     _re2_to_python, _POSIX_CLASSES, shannon_entropy, ENTROPY_BY_ALPHABET, ENTROPY_BY_ALPHABET_RULES, _B62, _ALPHABETS,
     alphabet_of, _base64_of_text, _entropy_ok, _luhn_ok, IBAN_LENGTH, _iban_ok, _RESOLVER_IPS, _public_ip,
     _de_tax_id_ok, _de_social_security_ok, _de_health_insurance_ok, _de_lanr_ok, _de_vat_id_ok, _B64_PEM_PRIVATE_RE,
@@ -2447,12 +2448,30 @@ _MEASURE_LABEL_RE = _LazyRx(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|max
 _SECRET_LABEL_RE = _LazyRx(r"(?i)(?:token|secret[_-]?key|secret|secret[_-]?value|api[_-]?key|apikey|access[_-]?key"
                               r"|auth[_-]?key|\w+[_-]key|password|passwd|pwd|passphrase)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
 _ELISION_RE = _LazyRx(r"(?:\.\.\.|\u2026)$")
+def _names_no_secret(text: str, start: int) -> bool:
+    """The label before the value names a cursor, a key that is an identifier, or the time or the state of a secret
+    (fields.names_no_secret; gateway field report, 2026-10-29: in maisecrets mode a masked cursor could not be sent
+    back, so paging broke)."""
+    m = _LABEL_WORDS_TAIL_RE.search(text, max(_line_start(text, start), start - 80), start)
+    if not m:
+        return False
+    label, words = m.group(2), _fields.label_words(m.group(2))
+    if _fields.is_time_or_state(words) or _fields.is_an_id(words):
+        return True
+    # a cursor or an identifier key only in the spelling of an API: a quoted key or camelCase. GITHUB_SYNC_TOKEN= in an
+    # env file and repo_sync_token: in a CI file name a credential (Fable review, 2026-10-30)
+    api = bool(m.group(1)) or ("_" not in label and "-" not in label and label != label.upper()
+                               and label != label.lower())
+    return api and (_fields.is_cursor(words) or _fields.is_handle_key(words))
+
+
 # a label that names a derived thing: secret_id, password_hash, token_type, hashed_secret. Anchored at the value: in
 # `secret_name: x, password: <value>` the password stays a hit
 _DERIVED_LABEL_RE = _LazyRx(
-    r"(?i)(?:(?:secret|password|passwd|pwd|token|key)[_-]?(?:id|name|hash|hashed|len|length|path|file|arn|ref|url|uri"
+    r"(?i)(?:(?:secret|password|passwd|pwd|token|key)s?[_-]?(?:id|name|hash|hashed|len|length|path|file|arn|ref|url|uri"
     r"|version|type|policy|rules?|last(?:_\w+)?)|hashed_(?:secret|password|token)|(?:secret|password|token|key)Id"
-    r"|(?:secret|password|token)Name)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
+    r"|(?:secret|password|token)Name)"
+    r"\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
 
 
 def _yyyymmdd(v: str) -> bool:
@@ -2959,8 +2978,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                      and not _SECRET_LABEL_RE.search(
                         text, max(_line_start(text, start), start - 60), start))
                     or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 20)
+                    or _names_no_secret(text, start)
                     or _DERIVED_LABEL_RE.search(text, max(_line_start(text, start), start - 60), start)):
-                continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
+                continue   # a UUID, an elided value (sk-...), or a label of a derived thing (secret_id, nextPageToken)
             if "user-equals-password" in filters and _pass_equals_user(m.group(0), secret):
                 continue
             if ("sigv4-scope" in filters and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
@@ -2979,6 +2999,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue
             if rule.type == "IP" and _SECTION_BEFORE_RE.search(text, max(0, start - 24), start):
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
+            if rule.id == "ip#2" and _a_version(text, start, end, secret):
+                continue
             if overlaps(start, end):
                 continue
             if rule.entropy and not _entropy_ok(rule, secret, channel):
@@ -3430,7 +3452,7 @@ def findings(text: str, channel: str = "prompt", path: str = "", *, fields=None)
     spans = _fields.checked(text, fields)
     hits = scan(text, channel=channel, path=path)   # the call of before: a caller may wrap detect.scan
     if spans:
-        hits = _fields.added(text, hits, spans, lambda t: scan(t, channel=channel))
+        hits = _fields.added(text, hits, spans, lambda t: scan(t, channel=channel, path=""), same_scan=not path)
     return [m for m in hits if not is_fixture(m, text, path)]
 
 
