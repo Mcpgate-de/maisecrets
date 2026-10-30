@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.8.4] - 2026-10-30
+
+### API
+
+- new and provisional: remote.RemoteDetector, RemoteStatus, Result, Detector.findings_with, (b909b1d)
+
+### Features
+
+- an optional name service adds names in tool results, and the library can ask it too (b909b1d)
+
 ## [0.8.3] - 2026-10-29
 
 ### Features
