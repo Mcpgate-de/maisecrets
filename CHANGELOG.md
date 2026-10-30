@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## [0.8.5] - 2026-10-30
+
+### Features
+
+- a message to another Claude session goes out with placeholders instead of being dropped by the receiver (79b3bee)
+- finds a BitLocker recovery key by its check digits, bare and after any label (28f61cc)
+- detects Composio org and user API keys (oak_, uak_) (db767dc)
+
+### Fixes
+
+- an update word before an IP address no longer makes it a version (58a9ff5)
+- numbers after the word claim or prior authorization are no US insurance id (e4ab11e)
+- a paging cursor, a file key, the time of a secret or a version number in an API answer is no secret (ae23262)
+
+### Dependencies
+
+- the new Presidio labels match in any case; five code shapes and two context words that fired on developer text stay out (a9af4ad)
+- keep the skip list's line, a belief anchors on it (35152f2)
+- Presidio 2.2.365 with 13 new recognizers for South Africa, Canada, the Philippines and US health records (6e35408)
+- update dependency presidio-analyzer to v2.2.365 (b7c8dc9)
+
 ## [0.8.4] - 2026-10-30
 
 ### API
