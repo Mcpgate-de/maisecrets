@@ -1442,5 +1442,13 @@
  {
   "id": "labelbox-recursion-api-key",
   "regex": "rma_(?:(?<![A-Za-z0-9_-]rma_)|(?<=\\\\[nrt]rma_))[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "oak-api-key",
+  "regex": "oak_(?:(?<![A-Za-z0-9_-]oak_)|(?<=\\\\[nrt]oak_))(?=[A-Za-z_-]{0,19}[0-9])(?=[a-z0-9_-]{0,19}[A-Z])[A-Za-z0-9_-]{20}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "composio-user-api-key",
+  "regex": "uak_(?:(?<![A-Za-z0-9_-]uak_)|(?<=\\\\[nrt]uak_))[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"
  }
 ]

@@ -51,6 +51,18 @@
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" pre-tool"
           }
         ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pre-tool",
+            "timeout": 10,
+            "statusMessage": "maisecrets checks the tool call",
+            "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" pre-tool"
+          }
+        ]
       }
     ],
     "PostToolUse": [
