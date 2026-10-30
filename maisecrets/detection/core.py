@@ -781,6 +781,12 @@ PRESIDIO_NOT_AFTER_PLUS = {"us-license", "us-passport"}
 # went red)
 PRESIDIO_LABEL_CONSUMED = frozenset({"us-claim-number", "us-prescription-number", "us-prior-authorization-number",
                                      "us-referral-number"})
+# 2.2.365 patterns that fired on developer text next to a common context word: a code in the shape of an ID number
+# (PA123456 near "auth", A1B2C3 near "zip"). The labelled forms of the same recognizers stay
+PRESIDIO_SKIP_PATTERNS = frozenset({"ca-postal-code#1", "us-claim-number#1", "us-prescription-number#2",
+                                    "us-prior-authorization-number#1", "us-referral-number#1"})
+# context words that are ordinary words of a developer: `dfa` (a state machine), `registration` (a sign-up)
+PRESIDIO_CONTEXT_DROP = {"ph-passport": ("dfa",), "za-license-plate": ("registration",)}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
 # checksum are also FIX tags and XML identifiers; a real VAT ID stands next to USt-IdNr or VAT. The spaced form
 # (de-vat-id#1) has a low score and needs its word already
@@ -932,7 +938,7 @@ PRESIDIO_CARD_FIRST = {"credit-card": r"((4\d{3})|(5[0-5]\d{2})|(2(?:22[1-9]|2[3
 
 
 def _label_consumed(regex: str) -> tuple[str, int]:
-    """`(?<=LABEL)VALUE` as `(?:LABEL)(VALUE)` and the number of the value group."""
+    """`(?<=LABEL)VALUE` as `(?i:LABEL)(VALUE)` and the number of the value group."""
     depth, i, in_class = 1, 4, False
     while depth:
         c = regex[i]
@@ -947,8 +953,8 @@ def _label_consumed(regex: str) -> tuple[str, int]:
         elif c == ")":
             depth -= 1
         i += 1
-    label = regex[4:i - 1]
-    return f"(?:{label})({regex[i:]})", re.compile(label).groups + 1
+    label = regex[4:i - 1]   # Presidio matches with IGNORECASE: Claim number, CLAIM NUMBER
+    return f"(?i:{label})({regex[i:]})", re.compile(label).groups + 1
 
 
 def _presidio_regex(rec_id: str, regex: str) -> str:
@@ -978,6 +984,8 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
         weak = rec["id"] in PRESIDIO_ALWAYS_CONTEXT or (rec["validator"] and validator is None)
         for i, pat in enumerate(rec["patterns"]):
             rule_id = rec["id"] if len(rec["patterns"]) == 1 else f"{rec['id']}#{i}"
+            if rule_id in PRESIDIO_SKIP_PATTERNS:
+                continue
             regex, group = _re2_to_python(pat["regex"]), 0
             if rec["id"] in PRESIDIO_LABEL_CONSUMED and regex.startswith("(?<="):
                 regex, group = _label_consumed(regex)
@@ -987,7 +995,9 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
                 regex=_Lazy(rf"(?<!\d)(?:{regex})(?!\d)" if rec["id"] in PRESIDIO_DIGIT_BOUNDED
                             else _presidio_regex(rec["id"], regex)),
                 validator=validator, score=float(pat["score"]), secret_group=group,
-                context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
+                context=tuple(c.lower() for c in rec.get("context", [])
+                              if c.lower() not in PRESIDIO_CONTEXT_DROP.get(rec["id"], ()))
+                + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
                 require_context=weak or rule_id in PRESIDIO_PATTERN_CONTEXT,
                 whole_match=not group, region=region,
             ))

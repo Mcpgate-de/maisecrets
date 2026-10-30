@@ -57,9 +57,6 @@ class VendoredRulesTests(unittest.TestCase):
         self.assertIn("betterleaks.json: no rules", cvr.problems(self.root))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class PresidioPatternsCompileTests(unittest.TestCase):
     """Presidio runs the `regex` package and maisecrets runs `re`: a pattern `re` refuses raised in every scan, and a
@@ -85,7 +82,26 @@ class PresidioPatternsCompileTests(unittest.TestCase):
         rules = [r for r in self.core._load_presidio(("us",)) if r.id.split("#")[0] in consumed]
         self.assertTrue(any(r.secret_group for r in rules))
         n = "".join(str((7 * i + 3) % 10) for i in range(8))
-        for text, value in ((f"claim number: {n} was paid", n), (f"referral no. REF-{n[:7]}", f"REF-{n[:7]}"),
-                            (f"prior auth #: PA-{n[:7]}", f"PA-{n[:7]}")):
+        for text, value in ((f"claim number: {n} was paid", n), (f"Claim Number: {n}", n),
+                            (f"CLAIM #: {n}", n), (f"referral no. REF-{n[:7]}", f"REF-{n[:7]}"),
+                            (f"prior auth #: PA-{n[:7]}", f"PA-{n[:7]}"), (f"Prescription number: {n}", n)):
             with self.subTest(text):
                 self.assertEqual([m.value for m in self.core.scan(text, channel="tool", rule_list=rules)], [value])
+
+    def test_a_code_next_to_a_common_word_of_a_developer_is_no_id(self):
+        rules = self.core._load_presidio(("us", "ca", "ph", "za"))
+        for text in ("zip artifact A1B2C3 uploaded", "dfa state AB1234567 accepted", "registration failed for AB12CDGP",
+                     "auth request PA123456 failed", "billing job CLM-123456 done", "pharmacy sync RX-1234567 ok",
+                     "referral link REF-1234567 sent"):
+            with self.subTest(text=text):
+                self.assertEqual([m.kind for m in self.core.scan(text, channel="tool", rule_list=rules)], [])
+
+    def test_the_spaced_postal_code_and_a_passport_after_its_word_stay_hits(self):
+        rules = self.core._load_presidio(("ca", "ph"))
+        for text in ("postal code: K1A 0B1", "passport no. AB1234567"):
+            with self.subTest(text=text):
+                self.assertTrue(self.core.scan(text, channel="tool", rule_list=rules))
+
+
+if __name__ == "__main__":
+    unittest.main()
