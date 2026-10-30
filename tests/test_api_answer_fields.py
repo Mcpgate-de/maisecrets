@@ -197,6 +197,10 @@ class VersionQuadTests(unittest.TestCase):
                      f"Observed {b}", f"endpoint={b}", f"conversion: {b}"):
             with self.subTest(text=text):
                 self.assertEqual(self.ips(text), [b])
+        for text in (f"Your profile was updated. The IPv4 address is {a}.", f"Install done, connect from {a} now",
+                     f"We updated the login made from the IP address {a}"):
+            with self.subTest(text=text):
+                self.assertEqual(self.ips(text), [a])
 
 
 if __name__ == "__main__":
