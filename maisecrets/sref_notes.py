@@ -17,7 +17,7 @@ from .vault_refs import MAX_NOTES_PER_ORIGIN, MAX_SESSIONS_PER_NOTE, NOTE_BUDGET
     origin_of, profile, user_servers
 
 DIR = HOME / "sref"
-NOTES = DIR / "notes.json"            # profile -> origin -> "kind:id" -> {"t": time, "sessions": [session ids]}
+NOTES = DIR / "notes.json"            # profile -> origin -> "kind:id" -> {"t", "sessions": [ids], "url": MCP URL}
 SENT = DIR / "sent.json"              # profile -> origin -> "kind:id" -> time: references the model sent in a call
 
 
@@ -55,7 +55,8 @@ def note_result(payload: dict, deadline: float | None = None) -> int:
     _keys(payload.get("tool_response"), found)
     _keys(payload.get("tool_input"), asked)     # sent now: filtered below by the sent list, as later ones
     session = payload.get("session_id")
-    origin = origin_of(user_servers().get(server["name"]))
+    url = user_servers().get(server["name"])
+    origin = origin_of(url)
     if not (found or asked) or not origin or not isinstance(session, str) or not session:
         return 0
     now = time.time()
@@ -83,7 +84,7 @@ def note_result(payload: dict, deadline: float | None = None) -> int:
             note = mine.pop(k, None)
             note = note if isinstance(note, dict) else {}
             sessions = [s for s in (note.get("sessions") or []) if isinstance(s, str) and s != session]
-            mine[k] = {"t": now, "sessions": (sessions + [session])[-MAX_SESSIONS_PER_NOTE:]}
+            mine[k] = {"t": now, "sessions": (sessions + [session])[-MAX_SESSIONS_PER_NOTE:], "url": url}
         for k in [k for k, n in mine.items() if not (isinstance(n, dict) and isinstance(n.get("t"), (int, float))
                                                      and n["t"] > now - NOTE_TTL)]:
             del mine[k]
@@ -95,8 +96,8 @@ def note_result(payload: dict, deadline: float | None = None) -> int:
 
 
 def noted(refs: list, session: str | None) -> dict:
-    """reference -> the origin that noted it for this session in the last NOTE_TTL, for the references of `refs`
-    that one did; any other reference stays text."""
+    """reference -> (origin, MCP URL) of the gateway that noted it for this session in the last NOTE_TTL, for the
+    references of `refs` that one did; any other reference stays text."""
     if not isinstance(session, str) or not session:
         return {}
     now = time.time()
@@ -110,7 +111,7 @@ def noted(refs: list, session: str | None) -> dict:
             note = notes.get(k) if isinstance(notes, dict) and k else None
             if isinstance(note, dict) and isinstance(note.get("t"), (int, float)) and note["t"] > now - NOTE_TTL \
                     and session in (note.get("sessions") or []):
-                out[ref] = origin
+                out[ref] = (origin, note.get("url") if isinstance(note.get("url"), str) else "")
                 break
     return out
 

@@ -51,7 +51,7 @@ class SrefNoteTests(unittest.TestCase):
         # by kind and id: the display part may change or go
         for form in (ref(), ref(display="other")):
             with self.subTest(form=form[-12:]):
-                self.assertEqual(sref_notes.noted([form], "S1"), {form: "https://gw.example"})
+                self.assertEqual(sref_notes.noted([form], "S1"), {form: ("https://gw.example", "https://gw.example/mcp")})
         self.assertEqual(sref_notes.noted([ref()], "S2"), {})
         self.assertEqual(sref_notes.noted_elsewhere([ref()], "S2"), [ref()])
         self.assertEqual(sref_notes.noted_elsewhere([ref(rid="z" * 24)], "S2"), [], "never noted: plain text")
