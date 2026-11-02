@@ -1,8 +1,10 @@
 """The findings of a JSON-shaped object, one scan for the whole object, each finding placed in its string leaf.
 
 A caller that holds a parsed response (a dict from an API) and wants the findings of each string in it can scan each
-string apart, or write the object as JSON once and scan that. The second finds what the first finds with a field name
-before each string (the core reads JSON keys as labels), and on the gateway corpus it took a third of the time:
+string apart, or write the object as JSON once and scan that. The core reads JSON keys as labels, so the second sees
+each string after its key as the first does with a field name before it; it also sees the strings around it, so a
+record can add a finding that a string alone does not give (last_name next to first_name). On the gateway corpus both
+found the same, and the second took a third of the time:
 a call has a fixed cost of about 0.6 ms, and a response has about 170 strings (bench/gateway_report.py, 2026-11-02).
 What the caller then needs is each finding in the coordinates of its string, not of the JSON text, and that is what
 this module gives:
@@ -48,45 +50,57 @@ def _escape(s: str) -> tuple:
 
 def json_text(obj) -> tuple:
     """`(text, leaves)`: the object as JSON text, as json.dumps(obj, ensure_ascii=False) writes it, and its strings.
-    Raises TypeError for a value JSON cannot hold and ValueError for a cycle, as json.dumps does."""
+    Raises TypeError for a value JSON cannot hold and ValueError for a cycle, as json.dumps does. The walk keeps its
+    own stack, so a depth json.dumps writes does not end in a RecursionError here."""
     parts, leaves, n, seen = [], [], 0, set()
-
-    def put(s: str) -> None:
-        nonlocal n
-        parts.append(s)
-        n += len(s)
-
-    def walk(x, path: tuple) -> None:
+    # a stack of work: ("v", value, path) writes a value, ("s", text) writes text, ("x", id) leaves a container
+    todo = [("v", obj, ())]
+    while todo:
+        job = todo.pop()
+        if job[0] == "s":
+            parts.append(job[1])
+            n += len(job[1])
+            continue
+        if job[0] == "x":
+            seen.discard(job[1])
+            continue
+        _, x, path = job
         if isinstance(x, str):
-            written, places = _escape(x)
-            put('"')
-            leaves.append(Leaf(path, x, n, n + len(written), places))
-            put(written + '"')
+            value = str.__str__(x)   # the characters json.dumps writes, whatever a subclass does in __iter__
+            written, places = _escape(value)
+            leaves.append(Leaf(path, value, n + 1, n + 1 + len(written), places))
+            parts.append('"' + written + '"')
+            n += len(written) + 2
         elif x is None or isinstance(x, (bool, int, float)):
-            put(json.dumps(x))
+            w = json.dumps(x)
+            parts.append(w)
+            n += len(w)
         elif isinstance(x, (dict, list, tuple)):
             if id(x) in seen:
                 raise ValueError("Circular reference detected")
             seen.add(id(x))
+            items = []
             if isinstance(x, dict):
-                put("{")
                 for i, (k, v) in enumerate(x.items()):
                     if not isinstance(k, (str, int, float, bool)) and k is not None:
                         raise TypeError(f"keys must be str, int, float, bool or None, not {type(k).__name__}")
-                    key = k if isinstance(k, str) else json.dumps(k)
-                    put((", " if i else "") + '"' + _escape(key)[0] + '": ')
-                    walk(v, path + (key,))
-                put("}")
+                    key = str.__str__(k) if isinstance(k, str) else json.dumps(k)
+                    items.append(("s", (", " if i else "") + '"' + _escape(key)[0] + '": '))
+                    items.append(("v", v, path + (key,)))
+                opening, closing = "{", "}"
             else:
-                put("[")
                 for i, v in enumerate(x):
-                    put(", " if i else "")
-                    walk(v, path + (i,))
-                put("]")
-            seen.discard(id(x))
+                    if i:
+                        items.append(("s", ", "))
+                    items.append(("v", v, path + (i,)))
+                opening, closing = "[", "]"
+            parts.append(opening)
+            n += 1
+            todo.append(("x", id(x)))
+            todo.append(("s", closing))
+            todo.extend(reversed(items))
         else:
             raise TypeError(f"Object of type {type(x).__name__} is not JSON serializable")
-    walk(obj, ())
     return "".join(parts), leaves
 
 
@@ -117,6 +131,6 @@ def findings_by_leaf(detector, obj, channel: str = "tool", **kwargs) -> list:
             out.append((None, m))
             continue
         s = _back(leaf.places, m.start - leaf.start, end=False)
-        e = _back(leaf.places, min(m.end, leaf.end) - leaf.start, end=True)
+        e = s if m.end <= m.start else _back(leaf.places, min(m.end, leaf.end) - leaf.start, end=True)
         out.append((leaf, dataclasses.replace(m, start=s, end=e, value=leaf.value[s:e])))
     return out
