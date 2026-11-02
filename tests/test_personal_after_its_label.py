@@ -980,6 +980,13 @@ class RoleKeyTests(Base):
         self.assertText(f"name: {self.NAME}\n")   # the premise: after the weak label it reads as words
 
     def test_an_account_or_a_team_after_a_role_key_stays_text(self):
-        for value in ("Deleted User", "Platform Team", "Human Resources", "Plattform Mannschaft", "Release Bot"):
-            with self.subTest(n=len(value)):
-                self.assertText(f"author_name: {value}\n")
+        for key in ("author_name", "github_author_name", "gitlab_merge_request_author_name",
+                    "foo_reviewer_display_name"):
+            for value in ("Deleted User", "Platform Team", "Human Resources", "Plattform Mannschaft", "Release Bot",
+                          "Guest User"):
+                with self.subTest(key=key, n=len(value)):
+                    self.assertText(f"{key}: {value}\n")
+
+    def test_a_surname_that_is_also_an_account_word_stays_a_name(self):
+        name = "Christopher" + " " + "Guest"
+        self.assertMasked(f"author_name: {name}\n", name)
