@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.8.9] - 2026-11-02
+
+### Features
+
+- run.sh ner start runs the local name service with a secret of its own, and maisecrets checks it before each text (3ad743c)
+- a service maisecrets started proves its secret before it gets text, and an impostor on the port gets none (69bf0f5)
+
+### Fixes
+
+- the proof and the text of the name service check go to one address (302bfbc)
+- review findings on the name service check: no text after a timeout, closed when the kept secret is lost, a real proof in /maisecrets:ner (1fc19c4)
+- run.sh ner start runs the first image that proves its secret, and /maisecrets:ner names an older one (75386e2)
+- review findings on the challenge: the proof is read to the deadline, the schema names unauthorized and not_ours (bb0ae1b)
+- a product or model name alone (Claude, Copilot, GitHub, Jenkins …) is no longer masked as a person (014e51a)
+
 ## [0.8.8] - 2026-11-01
 
 ### Features
