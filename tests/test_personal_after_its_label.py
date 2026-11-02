@@ -957,11 +957,11 @@ class SharpSTests(Base):
         for surname in ("Wei" + "ß", "Gro" + "ß", "Strau" + "ß", "Mei" + "ßner"):
             with self.subTest(n=len(surname)):
                 self.assertMasked("Name: Lena " + surname + "\n", "Lena " + surname)
-                self.assertMasked("Kontakt: Lena " + surname + " <lena@example.de>\n", "Lena " + surname)
+                self.assertMasked("Kontakt: Lena " + surname + " <lena@example.com>\n", "Lena " + surname)
 
     def test_german_words_with_sharp_s_or_ss_stay_text(self):
         for value in ("Große Straße", "Freundliche Grüße", "Straße Größe", "Fußball Straße", "Gemäß Straße",
                       "Freundliche Gruesse", "Viele Grüsse", "Beste Grüße"):
             with self.subTest(n=len(value)):
                 self.assertText("Name: " + value + "\n")
-                self.assertNotIn("NAME", [m.type for m in scan(value + " <info@example.de>\n")])
+                self.assertNotIn("NAME", [m.type for m in scan(value + " <info@example.com>\n")])
