@@ -1,22 +1,19 @@
-"""The findings of a JSON-shaped object, one scan for the whole object, each finding placed in its string leaf.
+"""The findings of a JSON-shaped object in few scans, each finding placed in its string leaf.
 
 A caller that holds a parsed response (a dict from an API) and wants the findings of each string in it can scan each
-string apart, or write the object as JSON once and scan that. The core reads JSON keys as labels, so the second sees
-each string after its key as the first does with a field name before it; it also sees the strings around it, so a
-record can add a finding that a string alone does not give (last_name next to first_name). On the gateway corpus both
-found the same, and the second took a third of the time:
-a call has a fixed cost of about 0.6 ms, and a response has about 170 strings (bench/gateway_report.py, 2026-11-02).
-What the caller then needs is each finding in the coordinates of its string, not of the JSON text, and that is what
-this module gives:
+string apart after its key, or scan fewer texts. A call has a fixed cost of about 0.6 ms and a gateway response has
+69 strings on average, so the calls are most of the time. This module scans one text per record (layout "lines": each
+string on a line after its last key, as written) or one JSON text (layout "json", with the limits that docs/
+DETECTION.md names), and gives each finding in the coordinates of its string:
 
     from maisecrets.detection.leaves import findings_by_leaf
     for leaf, m in findings_by_leaf(detector, response):
         leaf.path, m.start, m.end, m.type   # the path of the string (keys and list indices), the span in the string
 
-The JSON text is the one `json.dumps(obj, ensure_ascii=False)` writes. A string that needs an escape (a quote, a
-backslash, a control character) is mapped back character by character, so a span is always one of the string as
-the caller holds it. A finding that starts in a key or in the structure belongs to no leaf (`leaf` is None); one
-that starts in a string and runs past its end is cut at the end of the string.
+In layout "json" the text is the one `json.dumps(obj, ensure_ascii=False)` writes, and a string that needs an escape
+is mapped back character by character, so a span is always one of the string as the caller holds it. A finding that
+starts in a key, a label or the structure belongs to no leaf (`leaf` is None); one that starts in a string and
+runs past its end is cut at the end of the string.
 """
 from __future__ import annotations
 
@@ -117,9 +114,55 @@ def _back(places: tuple, offset: int, end: bool) -> int:
     return lo
 
 
-def findings_by_leaf(detector, obj, channel: str = "tool", **kwargs) -> list:
-    """The findings of one scan of the object's JSON text, as `(leaf, match)`: `match.start`, `match.end` and
-    `match.value` are those of the string `leaf.value`. Further keyword arguments go to `detector.findings`."""
+def records(leaves: list) -> list:
+    """The strings grouped by record: each item of the outermost list on a string's path is a record of its own, and
+    the strings that sit in no list are the record of the object itself. The order of the strings is kept."""
+    groups: dict = {}
+    for leaf in leaves:
+        cut = next((i for i, part in enumerate(leaf.path) if isinstance(part, int)), None)
+        groups.setdefault(() if cut is None else leaf.path[:cut + 1], []).append(leaf)
+    return list(groups.values())
+
+
+def _label(path: tuple) -> str:
+    last = next((part for part in reversed(path) if isinstance(part, str)), "")
+    return last if last and "\n" not in last and ":" not in last else ""
+
+
+def _lines(detector, obj, channel: str, **kwargs) -> list:
+    out = []
+    for group in records(json_text(obj)[1]):
+        parts, placed, n = [], [], 0
+        for leaf in group:
+            label = _label(leaf.path)
+            lead = f"{label}: " if label else ""
+            placed.append((leaf, n + len(lead)))
+            parts.append(lead + leaf.value)
+            n += len(lead) + len(leaf.value) + 1
+        text = "\n".join(parts)
+        for m in sorted(detector.findings(text, channel=channel, **kwargs), key=lambda m: m.start):
+            hit = next(((leaf, at) for leaf, at in placed if at <= m.start < at + max(len(leaf.value), 1)), None)
+            if hit is None or not hit[0].value:
+                out.append((None, m))
+                continue
+            leaf, at = hit
+            s, e = m.start - at, min(m.end, at + len(leaf.value)) - at
+            out.append((leaf, dataclasses.replace(m, start=s, end=max(s, e), value=leaf.value[s:max(s, e)])))
+    return out
+
+
+def findings_by_leaf(detector, obj, channel: str = "tool", layout: str = "lines", **kwargs) -> list:
+    """The findings of the object's strings, as `(leaf, match)`: `match.start`, `match.end` and `match.value` are
+    those of the string `leaf.value`. Further keyword arguments go to `detector.findings`.
+
+    layout "lines" (the default since 0.8.11): one scan per record (`records`), each string on a line of its own after
+    its last key, as written (no JSON escape). layout "json": one scan of the JSON text; a string with a line break or
+    a quote is read with its escapes there, so a value can run over a line end or lose its label (gateway check of
+    0.8.10, 2026-11-02)."""
+    if layout == "lines":
+        return _lines(detector, obj, channel, **kwargs)
+    if layout != "json":
+        raise ValueError("layout must be lines or json")
     text, leaves = json_text(obj)
     out, k = [], 0
     for m in sorted(detector.findings(text, channel=channel, **kwargs), key=lambda m: m.start):

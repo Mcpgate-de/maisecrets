@@ -122,7 +122,7 @@ class FindingsByLeafTests(unittest.TestCase):
             def findings(self, text, channel, **kw):
                 at = text.index('\\"') + 1   # between the backslash and the quote of the escape
                 return [M(at, at, "X", "")]
-        (leaf, m), = L.findings_by_leaf(Det(), {"a": 'x"y'})
+        (leaf, m), = L.findings_by_leaf(Det(), {"a": 'x"y'}, layout="json")
         self.assertEqual((m.start, m.end, m.value), (1, 1, ""))
 
     def test_a_record_can_add_a_finding_that_a_string_alone_does_not_give(self):
@@ -138,6 +138,61 @@ class FindingsByLeafTests(unittest.TestCase):
         found = L.findings_by_leaf(D, {MAIL: "x"})
         self.assertTrue(found, "the premise: the address in the key is found")
         self.assertTrue(all(leaf is None for leaf, _ in found))
+
+
+def _oracle(obj) -> list:
+    """What the gateway's shadow finds: each string scanned alone after its last key."""
+    out = []
+    for leaf in L.json_text(obj)[1]:
+        key = L._label(leaf.path)
+        lead = f"{key}: " if key else ""
+        out += [(leaf.path, m.type, m.start - len(lead), m.end - len(lead))
+                for m in D.findings(lead + leaf.value, channel="tool") if m.start >= len(lead)]
+    return sorted(out)
+
+
+def _got(obj, layout: str) -> list:
+    return sorted((leaf.path, m.type, m.start, m.end) for leaf, m in L.findings_by_leaf(D, obj, layout=layout) if leaf)
+
+
+class LinesLayoutTests(unittest.TestCase):
+    """The shapes the gateway's check of 0.8.10 found (2026-11-02): in the JSON text a line break is two characters and
+    a quote gets a backslash, and a record next to another gave it context. The layout "lines" finds what each string
+    alone after its key finds. The values are synthetic."""
+    SHAPES = {
+        "a line break ends an address": {"body": "Hallo,\nbitte an meine Adresse: Hauptstraße 5, 10115 Berlin\n"
+                                                 "Danke und Gruß\nTeam"},
+        "JSON inside a string keeps its label": {"body": 'payload: {"username": "jdoe84", "role": "dev"}'},
+        "a record gives no context to the next": [{"note": "Steuer-ID folgt im nächsten Feld"},
+                                                  {"value": "860957" + "42719"}],
+    }
+
+    def test_the_json_layout_differs_on_these_shapes(self):
+        for name, obj in self.SHAPES.items():
+            with self.subTest(name):
+                self.assertNotEqual(_got(obj, "json"), _oracle(obj), "the premise")
+
+    def test_the_lines_layout_finds_what_each_string_after_its_key_finds(self):
+        table = {"description": "| Büro | Straße | PLZ |\n|---|---|---|\n| Nord | Hafenweg 2 | 20457 |\n"
+                                "| Süd | Bahnweg 9 | 80331 |"}
+        for name, obj in {**self.SHAPES, "a markdown table": table}.items():
+            with self.subTest(name):
+                self.assertEqual(_got(obj, "lines"), _oracle(obj))
+        self.assertTrue(_oracle(self.SHAPES["a line break ends an address"]), "the premise: an address is found")
+
+    def test_one_call_per_record(self):
+        calls = []
+
+        class Det:
+            def findings(self, text, channel, **kw):
+                calls.append(text)
+                return []
+        L.findings_by_leaf(Det(), {"ok": "yes", "items": [{"a": "1", "b": {"c": ["2", "3"]}}, {"a": "4"}]})
+        self.assertEqual(calls, ["ok: yes", "a: 1\nc: 2\nc: 3", "a: 4"])
+
+    def test_an_unknown_layout_is_refused(self):
+        with self.assertRaises(ValueError):
+            L.findings_by_leaf(D, {}, layout="xml")
 
 
 if __name__ == "__main__":
