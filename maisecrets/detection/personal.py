@@ -355,9 +355,9 @@ _COMPOUND_PERSON_KEY_RE = re.compile(
     r"|full_name")
 # the role keys of API data (author_name, github_reviewer_display_name: findings_by_leaf writes them for author.name);
 # there a value with a word of an account, a group or a state is no person (Deleted User, Platform Team, Plattform
-# Mannschaft). Not `guest` or `user`: they are surnames (codex review, 2026-11-02); Guest User stays text by the core's other checks.
-# A name-shaped value that is no person (United Kingdom, Bad Request) becomes a name here as after customer_name or
-# full_name: a person label trusts the shape
+# Mannschaft). Not `guest` or `user`: they are surnames (codex review, 2026-11-02); Guest User stays text by the
+# core's other checks. A name-shaped value that is no person (United Kingdom, Bad Request) becomes a name here as after
+# customer_name or full_name: a person label trusts the shape
 _ROLE_KEY_RE = re.compile(r"(?:^|_)(?:author|reviewer|assignee|reporter|creator|organi[sz]er|attendee|committer"
                           r"|approver|requester|merged_by|closed_by|approved_by|requested_by|merge_user)"
                           r"_(?:full_|display_)?name$")
