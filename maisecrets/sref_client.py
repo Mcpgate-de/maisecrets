@@ -144,10 +144,13 @@ def register(cfg: dict, found: dict, redirect: str, deadline: float) -> str:
 
 
 def authorize_url(found: dict, client_id: str, redirect: str, challenge: str, state: str) -> str:
-    return found["authorize"] + "?" + urlencode({
+    from urllib.parse import parse_qsl, urlunsplit
+    parts = urlsplit(found["authorize"])
+    query = parse_qsl(parts.query, keep_blank_values=True) + list({
         "response_type": "code", "client_id": client_id, "redirect_uri": redirect, "scope": found["scope"],
         "code_challenge": challenge, "code_challenge_method": "S256", "state": state,
-        "resource": found["origin"]})
+        "resource": found["origin"]}.items())
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 
 
 def _token(cfg: dict, found: dict, form: dict, deadline: float) -> dict:
@@ -163,9 +166,11 @@ def _token(cfg: dict, found: dict, form: dict, deadline: float) -> dict:
         data = None
     if status != 200 or not isinstance(data, dict) or not isinstance(data.get("access_token"), str) \
             or not isinstance(data.get("refresh_token"), str):
-        code = data.get("error") if isinstance(data, dict) and isinstance(data.get("error"), str) else ""
-        raise Refused(f"the gateway gave no token (HTTP {status}{', ' + code if code else ''}); "
-                      "run the login again")
+        code = data.get("error") if isinstance(data, dict) else None
+        if code == "invalid_grant":
+            raise _Revoked(f"the gateway no longer accepts the login (HTTP {status}); run the login again")
+        raise Refused(f"the gateway gave no token (HTTP {status}"
+                      f"{', ' + code if code in _TOKEN_ERRORS else ''}); run the login again")
     return data
 
 
@@ -180,6 +185,19 @@ def finish_login(cfg: dict, backend, found: dict, client_id: str, redirect: str,
                                      "expires": time.time() + float(data.get("expires_in") or 3600)})
 
 
+class _Revoked(Refused):
+    """The authorization server refused the refresh token for good (invalid_grant): the login is gone."""
+
+
+# the codes of the contract that an answer may name; any other string from the gateway is never shown, as it could
+# carry a value or a reference id (codex review, 2026-11-02)
+_TOKEN_ERRORS = frozenset({"invalid_grant", "invalid_client", "invalid_request", "unsupported_grant_type",
+                           "access_denied", "invalid_scope", "invalid_target"})
+_REASONS = frozenset({"unknown", "revoked", "expired", "malformed", "not_issued"})
+_FORBIDDEN = {"insufficient_scope": "the login lacks the resolve scope", "not_enabled": "the person is not allowed to "
+              "resolve references", "ineligible_sink": "this sink is not allowed"}
+
+
 def _access(cfg: dict, backend, found: dict, deadline: float, renew: bool = False) -> str:
     rec = _load(backend, found["origin"])
     if not rec.get("refresh"):
@@ -187,19 +205,26 @@ def _access(cfg: dict, backend, found: dict, deadline: float, renew: bool = Fals
                       "the person runs /maisecrets:sref login")
     if not renew and rec.get("access") and float(rec.get("expires") or 0) - time.time() > 60:
         return rec["access"]
-    # the refresh token rotates on each use: the new pair replaces the old one at once
-    data = _token(cfg, found, {"grant_type": "refresh_token", "refresh_token": rec["refresh"],
-                               "client_id": rec.get("client_id", "")}, deadline)
+    # the refresh token rotates on each use: the new pair replaces the old one at once; a refused one is forgotten,
+    # so the next call asks for a login instead of trying it again
+    try:
+        data = _token(cfg, found, {"grant_type": "refresh_token", "refresh_token": rec["refresh"],
+                                   "client_id": rec.get("client_id", "")}, deadline)
+    except _Revoked:
+        forget(backend, found["origin"])
+        raise
     _keep(backend, found["origin"], {**rec, "access": data["access_token"], "refresh": data["refresh_token"],
                                      "expires": time.time() + float(data.get("expires_in") or 3600)})
     return data["access_token"]
 
 
 # ---------------------------------------------------------------- resolve --
-def _counts(reasons: object) -> str:
+def _counts(reasons: object, batch: int) -> str:
+    """The reasons of a refused batch, only the categories of the contract with a plausible count."""
     if not isinstance(reasons, dict):
         return ""
-    parts = [f"{n} {k}" for k, n in sorted(reasons.items()) if isinstance(k, str) and isinstance(n, int)]
+    parts = [f"{n} {k}" for k, n in sorted(reasons.items(), key=lambda kv: str(kv[0]))
+             if k in _REASONS and type(n) is int and 0 < n <= batch]
     return ", ".join(parts)
 
 
@@ -244,9 +269,9 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
         if isinstance(values, dict) and all(isinstance(values.get(r), str) for r in canon):
             return {r: values[r] for r in canon}
         raise Refused(f"{host} gave no usable answer (a value is missing or not text)")
-    code = answer.get("error") if isinstance(answer.get("error"), str) else ""
+    code = answer.get("error")
     if status == 409 and code == "unresolvable":
-        detail = _counts(answer.get("reasons"))
+        detail = _counts(answer.get("reasons"), len(canon))
         raise Refused(f"{host} resolved none of the {len(canon)} references"
                       + (f" ({detail})" if detail else "") + "; use only references from a current result")
     if status == 429:
@@ -255,9 +280,9 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
         raise Refused(f"the login at {host} is no longer valid (consent withdrawn or expired); "
                       "the person runs /maisecrets:sref login")
     if status == 403:
-        raise Refused(f"{host} refused the resolve ({code or 'forbidden'})")
-    return_status = f"HTTP {status}" + (f", {code}" if code else "")
-    raise Refused(f"{host} gave no usable answer ({return_status})")
+        why = _FORBIDDEN.get(code, "forbidden") if isinstance(code, str) else "forbidden"
+        raise Refused(f"{host} refused the resolve ({why})")
+    raise Refused(f"{host} gave no usable answer (HTTP {status})")
 
 
 def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) -> None:
@@ -276,12 +301,13 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
             pass
 
         def do_GET(self) -> None:
-            q = {k: v[0] for k, v in parse_qs(urlsplit(self.path).query).items()}
-            ok = q.get("state") == state and bool(q.get("code"))
+            parts = urlsplit(self.path)
+            q = {k: v[0] for k, v in parse_qs(parts.query).items()}
+            ok = parts.path == "/callback" and q.get("state") == state and bool(q.get("code"))
             if ok:
                 box["code"] = q["code"]
-            else:
-                box.setdefault("error", q.get("error") or "the answer did not match this login")
+            elif parts.path == "/callback" and q.get("state") == state and q.get("error") == "access_denied":
+                box["denied"] = True
             page = (b"maisecrets: logged in. You can close this tab." if ok else
                     b"maisecrets: the login did not complete. Run it again.")
             self.send_response(200 if ok else 400)
@@ -292,17 +318,28 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
 
     httpd = HTTPServer(("127.0.0.1", 0), Handler)
     redirect = f"http://127.0.0.1:{httpd.server_address[1]}/callback"
-    t = threading.Thread(target=httpd.handle_request, daemon=True)
+    end = time.monotonic() + wait
+
+    def serve() -> None:
+        # until the callback of this login, the person's refusal, the time or 32 requests: another local process
+        # that sends a request first gets an error page and does not end the login (codex review, 2026-11-02)
+        for _ in range(32):
+            left = end - time.monotonic()
+            if left <= 0 or "code" in box or "denied" in box:
+                return
+            httpd.timeout = left
+            httpd.handle_request()
+    t = threading.Thread(target=serve, daemon=True)
     try:
         deadline = time.monotonic() + BUDGET
         client_id = register(cfg, found, redirect, deadline)
         verifier, challenge = pkce()
-        httpd.timeout = wait
         t.start()
         open_browser(authorize_url(found, client_id, redirect, challenge, state))
         t.join(wait + 1)
     finally:
         httpd.server_close()
     if "code" not in box:
-        raise Refused(f"the login did not complete: {box.get('error', 'no answer from the browser')}")
+        raise Refused("the login did not complete: " + ("the person declined it" if box.get("denied") else
+                                                         "no matching answer from the browser in time"))
     finish_login(cfg, backend, found, client_id, redirect, box["code"], verifier)

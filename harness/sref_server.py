@@ -49,6 +49,7 @@ class SrefServer:
         self.sinks = list(SINK_PROFILES.values())
         self.resolved: list = []
         self.access_ttl = 3600
+        self.evil = False                # True: the error answers carry a reference id in their strings
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -85,7 +86,8 @@ class SrefServer:
                     q = {k: v[0] for k, v in parse_qs(parts.query).items()}
                     redirect = q.get("redirect_uri", "")
                     if (server.clients.get(q.get("client_id")) != redirect or q.get("code_challenge_method") != "S256"
-                            or q.get("scope") != "sensitive-references.resolve" or not server.consent):
+                            or q.get("scope") != "sensitive-references.resolve" or not server.consent
+                            or q.get("response_type") != "code" or q.get("resource") != server.url):
                         return self._send(400, {"error": "invalid_request"})
                     code = secrets.token_urlsafe(16)
                     server.codes[code] = (q["client_id"], redirect, q.get("code_challenge", ""))
@@ -103,7 +105,9 @@ class SrefServer:
                 if self.path == "/register":
                     body = json.loads(raw or b"{}")
                     uris = body.get("redirect_uris") or []
-                    if len(uris) != 1 or not uris[0].startswith(("http://127.0.0.1:", "http://localhost:")):
+                    target = urlsplit(uris[0]) if len(uris) == 1 else None
+                    if (target is None or target.scheme != "http" or target.hostname not in ("127.0.0.1", "::1")
+                            or not target.port or target.path != "/callback"):
                         return self._send(400, {"error": "invalid_redirect_uri"})
                     cid = "c_" + secrets.token_hex(8)
                     server.clients[cid] = uris[0]
@@ -115,12 +119,13 @@ class SrefServer:
                         verifier = form.get("code_verifier", "")
                         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()) \
                             .rstrip(b"=").decode()
-                        if not got or got[1] != form.get("redirect_uri") or got[2] != challenge:
+                        if not got or got[1] != form.get("redirect_uri") or got[2] != challenge \
+                                or got[0] != form.get("client_id"):
                             return self._send(400, {"error": "invalid_grant"})
                         return self._send(200, server._pair(got[0]))
                     if form.get("grant_type") == "refresh_token":
                         cid = server.refresh.pop(form.get("refresh_token", ""), None)   # it rotates: used once
-                        if not cid or not server.consent:
+                        if not cid or not server.consent or cid != form.get("client_id"):
                             return self._send(400, {"error": "invalid_grant"})
                         return self._send(200, server._pair(cid))
                     return self._send(400, {"error": "unsupported_grant_type"})
@@ -145,6 +150,11 @@ class SrefServer:
                     return self._send(400, {"error": "invalid_request"})
                 if len(refs) > 100:
                     return self._send(413, {"error": "too_many_references"})
+                if server.evil:
+                    leak = refs[0] if refs else "x"
+                    return self._send(409 if sink == "local_file" else 403,
+                                      {"error": "unresolvable" if sink == "local_file" else leak,
+                                       "reasons": {leak: 1, "unknown": True, "revoked": -1}})
                 if SINK_PROFILES.get(sink) not in server.sinks:
                     return self._send(403, {"error": "ineligible_sink"})
                 reasons: dict = {}

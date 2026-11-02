@@ -82,7 +82,7 @@ class SrefClientTests(unittest.TestCase):
         self.assertEqual(self.found["resolve"], self.srv.url + "/sensitive-references/resolve")
         self.assertEqual(sorted(self.found["sinks"]), ["local-file-1", "mcpgate-process-1"])
 
-    def test_the_login_keeps_the_tokens_in_the_store_only(self):
+    def test_the_login_keeps_the_tokens_in_the_store(self):
         self.assertFalse(S.logged_in(self.backend, self.found["origin"]))
         self.login()
         self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
@@ -127,13 +127,45 @@ class SrefClientTests(unittest.TestCase):
         self.assertNotEqual(before, after, "a new pair is kept")
         self.assertEqual(len(self.srv.refresh), 1, "the old refresh token is spent")
 
-    def test_a_withdrawn_consent_asks_for_a_new_login(self):
+    def test_a_withdrawn_consent_asks_for_a_new_login_and_forgets_the_old_one(self):
         self.login()
         ref = self.srv.mint("email", VALUE_MAIL)
         self.srv.withdraw()
         with self.assertRaises(S.Refused) as cm:
             S.resolve(self.cfg, self.backend, self.found, [ref], "local_file", "/tmp/a.txt")
-        self.assertIn("token", str(cm.exception))
+        self.assertIn("run the login again", str(cm.exception))
+        self.assertFalse(S.logged_in(self.backend, self.found["origin"]), "a refused refresh token is not kept")
+
+    def test_a_string_of_the_gateway_never_reaches_an_error_message(self):
+        self.login()
+        ref = self.srv.mint("email", VALUE_MAIL)
+        self.srv.evil = True
+        for sink, dest in (("local_file", "/tmp/a.txt"), ("process", "curl")):
+            with self.subTest(sink=sink):
+                with self.assertRaises(S.Refused) as cm:
+                    S.resolve(self.cfg, self.backend, self.found, [ref], sink, dest)
+                msg = str(cm.exception)
+                self.assertNotIn(ref, msg)
+                self.assertNotIn(ref.split(":")[2], msg)
+
+    def test_another_local_request_does_not_end_the_login(self):
+        def browser(url):
+            port = url.split("127.0.0.1%3A")[1].split("%2F")[0]
+            for path in ("/favicon.ico", "/callback?code=x&state=wrong"):
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as answer:
+                        answer.read()
+                except urllib.error.HTTPError as exc:
+                    exc.close()
+            self.browser(url)
+        S.login(self.cfg, self.backend, self.found, browser, wait=10)
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+
+    def test_an_authorize_endpoint_with_a_query_keeps_it_and_adds_the_parameters(self):
+        from urllib.parse import parse_qs, urlsplit
+        found = dict(self.found, authorize="https://gw.example/authorize?tenant=a")
+        q = parse_qs(urlsplit(S.authorize_url(found, "cid", "http://127.0.0.1:1/callback", "ch", "st")).query)
+        self.assertEqual((q["tenant"], q["response_type"], q["state"]), (["a"], ["code"], ["st"]))
 
     def test_the_daily_quota_is_named(self):
         self.login()
