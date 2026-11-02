@@ -1710,7 +1710,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     the resolver script reads it under a one-time grant. Every key passes the session rule and
     the limiter before anything is recorded or served, so a refused command leaves no audit
     line and no value waiting (reviews, 2026-09-26)."""
-    command = tool_input.get("command", "")
+    from . import vault_refs
+    command = vault_refs.canonical_noted(tool_input.get("command", ""), cfg, payload.get("session_id"))
+    tool_input = {**tool_input, "command": command}
     bad_args = _args_call_refusal(command)
     if bad_args:
         return _deny(bad_args)
