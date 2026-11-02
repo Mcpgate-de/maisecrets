@@ -172,19 +172,28 @@ class SrefClientTests(unittest.TestCase):
         import time as clock
         seen = {"threads": 0}
 
-        def handlers() -> int:
-            return sum(1 for t in threading.enumerate()
-                       if getattr(getattr(t, "_target", None), "__name__", "") == "process_request_thread")
+        def handlers(port: int) -> int:
+            # the request threads of this listener only, not those of the fake gateway
+            n = 0
+            for t in threading.enumerate():
+                args = getattr(t, "_args", ())
+                if getattr(getattr(t, "_target", None), "__name__", "") == "process_request_thread" and args:
+                    try:
+                        n += args[0].getsockname()[1] == port
+                    except OSError:
+                        pass
+            return n
 
         def browser(url):
             port = int(url.split("127.0.0.1%3A")[1].split("%2F")[0])
             conns = []
             try:
-                for _ in range(64):
-                    conns.append(socket.create_connection(("127.0.0.1", port), timeout=2))
+                for _ in range(64):                # sampled from the first one, so no handler expires unseen
+                    conns.append(socket.create_connection(("127.0.0.1", port), timeout=10))
+                    seen["threads"] = max(seen["threads"], handlers(port))
                 end = clock.monotonic() + 2
                 while clock.monotonic() < end:     # the highest count the listener reaches while all 64 are open
-                    seen["threads"] = max(seen["threads"], handlers())
+                    seen["threads"] = max(seen["threads"], handlers(port))
                     clock.sleep(0.05)
             finally:
                 for c in conns:
@@ -210,9 +219,9 @@ class SrefClientTests(unittest.TestCase):
 
         def browser(url):
             port = int(url.split("127.0.0.1%3A")[1].split("%2F")[0])
-            end = __import__("time").monotonic() + 5
+            end = __import__("time").monotonic() + 15      # generous for a loaded CI runner; the login waits 20 s
             while fails["n"] < 20 and __import__("time").monotonic() < end:
-                with socket.create_connection(("127.0.0.1", port), timeout=2) as c:
+                with socket.create_connection(("127.0.0.1", port), timeout=10) as c:
                     c.recv(1)                      # the server closes it after the failed start
             self.browser(url)
         with mock.patch.object(socketserver.ThreadingMixIn, "process_request", no_thread), \
