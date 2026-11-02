@@ -505,7 +505,9 @@ _PRIMER_TAIL = (
     "stored values and the settings. When the user asks for the value in a file or a command, put the "
     "placeholder there as they asked. In test data, write values that name themselves (testpass, "
     "my-test-token), addresses at example.com and placeholders such as <your-token>: maisecrets leaves "
-    "them alone, and a password in a test file is taken for a fixture."
+    "them alone, and a password in a test file is taken for a fixture. maisecrets also leaves example values "
+    "unmasked on purpose: a run of digits (040 3456789), a documented test card, an address at example.com, a "
+    "documentation IP; when the user asks why such a value is not masked, that is the reason."
 )
 PRIMER = _PRIMER_HEAD + _PRIMER_DOCUMENT + _PRIMER_TAIL
 # on Windows a shell command takes a value only in the Bash tool of Claude Code (Git Bash)
