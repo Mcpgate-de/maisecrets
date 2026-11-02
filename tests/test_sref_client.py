@@ -142,6 +142,49 @@ class SrefClientTests(unittest.TestCase):
                 self.assertEqual(S.logged_in(self.backend, self.found["origin"]), kept)
                 self.srv.token_answer = None
 
+    def test_an_unknown_sink_type_is_named_in_fixed_text(self):
+        self.login()
+        sentinel = "⟦sref:email:" + "u" * 24 + "⟧"
+        with self.assertRaises(S.Refused) as cm:
+            S.resolve(self.cfg, self.backend, self.found, [self.srv.mint("email", VALUE_MAIL)], sentinel, "x")
+        self.assertEqual(str(cm.exception), "unknown sink type")
+
+    def test_a_timeout_on_the_refresh_keeps_the_login(self):
+        from unittest import mock
+        self.login()
+        self.srv.access.clear()
+        real = S._request
+
+        def slow(cfg, method, url, *a, **kw):
+            if url == self.found["token"]:
+                raise TimeoutError("the server took too long")
+            return real(cfg, method, url, *a, **kw)
+        with mock.patch.object(S, "_request", slow):
+            with self.assertRaises(S.Refused):
+                S.resolve(self.cfg, self.backend, self.found, [self.srv.mint("email", VALUE_MAIL)], "process", "mail")
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+
+    def test_many_silent_local_connections_hold_few_threads_and_the_login_goes_on(self):
+        # a process of the same user can always disturb its own login (C22); what the listener must not do is grow
+        # without bound or end: at most 16 connections hold a thread, and the login completes once they are gone
+        import socket
+        import threading
+        import time as clock
+        seen = {}
+
+        def browser(url):
+            port = int(url.split("127.0.0.1%3A")[1].split("%2F")[0])
+            before = threading.active_count()
+            conns = [socket.create_connection(("127.0.0.1", port)) for _ in range(64)]
+            clock.sleep(0.5)
+            seen["threads"] = threading.active_count() - before
+            for c in conns:
+                c.close()
+            self.browser(url)
+        S.login(self.cfg, self.backend, self.found, browser, wait=20)
+        self.assertLessEqual(seen["threads"], 16, "the connections beyond 16 hold no thread")
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+
     def test_a_string_of_the_token_endpoint_or_the_callback_never_reaches_an_error(self):
         self.login()
         sentinel = "⟦sref:email:" + "s" * 24 + "⟧"

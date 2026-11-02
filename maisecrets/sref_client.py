@@ -329,8 +329,26 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
             self.end_headers()
             self.wfile.write(page)
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    httpd.daemon_threads = True
+    slots = threading.BoundedSemaphore(16)
+
+    class Listener(ThreadingHTTPServer):
+        daemon_threads = True
+
+        def process_request(self, request, client_address):
+            # at most 16 connections at once: one more is closed at once, and the listener stays open for the
+            # browser's callback (many slow local connections cannot exhaust the threads; codex review, round 3)
+            if not slots.acquire(blocking=False):
+                self.shutdown_request(request)
+                return
+            super().process_request(request, client_address)
+
+        def process_request_thread(self, request, client_address):
+            try:
+                super().process_request_thread(request, client_address)
+            finally:
+                slots.release()
+
+    httpd = Listener(("127.0.0.1", 0), Handler)
     redirect = f"http://127.0.0.1:{httpd.server_address[1]}/callback"
     # until the callback of this login, the person's refusal or the time: another local process that sends wrong
     # requests, many of them, or a slow one, gets an error page or holds one thread, and the login goes on (codex
