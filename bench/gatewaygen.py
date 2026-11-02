@@ -54,8 +54,9 @@ class Out:
         self.values: list = []
         self.placed: list = []   # (index into values, start, end) of each value in the rendered text
 
-    def put(self, value: str, cls: str = "", kind: str = "") -> str:
-        self.values.append((value, cls, kind))
+    def put(self, value: str, cls: str = "", kind: str = "", policy: str = "") -> str:
+        # policy: a span of `cls` that counts as neither right nor wrong (score.py, `neutral`), reported apart
+        self.values.append((value, cls, kind, policy))
         return f"\ue000{len(self.values) - 1}\ue001"
 
     def render(self, obj) -> tuple:
@@ -70,11 +71,12 @@ class Out:
             text.append(raw[i:j])
             n += j - i
             k = raw.index("\ue001", j)
-            value, cls, kind = self.values[int(raw[j + 1:k])]
+            value, cls, kind, policy = self.values[int(raw[j + 1:k])]
             written = json.dumps(value, ensure_ascii=False)[1:-1]
             self.placed.append((int(raw[j + 1:k]), n, n + len(written)))
             if cls:
-                spans.append({"start": n, "end": n + len(written), "class": cls})
+                spans.append({"start": n, "end": n + len(written), "class": cls,
+                              **({"neutral": True, "policy": policy} if policy else {})})
             elif kind:
                 looks.append({"start": n, "end": n + len(written), "kind": kind})
             text.append(written)
@@ -93,9 +95,10 @@ class Out:
             text.append(value[i:j])
             n += j - i
             k = value.index("\ue001", j)
-            v, cls, kind = self.values[int(value[j + 1:k])]
+            v, cls, kind, policy = self.values[int(value[j + 1:k])]
             if cls:
-                spans.append({"start": n, "end": n + len(v), "class": cls})
+                spans.append({"start": n, "end": n + len(v), "class": cls,
+                              **({"neutral": True, "policy": policy} if policy else {})})
             elif kind:
                 looks.append({"start": n, "end": n + len(v), "kind": kind})
             text.append(v)
@@ -157,10 +160,12 @@ def _gitlab(o, r, people, lang):
 
 def _mail(o, r, people, domain):
     roll = r.random()
+    # a role or a notification address names no person: masking it is the safe default, so it is neither right nor
+    # wrong here and reported apart (agreed with the gateway, 2026-11-02)
     if roll < 0.12:
-        return o.put(f"{r.choice(_SYSTEM_MAIL)}@{domain}", kind="system mailbox")
+        return o.put(f"{r.choice(_SYSTEM_MAIL)}@{domain}", "pii.email", policy="system mailbox")
     if roll < 0.22:
-        return o.put(f"{r.choice(_TEAM_MAIL)}@{domain}", kind="team mailbox")
+        return o.put(f"{r.choice(_TEAM_MAIL)}@{domain}", "pii.email", policy="team mailbox")
     return o.put(r.choice(people)["email"], "pii.email")
 
 
@@ -243,7 +248,7 @@ def objects(count: int = COUNT, seed: int = SEED):
 if __name__ == "__main__":
     import collections
     cs = list(generate())
-    by = collections.Counter(s["class"] for c in cs for s in c["spans"])
+    by = collections.Counter(s.get("policy") or s["class"] for c in cs for s in c["spans"])
     look = collections.Counter(x["kind"] for c in cs for x in c["lookalikes"])
     print(json.dumps({"cases": len(cs), "spans": dict(by), "lookalikes": dict(look),
                       "splits": dict(collections.Counter(c["split"] for c in cs))}, indent=1))

@@ -11,7 +11,9 @@ de, languages en and de, channel tool, no sources, no host user), no NER. It rea
 - the time of each call, by leaf length (the fastest of --repeat calls), and the time of a whole response (every leaf
   once, the fastest of --repeat whole passes), which is what the gateway's shadow measures.
 
-Precision counts findings: a finding on a labelled span is right, one elsewhere is a false positive.
+Precision counts findings: a finding on a labelled span is right, one elsewhere is a false positive. A role or a
+notification mailbox (support@, notifications@) is a neutral span: neither right nor wrong, and counted apart as
+masked or text.
 
 The gateway rules (detector_shadow._leaves and _label_prefix, ai-gateway 7b5470bd8): a dict key adds ".key" to the
 path, a list item keeps its list's path, the prefix is the last key and ": " unless that key is empty, a number or a
@@ -126,7 +128,7 @@ class _Shifted:
 
 
 def run(det, items, repeat: int, mode: str = "prefix") -> dict:
-    spans, fps, hits = [], [], collections.Counter()
+    spans, fps, hits, neutral = [], [], collections.Counter(), collections.defaultdict(collections.Counter)
     leaf_ms, resp_ms = collections.defaultdict(list), collections.defaultdict(list)
     det.findings("warm: a first call loads the rules", channel="tool")
     for case, o, obj in items:
@@ -181,14 +183,19 @@ def run(det, items, repeat: int, mode: str = "prefix") -> dict:
             ms = [(m.start - n, m.end - n, m.type) for m in found if m.end > n]
             sc = score.score_case({"text": text, "spans": sp}, ms, adapter.SCOPE)
             hits[label(path)] += sum(sc["on_target"].values())
-            for s, out in zip(sp, sc["spans"]):
+            for s in sp:
+                if s.get("policy"):
+                    cov = score._covered([(a, b) for a, b, _ in ms], s["start"], s["end"])
+                    neutral[s["policy"]]["spans"] += 1
+                    neutral[s["policy"]]["masked" if cov == s["end"] - s["start"] else "text"] += 1
+            for s, out in zip([s for s in sp if not s.get("neutral")], sc["spans"]):
                 spans.append({"class": s["class"], "outcome": out["outcome"], "label": label(path),
                               "service": service, "lang": case["lang"]})
             for s, e, typ in sc["fp_found"]:
                 look = next((lk for lk in looks if s < lk["end"] and e > lk["start"]), None)
                 fps.append({"type": typ, "label": label(path), "kind": look["kind"] if look else "structure",
                             "service": service})
-    return {"spans": spans, "fps": fps, "hits": hits, "leaf_ms": leaf_ms, "resp_ms": resp_ms}
+    return {"spans": spans, "fps": fps, "hits": hits, "neutral": neutral, "leaf_ms": leaf_ms, "resp_ms": resp_ms}
 
 
 def _pct(xs, q):
@@ -215,6 +222,7 @@ def summary(r: dict) -> dict:
         "precision_by_label": {k: {"findings": r["hits"][k] + fp_label[k], "fp": fp_label[k],
                                    "precision": round(r["hits"][k] / (r["hits"][k] + fp_label[k]), 4)}
                                for k in sorted(set(r["hits"]) | set(fp_label)) if r["hits"][k] + fp_label[k]},
+        "neutral_mailboxes": {k: dict(v) for k, v in sorted(r.get("neutral", {}).items())},
         "fp_by_kind": dict(collections.Counter(f["kind"] for f in r["fps"]).most_common()),
         "fp_by_kind_label_type": [[*k, n] for k, n in collections.Counter(
             (f["kind"], f["label"], f["type"]) for f in r["fps"]).most_common(40)],

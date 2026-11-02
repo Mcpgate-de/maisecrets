@@ -42,7 +42,7 @@ class GatewayCorpusTests(unittest.TestCase):
     def test_leaf_spans_sit_on_their_values(self):
         n = 0
         for _, o, obj in self.items:
-            values = {v for v, cls, _ in o.values if cls}
+            values = {v for v, cls, _, _ in o.values if cls}
             for _, raw in R.leaves(obj):
                 text, spans, _ = o.leaf(raw)
                 self.assertNotIn("", text)
@@ -53,15 +53,17 @@ class GatewayCorpusTests(unittest.TestCase):
 
     def test_every_mail_domain_is_internal(self):
         for _, o, _ in self.items:
-            for v, cls, kind in o.values:
-                if "@" in v and (cls == "pii.email" or kind.endswith("mailbox")):
+            for v, cls, kind, policy in o.values:
+                if "@" in v and cls == "pii.email":
                     self.assertTrue(v.endswith(".internal"))
 
     def test_all_classes_and_lookalikes_occur(self):
         classes = {s["class"] for c, _, _ in self.items for s in c["spans"]}
         kinds = {x["kind"] for c, _, _ in self.items for x in c["lookalikes"]}
         self.assertEqual(classes, {"pii.name", "pii.username", "pii.email"})
-        self.assertEqual(kinds, {"bot", "project", "product", "branch", "system mailbox", "team mailbox"})
+        self.assertEqual(kinds, {"bot", "project", "product", "branch"})
+        policies = {s.get("policy") for c, _, _ in self.items for s in c["spans"] if s.get("neutral")}
+        self.assertEqual(policies, {"system mailbox", "team mailbox"})
 
     def test_no_sealed_split(self):
         self.assertEqual({c["split"] for c in G.generate()}, {"dev", "val"})
@@ -139,6 +141,19 @@ class ReportMetricTests(unittest.TestCase):
         self.assertEqual(rep["precision"], round(2 / 3, 4))
         self.assertEqual(rep["precision_by_label"]["author.name"]["precision"], 1.0)
         self.assertEqual(rep["precision_by_label"]["title"]["precision"], 0.0)
+
+    def test_a_masked_role_mailbox_is_no_false_positive_and_is_counted_apart(self):
+        o = G.Out()
+        obj = [{"organizer": {"email": o.put("support@nordwerk.internal", "pii.email", policy="team mailbox")}}]
+        case = {"tags": ["service:google_workspace"], "lang": "en"}
+
+        class Det:
+            def findings(self, text, channel, fields=None):
+                return [_Match(7, len(text), "EMAIL")] if text.startswith("email: ") else []
+        r = R.run(Det(), [(case, o, obj)], repeat=1)
+        rep = R.summary(r)
+        self.assertEqual((rep["fp"], rep["spans"]), (0, 0))
+        self.assertEqual(rep["neutral_mailboxes"], {"team mailbox": {"spans": 1, "masked": 1}})
 
     def test_a_response_takes_the_fastest_whole_pass_not_a_sum_of_leaf_minima(self):
         class Det:
