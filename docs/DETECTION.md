@@ -269,7 +269,8 @@ for leaf, m in findings_by_leaf(detector, response):     # layout "lines", the d
 - **The label** of a string is its last key, unless that key could change the label line: a key that is empty or
   longer than 64 characters, holds a line boundary (`\r`, U+2028 and the others of `str.splitlines`) or a control
   character, holds one of `: = | " '`, or names the cursor of a paged list (`nextPageToken`, as the gateway). Such a
-  string stands on its line without a label.
+  string stands on its line without a label, and starts a scan of its own: after another string, that string's last
+  line (`password:`) would read as its label.
 - **A span** is one of the string as the caller holds it; `m.value` is `leaf.value[m.start:m.end]`. A finding in a
   key, a label or the structure belongs to no string (`leaf` is None); one that runs past the end of its string is cut
   there; a span of length zero stays one, also at the end of a string and in an empty string. Placing the findings is

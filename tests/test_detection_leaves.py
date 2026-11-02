@@ -221,8 +221,10 @@ class LinesLayoutTests(unittest.TestCase):
                 return [M(self.at(text), self.at(text), "X", "")]
         (leaf, m), = L.findings_by_leaf(Det(lambda t: t.index("abc") + 3), {"a": "abc", "b": "def"})
         self.assertEqual((leaf.value, m.start, m.end), ("abc", 3, 3))
-        (leaf, m), = L.findings_by_leaf(Det(lambda t: 0), [["", "z"]])
-        self.assertEqual((leaf.value, m.start), ("", 0))
+        found = L.findings_by_leaf(Det(lambda t: 0), [["", "z"]])   # no labels: one scan for each string
+        self.assertEqual([(leaf.value, m.start) for leaf, m in found], [("", 0), ("z", 0)])
+        (leaf, m), = L.findings_by_leaf(Det(lambda t: len(t)), {"a": ""})
+        self.assertEqual((leaf.value, m.start, m.end), ("", 0, 0))
 
     def test_placing_the_findings_grows_linearly(self):
         from _timing import assert_linear
@@ -244,6 +246,25 @@ class LinesLayoutTests(unittest.TestCase):
                 return found
         assert_linear(self, lambda obj: L.findings_by_leaf(Det(), obj), lambda n: {f"k{i}": "abcd" for i in range(n)},
                       16_000)
+
+    def test_a_line_of_one_string_never_labels_a_string_without_a_label(self):
+        v = "Zq8v" + "Lm2p" + "R7xw" + "Kd4n"   # built from parts: the repository scan reads literals
+        for obj in ({"a": "prefix\npassword:", "": v}, {"a": "password:", "": v},
+                    {"a": "prefix\npassword:", "nextPageToken": v}, {"a": "password:", "x=y": v}):
+            with self.subTest(keys=list(obj)):
+                self.assertEqual([x for x in _got(obj, "lines") if x[1] == "SECRET"], [])
+        self.assertTrue([x for x in _got({"a": "x", "password": v}, "lines") if x[1] == "SECRET"],
+                        "the premise: the value is a secret after its own label")
+
+    def test_the_scan_texts_carry_no_unsafe_label(self):
+        calls = []
+
+        class Det:
+            def findings(self, text, channel, **kw):
+                calls.append(text)
+                return []
+        L.findings_by_leaf(Det(), {"email": "a", "x\rpassword": "b", "x=password": "c", "nextPageToken": "d"})
+        self.assertEqual(calls, ["email: a", "b", "c", "d"])
 
     def test_an_unknown_layout_is_refused(self):
         with self.assertRaises(ValueError):

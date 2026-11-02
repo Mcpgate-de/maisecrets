@@ -142,9 +142,20 @@ def _label(path: tuple) -> str:
     return "" if is_cursor(label_words(last), field=True) else last
 
 
+def _segments(group: list) -> list:
+    """A record cut before each string that has no label: on its own line after another string, the last line of that
+    string (`password:`) would read as its label, which neither string gives alone (codex review, 2026-11-02)."""
+    out = []
+    for leaf in group:
+        if not out or not _label(leaf.path):
+            out.append([])
+        out[-1].append(leaf)
+    return out
+
+
 def _lines(detector, obj, channel: str, **kwargs) -> list:
     out = []
-    for group in records(json_text(obj)[1]):
+    for group in (seg for rec in records(json_text(obj)[1]) for seg in _segments(rec)):
         parts, placed, n = [], [], 0
         for leaf in group:
             label = _label(leaf.path)
