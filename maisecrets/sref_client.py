@@ -340,7 +340,11 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
             if not slots.acquire(blocking=False):
                 self.shutdown_request(request)
                 return
-            super().process_request(request, client_address)
+            try:
+                super().process_request(request, client_address)
+            except BaseException:
+                slots.release()           # the thread did not start, so it cannot release the slot
+                raise
 
         def process_request_thread(self, request, client_address):
             try:

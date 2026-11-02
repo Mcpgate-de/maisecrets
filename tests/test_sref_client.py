@@ -16,6 +16,7 @@ import tempfile
 import unittest
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -150,7 +151,6 @@ class SrefClientTests(unittest.TestCase):
         self.assertEqual(str(cm.exception), "unknown sink type")
 
     def test_a_timeout_on_the_refresh_keeps_the_login(self):
-        from unittest import mock
         self.login()
         self.srv.access.clear()
         real = S._request
@@ -170,19 +170,55 @@ class SrefClientTests(unittest.TestCase):
         import socket
         import threading
         import time as clock
-        seen = {}
+        seen = {"threads": 0}
+
+        def handlers() -> int:
+            return sum(1 for t in threading.enumerate()
+                       if getattr(getattr(t, "_target", None), "__name__", "") == "process_request_thread")
 
         def browser(url):
             port = int(url.split("127.0.0.1%3A")[1].split("%2F")[0])
-            before = threading.active_count()
-            conns = [socket.create_connection(("127.0.0.1", port)) for _ in range(64)]
-            clock.sleep(0.5)
-            seen["threads"] = threading.active_count() - before
-            for c in conns:
-                c.close()
+            conns = []
+            try:
+                for _ in range(64):
+                    conns.append(socket.create_connection(("127.0.0.1", port), timeout=2))
+                end = clock.monotonic() + 2
+                while clock.monotonic() < end:     # the highest count the listener reaches while all 64 are open
+                    seen["threads"] = max(seen["threads"], handlers())
+                    clock.sleep(0.05)
+            finally:
+                for c in conns:
+                    c.close()
             self.browser(url)
         S.login(self.cfg, self.backend, self.found, browser, wait=20)
+        self.assertGreater(seen["threads"], 0, "the count sees the handler threads")
         self.assertLessEqual(seen["threads"], 16, "the connections beyond 16 hold no thread")
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+
+    def test_a_thread_that_does_not_start_gives_its_slot_back(self):
+        import socket
+        import socketserver
+        real = socketserver.ThreadingMixIn.process_request
+        fails = {"n": 0}
+
+        def no_thread(server, request, client_address):
+            # only the login listener on plain http; the fake gateway serves over TLS
+            if fails["n"] < 20 and not isinstance(server.socket, ssl.SSLSocket):   # more than the 16 slots
+                fails["n"] += 1
+                raise RuntimeError("can't start new thread")
+            return real(server, request, client_address)
+
+        def browser(url):
+            port = int(url.split("127.0.0.1%3A")[1].split("%2F")[0])
+            end = __import__("time").monotonic() + 5
+            while fails["n"] < 20 and __import__("time").monotonic() < end:
+                with socket.create_connection(("127.0.0.1", port), timeout=2) as c:
+                    c.recv(1)                      # the server closes it after the failed start
+            self.browser(url)
+        with mock.patch.object(socketserver.ThreadingMixIn, "process_request", no_thread), \
+                mock.patch.object(socketserver.BaseServer, "handle_error", lambda *a: None):
+            S.login(self.cfg, self.backend, self.found, browser, wait=20)
+        self.assertEqual(fails["n"], 20)
         self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
 
     def test_a_string_of_the_token_endpoint_or_the_callback_never_reaches_an_error(self):
