@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.8.12] - 2026-11-02
+
+### Features
+
+- a person's name under author, reviewer or assignee in API data is found when its surname is a word (5c0429e)
+
+### Fixes
+
+- User is a surname after a role key too (04cb5d4)
+- an account or a team after a prefixed role key stays text, and Guest stays a surname (7cee7cf)
+- a rule whose leading characters are not in the text is skipped before its regex runs (92380fd)
+- a greeting alone (Hallo, Hi, Dear) is no longer masked as a person by the name service (0403692)
+
 ## [0.8.11] - 2026-11-02
 
 ### Fixes
