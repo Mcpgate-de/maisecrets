@@ -965,3 +965,21 @@ class SharpSTests(Base):
             with self.subTest(n=len(value)):
                 self.assertText("Name: " + value + "\n")
                 self.assertNotIn("NAME", [m.type for m in scan(value + " <info@example.com>\n")])
+
+
+class RoleKeyTests(Base):
+    # the role keys of API data that findings_by_leaf writes for author.name and the like (2026-11-02): a person's
+    # name after them, also with a surname that is an English word; no account, team or state word
+    NAME = "Nora" + " " + "Baker"
+
+    def test_a_name_after_a_role_key_is_masked(self):
+        for key in ("author_name", "reviewer_name", "assignee_display_name", "reporter_display_name",
+                    "merged_by_name", "merge_user_name", "organizer_display_name"):
+            with self.subTest(key=key):
+                self.assertMasked(f"{key}: {self.NAME}\n", self.NAME)
+        self.assertText(f"name: {self.NAME}\n")   # the premise: after the weak label it reads as words
+
+    def test_an_account_or_a_team_after_a_role_key_stays_text(self):
+        for value in ("Deleted User", "Platform Team", "Human Resources", "Plattform Mannschaft", "Release Bot"):
+            with self.subTest(n=len(value)):
+                self.assertText(f"author_name: {value}\n")
