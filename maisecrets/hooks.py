@@ -2099,7 +2099,11 @@ def _elsewhere_reason(keys: list[str]) -> str:
 def _all_refs(text: str, values: dict) -> list[tuple[str, int, int]]:
     """The stored-value placeholders of text, and the server-range tokens that have a value in `values`."""
     from . import vault_refs
-    return find_refs(text) + [r for r in vault_refs.find(text) if r[0] in values]
+    out = find_refs(text) + [r for r in vault_refs.find(text) if r[0] in values]
+    if "sref:" in text:
+        from . import sref_client
+        out += [(r[1:-1], a, b) for r, _c, a, b in sref_client.find(text) if r[1:-1] in values]
+    return out
 
 
 def _deny_reason(failed: list[str]) -> str:
@@ -2380,6 +2384,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
 
     def collect_server(v: str) -> str:
         server.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        server.extend(k for k, _a, _b in _sref_refs(v, payload.get("session_id"))[0])
         return v
     _walk_strings(target, collect_server)
     server = list(dict.fromkeys(server))
@@ -2387,6 +2392,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
 
     def collect_elsewhere(v: str) -> str:
         elsewhere.extend(vault_refs.noted_elsewhere(v, cfg, payload.get("session_id")))
+        elsewhere.extend(r[1:-1] for r in _sref_refs(v, payload.get("session_id"))[1])
         return v
     _walk_strings(target, collect_elsewhere)
     if elsewhere:
@@ -2397,6 +2403,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
 
     def collect_outside(v: str) -> str:
         outside.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        outside.extend(k for k, _a, _b in _sref_refs(v, payload.get("session_id"))[0])
         return v
     _walk_strings({k: v for k, v in target.items() if k not in _CONTENT_FIELDS}, collect_outside)
     if outside:
@@ -2414,7 +2421,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     failed = _precheck(vault, list(dict.fromkeys(found)), session, extra=_server_limit_keys(server, session))
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
-    got, why = _server_fetch(cfg, vault, server, session)
+    got, why = _server_fetch(cfg, vault, server, session, ("local_file", paths[0] if len(paths) == 1 else path))
     if why:
         return _deny(why + " Nothing was written.")
     for key in dict.fromkeys(found):

@@ -117,6 +117,26 @@ class SrefBashTests(unittest.TestCase):
         self.assertIn("/maisecrets:sref login", reason)
         self.assertNotIn(self.ref[6:-1].split(":")[-1], reason.replace(self.shown, ""), "no id beyond the reference")
 
+    def write(self, path: str, content: str) -> dict:
+        hooks._live_cache.clear()
+        return hooks.pre_tool({"tool_name": "Write", "session_id": "s1", **CLAUDE, "cwd": str(self.profile),
+                               "tool_input": {"file_path": path, "content": content}})
+
+    def test_a_file_gets_the_value_and_the_gateway_learns_the_path(self):
+        self.login()
+        self.result()
+        target = str(self.profile / "invite.txt")
+        out = self.write(target, "To: " + self.shown + "\n")
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["content"], "To: " + VALUE + "\n")
+        self.assertEqual([(r["sink_type"], r["destination"]) for r in self.srv.resolved], [("local_file", target)])
+
+    def test_a_reference_in_the_path_is_refused(self):
+        self.login()
+        self.result()
+        out = self.write(str(self.profile / self.shown), "x")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self.srv.resolved, [])
+
     def test_the_audit_names_the_reference_without_its_id(self):
         self.login()
         self.result()
