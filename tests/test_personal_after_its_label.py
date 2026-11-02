@@ -988,5 +988,10 @@ class RoleKeyTests(Base):
                     self.assertText(f"{key}: {value}\n")
 
     def test_a_surname_that_is_also_an_account_word_stays_a_name(self):
-        name = "Christopher" + " " + "Guest"
-        self.assertMasked(f"author_name: {name}\n", name)
+        for name in ("Christopher" + " " + "Guest", "Priyanka" + " " + "User"):
+            for key in ("author_name", "customer_name", "full_name"):
+                with self.subTest(key=key, n=len(name)):
+                    self.assertMasked(f"{key}: {name}\n", name)
+        for phrase in ("Guest User", "Ghost User", "Test User"):
+            with self.subTest(phrase=phrase):
+                self.assertText(f"author_name: {phrase}\n")
