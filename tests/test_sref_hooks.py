@@ -137,6 +137,30 @@ class SrefBashTests(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertEqual(self.srv.resolved, [])
 
+    def test_the_command_logs_in_shows_the_state_and_logs_out_and_prints_no_token(self):
+        import contextlib
+        import io
+        from maisecrets import cli
+        helper = T.SrefClientTests("test_discovery_names_the_resolver_and_its_sinks")
+        helper.srv = self.srv
+
+        def run(*args) -> tuple:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), mock.patch("webbrowser.open", helper.browser):
+                code = cli.cmd_sref(list(args))
+            return code, out.getvalue()
+        code, text = run()
+        self.assertEqual(code, 0)
+        self.assertIn("gw (127.0.0.1): not logged in", text)
+        code, text = run("login")
+        self.assertEqual(code, 0, text)
+        self.assertIn("logged in to 127.0.0.1", text)
+        self.assertNotIn("srefr_", text)
+        self.assertIn("logged in", run("status")[1].split(": ", 1)[1])
+        self.assertEqual(run("logout")[0], 0)
+        self.assertFalse(S.logged_in(self.backend, self.found["origin"]))
+        self.assertEqual(run("login", "other")[0], 1, "an unknown server name")
+
     def test_the_audit_names_the_reference_without_its_id(self):
         self.login()
         self.result()
