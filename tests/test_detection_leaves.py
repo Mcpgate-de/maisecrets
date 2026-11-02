@@ -131,7 +131,8 @@ class FindingsByLeafTests(unittest.TestCase):
         found = {leaf.path[-1] for leaf, m in L.findings_by_leaf(D, {"last_name": last, "first_name": first}) if leaf}
         alone = {k for k, v in (("last_name", last), ("first_name", first))
                  if [m for m in D.findings(f"{k}: {v}", channel="tool") if m.start > len(k)]}
-        self.assertLessEqual(alone, found)
+        self.assertLess(alone, found)
+        self.assertIn("last_name", found - alone)
 
     def test_a_finding_in_a_key_belongs_to_no_string(self):
         found = L.findings_by_leaf(D, {MAIL: "x"})
