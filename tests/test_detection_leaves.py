@@ -165,6 +165,9 @@ class LinesLayoutTests(unittest.TestCase):
         "JSON inside a string keeps its label": {"body": 'payload: {"username": "jdoe84", "role": "dev"}'},
         "a record gives no context to the next": [{"note": "Steuer-ID folgt im nächsten Feld"},
                                                   {"value": "860957" + "42719"}],
+        # a Figma file key under file_key: after "file_key: " a key, in the JSON text not (gateway suite, 2026-11-02)
+        "a key name is read as the label of its value": {"meta": {"components": [
+            {"file_key": "qwert" + "7" + "yuiopas" + "42" + "dfghjkl", "name": "Button"}]}},
     }
 
     def test_the_json_layout_differs_on_these_shapes(self):
