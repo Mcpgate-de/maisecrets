@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.8.10] - 2026-11-02
+
+### Features
+
+- a parsed response is scanned once, and each finding comes back in its string (09202fa)
+
+### Fixes
+
+- fields= scans a value bare only when its label gives a hit (1ec5f4d)
+- German greetings and street words are no names, with ß or with ss (c046907)
+- German names with ß are found after their label and before a mail address (66550e2)
+- findings_by_leaf writes str subclasses and any depth as json.dumps does (b882297)
+
 ## [0.8.9] - 2026-11-02
 
 ### Features
