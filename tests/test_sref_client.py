@@ -7,6 +7,7 @@ Run: python3 -m unittest tests.test_sref_client -v
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import ssl
@@ -119,13 +120,51 @@ class SrefClientTests(unittest.TestCase):
 
     def test_an_expired_access_token_is_refreshed_once_and_the_refresh_token_rotates(self):
         self.login()
-        before = self.backend.get(S._entry(self.found["origin"]))
+        old = json.loads(self.backend.get(S._entry(self.found["origin"])))["refresh"]
         self.srv.access.clear()                      # the access token died early on the server
         ref = self.srv.mint("email", VALUE_MAIL)
         self.assertEqual(S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail"), {ref: VALUE_MAIL})
-        after = self.backend.get(S._entry(self.found["origin"]))
-        self.assertNotEqual(before, after, "a new pair is kept")
-        self.assertEqual(len(self.srv.refresh), 1, "the old refresh token is spent")
+        new = json.loads(self.backend.get(S._entry(self.found["origin"])))["refresh"]
+        self.assertNotEqual(old, new, "a new refresh token is kept")
+        self.assertNotIn(old, self.srv.refresh, "the old refresh token is spent")
+        self.assertIn(new, self.srv.refresh)
+
+    def test_only_a_400_invalid_grant_ends_the_login(self):
+        ref = self.srv.mint("email", VALUE_MAIL)
+        for answer, kept in (((500, {"error": "invalid_grant"}), True), ((503, {"error": "busy"}), True),
+                             ((400, {"error": "invalid_grant"}), False)):
+            with self.subTest(status=answer[0]):
+                self.login()
+                self.srv.access.clear()
+                self.srv.token_answer = answer
+                with self.assertRaises(S.Refused):
+                    S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+                self.assertEqual(S.logged_in(self.backend, self.found["origin"]), kept)
+                self.srv.token_answer = None
+
+    def test_a_string_of_the_token_endpoint_or_the_callback_never_reaches_an_error(self):
+        self.login()
+        sentinel = "⟦sref:email:" + "s" * 24 + "⟧"
+        self.srv.access.clear()
+        self.srv.token_answer = (400, {"error": sentinel})
+        with self.assertRaises(S.Refused) as cm:
+            S.resolve(self.cfg, self.backend, self.found, [self.srv.mint("email", VALUE_MAIL)], "process", "mail")
+        self.assertNotIn(sentinel, str(cm.exception))
+        self.srv.token_answer = None
+
+        def refusing_browser(url):
+            port = url.split("127.0.0.1%3A")[1].split("%2F")[0]
+            state = url.split("state=")[1].split("&")[0]
+            try:
+                from urllib.parse import quote
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?state={state}&error={quote(sentinel)}",
+                                            timeout=5) as answer:
+                    answer.read()
+            except urllib.error.HTTPError as exc:
+                exc.close()
+        with self.assertRaises(S.Refused) as cm:
+            S.login(self.cfg, self.backend, self.found, refusing_browser, wait=2)
+        self.assertNotIn(sentinel, str(cm.exception))
 
     def test_a_withdrawn_consent_asks_for_a_new_login_and_forgets_the_old_one(self):
         self.login()
@@ -151,7 +190,10 @@ class SrefClientTests(unittest.TestCase):
     def test_another_local_request_does_not_end_the_login(self):
         def browser(url):
             port = url.split("127.0.0.1%3A")[1].split("%2F")[0]
-            for path in ("/favicon.ico", "/callback?code=x&state=wrong"):
+            import socket
+            silent = socket.create_connection(("127.0.0.1", int(port)))   # sends nothing, holds one thread
+            self.addCleanup(silent.close)
+            for path in ["/favicon.ico", "/callback?code=x&state=wrong"] * 20:
                 try:
                     with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as answer:
                         answer.read()
@@ -163,9 +205,10 @@ class SrefClientTests(unittest.TestCase):
 
     def test_an_authorize_endpoint_with_a_query_keeps_it_and_adds_the_parameters(self):
         from urllib.parse import parse_qs, urlsplit
-        found = dict(self.found, authorize="https://gw.example/authorize?tenant=a")
+        found = dict(self.found, authorize="https://gw.example/authorize?tenant=a&state=old&redirect_uri=x")
         q = parse_qs(urlsplit(S.authorize_url(found, "cid", "http://127.0.0.1:1/callback", "ch", "st")).query)
-        self.assertEqual((q["tenant"], q["response_type"], q["state"]), (["a"], ["code"], ["st"]))
+        self.assertEqual((q["tenant"], q["response_type"], q["state"], q["redirect_uri"]),
+                         (["a"], ["code"], ["st"], ["http://127.0.0.1:1/callback"]))
 
     def test_the_daily_quota_is_named(self):
         self.login()

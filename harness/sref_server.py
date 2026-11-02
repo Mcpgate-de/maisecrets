@@ -50,6 +50,7 @@ class SrefServer:
         self.resolved: list = []
         self.access_ttl = 3600
         self.evil = False                # True: the error answers carry a reference id in their strings
+        self.token_answer = None         # (status, body): the token endpoint answers this to a refresh
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -109,6 +110,11 @@ class SrefServer:
                     if (target is None or target.scheme != "http" or target.hostname not in ("127.0.0.1", "::1")
                             or not target.port or target.path != "/callback"):
                         return self._send(400, {"error": "invalid_redirect_uri"})
+                    if (body.get("grant_types") != ["authorization_code", "refresh_token"]
+                            or body.get("response_types") != ["code"]
+                            or body.get("token_endpoint_auth_method") != "none"
+                            or body.get("scope") != "sensitive-references.resolve"):
+                        return self._send(400, {"error": "invalid_client_metadata"})
                     cid = "c_" + secrets.token_hex(8)
                     server.clients[cid] = uris[0]
                     return self._send(201, {"client_id": cid, "redirect_uris": uris})
@@ -123,6 +129,8 @@ class SrefServer:
                                 or got[0] != form.get("client_id"):
                             return self._send(400, {"error": "invalid_grant"})
                         return self._send(200, server._pair(got[0]))
+                    if form.get("grant_type") == "refresh_token" and server.token_answer is not None:
+                        return self._send(*server.token_answer)
                     if form.get("grant_type") == "refresh_token":
                         cid = server.refresh.pop(form.get("refresh_token", ""), None)   # it rotates: used once
                         if not cid or not server.consent or cid != form.get("client_id"):

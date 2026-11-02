@@ -17,6 +17,9 @@ is proven end to end.
 - The token: `srefr_…` for one hour, a refresh token for 30 days that rotates on each use. Both live in the store,
   under one entry per gateway origin; never in a file of the plugin, never in a log.
 
+An error message holds fixed text, the HTTP status, validated counts and the gateway's host name, which the person
+configured in the MCP URL; never a string the gateway or the browser sent, as one could carry a value or an id.
+
 Standard library only.
 """
 from __future__ import annotations
@@ -143,10 +146,14 @@ def register(cfg: dict, found: dict, redirect: str, deadline: float) -> str:
     return client_id
 
 
+_OAUTH_PARAMS = frozenset({"response_type", "client_id", "redirect_uri", "scope", "code_challenge",
+                           "code_challenge_method", "state", "resource"})
+
+
 def authorize_url(found: dict, client_id: str, redirect: str, challenge: str, state: str) -> str:
     from urllib.parse import parse_qsl, urlunsplit
     parts = urlsplit(found["authorize"])
-    query = parse_qsl(parts.query, keep_blank_values=True) + list({
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k not in _OAUTH_PARAMS] + list({
         "response_type": "code", "client_id": client_id, "redirect_uri": redirect, "scope": found["scope"],
         "code_challenge": challenge, "code_challenge_method": "S256", "state": state,
         "resource": found["origin"]}.items())
@@ -167,7 +174,7 @@ def _token(cfg: dict, found: dict, form: dict, deadline: float) -> dict:
     if status != 200 or not isinstance(data, dict) or not isinstance(data.get("access_token"), str) \
             or not isinstance(data.get("refresh_token"), str):
         code = data.get("error") if isinstance(data, dict) else None
-        if code == "invalid_grant":
+        if code == "invalid_grant" and status == 400:
             raise _Revoked(f"the gateway no longer accepts the login (HTTP {status}); run the login again")
         raise Refused(f"the gateway gave no token (HTTP {status}"
                       f"{', ' + code if code in _TOKEN_ERRORS else ''}); run the login again")
@@ -238,7 +245,7 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
         return {}
     host = urlsplit(found["origin"]).hostname
     if sink_type not in SINKS:
-        raise Refused(f"unknown sink {sink_type!r}")
+        raise Refused("unknown sink type")
     if SINKS[sink_type] not in found.get("sinks", []):
         raise Refused(f"{host} does not resolve into a {'file' if sink_type == 'local_file' else 'command'}")
     if not isinstance(destination, str) or not 1 <= len(destination) <= 4096:
@@ -290,13 +297,17 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
     browser at the authorize URL (`open_browser(url)`), the code back from the redirect (its state must match), and
     the tokens into the store. The listener answers one request and closes."""
     import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import parse_qs
 
     box: dict = {}
     state = secrets.token_urlsafe(16)
 
+    done = threading.Event()
+
     class Handler(BaseHTTPRequestHandler):
+        timeout = 5                       # a connection that sends nothing holds its own thread for 5 s, no more
+
         def log_message(self, *a) -> None:
             pass
 
@@ -305,9 +316,11 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
             q = {k: v[0] for k, v in parse_qs(parts.query).items()}
             ok = parts.path == "/callback" and q.get("state") == state and bool(q.get("code"))
             if ok:
-                box["code"] = q["code"]
+                box.setdefault("code", q["code"])
+                done.set()
             elif parts.path == "/callback" and q.get("state") == state and q.get("error") == "access_denied":
                 box["denied"] = True
+                done.set()
             page = (b"maisecrets: logged in. You can close this tab." if ok else
                     b"maisecrets: the login did not complete. Run it again.")
             self.send_response(200 if ok else 400)
@@ -316,28 +329,23 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
             self.end_headers()
             self.wfile.write(page)
 
-    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    httpd.daemon_threads = True
     redirect = f"http://127.0.0.1:{httpd.server_address[1]}/callback"
-    end = time.monotonic() + wait
-
-    def serve() -> None:
-        # until the callback of this login, the person's refusal, the time or 32 requests: another local process
-        # that sends a request first gets an error page and does not end the login (codex review, 2026-11-02)
-        for _ in range(32):
-            left = end - time.monotonic()
-            if left <= 0 or "code" in box or "denied" in box:
-                return
-            httpd.timeout = left
-            httpd.handle_request()
-    t = threading.Thread(target=serve, daemon=True)
+    # until the callback of this login, the person's refusal or the time: another local process that sends wrong
+    # requests, many of them, or a slow one, gets an error page or holds one thread, and the login goes on (codex
+    # review, 2026-11-02, two rounds)
+    t = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
     try:
         deadline = time.monotonic() + BUDGET
         client_id = register(cfg, found, redirect, deadline)
         verifier, challenge = pkce()
         t.start()
         open_browser(authorize_url(found, client_id, redirect, challenge, state))
-        t.join(wait + 1)
+        done.wait(wait)
     finally:
+        if t.is_alive():
+            httpd.shutdown()
         httpd.server_close()
     if "code" not in box:
         raise Refused("the login did not complete: " + ("the person declined it" if box.get("denied") else
