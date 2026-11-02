@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.8.11] - 2026-11-02
+
+### Fixes
+
+- a string without a label starts a scan of its own in the lines layout (bad67e1)
+- a key that could change the label line is no label, and findings are placed in one pass (25c5424)
+- findings_by_leaf scans one record at a time, each string after its key, as written (59c57e4)
+
 ## [0.8.10] - 2026-11-02
 
 ### Features
