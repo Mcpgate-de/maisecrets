@@ -950,12 +950,12 @@ def cmd_sref(args: list[str]) -> int:
 
     from . import sref_client, vault_refs
     from .vault import make_backend
-    cfg = load_config()
-    backend = make_backend(cfg)
     action, name = (args[0] if args else "status"), (args[1] if len(args) > 1 else None)
     if action not in ("status", "login", "logout"):
         print("usage: sref [status | login [NAME] | logout [NAME]]", file=sys.stderr)
         return 2
+    cfg = load_config()
+    backend = make_backend(cfg)
     servers = vault_refs.user_servers()
     if name is not None:
         servers = {k: v for k, v in servers.items() if k == name}
