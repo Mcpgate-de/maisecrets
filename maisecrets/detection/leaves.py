@@ -124,9 +124,22 @@ def records(leaves: list) -> list:
     return list(groups.values())
 
 
+# a key with one of these is no label: it would end the label line or read as an assignment, a quote or a table cell
+_NOT_IN_LABEL = frozenset(':=|"\'')
+_LABEL_MAX = 64
+
+
 def _label(path: tuple) -> str:
+    """The last key of the path as the label of its string, or "" when it can be none: a key that is empty, longer
+    than 64 characters, holds a line boundary of str.splitlines() (\\r, U+2028 …) or a control character, holds
+    one of `: = | " '`, or names the cursor of a paged list (nextPageToken: the gateway gives no label there either)."""
     last = next((part for part in reversed(path) if isinstance(part, str)), "")
-    return last if last and "\n" not in last and ":" not in last else ""
+    if not last or len(last) > _LABEL_MAX or any(c in _NOT_IN_LABEL for c in last):
+        return ""
+    if last.splitlines() != [last] or any(ord(c) < 0x20 or 0x7f <= ord(c) < 0xa0 for c in last):
+        return ""
+    from .fields import is_cursor, label_words
+    return "" if is_cursor(label_words(last), field=True) else last
 
 
 def _lines(detector, obj, channel: str, **kwargs) -> list:
@@ -140,9 +153,18 @@ def _lines(detector, obj, channel: str, **kwargs) -> list:
             parts.append(lead + leaf.value)
             n += len(lead) + len(leaf.value) + 1
         text = "\n".join(parts)
+        k = 0   # the findings come sorted by start and the strings in text order: one pass over both
         for m in sorted(detector.findings(text, channel=channel, **kwargs), key=lambda m: m.start):
-            hit = next(((leaf, at) for leaf, at in placed if at <= m.start < at + max(len(leaf.value), 1)), None)
-            if hit is None or not hit[0].value:
+            while k < len(placed) and placed[k][1] + len(placed[k][0].value) < m.start:
+                k += 1
+            hit = None
+            for leaf, at in placed[k:k + 2]:
+                end = at + len(leaf.value)
+                # a span starts in a string; a point may also sit at its end, and an empty string owns its one point
+                if at <= m.start < end or (m.end <= m.start and m.start == end):
+                    hit = (leaf, at)
+                    break
+            if hit is None:
                 out.append((None, m))
                 continue
             leaf, at = hit

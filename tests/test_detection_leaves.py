@@ -141,10 +141,11 @@ class FindingsByLeafTests(unittest.TestCase):
 
 
 def _oracle(obj) -> list:
-    """What the gateway's shadow finds: each string scanned alone after its last key."""
+    """What the gateway's shadow finds: each string scanned alone after its last key (its own rule, not L._label: the
+    shapes below have plain keys)."""
     out = []
     for leaf in L.json_text(obj)[1]:
-        key = L._label(leaf.path)
+        key = next((part for part in reversed(leaf.path) if isinstance(part, str)), "")
         lead = f"{key}: " if key else ""
         out += [(leaf.path, m.type, m.start - len(lead), m.end - len(lead))
                 for m in D.findings(lead + leaf.value, channel="tool") if m.start >= len(lead)]
@@ -192,6 +193,57 @@ class LinesLayoutTests(unittest.TestCase):
                 return []
         L.findings_by_leaf(Det(), {"ok": "yes", "items": [{"a": "1", "b": {"c": ["2", "3"]}}, {"a": "4"}]})
         self.assertEqual(calls, ["ok: yes", "a: 1\nc: 2\nc: 3", "a: 4"])
+
+    def test_a_key_that_could_change_the_label_line_is_no_label(self):
+        want = {"email": "email", "file_key": "file_key", "Straße": "Straße", "a b": "a b",
+                "x\rpassword": "", "x\u2028password": "", "x\u0085password": "", "x\x0bpassword": "", "x\npassword": "",
+                "x:password": "", "x=password": "", "x|password": "", 'x"password': "", "x'password": "",
+                "nextPageToken": "", "page_token": "", "k" * 65: "", "": ""}
+        for key, label in want.items():
+            with self.subTest(n=len(key)):
+                self.assertEqual(L._label(("a", key)), label)
+
+    def test_points_at_the_end_of_a_string_and_in_an_empty_string_keep_their_string(self):
+        import dataclasses
+
+        @dataclasses.dataclass(frozen=True)
+        class M:
+            start: int
+            end: int
+            type: str
+            value: str
+
+        class Det:
+            def __init__(self, at):
+                self.at = at
+
+            def findings(self, text, channel, **kw):
+                return [M(self.at(text), self.at(text), "X", "")]
+        (leaf, m), = L.findings_by_leaf(Det(lambda t: t.index("abc") + 3), {"a": "abc", "b": "def"})
+        self.assertEqual((leaf.value, m.start, m.end), ("abc", 3, 3))
+        (leaf, m), = L.findings_by_leaf(Det(lambda t: 0), [["", "z"]])
+        self.assertEqual((leaf.value, m.start), ("", 0))
+
+    def test_placing_the_findings_grows_linearly(self):
+        from _timing import assert_linear
+        import dataclasses
+
+        @dataclasses.dataclass(frozen=True)
+        class M:
+            start: int
+            end: int
+            type: str
+            value: str
+
+        class Det:
+            def findings(self, text, channel, **kw):
+                found, at = [], 0
+                for line in text.split("\n"):
+                    found.append(M(at + 3, at + 4, "X", ""))
+                    at += len(line) + 1
+                return found
+        assert_linear(self, lambda obj: L.findings_by_leaf(Det(), obj), lambda n: {f"k{i}": "abcd" for i in range(n)},
+                      16_000)
 
     def test_an_unknown_layout_is_refused(self):
         with self.assertRaises(ValueError):
