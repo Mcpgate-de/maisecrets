@@ -333,6 +333,19 @@ class RoundFourTests(unittest.TestCase):
             Path(d, "maisecrets.py").write_text("x = 1\n", encoding="utf-8")
             self.assertIs(maisecrets.describe(Path(d), "de")["dirty"], True)
 
+    def test_a_reproduced_result_matches_only_in_cases_and_counts_never_in_date_or_time(self):
+        sys.path.insert(0, str(ROOT / "bench"))
+        import verify_result
+        base = {"cases_sha256": "a", "metrics": {"all": {"fp": 1}}, "v3": {"all": {"fp": 1}},
+                "per_case": {"c1": ["full"]}, "date": "2026-11-02", "timing": {"total_s": 9.0},
+                "scanner": {"commit": "x"}}
+        other = {**base, "date": "2027-01-01", "timing": {"total_s": 1.0}, "scanner": {"commit": "y"}}
+        self.assertEqual(verify_result.compare(other, base), [])
+        for part in ("cases_sha256", "metrics", "v3", "per_case"):    # named here, not read from the script
+            with self.subTest(part=part):
+                self.assertEqual(verify_result.compare({**base, part: "changed"}, base), [part])
+                self.assertEqual(verify_result.compare({k: v for k, v in base.items() if k != part}, base), [part])
+
     def test_the_version_is_the_release_tag_or_the_newest_tag_and_the_commit_not_the_manifest(self):
         # next keeps an old manifest version until a release writes it on main: 0.8.12 was reported as "0.7.2"
         from bench.adapters import maisecrets
