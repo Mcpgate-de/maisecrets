@@ -333,6 +333,29 @@ class RoundFourTests(unittest.TestCase):
             Path(d, "maisecrets.py").write_text("x = 1\n", encoding="utf-8")
             self.assertIs(maisecrets.describe(Path(d), "de")["dirty"], True)
 
+    def test_the_version_is_the_release_tag_or_the_newest_tag_and_the_commit_not_the_manifest(self):
+        # next keeps an old manifest version until a release writes it on main: 0.8.12 was reported as "0.7.2"
+        from bench.adapters import maisecrets
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        who = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+
+        def git(d, *cmd):
+            return subprocess.run(["git", "-C", d, *cmd], check=True, env=env, capture_output=True,
+                                  text=True).stdout.strip()
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, ".claude-plugin").mkdir()
+            Path(d, ".claude-plugin", "plugin.json").write_text('{"version": "0.0.1"}', encoding="utf-8")
+            git(d, "init", "-q")
+            git(d, "add", ".")
+            git(d, *who, "commit", "-q", "-m", "a")
+            self.assertEqual(maisecrets.describe(Path(d), "de")["version"], "0.0.1", "no tag: the manifest")
+            git(d, "tag", "v0.9.2")
+            git(d, "tag", "v0.10.1")     # sorted as versions, not as text
+            self.assertEqual(maisecrets.describe(Path(d), "de")["version"], "0.10.1")
+            git(d, *who, "commit", "-q", "--allow-empty", "-m", "b")
+            head = git(d, "rev-parse", "HEAD")
+            self.assertEqual(maisecrets.describe(Path(d), "de")["version"], f"0.10.1+{head[:8]}")
+
     def test_a_result_without_a_commit_or_a_dirty_flag_is_refused(self):
         sys.path.insert(0, str(ROOT / "bench"))
         import report
