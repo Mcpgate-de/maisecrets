@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.8.15] - 2026-11-03
+
+### Features
+
+- the library tells a caller that applies the name spans itself which span is a product name (remote.is_product_name) (d8c7be0)
+
+### Fixes
+
+- the name service no longer masks a product name such as Claude Code, GitHub Actions or Docker Desktop as a person (5777f90)
+- a release that changes no detection still gets its results directory, so its tag can be verified (162f067)
+
 ## [0.8.14] - 2026-11-03
 
 ### Features
