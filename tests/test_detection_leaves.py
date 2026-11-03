@@ -296,6 +296,17 @@ class LinesLayoutTests(unittest.TestCase):
                                ("nextPageToken",): ""})
         self.assertEqual([L._label(p) for p in got], list(got.values()))
 
+    def test_an_empty_string_does_not_take_the_next_line_as_its_value(self):
+        # `address: ` alone on its line read the next line as its value, and the span started in the next label, in no
+        # string (gateway review, 2026-11-03); empty or white space only, in a dict and in a list
+        street = "Linden" + "weg 14, 10115 Berlin"
+        for obj, path in (({"address": "", "note": street}, ("note",)),
+                          ({"items": [{"address": " ", "contact": street}]}, ("items", 0, "contact"))):
+            with self.subTest(obj=list(obj)):
+                found = L.findings_by_leaf(D, obj)
+                self.assertTrue(found, "premise: the address is found")
+                self.assertEqual({leaf.path if leaf else None for leaf, _m in found}, {path})
+
     def test_an_unknown_layout_is_refused(self):
         with self.assertRaises(ValueError):
             L.findings_by_leaf(D, {}, layout="xml")

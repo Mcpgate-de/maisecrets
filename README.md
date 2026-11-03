@@ -337,7 +337,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 40 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 15 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 391 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 392 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -2281,11 +2281,14 @@ revoke bound that. A value written into a file is plain text there.
 
 ## Sensitive References
 
-A gateway with Sensitive References (for example mcpgate) can mask a value in
+A gateway with Sensitive References (for example mcpgate, where the resolver is
+experimental and on only for accounts its admin enables) can mask a value in
 its tool results with a reference such as `⟦sref:email:<id>:ma•••@example.org⟧`.
-The AI sees the reference and its display part, never the value. With
-maisecrets, a command or a file that needs the value gets it on your computer,
-at the moment of the call, from the gateway's resolver.
+The AI sees the reference and its display part, not the value in the call.
+With maisecrets, a command or a file that needs the value gets it on your
+computer, at the moment of the call, from the gateway's resolver. A file keeps
+the value, so the AI sees it if it reads that file later; for one hour after a
+resolve, output that prints the value shows the reference instead.
 
 1. Log in once: `/maisecrets:sref login` (in Codex: `run.sh sref login` in a
    terminal). Your browser opens; you log in to the gateway and give the

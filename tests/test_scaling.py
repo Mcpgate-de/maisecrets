@@ -35,12 +35,19 @@ def _detector() -> Detector:
 
 
 def _cpu(fn) -> float:
+    """The CPU time of one call, best of 3; each trial repeats the call until 0.1 s have passed, so a clock that ticks
+    every 15.6 ms (Windows) measures a short call too (a 0 there made the ratio 15,625)."""
     best = float("inf")
     for _ in range(3):
-        t0 = time.process_time()
-        fn()
-        best = min(best, time.process_time() - t0)
-    return max(best, 1e-6)
+        n, t0 = 0, time.process_time()
+        while True:
+            fn()
+            n += 1
+            spent = time.process_time() - t0
+            if spent >= 0.1:
+                break
+        best = min(best, spent / n)
+    return best
 
 
 class ScalingTests(unittest.TestCase):
