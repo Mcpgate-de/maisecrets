@@ -21,6 +21,25 @@ def note(payload: dict) -> None:
     sref_notes.note_result(payload)
 
 
+def canonical(text: str, session: str | None, cfg: dict | None = None) -> str:
+    """text with each server token (vault_refs.canonical_noted) and each reference this session received in its
+    canonical form, without the display part. The display is chosen by whoever wrote the text; a quote or `$(` in it
+    moved the shell analysis of a command (Fable review, 2026-11-02: `⟦sref:email:ID:'⟧ | base64` passed the
+    refusals). The canonical form holds [A-Za-z0-9_:-] only."""
+    from . import vault_refs
+    text = vault_refs.canonical_noted(text, cfg, session)
+    if "sref:" not in text:
+        return text
+    from . import sref_client, sref_notes
+    found = sref_client.find(text)
+    here = sref_notes.noted([r for r, _c, _a, _b in found], session)
+    out = text
+    for r, c, a, b in sorted(found, key=lambda x: -x[2]):
+        if r in here:
+            out = out[:a] + c + out[b:]
+    return out
+
+
 def refs(text: str, session: str | None, ctxs=None) -> tuple[list, list]:
     """The Sensitive References of text (sref_notes.py): (key, start, end) of each one this session received, the
     key being the reference without its brackets, and the ones it did not receive (they get a reason)."""
@@ -51,7 +70,8 @@ def fetch(cfg: dict, backend, keys: list[str], session: str | None, sink: tuple[
     here = sref_notes.noted([f"⟦{k}⟧" for k in keys], session)
     by_gateway: dict = {}
     for k in keys:
-        by_gateway.setdefault(here[f"⟦{k}⟧"], []).append(k)
+        if f"⟦{k}⟧" in here:               # only noted keys come here; any other one stays text
+            by_gateway.setdefault(here[f"⟦{k}⟧"], []).append(k)
     out: dict = {}
     for (origin, url), ks in by_gateway.items():
         host = urlsplit(origin).hostname

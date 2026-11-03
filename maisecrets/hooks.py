@@ -58,8 +58,8 @@ from .guarded_paths import (  # noqa: F401
     _is_ssh_config_path, _names_a_guarded_file, _holds_a_guarded_folder, _a_guarded_path, _identity, _abs,
     _touches_store, _hardlinked_into, _in_the_home,
 )
-from .sref_hooks import audit_name as _audit_name, fetch as _sref_fetch, note as _sref_note, \
-    program_of as _program_of, refs as _sref_refs
+from .sref_hooks import audit_name as _audit_name, canonical as _sref_canonical, fetch as _sref_fetch, \
+    note as _sref_note, program_of as _program_of, refs as _sref_refs
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
 AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
@@ -1712,8 +1712,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     the resolver script reads it under a one-time grant. Every key passes the session rule and
     the limiter before anything is recorded or served, so a refused command leaves no audit
     line and no value waiting (reviews, 2026-09-26)."""
-    from . import vault_refs
-    command = vault_refs.canonical_noted(tool_input.get("command", ""), cfg, payload.get("session_id"))
+    command = _sref_canonical(tool_input.get("command", ""), payload.get("session_id"), cfg)
     tool_input = {**tool_input, "command": command}
     bad_args = _args_call_refusal(command)
     if bad_args:
@@ -2303,7 +2302,8 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         from . import vault_refs
         # a server token in a file name too: the server would choose the file (C27)
         in_header = [k for line, _path in headers for k, _a, _b in
-                     find_refs(line) + vault_refs.find_noted(line, cfg, payload.get("session_id"))]
+                     find_refs(line) + vault_refs.find_noted(line, cfg, payload.get("session_id"))
+                     + _sref_refs(line, payload.get("session_id"))[0]]
         if in_header:
             return _deny(f"maisecrets: ⟦{in_header[0]}⟧ is in a file name of the patch, where it is not resolved. "
                          "Nothing was written. Put the placeholder into the content, not into a path.")

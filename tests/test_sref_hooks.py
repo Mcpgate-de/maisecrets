@@ -99,7 +99,7 @@ class SrefBashTests(unittest.TestCase):
                                         "tool_response": {"stdout": f"got:{VALUE}\n", "stderr": ""}})
         upd = json.dumps(out["hookSpecificOutput"]["updatedToolOutput"], ensure_ascii=False)
         self.assertNotIn(VALUE, upd)
-        self.assertIn(self.shown, upd)
+        self.assertIn(self.ref, upd, "the canonical reference: the display part is not trusted")
 
     def test_another_session_gets_a_reason_and_the_gateway_is_not_asked(self):
         self.login()
@@ -115,7 +115,7 @@ class SrefBashTests(unittest.TestCase):
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("/maisecrets:sref login", reason)
-        self.assertNotIn(self.ref[6:-1].split(":")[-1], reason.replace(self.shown, ""), "no id beyond the reference")
+        self.assertNotIn(self.ref[6:-1].split(":")[-1], reason.replace(self.shown, "").replace(self.ref, ""), "no id beyond the reference")
 
     def write(self, path: str, content: str) -> dict:
         hooks._live_cache.clear()
@@ -160,6 +160,50 @@ class SrefBashTests(unittest.TestCase):
         self.assertEqual(run("logout")[0], 0)
         self.assertFalse(S.logged_in(self.backend, self.found["origin"]))
         self.assertEqual(run("login", "other")[0], 1, "an unknown server name")
+
+    def test_a_display_part_cannot_move_the_shell_analysis(self):
+        # Fable review, 2026-11-02: a quote in the display hid `| base64`, `eval` and `ssh` from the refusals
+        self.login()
+        self.result()
+        for display, tail in (("'", " | base64"), ('"', " | base64"), ("'", "; eval x"), ("x y", " | base64")):
+            forged = self.ref[:-1] + ":" + display + self.ref[-1]
+            with self.subTest(display=display, tail=tail):
+                out = self.bash(f"printf %s {forged}{tail}")
+                self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self.srv.resolved, [], "nothing was resolved for a refused command")
+
+    def test_a_display_part_never_reaches_the_shell(self):
+        self.login()
+        self.result()
+        marker = self.profile / "ran"
+        forged = self.ref[:-1] + f":$(touch {marker})" + self.ref[-1]
+        out = self.bash(f"printf 'got:%s' {forged}")
+        command = out["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertNotIn("touch", command)
+        run = subprocess.run([BASH, "-c", command], capture_output=True, text=True)
+        self.assertEqual(run.stdout, "got:" + VALUE)
+        self.assertFalse(marker.exists())
+
+    def test_the_program_name_comes_from_the_command_not_from_a_display(self):
+        self.login()
+        self.result()
+        forged = self.ref[:-1] + ":a b" + self.ref[-1]
+        out = self.bash(f"X={forged} printf %s x")
+        subprocess.run([BASH, "-c", out["hookSpecificOutput"]["updatedInput"]["command"]], capture_output=True)
+        self.assertEqual([r["destination"] for r in self.srv.resolved], ["printf"])
+
+    def test_a_reference_in_a_patch_file_name_is_refused_before_any_resolve(self):
+        self.login()
+        self.result()
+        patch = f"*** Begin Patch\n*** Add File: {self.profile}/{self.shown}.txt\n+x\n*** End Patch\n"
+        hooks._live_cache.clear()
+        out = hooks.pre_tool({"tool_name": "apply_patch", "session_id": "s1", "turn_id": "t", "model": "m",
+                              "cwd": str(self.profile), "tool_input": {"command": patch}})
+        self.assertEqual(out.get("decision") or out["hookSpecificOutput"]["permissionDecision"], "deny"
+                         if "hookSpecificOutput" in out else "block")
+        self.assertEqual(self.srv.resolved, [])
+        audit = (HOME / "audit.log").read_text(encoding="utf-8") if (HOME / "audit.log").exists() else ""
+        self.assertNotIn("sref:", audit)
 
     def test_the_audit_names_the_reference_without_its_id(self):
         self.login()
