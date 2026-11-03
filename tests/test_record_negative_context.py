@@ -66,7 +66,7 @@ STREET_LABELLED = [("address", "Linden" + "strasse 14"), ("address", "Linden" + 
                    ("adresse", "Linden" + "str. 14"), ("note", "wohnt in der Linden" + "str. 14"),
                    ("note", "located at Linden" + "str. 14")]
 # an EU street form after its label checks the text after it for a template; the next field is not that text
-EU_STREETS = [("indirizzo", "Via " + "Roma 12"), ("address", "Calle " + "Mayor 5")]
+EU_STREETS = [("address", "12 rue de la " + "Paix"), ("indirizzo", "Via " + "Roma 12"), ("address", "Calle " + "Mayor 5")]
 TEMPLATES = ["[x]", "<b>", "{a}", "see [city]", "<postal code>"]
 
 
