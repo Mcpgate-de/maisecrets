@@ -23,7 +23,7 @@ import itertools
 import re
 
 from .lazy_regex import LazyRx as _LazyRx
-from .text_index import field_start
+from .text_index import field_end, field_start
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
@@ -1797,11 +1797,11 @@ def _eu_street_ok(text: str, a: int, b: int) -> bool:
     """An EU street form after its label is a person's street when no template follows it on its line or the next
     ([city], <postal code>) and no business or legal form stands in its record before it."""
     end = text.find("\n", text.find("\n", b) + 1)
-    after = text[b:end if end != -1 else len(text)][:200]
+    after = text[b:min(end if end != -1 else len(text), field_end(text, a))][:200]
     if "[" in after or "<" in after or "{" in after:
         return False
     line = text.rfind("\n", 0, a) + 1
-    lo = max(_block_back(text, line), a - 300)
+    lo = max(_block_back(text, line), a - 300, field_start(text, a))
     return not (_EU_BUSINESS_RE.search(text, lo, a) or _not_a_home(text, lo, a))
 
 
@@ -2445,13 +2445,14 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         for m in _STREET_LABEL_RE.finditer(text):
             g = 1 if m.group(1) is not None else 2
             v = m.group(g)
+            fs = field_start(text, m.start())
             if _NOT_AN_ADDRESS_RE.search(v) or _GERUND_STREET_RE.search(v) or v.startswith("0") \
                     or _PLACEHOLDER_STREET_RE.match(v) \
-                    or _PARENT_NOT_A_STREET_RE.search(text, max(0, m.start() - 60), m.start()) \
-                    or _NOT_A_STREET_LABEL_RE.search(text, max(0, m.start() - 12), m.start()) \
-                    or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())) \
+                    or _PARENT_NOT_A_STREET_RE.search(text, max(fs, m.start() - 60), m.start()) \
+                    or _NOT_A_STREET_LABEL_RE.search(text, max(fs, m.start() - 12), m.start()) \
+                    or (g == 2 and _THING_SUBJECT_RE.search(text, max(fs, m.start() - 40), m.start())) \
                     or (g == 2 and m.group().lower().startswith(("located", "situated", "property"))
-                        and _PLACE_OF_A_BUSINESS_RE.search(text, max(0, m.start() - 60), m.start())) \
+                        and _PLACE_OF_A_BUSINESS_RE.search(text, max(fs, m.start() - 60), m.start())) \
                     or (not _STREET_LINE_RE.fullmatch(v) and not _eu_street_ok(text, m.start(g), m.end(g))):
                 continue
             # the company's name often stands on the line before its address label (Acme Inc.\nAddress: ...): the
@@ -2459,6 +2460,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
             line = _line_back(text, m.start(), 160)
             if line > 0 and text[line - 1] == "\n":
                 line = _line_back(text, line - 1, max(1, 160 - (m.start() - line)))
+            line = max(line, fs)
             # a label that names a home (home address, Wohnadresse) or a verb of residence is a person's: no company
             # word nearby turns it into a company's address (an employer on the line before)
             home = _HOME_LABEL_RE.search(text, m.start(), m.start(g))
@@ -2760,7 +2762,7 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 continue
             line = _line_back(text, m.start())
             # the name of a hotel, an office or a company stands on the lines above an address block, not on its line
-            block = _block_back(text, line)
+            block = max(_block_back(text, line), field_start(text, m.start()))
             end = m.end()
             while text[end - 1] in ".,":   # the stop of a sentence is no part of the place (Berlin.)
                 end -= 1
