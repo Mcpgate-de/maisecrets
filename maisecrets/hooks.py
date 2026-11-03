@@ -58,8 +58,10 @@ from .guarded_paths import (  # noqa: F401
     _is_ssh_config_path, _names_a_guarded_file, _holds_a_guarded_folder, _a_guarded_path, _identity, _abs,
     _touches_store, _hardlinked_into, _in_the_home,
 )
-from .sref_hooks import audit_name as _audit_name, canonical as _sref_canonical, fetch as _sref_fetch, \
-    note as _sref_note, program_of as _program_of, refs as _sref_refs
+from .server_values import _all_refs, _elsewhere_reason, _server_fetch, _server_limit_keys, \
+    _server_release
+from .sref_hooks import canonical as _sref_canonical, grant as _sref_grant, note as _sref_note, \
+    precheck as _sref_precheck, program_of as _program_of, read_call as _sref_read_call, refs as _sref_refs
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
 AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
@@ -1823,7 +1825,10 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     if failed:
         return _deny(_deny_reason(failed))
     # before any stored value is recorded: a server that refuses leaves no audit line of ours
-    got, why = _server_fetch(cfg, vault, server_keys, session, ("process", _program_of(command)))
+    srefs = [k for k in server_keys if k.startswith("sref:")]
+    # a reference resolves when the command starts (a grant below): here only whether it can
+    got, why = _server_fetch(cfg, vault, [k for k in server_keys if k not in srefs], session)
+    why = why or (_sref_precheck(cfg, vault.backend, srefs, session) if srefs else None)
     if why:
         return _deny(why + " The command did not run.")
     guarded = [k for k, (v, _o) in got.items() if _names_a_guarded_file(v, str(payload.get("cwd") or ""))]
@@ -1852,6 +1857,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     # phase 2: record (audit line, limiter) and fetch; a failure here has recorded nothing served
     plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
     for key in uniq:
+        if key in srefs:
+            plan[key] = (_sref_grant(cfg, key, session, _program_of(command), command), None)
+            continue
         if key in fetched:
             plan[key] = (None, fetched[key])
             continue
@@ -1876,9 +1884,10 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     _released, why = _server_release(vault, got, session, "Bash", command)
     if why:
         return _deny(why + " The command did not run.")
-    noted = _note_destinations(cfg, payload, "Bash", tool_input, [k for k in plan if k not in fetched],
+    stored = [k for k in plan if k not in fetched and k not in srefs]
+    noted = _note_destinations(cfg, payload, "Bash", tool_input, stored,
                                ssh_command=command, ssh_dest=ssh_plan["dest"] if ssh_plan else None)
-    stop = _unnoted(cfg, noted, [k for k in plan if k not in fetched], "The command did not run.")
+    stop = _unnoted(cfg, noted, stored, "The command did not run.")
     if stop:
         return stop
     # phase 3: serve and rewrite
@@ -1889,7 +1898,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     for key, (nonce, value) in plan.items():
         var = f"__ms_{len(var_by_key) + 1}"
         var_by_key[key] = var
-        if windows:
+        if key in srefs:
+            read = _sref_read_call(nonce or "")
+        elif windows:
             read = _resolver_call(key, nonce or "")
         else:
             try:
@@ -1985,72 +1996,6 @@ def _precheck(vault: Vault, keys: list[str], session: str | None, extra: list[st
     server keys of the call (`KEY@host`): no session rule of the store, but the same limiter (C7)."""
     failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
     return failed or vault._limit_all(list(keys) + list(extra), session)
-
-
-def _server_limit_keys(keys: list[str], session: str | None) -> list[str]:
-    """The limiter names of server keys: `KEY@host` of the origin that noted the key for this session."""
-    if not keys:
-        return []
-    from urllib.parse import urlsplit
-
-    from . import vault_refs
-    origins = vault_refs.noted(keys, session)
-    return [f"{k}@{urlsplit(origins[k][0]).hostname}" for k in keys if origins.get(k)]
-
-
-def _server_fetch(cfg: dict, vault: Vault, keys: list[str], session: str | None,
-                  sink: tuple[str, str] = ("process", "sh")) -> tuple[dict, str | None]:
-    """Vault references (vault_refs.py) and Sensitive References (sref_client.py): the values of server tokens, from
-    the server that sent them, all or none. Returns (key -> (value, origin), None) or ({}, the reason without a
-    value). Nothing is recorded yet."""
-    if not keys:
-        return {}, None
-    from . import vault_refs
-    names = ", ".join(f"⟦{k}⟧" for k in keys)
-    srefs = [k for k in keys if k.startswith("sref:")]
-    try:
-        got = vault_refs.resolve(cfg, vault.backend, [k for k in keys if k not in srefs], session) \
-            if len(srefs) < len(keys) else {}
-        if srefs:
-            got.update(_sref_fetch(cfg, vault.backend, srefs, session, sink))
-        return got, None
-    except vault_refs.Refused as exc:
-        return {}, (f"maisecrets: cannot get the value of {names} from the server that sent it: {exc}. Do not ask "
-                    "the user for the value; tell them this reason.")
-
-
-def _server_release(vault: Vault, got: dict, session: str | None, tool: str, context: str) -> tuple[dict, str | None]:
-    """The limiter record and one audit line per server value (`KEY@host`, rotated like every audit line), then
-    the values are kept for an hour, so an echo in a later tool result is redacted to the server's token.
-    Returns (key -> value, None) or ({}, the reason)."""
-    if not got:
-        return {}, None
-    from urllib.parse import urlsplit
-
-    from . import vault_refs
-    status = vault.record_server([f"{_audit_name(k)}@{urlsplit(o).hostname}" for k, (_v, o) in got.items()], session,
-                                 tool,
-                                 context)
-    if status != "ok":
-        return {}, (f"maisecrets: no value from the server is released ({status}). Tell the user.")
-    vault_refs.remember_released(vault.backend, session, got)
-    return {k: v for k, (v, _origin) in got.items()}, None
-
-
-def _elsewhere_reason(keys: list[str]) -> str:
-    names = ", ".join(f"⟦{k}⟧" for k in keys)
-    return (f"maisecrets: {names} came from a server in another session or more than 24 hours ago, so it does not "
-            "resolve here. Call that server's tool again in this session and use the new tokens.")
-
-
-def _all_refs(text: str, values: dict) -> list[tuple[str, int, int]]:
-    """The stored-value placeholders of text, and the server-range tokens that have a value in `values`."""
-    from . import vault_refs
-    out = find_refs(text) + [r for r in vault_refs.find(text) if r[0] in values]
-    if "sref:" in text:
-        from . import sref_client
-        out += [(r[1:-1], a, b) for r, _c, a, b in sref_client.find(text) if r[1:-1] in values]
-    return out
 
 
 def _deny_reason(failed: list[str]) -> str:

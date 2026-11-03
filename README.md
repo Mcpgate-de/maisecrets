@@ -2295,8 +2295,9 @@ at the moment of the call, from the gateway's resolver.
    yourself (user scope) showed it in the same session in the last 24 hours. A
    reference from another session, or one the AI typed itself, gets a reason
    and no value.
-3. In a Bash command the value goes in when the command runs; the gateway
-   learns the program's name (sink `process`). In the content of Write, Edit,
+3. In a Bash command the value is fetched only when the command starts (a
+   one-time grant of 120 seconds); a command that never runs costs no resolve.
+   The gateway learns the program's name (sink `process`). In the content of Write, Edit,
    MultiEdit, NotebookEdit or a Codex patch the file gets the value; the
    gateway learns the path (sink `local_file`). A reference in a path is
    refused. Anywhere else (another MCP server, WebFetch, a subagent) it stays

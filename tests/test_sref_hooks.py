@@ -73,6 +73,12 @@ class SrefBashTests(unittest.TestCase):
                                   "mcp_server": {"name": "gw", "source": "user"}, "tool_input": {"iid": 7},
                                   "tool_response": {"content": [{"type": "text", "text": "author: " + self.shown}]}})
 
+    def run_command(self, command: str, session: str = "s1") -> subprocess.CompletedProcess:
+        """The hook, then the rewritten command, as the client runs it: the value is fetched when it starts."""
+        out = self.bash(command, session)
+        return subprocess.run([BASH, "-c", out["hookSpecificOutput"]["updatedInput"]["command"]],
+                              capture_output=True, text=True, timeout=60)
+
     def bash(self, command: str, session: str = "s1") -> dict:
         hooks._live_cache.clear()
         return hooks.pre_tool({"tool_name": "Bash", "session_id": session, **CLAUDE,
@@ -92,7 +98,7 @@ class SrefBashTests(unittest.TestCase):
     def test_an_echo_of_the_value_comes_back_as_the_reference(self):
         self.login()
         self.result()
-        self.bash(f"printf 'got:%s' {self.shown}")
+        self.run_command(f"printf 'got:%s' {self.shown}")
         hooks._live_cache.clear()
         out = hooks._post_tool_guarded({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
                                         "tool_input": {"command": "cat out.txt"},
@@ -115,7 +121,8 @@ class SrefBashTests(unittest.TestCase):
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("/maisecrets:sref login", reason)
-        self.assertNotIn(self.ref[6:-1].split(":")[-1], reason.replace(self.shown, "").replace(self.ref, ""), "no id beyond the reference")
+        rest = reason.replace(self.shown, "").replace(self.ref, "")
+        self.assertNotIn(self.ref[6:-1].split(":")[-1], rest, "no id beyond the reference")
 
     def write(self, path: str, content: str) -> dict:
         hooks._live_cache.clear()
@@ -205,10 +212,38 @@ class SrefBashTests(unittest.TestCase):
         audit = (HOME / "audit.log").read_text(encoding="utf-8") if (HOME / "audit.log").exists() else ""
         self.assertNotIn("sref:", audit)
 
+    def test_the_hook_resolves_nothing_and_the_command_fetches_the_value_once_when_it_starts(self):
+        # prod run, 2026-11-03: a command that the client refused after the hook had already cost a resolve
+        self.login()
+        self.result()
+        out = self.bash(f"printf 'got:%s' {self.shown}")
+        command = out["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertEqual(self.srv.resolved, [], "the hook itself resolves nothing")
+        self.assertFalse((HOME / "audit.log").exists() and "sref:" in (HOME / "audit.log").read_text())
+        first = subprocess.run([BASH, "-c", command], capture_output=True, text=True, timeout=60)
+        self.assertEqual(first.stdout, "got:" + VALUE)
+        self.assertEqual(len(self.srv.resolved), 1)
+        again = subprocess.run([BASH, "-c", command], capture_output=True, text=True, timeout=60)
+        self.assertEqual(again.returncode, 97, "a grant redeems once")
+        self.assertEqual(len(self.srv.resolved), 1)
+
+    def test_an_expired_grant_resolves_nothing(self):
+        from maisecrets import sref_hooks
+        self.login()
+        self.result()
+        command = self.bash(f"printf %s {self.shown}")["hookSpecificOutput"]["updatedInput"]["command"]
+        for f in (HOME / "sref" / "grants").glob("*.json"):
+            data = json.loads(f.read_text())
+            data["t"] -= sref_hooks.GRANT_SECONDS + 1
+            f.write_text(json.dumps(data))
+        run = subprocess.run([BASH, "-c", command], capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 97)
+        self.assertEqual(self.srv.resolved, [])
+
     def test_the_audit_names_the_reference_without_its_id(self):
         self.login()
         self.result()
-        self.bash(f"printf %s {self.shown}")
+        self.run_command(f"printf %s {self.shown}")
         audit = (HOME / "audit.log").read_text(encoding="utf-8") if (HOME / "audit.log").exists() else ""
         rid = self.ref.split(":")[2].rstrip(self.ref[-1])
         self.assertIn("sref:email:" + rid[:4], audit)
