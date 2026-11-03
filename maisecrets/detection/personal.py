@@ -548,7 +548,7 @@ def _de_title_names(text: str, regions: tuple) -> list:
         return []
     out = []
     for m in _DE_TITLE_RE.finditer(text):
-        if _DE_ARTICLE_BEFORE_RE.search(text, max(0, m.start() - 16), m.start()):
+        if _DE_ARTICLE_BEFORE_RE.search(text, max(field_start(text, m.start()), m.start() - 16), m.start()):
             continue
         g = 1
         if _de_role(m.group(1)):
@@ -2260,7 +2260,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
     if "secret-hex48-after-token-word" in want and any(w in low for w in ("token", "code", "secret", "key")):
         for m in _HEX48_RE.finditer(text):
             v = m.group(2)
-            if _DIGEST_WORD_RE.search(text, max(0, m.start() - 16), m.start(2)):
+            if _DIGEST_WORD_RE.search(text, max(field_start(text, m.start()), m.start() - 16), m.start(2)):
                 continue   # a hash: cache key, key fingerprint, the digest of a build
             if sum(c.isdigit() for c in v) >= 4 and sum(c.isalpha() for c in v) >= 4:
                 out.append((m.start(2), m.end(2), "secret-hex48-after-token-word", "SECRET"))
@@ -2368,8 +2368,9 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         out += _vcard_hits(text, want)
     if "address-in-form" in want and "in" in regions:
         for m in _IN_ADDRESS_RE.finditer(text):
-            line = _line_back(text, m.start())
-            if m.group().count(",") >= 3 and not _NOT_A_HOME_RE.search(text, line, min(len(text), m.end() + 80)):
+            line = max(_line_back(text, m.start()), field_start(text, m.start()))
+            if m.group().count(",") >= 3 and not _NOT_A_HOME_RE.search(
+                    text, line, min(field_end(text, m.start()), m.end() + 80)):
                 out.append((m.start(), m.end(), "address-in-form", ADDRESS))
     if "name-non-latin-after-label" in want and not text.isascii():
         for m in _NONLATIN_LABEL_RE.finditer(text):

@@ -30,7 +30,8 @@ def _iban() -> str:
 
 
 TARGETS = [("password", PW), ("note", "Passwort: " + PW), ("api_key", TOKEN), ("comment", "token=" + TOKEN),
-           ("address", STREET), ("iban", _iban()), ("name", "Svet" + "lana " + SURNAME)]
+           ("address", STREET), ("iban", _iban()), ("name", "Svet" + "lana " + SURNAME),
+           ("note", "Sehr geehrter Herr " + SURNAME), ("card", "4532 0151 " + "1283 0366"), ("ip", "85.214." + "132.117")]
 NEIGHBOURS = {
     "test def": "x = 1\ndef test_login():\n    pass",
     "import pytest": "notes\nimport pytest",
@@ -54,11 +55,16 @@ NEIGHBOURS = {
     "vendor": "the vendor",
     "bank": "Sparkasse",
     "server key": "server:\n  ",
+    "article": "Besuch der",
+    "digest": "sha256",
+    "order id": "order_id",
+    "section": "RFC 6749 section",
 }
 # the street after its label (address-street-after-label) reads the line before and up to 60 characters back for a
 # company, a parent or a thing; a field before it held these windows open across the record (gateway review round 5)
-STREET_LABELLED = [("address", "Linden" + "strasse 14"), ("address", "Linden" + "str. 14"), ("adresse", "Linden" + "str. 14"),
-                   ("note", "wohnt in der Linden" + "str. 14"), ("note", "located at Linden" + "str. 14")]
+STREET_LABELLED = [("address", "Linden" + "strasse 14"), ("address", "Linden" + "str. 14"),
+                   ("adresse", "Linden" + "str. 14"), ("note", "wohnt in der Linden" + "str. 14"),
+                   ("note", "located at Linden" + "str. 14")]
 # an EU street form after its label checks the text after it for a template; the next field is not that text
 EU_STREETS = [("indirizzo", "Via " + "Roma 12"), ("address", "Calle " + "Mayor 5")]
 TEMPLATES = ["[x]", "<b>", "{a}", "see [city]", "<postal code>"]
