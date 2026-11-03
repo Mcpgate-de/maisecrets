@@ -2296,14 +2296,17 @@ at the moment of the call, from the gateway's resolver.
    reference from another session, or one the AI typed itself, gets a reason
    and no value.
 3. In a Bash command the value is fetched only when the command starts and
-   reads it; a command that never runs costs no resolve. The gateway learns
-   the program's name (sink `process`). In the content of Write, Edit,
-   MultiEdit, NotebookEdit or a Codex patch the file gets the value; the
-   gateway learns the path (sink `local_file`). A reference in a path is
-   refused. Anywhere else (another MCP server, WebFetch, a subagent) it stays
-   text.
-4. If the command prints the value, maisecrets shows the reference instead,
-   for an hour. An error names the reason and a count, never a value. The
+   reads it; a command that never runs costs no resolve. maisecrets sends the
+   program's name as the target (sink `process`). In the content of Write,
+   Edit, MultiEdit, NotebookEdit or a Codex patch the file gets the value, and
+   maisecrets sends the path as the target (sink `local_file`); mcpgate checks
+   the kind of target, not the path. The value of a file write is fetched
+   before the client asks you about the write, so a write you refuse has
+   already cost a resolve (counted in the gateway's daily quota and audit) and
+   the AI still gets nothing. A reference in a path is refused. Anywhere else
+   (another MCP server, WebFetch, a subagent) it stays text.
+4. For an hour after a resolve, output that prints the value shows the
+   reference instead. An error names the reason and a count, never a value. The
    audit (`/maisecrets:audit`) names each resolve with the kind of the
    reference and 4 characters of its id.
 
