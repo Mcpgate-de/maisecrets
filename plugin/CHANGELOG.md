@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.8.16] - 2026-11-03
+
+### Features
+
+- a surname after Herr or Frau in a tool result is masked (e845ec7)
+- the library gives the label a JSON string is scanned after (leaves.label) (4718ec2)
+
 ## [0.8.15] - 2026-11-03
 
 ### Features
