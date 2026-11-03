@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [0.8.13] - 2026-11-03
+
+### Features
+
+- a phone number after Tel. or Telefon is masked in a typed prompt too (fbf8544)
+- the AI knows why an example value such as 040 3456789 stays unmasked (80da048)
+
+### Fixes
+
+- a benchmark report names the release it measured, not the old manifest number (f44b034)
+
+### Security
+
+- the display part of a server token can no longer turn a refused command into an allowed one (02e57cd)
+- a value glued to a placeholder key in a tool result is masked (b4721f1)
+
 ## [0.8.12] - 2026-11-02
 
 ### Features
