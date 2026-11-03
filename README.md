@@ -2281,11 +2281,14 @@ revoke bound that. A value written into a file is plain text there.
 
 ## Sensitive References
 
-A gateway with Sensitive References (for example mcpgate) can mask a value in
+A gateway with Sensitive References (for example mcpgate, where the resolver is
+experimental and on only for accounts its admin enables) can mask a value in
 its tool results with a reference such as `⟦sref:email:<id>:ma•••@example.org⟧`.
-The AI sees the reference and its display part, never the value. With
-maisecrets, a command or a file that needs the value gets it on your computer,
-at the moment of the call, from the gateway's resolver.
+The AI sees the reference and its display part, not the value in the call.
+With maisecrets, a command or a file that needs the value gets it on your
+computer, at the moment of the call, from the gateway's resolver. A file keeps
+the value, so the AI sees it if it reads that file later; for one hour after a
+resolve, output that prints the value shows the reference instead.
 
 1. Log in once: `/maisecrets:sref login` (in Codex: `run.sh sref login` in a
    terminal). Your browser opens; you log in to the gateway and give the
