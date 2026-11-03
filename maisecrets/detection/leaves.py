@@ -174,10 +174,12 @@ def label(path: tuple) -> str:
 
 def _segments(group: list) -> list:
     """A record cut before each string that has no label: on its own line after another string, the last line of that
-    string (`password:`) would read as its label, which neither string gives alone (codex review, 2026-11-02)."""
+    string (`password:`) would read as its label, which neither string gives alone (codex review, 2026-11-02). And cut
+    after a string that is empty or white space only: its label line (`address: `) would take the next line as its
+    value, and the span would start in the next label, in no string (gateway review, 2026-11-03)."""
     out = []
     for leaf in group:
-        if not out or not _label(leaf.path):
+        if not out or not _label(leaf.path) or not out[-1][-1].value.strip():
             out.append([])
         out[-1].append(leaf)
     return out
