@@ -85,6 +85,19 @@ class RecordNegativeContextTests(unittest.TestCase):
                         checked += 1
         self.assertEqual(checked, len(NEIGHBOURS) * len(TARGETS) * 2)
 
+    def test_each_field_decodes_with_its_own_budget(self):
+        # the decode stage spends at most 64 runs per text; a record shared them across its fields, so 70 hashes kept a
+        # base64 secret in a later field from being decoded (gateway review, 2026-11-03)
+        import base64
+        import hashlib
+        token = "gh" + "p_" + "".join("abcdefghijklmnopqrstuvwxyz0123456789"[(i * 7) % 36] for i in range(36))
+        blob = base64.b64encode(f"export GITHUB_TOKEN={token}\n".encode()).decode()
+        obj = {f"h{i}": hashlib.sha1(str(i).encode()).hexdigest() for i in range(70)}
+        obj["blob"] = blob
+        self.assertTrue([m for m in D.findings("blob: " + blob, channel="tool") if m.type == "SECRET"],
+                        "premise: the field alone decodes it")
+        self.assertEqual(_lost(obj), [])
+
     def test_a_test_marker_inside_the_field_still_counts(self):
         # the boundary only stops a context of ANOTHER field: a marker in the field's own text still marks a fixture
         obj = {"code": "def test_login():\n    password = '" + PW + "'"}
