@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Write maisecrets/detection/rules/leading_literals.json: the leading literal of each built-in pattern of every
-region and language, so a hook process reads it instead of parsing 920 patterns (prefilter.leading_literal).
+region and language, and for a pattern without one the literals one of which every match holds, so a hook process
+reads them instead of parsing 920 patterns (prefilter.leading_literal, prefilter.required_literals).
 
     python3 scripts/gen_leading_literals.py          # write the file
     python3 scripts/gen_leading_literals.py --check  # exit 1 when the file differs from the patterns
@@ -34,7 +35,10 @@ def wanted() -> dict:
             if r.keywords or source == "user" or matcher not in ("", "regex") or not isinstance(pattern, str):
                 continue
             lit, icase = prefilter.parsed_literal(r.regex)
-            out[prefilter.literal_key(pattern, r.regex.flags)] = [lit, bool(icase) if lit else False]
+            entry = [lit, bool(icase) if lit else False]
+            if not lit:      # the literals one of which every match holds (prefilter.required_literals)
+                entry.append(list(prefilter.parsed_required(r.regex)))
+            out[prefilter.literal_key(pattern, r.regex.flags)] = entry
     return dict(sorted(out.items()))
 
 
