@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.8.14] - 2026-11-03
+
+### Features
+
+- a command or a file gets the value of a Sensitive Reference from your gateway, and the AI never sees it (1fb2a49)
+
 ## [0.8.13] - 2026-11-03
 
 ### Features
