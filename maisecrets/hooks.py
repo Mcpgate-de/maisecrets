@@ -60,8 +60,8 @@ from .guarded_paths import (  # noqa: F401
 )
 from .server_values import _all_refs, _elsewhere_reason, _server_fetch, _server_limit_keys, \
     _server_release
-from .sref_hooks import canonical as _sref_canonical, grant as _sref_grant, note as _sref_note, \
-    precheck as _sref_precheck, program_of as _program_of, read_call as _sref_read_call, refs as _sref_refs
+from .sref_hooks import canonical as _sref_canonical, note as _sref_note, precheck as _sref_precheck, \
+    program_of as _program_of, refs as _sref_refs
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
 AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
@@ -1221,7 +1221,8 @@ def _resolver_call(key: str, nonce: str) -> str:
     return f'$("{py}" "{script}" {key} --grant {nonce})'
 
 
-def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: str | None = None) -> bool:
+def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: str | None = None,
+                       sref: dict | None = None) -> bool:
     """Deliver one value once through a FIFO from a detached child. The command runs later, and
     on Codex inside a sandbox that may neither write the vault nor read the keychain (measured:
     resolve.py failed there and the command died); a FIFO in TMPDIR is readable from inside.
@@ -1231,7 +1232,10 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
     with the value in its memory (suite review, 2026-09-27). With ``approve``, the child confirms that
     ssh session-approval token once the value was read. That FIFO sits in the sealed directory, which
     nobody can list: only the command that holds its name can open it, and only the rewritten command
-    the user allowed holds that name (ssh_approval.py)."""
+    the user allowed holds that name (ssh_approval.py). With ``sref``, the child resolves a Sensitive
+    Reference only once a reader opened the FIFO: a command the client refuses never starts, so it costs
+    no resolve (prod run, 2026-11-03), and the child, not the sandboxed command, reaches the store and the
+    gateway. A failed resolve writes nothing; the prelude refuses an empty value."""
     code = (
         "import json,os,sys,time\n"
         "spec = json.load(sys.stdin)\n"
@@ -1250,6 +1254,13 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
         "        time.sleep(0.05)\n"
         "if fd is not None:\n"
         "    os.set_blocking(fd, True)\n"
+        "    if spec.get('sref'):\n"
+        "        try:\n"
+        "            sys.path.insert(0, spec['root'])\n"
+        "            from maisecrets import sref_hooks\n"
+        "            spec['value'] = sref_hooks.serve(**spec['sref'])\n"
+        "        except Exception:\n"
+        "            spec['value'] = ''\n"
         "    try:\n"
         "        os.write(fd, spec['value'].encode())\n"
         "    finally:\n"
@@ -1271,7 +1282,7 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         child.stdin.write(json.dumps({"fifo": fifo, "value": value, "seconds": seconds, "approve": approve,
-                                      "root": root}).encode())
+                                      "root": root, "sref": sref}).encode())
         child.stdin.close()
         # the FIFO must exist before the command starts: wait for the child to create it
         for _ in range(100):
@@ -1858,7 +1869,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
     for key in uniq:
         if key in srefs:
-            plan[key] = (_sref_grant(cfg, key, session, _program_of(command), command), None)
+            plan[key] = (None, None)          # resolved by the serving child when the command reads it
             continue
         if key in fetched:
             plan[key] = (None, fetched[key])
@@ -1898,9 +1909,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     for key, (nonce, value) in plan.items():
         var = f"__ms_{len(var_by_key) + 1}"
         var_by_key[key] = var
-        if key in srefs:
-            read = _sref_read_call(nonce or "")
-        elif windows:
+        if windows:
             read = _resolver_call(key, nonce or "")
         else:
             try:
@@ -1914,14 +1923,17 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             if approve:
                 # the first use: its FIFO sits where nobody can list it, so reading it proves the yes
                 fifo = os.path.join(_sealed_dir(), os.path.basename(fifo))
-            if not _serve_value_later(fifo, value or "", approve=approve):
+            sref = {"key": key, "session": session, "program": _program_of(command), "command": command[:2000]} \
+                if key in srefs else None
+            if not _serve_value_later(fifo, value or "", approve=approve, sref=sref):
                 _unserve(served)
                 return _deny(f"maisecrets: the value for ⟦{key}⟧ could not be prepared for delivery "
                              "(delivery unavailable). The command did not run. Retry once; if this "
                              "message comes again, stop and tell the user.")
             served.append(fifo)
             read = f"$(cat {shlex_quote(fifo)})"
-        prelude.append(f'{var}="{read}" || {{ echo "maisecrets: the value for {key} was not delivered '
+        check = f' && [ -n "${{{var}}}" ]' if key in srefs else ""   # a failed resolve writes nothing
+        prelude.append(f'{var}="{read}"{check} || {{ echo "maisecrets: the value for {key} was not delivered '
                        f'(served for 120 s, or read by another process); the command did not run. Run it again '
                        f'once; if it fails again, stop and tell the user" >&2; exit 97; }}')
     for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):

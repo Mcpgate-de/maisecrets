@@ -90,7 +90,7 @@ def fetch(cfg: dict, backend, keys: list[str], session: str | None, sink: tuple[
 def precheck(cfg: dict, backend, keys: list[str], session: str | None) -> str | None:
     """Before a Bash command: each reference has a gateway that offers a resolver and a login there; else the reason,
     as server_values._server_fetch words it. It resolves nothing: the command fetches the value itself when it starts
-    (grant, redeem)."""
+    (the child that serves it, when the command reads it)."""
     from urllib.parse import urlsplit
 
     from . import sref_client, sref_notes
@@ -110,79 +110,21 @@ def precheck(cfg: dict, backend, keys: list[str], session: str | None) -> str | 
     return None
 
 
-GRANT_SECONDS = 120
-
-
-def _grants():
-    from .vault import HOME
-    d = HOME / "sref" / "grants"
-    d.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return d
-
-
-def grant(cfg: dict, key: str, session: str | None, program: str, command: str) -> str:
-    """A one-time grant for one reference of a Bash command: the command redeems it when it starts
-    (hooks/sref_value.py). A command that the client refuses after this hook never starts, so its reference is never
-    resolved (prod run, 2026-11-03: a refused command still cost a resolve). Expired grants go here."""
-    import json
-    import secrets
-    import time
-    d = _grants()
-    now = time.time()
-    for f in d.glob("*.json"):
-        try:
-            if now - f.stat().st_mtime > GRANT_SECONDS:
-                f.unlink()
-        except OSError:
-            pass
-    nonce = secrets.token_urlsafe(18)
-    path = d / f"{nonce}.json"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump({"key": key, "session": session, "program": program, "command": command[:2000], "t": now}, f)
-    return nonce
-
-
-def redeem(nonce: str) -> str:
-    """The value of the reference of a grant, once and within GRANT_SECONDS: the resolve (sink process), the audit line
-    and the release for the echo replacement happen here, when the command really starts. Raises Refused."""
-    import json
-    import time
-
-    from . import sref_client, vault_refs
+def serve(key: str, session: str | None, program: str, command: str) -> str:
+    """The value of one reference of a Bash command, for the child that serves it through a FIFO
+    (hooks._serve_value_later): called only once the command opened the FIFO, so a command that never starts
+    costs no resolve. The resolve (sink process), the audit line and the release for the echo replacement happen
+    here. Raises Refused."""
+    from . import vault_refs
     from .server_values import _server_release
     from .vault import Vault, load_config
-    if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", nonce or ""):
-        raise sref_client.Refused("no such grant")
-    d = _grants()
-    path, taken = d / f"{nonce}.json", d / f"{nonce}.taken"
-    try:
-        os.replace(path, taken)                 # one redeem: a second one finds no file
-    except OSError:
-        raise sref_client.Refused("the grant was used or has expired") from None
-    try:
-        g = json.loads(taken.read_text(encoding="utf-8"))
-    finally:
-        taken.unlink()
-    if time.time() - float(g.get("t", 0)) > GRANT_SECONDS:
-        raise sref_client.Refused("the grant has expired")
     cfg = load_config()
     vault = Vault(cfg)
-    key, session = g["key"], g.get("session")
-    got = fetch(cfg, vault.backend, [key], session, ("process", g.get("program") or "sh"))
-    _released, why = _server_release(vault, got, session, "Bash", g.get("command") or "")
+    got = fetch(cfg, vault.backend, [key], session, ("process", program or "sh"))
+    _released, why = _server_release(vault, got, session, "Bash", command)
     if why:
         raise vault_refs.Refused(why)
     return got[key][0]
-
-
-def read_call(nonce: str) -> str:
-    """The command substitution that reads one reference's value under its grant when the command starts."""
-    import sys
-    from pathlib import Path
-    py = Path(sys.executable).as_posix()
-    script = (Path(__file__).resolve().parent.parent / "hooks" / "sref_value.py").as_posix()
-    return f'$("{py}" "{script}" {nonce})'
 
 
 def program_of(command: str) -> str:

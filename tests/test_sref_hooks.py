@@ -224,21 +224,17 @@ class SrefBashTests(unittest.TestCase):
         self.assertEqual(first.stdout, "got:" + VALUE)
         self.assertEqual(len(self.srv.resolved), 1)
         again = subprocess.run([BASH, "-c", command], capture_output=True, text=True, timeout=60)
-        self.assertEqual(again.returncode, 97, "a grant redeems once")
+        self.assertEqual(again.returncode, 97, "the value is served once")
         self.assertEqual(len(self.srv.resolved), 1)
 
-    def test_an_expired_grant_resolves_nothing(self):
-        from maisecrets import sref_hooks
+    def test_a_failed_resolve_stops_the_command_instead_of_running_it_without_the_value(self):
         self.login()
         self.result()
-        command = self.bash(f"printf %s {self.shown}")["hookSpecificOutput"]["updatedInput"]["command"]
-        for f in (HOME / "sref" / "grants").glob("*.json"):
-            data = json.loads(f.read_text())
-            data["t"] -= sref_hooks.GRANT_SECONDS + 1
-            f.write_text(json.dumps(data))
+        command = self.bash(f"printf 'got:%s' {self.shown}")["hookSpecificOutput"]["updatedInput"]["command"]
+        self.srv.revoke(self.ref)                    # between the hook and the start: the gateway refuses now
         run = subprocess.run([BASH, "-c", command], capture_output=True, text=True, timeout=60)
         self.assertEqual(run.returncode, 97)
-        self.assertEqual(self.srv.resolved, [])
+        self.assertEqual(run.stdout, "", "printf never ran with an empty value")
 
     def test_the_audit_names_the_reference_without_its_id(self):
         self.login()
