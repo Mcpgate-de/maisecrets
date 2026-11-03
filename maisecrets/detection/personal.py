@@ -18,6 +18,8 @@ Every check is bounded: each regex has bounded repeats, and a CSV header is read
 """
 from __future__ import annotations
 
+import bisect
+import itertools
 import re
 
 # ---------------------------------------------------------------------------------------------------- types --
@@ -2805,11 +2807,15 @@ def _address_with_its_place(text: str, out: list) -> list:
     if not any(k in _ADDRESS_RULES_WITH_PLACE for _s, _e, k, _t in out):
         return out
     res = []
-    wider = [(s, e) for s, e, _k, typ in out if typ == ADDRESS]
+    # the address hits by start, and the furthest end up to each: one lookup per hit (a scan of all of them per hit
+    # took 129 s for 16,000 addresses in one text, netcup 2026-11-03)
+    wider = sorted((s, e) for s, e, _k, typ in out if typ == ADDRESS)
+    starts = [s for s, _e in wider]
+    reach = list(itertools.accumulate((e for _s, e in wider), max))
     for s, e, k, typ in out:
         # an address hit that another one already holds and runs past stays as it was: that one owns the span
-        if typ == ADDRESS and k in _ADDRESS_RULES_WITH_PLACE \
-                and not any(s2 <= s and e2 > e for s2, e2 in wider):
+        i = bisect.bisect_right(starts, s)
+        if typ == ADDRESS and k in _ADDRESS_RULES_WITH_PLACE and not (i and reach[i - 1] > e):
             m = _PLACE_AFTER_RE.match(text, e)
             if m:
                 e = m.end()
