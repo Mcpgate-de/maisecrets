@@ -23,6 +23,7 @@ import itertools
 import re
 
 from .lazy_regex import LazyRx as _LazyRx
+from .text_index import field_start
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
@@ -2614,7 +2615,7 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
     if "address-us-two-lines" in want and "\n" in text and "us" in regions:
         for m in _US_TWO_LINES_RE.finditer(text):
             line = text.rfind("\n", 0, m.start()) + 1
-            lo = max(_block_back(text, line), m.start() - 160)
+            lo = max(_block_back(text, line), m.start() - 160, field_start(text, m.start()))
             # a company, an office or a public place on the lines above or before it keeps the address text
             home = _HOME_ADDRESS_BEFORE_RE.search(text, max(line, m.start() - 40), m.start())
             if not home and (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())):
@@ -2624,7 +2625,7 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
     if "address-us-one-line" in want and "us" in regions and ", " in text:
         for m in _US_ONE_LINE_RE.finditer(text):
             line = text.rfind("\n", 0, m.start()) + 1
-            lo = max(_block_back(text, line), m.start() - 160)
+            lo = max(_block_back(text, line), m.start() - 160, field_start(text, m.start()))
             # "at the Harbor View Inn, 12 …": a named place before the address, as a venue's name on the line above
             home = _HOME_ADDRESS_BEFORE_RE.search(text, max(line, m.start() - 40), m.start())
             if not home and (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())
@@ -2646,7 +2647,7 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 if _GERUND_STREET_RE.search(m.group()) or (rx.groups and _city_is_a_word(m.group(1))):
                     continue
                 end = m.end(1) if rx.groups else m.end()
-                lo = max(line, m.start() - 160)
+                lo = max(line, m.start() - 160, field_start(text, m.start()))
                 if _NOT_A_HOME_RE.search(text, lo, m.end()):
                     _company_window(text, lo, m.start(), end, "street-address", company)
                     continue
