@@ -221,10 +221,11 @@ class LinesLayoutTests(unittest.TestCase):
                 return [M(self.at(text), self.at(text), "X", "")]
         (leaf, m), = L.findings_by_leaf(Det(lambda t: t.index("abc") + 3), {"a": "abc", "b": "def"})
         self.assertEqual((leaf.value, m.start, m.end), ("abc", 3, 3))
-        found = L.findings_by_leaf(Det(lambda t: 0), [["", "z"]])   # no labels: one scan for each string
-        self.assertEqual([(leaf.value, m.start) for leaf, m in found], [("", 0), ("z", 0)])
-        (leaf, m), = L.findings_by_leaf(Det(lambda t: len(t)), {"a": ""})
-        self.assertEqual((leaf.value, m.start, m.end), ("", 0, 0))
+        found = L.findings_by_leaf(Det(lambda t: 0), [["y", "z"]])   # no labels: one scan for each string
+        self.assertEqual([(leaf.value, m.start) for leaf, m in found], [("y", 0), ("z", 0)])
+        # an empty string is not scanned: it holds nothing to find (the detector returns nothing for an empty text)
+        self.assertEqual(L.findings_by_leaf(Det(lambda t: len(t)), {"a": ""}), [])
+        self.assertEqual(D.findings("", channel="tool"), [])
 
     def test_placing_the_findings_grows_linearly(self):
         from _timing import assert_linear
@@ -306,6 +307,22 @@ class LinesLayoutTests(unittest.TestCase):
                 found = L.findings_by_leaf(D, obj)
                 self.assertTrue(found, "premise: the address is found")
                 self.assertEqual({leaf.path if leaf else None for leaf, _m in found}, {path})
+
+    def test_empty_strings_neither_cut_a_record_nor_cost_a_scan(self):
+        # real responses carry many empty fields (description: "", subtype: ""): one scan per record, not per field
+        # (gateway review, 2026-11-03: 1,614 scans instead of 45 for a Slack-shaped response)
+        calls = []
+
+        class Counting:
+            def findings(self, text, channel, **kw):
+                calls.append(text)
+                return D.findings(text, channel=channel, **kw)
+        obj = {"items": [{"first_name": "Svet" + "lana", "description": "", "last_name": "Kowal" + "czyk",
+                          "subtype": " ", "note": "x"} for _ in range(5)]}
+        found = L.findings_by_leaf(Counting(), obj)
+        self.assertEqual(len(calls), 5)
+        self.assertTrue(all("description" not in t and "subtype" not in t for t in calls))
+        self.assertIn("NAME", {m.type for leaf, m in found if leaf and leaf.path[-1] == "last_name"})
 
     def test_an_unknown_layout_is_refused(self):
         with self.assertRaises(ValueError):
