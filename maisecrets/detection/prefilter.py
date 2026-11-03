@@ -7,7 +7,10 @@ sk-); a text without it cannot hold a match (2026-11-02: no finding changed in 2
 less time). Only the built-in rules that run as one regex over the text take part, never a rule of your own."""
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+from pathlib import Path
 
 MIN = 3
 NONE = ("", False)
@@ -25,6 +28,31 @@ def any_keyword(keywords: tuple, low: str, known: dict) -> bool:
     return False
 
 
+# the literal of each built-in pattern, worked out ahead (scripts/gen_leading_literals.py): parsing 920 patterns took
+# ~20 ms of each hook process (netcup, 2026-11-03). The key is a hash of the flags and the pattern, so a changed pattern
+# misses and is parsed as before; tests/test_leading_literals.py recomputes every entry
+LITERALS_FILE = Path(__file__).parent / "rules" / "leading_literals.json"
+
+
+def literal_key(pattern: str, flags: int) -> str:
+    return hashlib.sha256(f"{int(flags)}\n{pattern}".encode("utf-8", "surrogatepass")).hexdigest()[:24]
+
+
+def _read_literals() -> dict:
+    try:
+        return json.loads(LITERALS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+# read once at import (26 KB, under 1 ms): a scan then writes no module state (tests/test_scan_context.py)
+_LITERALS = _read_literals()
+
+
+def _known() -> dict:
+    return _LITERALS
+
+
 def leading_literal(regex, matcher: str, keywords: tuple, source: str) -> tuple:
     """(literal, ignore_case) that every match of the regex starts with, or NONE: the leading literal characters of
     the pattern, at least MIN. NONE for a rule with keywords (they gate it already), a rule of your own, a rule that
@@ -32,6 +60,15 @@ def leading_literal(regex, matcher: str, keywords: tuple, source: str) -> tuple:
     pattern = getattr(regex, "pattern", None)
     if keywords or source == "user" or matcher not in ("", "regex") or not isinstance(pattern, str):
         return NONE
+    hit = _known().get(literal_key(pattern, regex.flags))
+    if isinstance(hit, list) and len(hit) == 2 and isinstance(hit[0], str):
+        return (hit[0], bool(hit[1])) if hit[0] else NONE
+    return parsed_literal(regex)
+
+
+def parsed_literal(regex) -> tuple:
+    """leading_literal by parsing the pattern: the reference of the file and the way for a pattern it lacks."""
+    pattern = regex.pattern
     try:
         try:
             import re._parser as parser
