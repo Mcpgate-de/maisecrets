@@ -19,6 +19,7 @@ Every check is bounded: each regex has bounded repeats, and a CSV header is read
 from __future__ import annotations
 
 import bisect
+import functools
 import itertools
 import re
 
@@ -861,6 +862,8 @@ def _known_column(name: str) -> str:
     return ""
 
 
+# a response repeats its keys in each record: the folded name of a key is computed once per process
+@functools.lru_cache(maxsize=4096)
 def _md_column(cell: str) -> str:
     """The field name of a column, a key or an element, folded to the names of _STRONG_COLS and _WEAK_COLS: no XML
     namespace prefix (fpml:name), no Markdown escape (first\\_name), lower case, separators as `_`, then an alias"""
