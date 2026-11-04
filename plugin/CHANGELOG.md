@@ -2,13 +2,32 @@
 
 ## Unreleased
 
+## [0.8.18] - 2026-11-04
+
+### Features
+
+- a password or name in a Slack bold or code element, or in an Atlassian code node, is masked like the sentence around it (e13c6cb)
+
+### Fixes
+
+- a rule with context words is checked faster: a word the window does not hold as a substring is not searched for as a whole word (1a22387)
+- a response with many distinct keys keeps the label of each key cached (65,536 keys instead of 4,096) (2822cb4)
+- a Slack response is scanned up to 40 % faster: a string its record already holds after the same label is scanned once (7a1e0a0)
+- a JSON response picks its rules faster: a keyword with a three-letter piece the response lacks is not searched for (b59321b)
+- a JSON response is cut into its strings faster: a string without an escape is not walked by character, and a key's label is worked out once (f7ffe63)
+- a JSON response with repeated keys is scanned faster: each key's column name is folded once (c4a74fd)
+- in a JSON response, a company word or a template in another field no longer hides a street after its label (35f86eb)
+- a JSON response is scanned faster: each record walks only the rules that can fire somewhere in the response (98ebc36)
+
 ## [0.8.17] - 2026-11-04
 
 ### Fixes
 
 - an empty field no longer splits a JSON record into one scan per field (cca7a8c)
 - each field of a JSON record decodes its base64 and hex with its own budget (727f10a)
-- a field of a JSON record no longer hides a secret or an address in another field (dc21a78)
+- a field of a JSON record no longer hides a secret or an address in another field (dc21a78). Known limit of this
+  release: a street after its label (address: …) is still hidden by a company or place word in another field, and
+  the template check after an EU street still reads the next field; fixed in 0.8.18 (35f86eb)
 - an address after an empty field of a JSON record keeps its field (f53a300)
 - a JSON response is scanned 17-23 % faster: a rule with no other gate runs only where its literal can be (0865a7f)
 - a hook starts faster: the personal-data regexes compile on first use (f78ec13)
