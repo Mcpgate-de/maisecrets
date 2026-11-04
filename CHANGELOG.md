@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.8.19] - 2026-11-04
+
+### Fixes
+
+- a JSON response with many findings spreads them faster: each string is searched only for the values whose longest word it holds (fa2b787)
+- a hook's first long tool result is scanned a third faster: a keyword rule compiles the head of an alternative only where that alternative matches (b4ee4af)
+- measure_resources runs on a Linux host without /usr/bin/time: BENCH_TIME names GNU time (a6c31cf)
+
 ## [0.8.18] - 2026-11-04
 
 ### Features
