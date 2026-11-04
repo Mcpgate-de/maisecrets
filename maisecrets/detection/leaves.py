@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import json
 
 from .prefilter import rules_for, with_response_rules
+from .lazy_regex import LazyRx
 from .text_index import record_fields
 
 # The level of the record guarantee: in layout "lines" a record finds every span that a scan of each field alone after
@@ -43,7 +45,13 @@ class Leaf:
     places: tuple   # the JSON offset of each character of value, and of its end, relative to start
 
 
+# a character json.dumps writes as an escape; a string without one is written as it is (most strings of a response)
+_NEEDS_ESCAPE = LazyRx(r'["\\\x00-\x1f]')
+
+
 def _escape(s: str) -> tuple:
+    if not _NEEDS_ESCAPE.search(s):
+        return s, tuple(range(len(s) + 1))
     out, places, n = [], [], 0
     for ch in s:
         places.append(n)
@@ -166,7 +174,12 @@ def _label(path: tuple) -> str:
     role = _role_label(path)
     if role:
         return role
-    last = next((part for part in reversed(path) if isinstance(part, str)), "")
+    return _key_label(next((part for part in reversed(path) if isinstance(part, str)), ""))
+
+
+# a response repeats its keys in each record: the label of a key is worked out once per process
+@functools.lru_cache(maxsize=4096)
+def _key_label(last: str) -> str:
     if not last or len(last) > _LABEL_MAX or any(c in _NOT_IN_LABEL for c in last):
         return ""
     if last.splitlines() != [last] or any(ord(c) < 0x20 or 0x7f <= ord(c) < 0xa0 for c in last):
