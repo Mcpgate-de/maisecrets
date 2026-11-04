@@ -419,6 +419,17 @@ class InlineNodeTests(unittest.TestCase):
         self.assertEqual({p for p, _s in found}, {("content",)})
         self.assertEqual(len(found), 1)
 
+    def test_a_common_shape_after_a_password_label_does_not_spread(self):
+        # a date, a host with its port, a ticket key and a version after a password label stand in other strings too
+        checked = 0
+        for value in ("2026" + "-11-04", "localhost" + ":8080", "ABCD" + "-1234", "release" + "-2026.11"):
+            obj = {"content": "password: " + value, "title": "Planned for " + value + " today"}
+            found = {leaf.path for leaf, _m in L.findings_by_leaf(D, obj) if leaf is not None}
+            if ("content",) in found:
+                checked += 1
+            self.assertNotIn(("title",), found, value[:4])
+        self.assertGreater(checked, 0, "premise: a label rule takes one of the shapes")
+
     def test_a_spread_value_marks_whole_words_only(self):
         obj = {"a": {"password": self.PW, "note": "x" + self.PW + " and " + self.PW + "y and " + self.PW + "."}}
         notes = sorted((s, e) for p, s, e in self._paths(obj) if p == ("a", "note"))

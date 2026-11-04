@@ -264,15 +264,24 @@ def _lines(detector, obj, channel: str, **kwargs) -> list:
 
 # a value spreads when it names one thing, the rule of the ai-gateway's propagation: a name or a user name of two
 # words or more (one word, Wolf or Sommer, is also a word of other strings); any other value of 8 to 256 characters
-# with a digit or a sign (a label rule takes any word after `password:`, and the word is in the code around it)
+# with a letter and a digit and none of the common shapes (a label rule takes any word after `password:`, and the word
+# is in the code around it)
 _SPREAD_MIN, _SPREAD_MAX = 8, 256
 _WORD_TYPES = frozenset({"NAME", "USERNAME"})
+
+
+# shapes a label rule takes after `password:` that are no secret and stand in other strings too: a date or a time, a
+# host or file with a port or line, a dunder name, a ticket key, a version, a word with a version (gateway, Gate B)
+_COMMON_SHAPE = LazyRx(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+                       r"|[\w.-]+:\d+|__\w+__|[A-Z][A-Z0-9]*-\d+|v?\d+(?:\.\d+)+[\w.+-]*|[A-Za-z]+[-_.]v?\d+(?:\.\d+)*")
 
 
 def _spreads(value: str, kind: str) -> bool:
     if kind in _WORD_TYPES:
         return len(value.split()) >= 2 and len(value) <= _SPREAD_MAX
-    return _SPREAD_MIN <= len(value) <= _SPREAD_MAX and any(not (c.isalpha() or c.isspace()) for c in value)
+    return (_SPREAD_MIN <= len(value) <= _SPREAD_MAX and any(c.isalpha() for c in value)
+            and any(c.isdigit() for c in value) and not value.startswith("@")
+            and not _COMMON_SHAPE.fullmatch(value))
 
 
 def _keeps(leaf) -> bool:

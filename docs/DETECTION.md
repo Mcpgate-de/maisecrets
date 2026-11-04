@@ -272,7 +272,8 @@ for leaf, m in findings_by_leaf(detector, response):     # layout "lines", the d
   paragraph are scanned also as one sentence, and the findings are cut into the nodes; a value found in one string
   of a response is masked in the other strings that hold it as a whole word (Slack's bold or code element after
   `Passwort: ` in its blocks, found from the message's text field). A name or user name spreads with two words or
-  more, any other value with 8 to 256 characters and a digit or a sign: one word (Wolf, Sommer, a word after
+  more, any other value with 8 to 256 characters, a letter and a digit and none of the common shapes (a date or a time,
+  `host:port`, `file:line`, `__name__`, `@Annotation`, a ticket key, a version): one word (Wolf, Sommer, a word after
   `password:`) is also a word of other strings. A string whose key
   names no secret (a cursor, `component_key`, a lone `key`, an id, `token_expires_at`, a revision) gets no spread.
 - **layout "json"** (the default of 0.8.10): one scan of `json.dumps(obj, ensure_ascii=False)`. In that text a line
