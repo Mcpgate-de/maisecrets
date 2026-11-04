@@ -266,6 +266,8 @@ for leaf, m in findings_by_leaf(detector, response):     # layout "lines", the d
   inside that field (`tests/test_record_negative_context.py`). `leaves.RECORD_CONTEXT_PER_FIELD` names the level of
   this guarantee and moves up each time a window that crossed a field is closed: 2 since 0.8.18 (the street after
   its label). A release without the constant is below 2.
+  A string that its record already holds after the same label (Slack writes each message twice, in `text` and in
+  `blocks`) is scanned once, and the copy gets the findings of the first (since 0.8.18).
 - **layout "json"** (the default of 0.8.10): one scan of `json.dumps(obj, ensure_ascii=False)`. In that text a line
   break is the two characters `\n` and a quote gets a backslash, so an address can run over a line end and a label
   inside a string is lost; and a context word of one record can give a finding in the next. The gateway's check of
