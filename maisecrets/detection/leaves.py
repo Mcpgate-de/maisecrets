@@ -177,8 +177,9 @@ def _label(path: tuple) -> str:
     return _key_label(next((part for part in reversed(path) if isinstance(part, str)), ""))
 
 
-# a response repeats its keys in each record: the label of a key is worked out once per process
-@functools.lru_cache(maxsize=4096)
+# a response repeats its keys in each record: the label of a key is worked out once per process. 65,536 keys: a cache
+# that a response with more distinct keys overruns made the large response of the linear test 18 times the small one
+@functools.lru_cache(maxsize=65536)
 def _key_label(last: str) -> str:
     if not last or len(last) > _LABEL_MAX or any(c in _NOT_IN_LABEL for c in last):
         return ""
@@ -227,7 +228,12 @@ def _lines(detector, obj, channel: str, **kwargs) -> list:
     # is scanned once: the record's findings of the first hold all a scan of that field alone finds
     # (RECORD_CONTEXT_PER_FIELD), and the copy gets them
     copies: list = []
-    for rec in records(json_text(obj)[1]):
+    sentences: list = []
+    every = json_text(obj)[1]
+    for rec in records(every):
+        joined = _inline_sentences(rec)
+        sentences += joined
+        rec = rec + [leaf for leaf, _nodes in joined]
         first: dict = {}
         for group in _segments(rec):
             parts, placed, starts, n = [], [], [], 0
@@ -251,7 +257,117 @@ def _lines(detector, obj, channel: str, **kwargs) -> list:
             if leaf is not None:
                 by_leaf.setdefault(id(leaf), []).append(m)
         out += [(leaf, m) for leaf, seen in copies for m in by_leaf.get(id(seen), ())]
+    if sentences:
+        out = _sentence_findings(out, sentences)
+    return _spread(out, every)
+
+
+# a value spreads when it names one thing, the rule of the ai-gateway's propagation: a name or a user name of two
+# words or more (one word, Wolf or Sommer, is also a word of other strings); any other value of 8 to 256 characters
+# with a letter and a digit and none of the common shapes (a label rule takes any word after `password:`, and the word
+# is in the code around it)
+_SPREAD_MIN, _SPREAD_MAX = 8, 256
+_WORD_TYPES = frozenset({"NAME", "USERNAME"})
+
+
+# shapes a label rule takes after `password:` that are no secret and stand in other strings too: a date or a time, a
+# host or file with a port or line, a dunder name, a ticket key, a version, a word with a version (gateway, Gate B)
+_COMMON_SHAPE = LazyRx(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+                       r"|[\w.-]+:\d+|__\w+__|[A-Z][A-Z0-9]*-\d+|v?\d+(?:\.\d+)+[\w.+-]*|[A-Za-z]+[-_.]v?\d+(?:\.\d+)*")
+
+
+def _spreads(value: str, kind: str) -> bool:
+    if kind in _WORD_TYPES:
+        return len(value.split()) >= 2 and len(value) <= _SPREAD_MAX
+    return (_SPREAD_MIN <= len(value) <= _SPREAD_MAX and any(c.isalpha() for c in value)
+            and any(c.isdigit() for c in value) and not value.startswith("@")
+            and not _COMMON_SHAPE.fullmatch(value))
+
+
+def _keeps(leaf) -> bool:
+    """The string's label names no secret, so a value under it is kept where a scan of the field finds it (a cursor, the
+    key of a file or a component, an id, the time or state of a secret, a revision, a lone `key`): no spread overrides
+    that (fields.py; the gateway's spread put a Figma component key into meta.components.key, 2026-11-04)."""
+    from . import fields
+    words = fields.label_words(next((part for part in reversed(leaf.path) if isinstance(part, str)), ""))
+    return (words == ["key"] or fields.names_no_secret(words) or fields.is_a_revision(words, leaf.value))
+
+
+def _spread(out: list, every: list) -> list:
+    """A value found in one string of the response is masked in the other strings that hold it as a whole word: Slack
+    writes a message's value once in text, after its cue, and once in a bold or code element of its blocks, where no
+    cue stands before it (gateway review, 2026-11-04)."""
+    values: dict = {}
+    for leaf, m in out:
+        # without the marks of Slack's mrkdwn around it (*bold*, `code`): the blocks hold the value without them
+        value = leaf.value[m.start:m.end].strip("*_~`") if leaf is not None else ""
+        if _spreads(value, m.type):
+            values.setdefault(value, m)
+    if not values:
+        return out
+    taken: dict = {}
+    for leaf, m in out:
+        if leaf is not None:
+            taken.setdefault(id(leaf), []).append((m.start, m.end))
+    added = []
+    for leaf in every:
+        if _keeps(leaf):
+            continue
+        text = leaf.value
+        for value, m in values.items():
+            at = text.find(value)
+            while at >= 0:
+                end = at + len(value)
+                if not (at and text[at - 1].isalnum()) and not (end < len(text) and text[end].isalnum()) \
+                        and not any(a < end and at < b for a, b in taken.get(id(leaf), ())):
+                    taken.setdefault(id(leaf), []).append((at, end))
+                    added.append((leaf, dataclasses.replace(m, start=at, end=end, value=value)))
+                at = text.find(value, at + 1)
+    return out + added
+
+
+# the containers whose text nodes form one sentence: the paragraphs of Atlassian's document format
+# (`"Das Passwort ist "` | a code node). Slack's rich text needs none: its message's text field holds the whole
+# sentence, and a value found there is found in the blocks too (_spread)
+_INLINE_LISTS = frozenset({"content"})
+
+
+def _inline_sentences(rec: list) -> list:
+    """(sentence, nodes) for each container of the record with two text nodes or more: the sentence is a Leaf of their
+    joined text after the label of the first node, scanned beside the nodes, so a value in a node of its own gets the
+    cue of the node before it. Each node is still scanned alone."""
+    groups: dict = {}
+    for leaf in rec:
+        p = leaf.path
+        if len(p) >= 3 and p[-1] == "text" and isinstance(p[-2], int) and p[-3] in _INLINE_LISTS:
+            groups.setdefault(p[:-2], []).append(leaf)
+    out = []
+    for nodes in groups.values():
+        if len(nodes) >= 2 and sum(1 for n in nodes if n.value.strip()) >= 2:
+            out.append((Leaf(nodes[0].path, "".join(n.value for n in nodes), -1, -1, ()), nodes))
     return out
+
+
+def _sentence_findings(out: list, sentences: list) -> list:
+    """The findings of each sentence, cut into the nodes they cover; a node's own finding is not repeated."""
+    ids = {id(leaf) for leaf, _nodes in sentences}
+    kept = [(leaf, m) for leaf, m in out if leaf is None or id(leaf) not in ids]
+    have = {(id(leaf), m.start, m.end, m.type) for leaf, m in kept if leaf is not None}
+    by_leaf: dict = {}
+    for leaf, m in out:
+        if leaf is not None and id(leaf) in ids:
+            by_leaf.setdefault(id(leaf), []).append(m)
+    for sentence, nodes in sentences:
+        for m in by_leaf.get(id(sentence), ()):
+            at = 0
+            for node in nodes:
+                a, b = max(m.start, at), min(m.end, at + len(node.value))
+                s, e = a - at, b - at
+                if s < e and (id(node), s, e, m.type) not in have:
+                    have.add((id(node), s, e, m.type))
+                    kept.append((node, dataclasses.replace(m, start=s, end=e, value=node.value[s:e])))
+                at += len(node.value)
+    return kept
 
 
 def _scan_segments(detector, segments: list, channel: str, kwargs: dict) -> list:
