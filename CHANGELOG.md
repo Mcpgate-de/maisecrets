@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.8.21] - 2026-11-04
+
+### Fixes
+
+- fewer false alarms in code and docs: an ordinary English word after a "token" or "key" label in a tool result is no longer masked as a secret (a40d199)
+
 ## [0.8.20] - 2026-11-04
 
 ### Fixes
