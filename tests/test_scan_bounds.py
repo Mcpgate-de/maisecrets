@@ -287,3 +287,44 @@ class KeywordLabelTailTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeywordHeadWindowTests(unittest.TestCase):
+    """The vendored rules with the lazy head `[\\w.-]{0,50}?` of generic-api-key (atlassian, jfrog, etsy, codecov) run
+    in windows around their own keywords on a long text: the same matches as the regex over the whole text."""
+    HEADED = ("atlassian-api-token.legacy", "jfrog-api-key", "jfrog-identity-token", "etsy-access-token",
+              "codecov-access-token.legacy")
+
+    def rules(self):
+        return [r for r in detect.rules() if r.id in self.HEADED]
+
+    def test_the_headed_rules_take_the_window_path(self):
+        rules = self.rules()
+        self.assertEqual({r.id for r in rules}, set(self.HEADED))
+        for rule in rules:
+            self.assertIsNotNone(detect._keyword_window(rule), f"{rule.id}: a sync changed the head of its regex")
+
+    def test_fuzz_the_window_path_finds_what_the_regex_finds(self):
+        r = random.Random(25)
+        rules = self.rules()
+        seps = ["=", ": ", ":=", "=>", " = '", '":"', "\n:\n", "\n\n=\n\n", " ,"]
+        hits = 0
+        for _ in range(60):
+            parts = []
+            for _ in range(300):
+                if r.random() < 0.15:
+                    k = r.choice(r.choice(rules).keywords)
+                    head = rnd(r.randint(0, 60), string.ascii_letters + "_.-")
+                    value = rnd(r.choice([24, 32, 64, 73, r.randint(1, 90)]), string.ascii_lowercase + string.digits)
+                    parts.append(head + r.choice([k, k.upper(), k.title()]) + rnd(r.randint(0, 22), "_ -.x")
+                                 + r.choice(seps) + value + r.choice(["'", '"', " ", "\n", ";", ""]))
+                else:
+                    parts.append(rnd(r.randint(1, 80), string.ascii_letters + " \n.,:=-_"))
+            text = " ".join(parts)
+            self.assertGreater(len(text), 4096)   # the window path runs on a long text only
+            for rule in rules:
+                want = [(m.start(), m.end()) for m in rule.regex.finditer(text)]
+                got = [(m.start(), m.end()) for m in detect._matches(rule, text, "tool")]
+                self.assertEqual(got, want, rule.id)
+                hits += len(want)
+        self.assertGreater(hits, 100)   # the fuzz reaches the rules' values, not only their keywords
