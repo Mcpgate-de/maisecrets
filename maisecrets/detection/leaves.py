@@ -223,16 +223,39 @@ def _response_order(detector, texts: list, kwargs: dict):
 def _lines(detector, obj, channel: str, **kwargs) -> list:
     out = []
     segments = []
-    for group in (seg for rec in records(json_text(obj)[1]) for seg in _segments(rec)):
-        parts, placed, starts, n = [], [], [], 0
-        for leaf in group:
-            label = _label(leaf.path)
-            lead = f"{label}: " if label else ""
-            placed.append((leaf, n + len(lead)))
-            starts.append(n)
-            parts.append(lead + leaf.value)
-            n += len(lead) + len(leaf.value) + 1
-        segments.append(("\n".join(parts), placed, starts))
+    # a string a record already holds after the same label (Slack writes each message twice, in text and in blocks)
+    # is scanned once: the record's findings of the first hold all a scan of that field alone finds
+    # (RECORD_CONTEXT_PER_FIELD), and the copy gets them
+    copies: list = []
+    for rec in records(json_text(obj)[1]):
+        first: dict = {}
+        for group in _segments(rec):
+            parts, placed, starts, n = [], [], [], 0
+            for leaf in group:
+                label = _label(leaf.path)
+                seen = first.setdefault((label, leaf.value), leaf)
+                if seen is not leaf:
+                    copies.append((leaf, seen))
+                    continue
+                lead = f"{label}: " if label else ""
+                placed.append((leaf, n + len(lead)))
+                starts.append(n)
+                parts.append(lead + leaf.value)
+                n += len(lead) + len(leaf.value) + 1
+            if parts:
+                segments.append(("\n".join(parts), placed, starts))
+    out += _scan_segments(detector, segments, channel, kwargs)
+    if copies:
+        by_leaf: dict = {}
+        for leaf, m in out:
+            if leaf is not None:
+                by_leaf.setdefault(id(leaf), []).append(m)
+        out += [(leaf, m) for leaf, seen in copies for m in by_leaf.get(id(seen), ())]
+    return out
+
+
+def _scan_segments(detector, segments: list, channel: str, kwargs: dict) -> list:
+    out = []
     order = _response_order(detector, [t for t, _p, _s in segments], kwargs)
     for text, placed, starts in segments:
         # a negative context counts only inside its field (text_index.py); the rules of the response (prefilter.py)

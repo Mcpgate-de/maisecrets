@@ -329,5 +329,42 @@ class LinesLayoutTests(unittest.TestCase):
             L.findings_by_leaf(D, {}, layout="xml")
 
 
+
+class RecordCopyTests(unittest.TestCase):
+    """A string that its record already holds after the same label is scanned once, and the copy gets the findings of
+    the first (Slack writes each message twice, in text and in blocks)."""
+
+    PW = "Qz" + "7!vRk2" + "pLm9"
+    TOKEN = "a8f3" + "K9zQx2" + "Lm7vPwR4tY"
+
+    def _msg(self, text):
+        return {"messages": [{"text": text, "user": "U01", "blocks": [{"type": "section", "text": text}]},
+                             {"text": "no secret here", "blocks": [{"text": "no secret here"}]}]}
+
+    def test_a_copy_gets_the_findings_of_the_first(self):
+        text = "deploy note, password: " + self.PW + " and token=" + self.TOKEN
+        found = L.findings_by_leaf(D, self._msg(text))
+        by_path: dict = {}
+        for leaf, m in found:
+            if leaf is not None:
+                by_path.setdefault(leaf.path, set()).add((m.start, m.end, m.type))
+        first = by_path.get(("messages", 0, "text"), set())
+        self.assertTrue(first, "premise: the message has findings")
+        self.assertEqual(by_path.get(("messages", 0, "blocks", 0, "text")), first)
+
+    def test_a_copy_finds_what_the_field_alone_finds(self):
+        # the per-field oracle of the record scan holds for a copy too
+        text = "password: " + self.PW
+        alone = {(m.start - 6, m.end - 6) for m in D.findings("text: " + text, channel="tool")}
+        copy = {(m.start, m.end) for leaf, m in L.findings_by_leaf(D, self._msg(text))
+                if leaf is not None and leaf.path == ("messages", 0, "blocks", 0, "text")}
+        self.assertTrue(alone, "premise: the field alone has a finding")
+        self.assertLessEqual(alone, copy)
+
+    def test_a_copy_under_another_label_is_scanned_as_its_own(self):
+        obj = {"a": {"note": "token=" + self.TOKEN, "comment": "token=" + self.TOKEN}}
+        paths = {leaf.path for leaf, _m in L.findings_by_leaf(D, obj) if leaf is not None}
+        self.assertEqual(paths, {("a", "note"), ("a", "comment")})
+
 if __name__ == "__main__":
     unittest.main()
