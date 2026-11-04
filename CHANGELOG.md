@@ -8,7 +8,9 @@
 
 - an empty field no longer splits a JSON record into one scan per field (cca7a8c)
 - each field of a JSON record decodes its base64 and hex with its own budget (727f10a)
-- a field of a JSON record no longer hides a secret or an address in another field (dc21a78)
+- a field of a JSON record no longer hides a secret or an address in another field (dc21a78). Known limit of this
+  release: a street after its label (address: …) is still hidden by a company or place word in another field, and
+  the template check after an EU street still reads the next field; fixed in 0.8.18 (35f86eb)
 - an address after an empty field of a JSON record keeps its field (f53a300)
 - a JSON response is scanned 17-23 % faster: a rule with no other gate runs only where its literal can be (0865a7f)
 - a hook starts faster: the personal-data regexes compile on first use (f78ec13)
