@@ -177,8 +177,9 @@ def _label(path: tuple) -> str:
     return _key_label(next((part for part in reversed(path) if isinstance(part, str)), ""))
 
 
-# a response repeats its keys in each record: the label of a key is worked out once per process
-@functools.lru_cache(maxsize=4096)
+# a response repeats its keys in each record: the label of a key is worked out once per process. 65,536 keys: a cache
+# that a response with more distinct keys overruns made the large response of the linear test 18 times the small one
+@functools.lru_cache(maxsize=65536)
 def _key_label(last: str) -> str:
     if not last or len(last) > _LABEL_MAX or any(c in _NOT_IN_LABEL for c in last):
         return ""
