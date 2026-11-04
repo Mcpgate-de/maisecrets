@@ -299,6 +299,7 @@ for leaf, m in findings_by_leaf(detector, response):     # layout "lines", the d
   is not scanned and does not cut its record (it holds nothing to find). Placing the findings is
   one pass over the strings and the findings. A value JSON cannot hold raises `TypeError`, a cycle `ValueError`.
 - `tests/test_detection_leaves.py` holds these points.
+  So a password and a first and last name reach such an element; a single surname alone in it stays as it is.
 
 ## A remote detector (optional)
 
