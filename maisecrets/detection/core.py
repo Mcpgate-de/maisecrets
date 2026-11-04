@@ -2066,6 +2066,21 @@ def _phone_ok(text: str, start: int, secret: str) -> bool:
 # the end of the 8th line after it (the separators may hold line breaks; the window ends after a
 # newline, which the value's terminator class takes the same way as in the whole text).
 _WINDOWED = {"generic-api-key": _LazyRx(r"(?i)access|auth|api|credential|creds|key|passw(?:or)?d|secret|token")}
+# the other vendored rules with the same lazy head (atlassian, jfrog, etsy, codecov) run in the same windows around
+# their own keywords: each alternative after the head holds one of them
+_KEYWORD_HEAD = "(?i)[\\w.-]{0,50}?(?:"
+_KEYWORD_WINDOWS: dict = {}
+
+
+def _keyword_window(rule: Rule):
+    """The keyword search of a rule with the lazy head of generic-api-key, or None."""
+    kw = _KEYWORD_WINDOWS.get(rule.id, False)
+    if kw is False:
+        kw = None
+        if rule.keywords and rule.regex.pattern.startswith(_KEYWORD_HEAD):
+            kw = re.compile("(?i)" + "|".join(re.escape(k) for k in rule.keywords))
+        _KEYWORD_WINDOWS[rule.id] = kw
+    return kw
 
 
 def _windowed(rule: Rule, kw: re.Pattern, text: str):
@@ -2126,7 +2141,7 @@ def _matches(rule: Rule, text: str, channel: str = "prompt"):
                 continue
             yield _Spanned(_EMPTY_RE.match(text, b), a, text)
         return
-    kw = _WINDOWED.get(rule.id) if matcher == "windowed" else None
+    kw = _WINDOWED.get(rule.id) if matcher == "windowed" else _keyword_window(rule) if matcher == "regex" else None
     if kw is not None and len(text) > 4096:
         yield from _windowed(rule, kw, text)
         return
