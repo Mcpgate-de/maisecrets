@@ -8,6 +8,7 @@ less time). Only the built-in rules that run as one regex over the text take par
 from __future__ import annotations
 
 import contextlib
+import functools
 import contextvars
 import hashlib
 import json
@@ -259,18 +260,41 @@ def with_response_rules(text: str, order: tuple):
         _RESPONSE.reset(token)
 
 
+@functools.lru_cache(maxsize=8192)
+def _trigrams(word: str) -> frozenset:
+    return frozenset(word[i:i + 3] for i in range(len(word) - 2))
+
+
+class _Grams(dict):
+    """A dict of `word in low`, answered first by the three-letter pieces of `low`: a word with a piece the text lacks
+    cannot be in it. A response holds a few of the 553 keywords, and a search of the whole text for each of them was
+    most of the time of rules_for."""
+
+    def __init__(self, low: str) -> None:
+        super().__init__()
+        self.low = low
+        self.grams = {low[i:i + 3] for i in range(len(low) - 2)}
+
+    def __missing__(self, word: str) -> bool:
+        hit = self[word] = (len(word) < 3 or _trigrams(word) <= self.grams) and word in self.low
+        return hit
+
+
 def rules_for(order: tuple, joined: str, low: str) -> tuple:
     """The rules of `order` that can fire somewhere in `joined` (its lower case is `low`); the steps that are no rule
     (the personal data, the terms, the imported values) stay in their place."""
-    known: dict = {}
+    known = _Grams(low)
     out = []
     for rule in order:
         if not hasattr(rule, "keywords"):
             out.append(rule)
             continue
-        if rule.keywords and not any_keyword(rule.keywords, low, known):
+        if rule.keywords and not any(known[k] for k in rule.keywords):
             continue
-        if lacks_prefix(rule.prefix, joined, low) or lacks_required(rule.need, joined, low):
+        need, icase = rule.prefix or NONE
+        if need and (not known[need.lower()] if icase else need not in joined):
+            continue
+        if rule.need and joined.isascii() and not any(known[x] for x in rule.need):
             continue
         out.append(rule)
     return tuple(out)

@@ -54,6 +54,24 @@ class ResponseRulesTests(unittest.TestCase):
             full = [_spans(r) for r in records]
         self.assertEqual(subset, full)
 
+    def test_the_three_letter_filter_picks_the_rules_the_plain_checks_pick(self):
+        # rules_for answers `word in low` first by the three-letter pieces of the text: a word with a piece the text
+        # lacks cannot be in it. The plain checks of the scan must pick the same rules, in the same order
+        from maisecrets.detection import core
+        order = D._run(lambda: core._in_scan_order(core.rules()))
+        texts = _texts() + ["\u015e\u0130FRE: x", "\u0130stanbul password: y", "\u017fecret \u0131",
+                            "\u03a3 token \u03a3\u03a3", "ab", "", "x" * 3]
+        checked = 0
+        for t in texts:
+            low = core._lower(t)
+            known: dict = {}
+            plain = tuple(r for r in order if not hasattr(r, "keywords") or (
+                not (r.keywords and not prefilter.any_keyword(r.keywords, low, known))
+                and not prefilter.lacks_prefix(r.prefix, t, low) and not prefilter.lacks_required(r.need, t, low)))
+            self.assertEqual(prefilter.rules_for(order, t, low), plain)
+            checked += 1
+        self.assertGreater(checked, 100, "premise: the corpora are there")
+
     def test_only_the_exact_text_takes_the_subset(self):
         text = "password: x"
         with prefilter.with_response_rules(text, ("only",)):
