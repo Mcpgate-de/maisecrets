@@ -14,8 +14,8 @@ replace = '''                  r"|unreal[ _-]?name"'''
 [[proof]]
 path = "a plural or directory phone key is no phone label"
 file = "maisecrets/detection/personal.py"
-find = '''_PHONE_LABEL_WORDS = (r"phones?|(?:business|home|work|mobile|other)[ _-]?phones?|telephone|tel|mobile?|'''
-replace = '''_PHONE_LABEL_WORDS = (r"phone|telephone|tel|mobile?|'''
+find = '''_PHONE_LABEL_WORDS = (r"phones?|(?:business|home|work|mobile|other)[ _-]?phones?|telephone|tel|mobile?"'''
+replace = '''_PHONE_LABEL_WORDS = (r"phone|telephone|tel|mobile?"'''
 
 [[proof]]
 path = "a commit hash after an AWS key id is a secret"

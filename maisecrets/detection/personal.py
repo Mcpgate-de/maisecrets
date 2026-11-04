@@ -1910,7 +1910,8 @@ _PHONE_URL_RE = _lazy(r"(?i)(?<![a-z])(?:phone|tel|mobile|msisdn|cell)[\w-]{0,10
 # or "is") takes any national form; a verb (call, reach … at, contact … at) and a label with words between them take a
 # North American number only, whose shape is rare outside a phone number
 # business_phones, homePhones: the phones of a person in a directory (Microsoft Graph user, Google People)
-_PHONE_LABEL_WORDS = (r"phones?|(?:business|home|work|mobile|other)[ _-]?phones?|telephone|tel|mobile?|mobil(?:e|nummer|telefon)?|cell(?:ular|phone)?|fax|handy"
+_PHONE_LABEL_WORDS = (r"phones?|(?:business|home|work|mobile|other)[ _-]?phones?|telephone|tel|mobile?"
+                      r"|mobil(?:e|nummer|telefon)?|cell(?:ular|phone)?|fax|handy"
                       r"|telefon(?:nummer|o)?|t[ée]l[ée]phone|tel[ée]fono|telefoon(?:nummer)?|telefone|portable"
                       r"|cellulare|rufnummer|rufnr|durchwahl|festnetz(?:nummer)?|whatsapp|hotline"
                       r"|contact[ _-]?(?:number|no)")
