@@ -2074,12 +2074,13 @@ _KEYWORD_WINDOWS: dict = {}
 
 def _keyword_window(rule: Rule):
     """The keyword search of a rule with the lazy head of generic-api-key, or None."""
-    kw = _KEYWORD_WINDOWS.get(rule.id, False)
+    key = (rule.regex.pattern, tuple(rule.keywords or ()))   # the rule's content: an own rule may reuse an id
+    kw = _KEYWORD_WINDOWS.get(key, False)
     if kw is False:
         kw = None
         if rule.keywords and rule.regex.pattern.startswith(_KEYWORD_HEAD):
             kw = re.compile("(?i)" + "|".join(re.escape(k) for k in rule.keywords))
-        _KEYWORD_WINDOWS[rule.id] = kw
+        _KEYWORD_WINDOWS[key] = kw
     return kw
 
 
