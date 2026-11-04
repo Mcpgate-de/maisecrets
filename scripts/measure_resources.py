@@ -217,8 +217,9 @@ def footprint(scanner: str, cand: Path, env: dict) -> dict:
 def network_note(scanner: str) -> str:
     if scanner.startswith("maisecrets"):
         return "no (standard library, no network code in the detector)"
-    if scanner in BINARIES:
-        return "denied by the sandbox on macOS (validation off by flag)"
+    if scanner in BINARIES:   # sandbox-exec exists on macOS only (bench/adapters/_filescan.py)
+        return ("denied by the sandbox on macOS (validation off by flag)" if sys.platform == "darwin"
+                else "not blocked on Linux (validation off by flag)")
     return "not blocked, not observed"
 
 

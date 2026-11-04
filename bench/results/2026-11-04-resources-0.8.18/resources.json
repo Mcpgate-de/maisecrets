@@ -68,7 +68,7 @@
     "torch": false,
     "what": "the release binary"
    },
-   "network": "denied by the sandbox on macOS (validation off by flag)"
+   "network": "not blocked on Linux (validation off by flag)"
   },
   "detect_secrets": {
    "cells": {
@@ -150,7 +150,7 @@
     "torch": false,
     "what": "the release binary"
    },
-   "network": "denied by the sandbox on macOS (validation off by flag)"
+   "network": "not blocked on Linux (validation off by flag)"
   },
   "kingfisher": {
    "cells": {
@@ -191,7 +191,7 @@
     "torch": false,
     "what": "the release binary"
    },
-   "network": "denied by the sandbox on macOS (validation off by flag)"
+   "network": "not blocked on Linux (validation off by flag)"
   },
   "maisecrets": {
    "cells": {
@@ -276,7 +276,7 @@
     "torch": false,
     "what": "the release binary"
    },
-   "network": "denied by the sandbox on macOS (validation off by flag)"
+   "network": "not blocked on Linux (validation off by flag)"
   },
   "pii_anon": {
    "cells": {
@@ -440,7 +440,7 @@
     "torch": false,
     "what": "the release binary"
    },
-   "network": "denied by the sandbox on macOS (validation off by flag)"
+   "network": "not blocked on Linux (validation off by flag)"
   }
  },
  "texts": {

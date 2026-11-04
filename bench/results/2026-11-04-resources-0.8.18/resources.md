@@ -42,11 +42,11 @@ Machine: AMD EPYC 9645 96-Core Processor, 8 CPUs, 15.6 GB RAM, Linux 6.12.115+de
 | presidio | its virtual environment | 783.3 | 424.5 | no | not blocked, not observed | not used (CPU only) |
 | preserve | its virtual environment | 302.0 | 0.0 | no | not blocked, not observed | not used (CPU only) |
 | pii_anon | its virtual environment | 91.9 | 0.0 | no | not blocked, not observed | not used (CPU only) |
-| gitleaks | the release binary | 20.9 | 0 | no | denied by the sandbox on macOS (validation off by flag) | not used (CPU only) |
-| betterleaks | the release binary | 23.1 | 0 | no | denied by the sandbox on macOS (validation off by flag) | not used (CPU only) |
-| trufflehog | the release binary | 34.8 | 0 | no | denied by the sandbox on macOS (validation off by flag) | not used (CPU only) |
+| gitleaks | the release binary | 20.9 | 0 | no | not blocked on Linux (validation off by flag) | not used (CPU only) |
+| betterleaks | the release binary | 23.1 | 0 | no | not blocked on Linux (validation off by flag) | not used (CPU only) |
+| trufflehog | the release binary | 34.8 | 0 | no | not blocked on Linux (validation off by flag) | not used (CPU only) |
 | detect_secrets | its virtual environment | 15.4 | 0.0 | no | not blocked, not observed | not used (CPU only) |
-| kingfisher | the release binary | 34.9 | 0 | no | denied by the sandbox on macOS (validation off by flag) | not used (CPU only) |
-| noseyparker | the release binary | 40.7 | 0 | no | denied by the sandbox on macOS (validation off by flag) | not used (CPU only) |
+| kingfisher | the release binary | 34.9 | 0 | no | not blocked on Linux (validation off by flag) | not used (CPU only) |
+| noseyparker | the release binary | 40.7 | 0 | no | not blocked on Linux (validation off by flag) | not used (CPU only) |
 
 maisecrets with the local NER layer: not measured here (BENCH_NER_PYTHON, BENCH_NER not set). The figures of docs/NER-EXPERIMENT.md: spacy en_core_web_sm: 12 / 38 (median / p95) ms per document, memory 137 after load, 168 after the documents; D3 (the support-copilot setting): 33 / 88 ms per document, memory + 0.7 GB; GLiNER multi v2.1: 152 / 411 ms per document, memory + 3.5 GB.
