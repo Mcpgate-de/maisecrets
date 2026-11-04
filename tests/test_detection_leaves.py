@@ -336,13 +336,16 @@ class RecordCopyTests(unittest.TestCase):
 
     PW = "Qz" + "7!vRk2" + "pLm9"
     TOKEN = "a8f3" + "K9zQx2" + "Lm7vPwR4tY"
+    # a password of letters: no other string takes it by the spread of a found value (InlineNodeTests), so only the
+    # copy path gives it to the copy
+    LETTERS = "Zqxv" + "bnml" + "kw"
 
     def _msg(self, text):
         return {"messages": [{"text": text, "user": "U01", "blocks": [{"type": "section", "text": text}]},
                              {"text": "no secret here", "blocks": [{"text": "no secret here"}]}]}
 
     def test_a_copy_gets_the_findings_of_the_first(self):
-        text = "deploy note, password: " + self.PW + " and token=" + self.TOKEN
+        text = "deploy note, password: " + self.LETTERS
         found = L.findings_by_leaf(D, self._msg(text))
         by_path: dict = {}
         for leaf, m in found:
@@ -354,7 +357,7 @@ class RecordCopyTests(unittest.TestCase):
 
     def test_a_copy_finds_what_the_field_alone_finds(self):
         # the per-field oracle of the record scan holds for a copy too
-        text = "password: " + self.PW
+        text = "password: " + self.LETTERS
         alone = {(m.start - 6, m.end - 6) for m in D.findings("text: " + text, channel="tool")}
         copy = {(m.start, m.end) for leaf, m in L.findings_by_leaf(D, self._msg(text))
                 if leaf is not None and leaf.path == ("messages", 0, "blocks", 0, "text")}
