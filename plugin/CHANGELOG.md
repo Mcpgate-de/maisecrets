@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.8.20] - 2026-11-04
+
+### Fixes
+
+- names and phone numbers in user directories and chat profiles are masked; a commit hash next to an AWS key is no longer taken for its secret (b974c29)
+- a gateway that cannot record the release of a value says so, and the person may simply try again (33400a4)
+
 ## [0.8.19] - 2026-11-04
 
 ### Fixes
