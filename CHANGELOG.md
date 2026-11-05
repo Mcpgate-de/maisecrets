@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.8.22] - 2026-11-05
+
+### Fixes
+
+- large tool results are checked faster (4554cd6)
+
 ## [0.8.21] - 2026-11-04
 
 ### Fixes
