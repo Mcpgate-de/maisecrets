@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.8.23] - 2026-11-05
+
+### Fixes
+
+- /maisecrets:sref runs again (3aae54e)
+- finds a password like Sommer2024! after the German word Passwort or Kennwort in a tool result (4a8f626)
+
 ## [0.8.22] - 2026-11-05
 
 ### Fixes
