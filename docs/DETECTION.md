@@ -56,6 +56,7 @@ for m in d.findings(text, channel="tool", path="notes.txt"):
 | `Active`, `resolve_regions` | The regions and label languages, and their resolution from a config (`locale=` to give the locale) |
 | `user_rule` | A rule of your own, for `Sources.user_rules` (returns a `Rule`) |
 | `TYPES` | The type vocabulary: each type a `Match` can carry, with its `family` and `class` (`maisecrets/detection/types.json`) |
+| `ScanIncomplete` | Raised by a scan past its `deadline=` (since 0.8.24): `findings`, `reason`, `read`, below |
 
 The rule tables and the helpers of `core.py` are no API: they change with the rules.
 
@@ -110,6 +111,7 @@ maintainer on 2026-10-20 (merge request !160):
 | `user_rule(id, type, pattern, keywords=(), secret_group=0)` | **stable**: the one way for a caller to make a rule of its own. The id becomes `user:<id>`; a wrong argument raises `ValueError` |
 | `Rule` | **no stable constructor**: the type that `user_rule` returns and `Detector.rules()` lists. Of its fields only `id`, `type`, `keywords` and `secret_group` are promised; the other 17 belong to the detector |
 | `TYPES` and `maisecrets/detection/types.json` | **stable** as the section "The type vocabulary" says: a listed type and its family stay; a class may be refined in a minor release; new types may come |
+| `ScanIncomplete` and `deadline=` | **provisional** (since 0.8.24, for the gateway's time budget): the names may change in a minor release, until the maintainer decides |
 | `LazyRegex` | **removed in 0.8** (deprecated in 0.7.0): give `user_rule` the pattern as a string |
 | The text of `scan` and `findings` | **a `str`**: anything else raises `TypeError` since 0.8, decided without a `DeprecationWarning` in 0.7. Before, `None`, `b""` and `0` gave no hits and other bytes or numbers raised whatever the first regex raised |
 | The offsets of a `Match` | **Unicode code points** of the scanned `str`, `text[start:end] == value`. A UTF-16 caller (JavaScript, Java, .NET) counts a character outside the BMP, such as an emoji, as two units and converts. In a tool result a value hidden by ANSI codes or zero-width characters has the span of its original text, those characters included |
