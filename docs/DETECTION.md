@@ -301,6 +301,29 @@ for leaf, m in findings_by_leaf(detector, response):     # layout "lines", the d
 - `tests/test_detection_leaves.py` holds these points.
   So a password and a first and last name reach such an element; a single surname alone in it stays as it is.
 
+## A deadline: stop a scan in time (since 0.8.24)
+
+`Detector.findings(text, ..., deadline=)` and `leaves.findings_by_leaf(detector, obj, ..., deadline=)` take a
+`time.monotonic()` value, as `findings_with()` does for the remote step. Without it nothing changes.
+
+Past the deadline the scan stops between rules, between its steps (the personal data, the cleaned copy, the terms)
+and between record segments. It raises `maisecrets.detection.ScanIncomplete`:
+
+- `findings`: what it found so far, in the call's return shape and offsets (`Match` for `findings()`,
+  `(leaf, Match)` for `findings_by_leaf()`);
+- `reason`: `"deadline"`.
+
+The text after the last finding is not scanned by every rule. A caller treats the rest as unscanned, for example
+with its own patterns.
+
+One rule's regex on one text cannot be interrupted, so a scan can pass its deadline by its slowest single step.
+Measured on the reference host (AMD EPYC 9645, 2026-11-05), five runs per budget of 0.05 to 1 s:
+
+| Input | Whole scan | Time past the deadline |
+|---|---:|---:|
+| 1 MB tool text, `findings()` | 9.2 s | at most 109 ms, median 5 to 53 ms |
+| Slack history of 88 KB JSON, `findings_by_leaf()` | 0.32 s | under 1 ms |
+
 ## A remote detector (optional)
 
 The rules find few names (docs/NER-EXPERIMENT.md). A named-entity service can add them after the rules, through
