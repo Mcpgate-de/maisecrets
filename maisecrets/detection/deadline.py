@@ -15,11 +15,15 @@ _DEADLINE: contextvars.ContextVar = contextvars.ContextVar("maisecrets_deadline"
 class ScanIncomplete(Exception):
     """A scan that passed its deadline. `findings` holds what it found so far, in the return shape of the call that
     raised (a list of Match for findings(), a list of (leaf, Match) for findings_by_leaf()); the text after the last
-    finding is not scanned by every rule. `reason` is "deadline"."""
+    finding is not scanned by every rule. `reason` is "deadline". `read` (findings_by_leaf only): the leaves whose
+    findings are complete."""
 
-    def __init__(self, findings: list, reason: str = "deadline") -> None:
+    def __init__(self, findings: list, reason: str = "deadline", read=None) -> None:
         super().__init__(f"the scan stopped at its {reason} with {len(findings)} findings")
         self.findings, self.reason = findings, reason
+        # findings_by_leaf: the leaves whose own scan ran to its end, so their findings in `findings` are complete; a
+        # value found only in a leaf outside it is not spread to them. None for findings()
+        self.read = read
 
 
 def current():

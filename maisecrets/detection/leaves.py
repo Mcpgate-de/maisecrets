@@ -251,7 +251,33 @@ def _lines(detector, obj, channel: str, **kwargs) -> list:
                 n += len(lead) + len(leaf.value) + 1
             if parts:
                 segments.append(("\n".join(parts), placed, starts))
-    out += _scan_segments(detector, segments, channel, kwargs)
+    try:
+        out += _scan_segments(detector, segments, channel, kwargs)
+    except ScanIncomplete as e:
+        # the steps below only add findings: run them on the part, so a read string keeps every mask they give it. A
+        # copy and a joined sentence are not read: their findings come from those steps, which saw only a part
+        cut = _after_scan(e.findings, copies, sentences, every)
+        raise ScanIncomplete(cut, e.reason, _read_whole(e.read or [], copies, sentences)) from None
+    return _after_scan(out, copies, sentences, every)
+
+
+def _read_whole(read: list, copies: list, sentences: list) -> list:
+    """The leaves of a cut scan whose findings are complete: read in a segment that ran to its end, not a copy (its
+    findings come from the leaf it copies, after the scan), and not a joined sentence or one of its nodes unless the
+    sentence was read too (the nodes get the sentence's findings after the scan)."""
+    done = {id(leaf) for leaf in read}
+    out = {id(leaf): leaf for leaf in read}
+    for leaf, _seen in copies:
+        out.pop(id(leaf), None)
+    for sentence, nodes in sentences:
+        if id(sentence) not in done:
+            for node in nodes:
+                out.pop(id(getattr(node, "leaf", node)), None)
+        out.pop(id(sentence), None)
+    return list(out.values())
+
+
+def _after_scan(out: list, copies: list, sentences: list, every: list) -> list:
     if copies:
         by_leaf: dict = {}
         for leaf, m in out:
@@ -391,15 +417,18 @@ def _scan_segments(detector, segments: list, channel: str, kwargs: dict) -> list
     out = []
     order = _response_order(detector, [t for t, _p, _s in segments], {k: v for k, v in kwargs.items()
                                                                        if k != "deadline"})
+    read: list = []
     for text, placed, starts in segments:
         # a negative context counts only inside its field (text_index.py); the rules of the response (prefilter.py)
         try:
             with record_fields(text, starts), (with_response_rules(text, order) if order else contextlib.nullcontext()):
                 found = detector.findings(text, channel=channel, **kwargs)
         except ScanIncomplete as e:
-            # past the deadline: the segments before, and this one's findings so far, placed in their strings
-            raise ScanIncomplete(out + _placed(e.findings, placed), e.reason) from None
+            # past the deadline: the segments before, and this one's findings so far, placed in their strings; the
+            # strings of the segments before are read whole
+            raise ScanIncomplete(out + _placed(e.findings, placed), e.reason, read) from None
         out += _placed(found, placed)
+        read += [leaf for leaf, _at in placed]
     return out
 
 
@@ -442,7 +471,7 @@ def findings_by_leaf(detector, obj, channel: str = "tool", layout: str = "lines"
     try:
         found = detector.findings(text, channel=channel, **kwargs)
     except ScanIncomplete as e:
-        raise ScanIncomplete(_json_placed(e.findings, leaves), e.reason) from None
+        raise ScanIncomplete(_json_placed(e.findings, leaves), e.reason, []) from None   # one scan: none read whole
     return _json_placed(found, leaves)
 
 

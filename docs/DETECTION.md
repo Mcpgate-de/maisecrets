@@ -311,7 +311,10 @@ and between record segments. It raises `maisecrets.detection.ScanIncomplete`:
 
 - `findings`: what it found so far, in the call's return shape and offsets (`Match` for `findings()`,
   `(leaf, Match)` for `findings_by_leaf()`);
-- `reason`: `"deadline"`.
+- `reason`: `"deadline"`;
+- `read` (`findings_by_leaf()` only): the leaves whose findings in `findings` are complete. Their segment ran to its
+  end. A copy of a string, and the nodes of a joined sentence whose sentence was not read, are not in it. A value
+  found only in a leaf outside `read` is not spread into the leaves in it. `None` for `findings()`.
 
 The text after the last finding is not scanned by every rule. A caller treats the rest as unscanned, for example
 with its own patterns.

@@ -119,6 +119,36 @@ class LeafDeadlineTests(unittest.TestCase):
             partial_seen = partial_seen or 0 < len(part) < len(self.full)
         self.assertTrue(partial_seen)
 
+    def test_a_read_leaf_has_every_finding_of_the_whole_scan(self):
+        # the gateway withholds the leaves outside `read` and shows the others with their masks: a read leaf must
+        # carry what the whole scan gives it, also in a record that holds its text twice (text and blocks)
+        def block(line: str) -> list:
+            section = {"type": "rich_text_section", "elements": [{"type": "text", "text": line}]}
+            return [{"type": "rich_text", "elements": [section]}]
+        obj = {"messages": [{"user": "U" + rnd(8, string.digits), "text": line, "blocks": block(line)}
+                            for line in text().split("\n")]}
+        whole: dict = {}
+        for leaf, m in leaves.findings_by_leaf(D, obj):
+            if leaf is not None:
+                whole.setdefault(leaf.path, set()).add((m.start, m.end, m.type))
+        cut_seen = False
+        for budget in range(20, 4000, 41):     # many cut points: some fall inside a segment that finds more later
+            clock = FakeClock()
+            with mock.patch.object(core.time, "monotonic", clock), self.subTest(budget=budget):
+                try:
+                    leaves.findings_by_leaf(D, obj, deadline=1000.0 + budget)
+                    continue
+                except ScanIncomplete as e:
+                    cut = e
+            got: dict = {}
+            for leaf, m in cut.findings:
+                if leaf is not None:
+                    got.setdefault(leaf.path, set()).add((m.start, m.end, m.type))
+            for leaf in cut.read:
+                self.assertEqual(got.get(leaf.path, set()), whole.get(leaf.path, set()), leaf.path)
+            cut_seen = cut_seen or (0 < len(cut.read))
+        self.assertTrue(cut_seen)   # a budget cut the scan after some leaves were read
+
     def test_the_json_layout_places_the_findings_so_far(self):
         clock = FakeClock()
         with mock.patch.object(core.time, "monotonic", clock):
