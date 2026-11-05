@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [0.8.24] - 2026-11-05
+
+### Features
+
+- a record scan that stops at its deadline names the strings it read whole (0722903)
+- a scan can stop at a deadline and return what it found so far (3c74643)
+- tells you once per session when a gateway offers Sensitive References and this computer has no login (5963c3c)
+
+### Fixes
+
+- a command or file with a reference maisecrets cannot resolve is refused, with the cause and the fix (76eb42e)
+
 ## [0.8.23] - 2026-11-05
 
 ### Fixes
