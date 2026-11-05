@@ -61,7 +61,7 @@ from .guarded_paths import (  # noqa: F401
 from .server_values import _all_refs, _elsewhere_reason, _server_fetch, _server_limit_keys, \
     _server_release
 from .sref_hooks import canonical as _sref_canonical, note as _sref_note, precheck as _sref_precheck, \
-    program_of as _program_of, refs as _sref_refs
+    program_of as _program_of, refs as _sref_refs, never_reason as _sref_never_reason
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
 AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
@@ -1753,7 +1753,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     server = [(k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id"))
               if ctxs[a] != "comment"]
     # a Sensitive Reference this session received (sref_notes.py): it takes the same way as a vault token
-    srefs, sref_elsewhere = _sref_refs(command, payload.get("session_id"), ctxs)
+    srefs, sref_elsewhere, sref_never = _sref_refs(command, payload.get("session_id"), ctxs)
+    if sref_never:
+        return _deny(_sref_never_reason(sref_never) + " The command did not run.")
     server = server + srefs
     refs = sorted(refs + server, key=lambda r: r[1])
     server_keys = list(dict.fromkeys(k for k, _a, _b in server))
@@ -2305,6 +2307,14 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     _walk_strings(target, collect_elsewhere)
     if elsewhere:
         return _deny(_elsewhere_reason(list(dict.fromkeys(elsewhere))) + " Nothing was written.")
+    never: list[str] = []
+
+    def collect_never(v: str) -> str:
+        never.extend(_sref_refs(v, payload.get("session_id"))[2])
+        return v
+    _walk_strings(target, collect_never)
+    if never:
+        return _deny(_sref_never_reason(list(dict.fromkeys(never))) + " Nothing was written.")
     # a server value goes into the content only: in a path the server would choose the file, after the home check
     # above saw the token (Codex review, 2026-10-16)
     outside: list[str] = []

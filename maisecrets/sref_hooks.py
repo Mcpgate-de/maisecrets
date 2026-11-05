@@ -40,16 +40,29 @@ def canonical(text: str, session: str | None, cfg: dict | None = None) -> str:
     return out
 
 
-def refs(text: str, session: str | None, ctxs=None) -> tuple[list, list]:
+def refs(text: str, session: str | None, ctxs=None) -> tuple[list, list, list]:
     """The Sensitive References of text (sref_notes.py): (key, start, end) of each one this session received, the
-    key being the reference without its brackets, and the ones it did not receive (they get a reason)."""
+    key being the reference without its brackets; the ones another session received; and the ones no session
+    received. The last two get a reason: the command would run with the reference's text instead of its value."""
     if "sref:" not in text:
-        return [], []
+        return [], [], []
     from . import sref_client, sref_notes
     found = [(r, a, b) for r, _c, a, b in sref_client.find(text) if ctxs is None or ctxs[a] != "comment"]
     refs = [r for r, _a, _b in found]
     here = sref_notes.noted(refs, session)
-    return [(r[1:-1], a, b) for r, a, b in found if r in here], sref_notes.noted_elsewhere(refs, session)
+    elsewhere = sref_notes.noted_elsewhere(refs, session)
+    never = list(dict.fromkeys(r for r in refs if r not in here and r not in elsewhere))
+    return [(r[1:-1], a, b) for r, a, b in found if r in here], elsewhere, never
+
+
+def never_reason(refs: list) -> str:
+    """The refusal for references no session received: maisecrets cannot put their values in, and the call would work
+    with the reference's text (a gateway pilot, 2026-11-05: a command ran with the token and found nothing)."""
+    names = ", ".join(refs)
+    return (f"maisecrets: {names} is a Sensitive Reference that this session did not receive in a tool result, so "
+            "maisecrets cannot put its value in; the call would work with the reference's text instead. If maisecrets "
+            "has no login to the gateway yet, the user runs /maisecrets:sref login once. Then call the tool that "
+            "showed the reference again in this session and use the reference it returns.")
 
 
 def audit_name(key: str) -> str:

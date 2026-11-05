@@ -124,6 +124,24 @@ class SrefBashTests(unittest.TestCase):
         rest = reason.replace(self.shown, "").replace(self.ref, "")
         self.assertNotIn(self.ref[6:-1].split(":")[-1], rest, "no id beyond the reference")
 
+    def test_a_reference_no_session_received_is_refused_with_its_cause(self):
+        # the gateway pilot (2026-11-05): a command with a reference the plugin cannot resolve ran with its text
+        for logged_in in (False, True):
+            if logged_in:
+                self.login()
+            out = self.bash(f"printf %s {self.shown}")
+            with self.subTest(logged_in=logged_in):
+                self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+                reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn("did not receive", reason)
+                self.assertIn("/maisecrets:sref login", reason)
+        self.assertEqual(self.srv.resolved, [])
+
+    def test_a_file_with_a_reference_no_session_received_is_not_written(self):
+        out = self.write(str(self.profile / "x.txt"), "author: " + self.shown)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("did not receive", out["hookSpecificOutput"]["permissionDecisionReason"])
+
     def write(self, path: str, content: str) -> dict:
         hooks._live_cache.clear()
         return hooks.pre_tool({"tool_name": "Write", "session_id": "s1", **CLAUDE, "cwd": str(self.profile),
