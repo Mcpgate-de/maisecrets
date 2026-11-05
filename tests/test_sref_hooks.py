@@ -124,6 +124,24 @@ class SrefBashTests(unittest.TestCase):
         rest = reason.replace(self.shown, "").replace(self.ref, "")
         self.assertNotIn(self.ref[6:-1].split(":")[-1], rest, "no id beyond the reference")
 
+    def gateway_result(self, session: str = "s1") -> dict:
+        return hooks._post_tool_guarded({"tool_name": "mcp__gw__gitlab_read_actions", "session_id": session, **CLAUDE,
+                                         "mcp_server": {"name": "gw", "source": "user"}, "tool_input": {"iid": 7},
+                                         "tool_response": {"content": [{"type": "text",
+                                                                        "text": "author: " + self.shown}]}})
+
+    def test_without_a_login_the_first_result_tells_the_person_once_per_session(self):
+        first = self.gateway_result("s1").get("systemMessage") or ""
+        self.assertIn("offers Sensitive References", first)
+        self.assertIn("/maisecrets:sref login", first)
+        self.assertNotIn("offers Sensitive References", self.gateway_result("s1").get("systemMessage") or "")
+        self.assertIn("offers Sensitive References", self.gateway_result("s2").get("systemMessage") or "")
+        self.assertEqual(self.srv.resolved, [])          # a hint resolves nothing and opens no browser
+
+    def test_with_a_login_no_hint(self):
+        self.login()
+        self.assertNotIn("offers Sensitive References", self.gateway_result("s1").get("systemMessage") or "")
+
     def test_a_reference_no_session_received_is_refused_with_its_cause(self):
         # the gateway pilot (2026-11-05): a command with a reference the plugin cannot resolve ran with its text
         for logged_in in (False, True):

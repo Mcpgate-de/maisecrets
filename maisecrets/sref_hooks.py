@@ -7,18 +7,42 @@ import os
 import re
 
 
-def note(payload: dict) -> None:
-    """PostToolUse of an MCP tool: note the references of its result for this session (sref_notes.py)."""
+def note(payload: dict) -> str | None:
+    """PostToolUse of an MCP tool: note the references of its result for this session (sref_notes.py). Returns a
+    notice for the person, once per session and gateway, when the gateway sends references and this computer has no
+    login there: without it a command with a reference is refused. The login stays the person's own step."""
     import json
     if not str(payload.get("tool_name") or "").startswith("mcp__") or \
             "sref:" not in json.dumps(payload.get("tool_response"), ensure_ascii=False):
-        return
+        return None
     from . import sref_notes
     from .hooks import client_of
     if client_of(payload) == "codex":
         from . import codex_vault
         payload = {**payload, "mcp_server": codex_vault.mcp_server_of(payload) or {}}
     sref_notes.note_result(payload)
+    return _login_hint(payload)
+
+
+def _login_hint(payload: dict) -> str | None:
+    from urllib.parse import urlsplit
+
+    from . import sref_client, sref_notes
+    from .hooks import client_of
+    from .vault import Vault, load_config
+    server = payload.get("mcp_server") if isinstance(payload.get("mcp_server"), dict) else {}
+    if server.get("source") != "user" or not isinstance(server.get("name"), str):
+        return None
+    origin = sref_notes.origin_of(sref_notes.user_servers().get(server["name"]))
+    if not origin or sref_client.logged_in(Vault(load_config()).backend, origin):
+        return None
+    if not sref_notes.first_hint(origin, payload.get("session_id")):
+        return None
+    host = urlsplit(origin).hostname
+    command = "run.sh sref login" if client_of(payload) == "codex" else "/maisecrets:sref login"
+    return (f"maisecrets: {host} offers Sensitive References: its results hold references that maisecrets can put "
+            f"into your commands as their values. {command} connects this computer once; until then a command with "
+            "such a reference is refused.")
 
 
 def canonical(text: str, session: str | None, cfg: dict | None = None) -> str:

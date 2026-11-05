@@ -2931,7 +2931,10 @@ def _post_tool_guarded(payload: dict) -> dict:
     except Exception as exc:  # noqa: BLE001 - a token not noted stays text; the output must not be withheld for it
         _debug(f"post-tool vault-refs: {type(exc).__name__}")
     try:
-        _sref_note(payload)       # a Sensitive Reference of the gateway, noted for this session (sref_hooks.py)
+        # a Sensitive Reference of the gateway, noted for this session; a hint once when there is no login (sref_hooks)
+        hint = _sref_note(payload)
+        if hint:
+            notice = (notice + " " + hint) if notice else hint
     except Exception as exc:  # noqa: BLE001 - a note that fails leaves the reference as text; the output goes on
         _debug(f"post-tool sref notes: {type(exc).__name__}")
     result = _post_tool_guarded_rest(payload)
