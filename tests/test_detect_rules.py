@@ -278,7 +278,9 @@ class ValidatorTests(unittest.TestCase):
                 hits = [(m.type, text[m.start:m.end]) for m in detect.scan(text, channel="tool")]
                 self.assertIn(("IP", addr), hits)
         # still text: an address glued to a word before its colon, and code
-        for text in (f"x:{addr}", "std::vector<int> v;", "ns::Foo::bar()", "at 12:30:45"):
+        for text in (f"x:{addr}", "std::vector<int> v;", "ns::Foo::bar()", "at 12:30:45",
+                     "remoteAddress: '::ffff:127.0.0.1'", "client ::ffff:10.1.2.3 connected",
+                     "[::ffff:10.0.0.5]:8080", "from ::FFFF:172.17.0.1 port 5000"):
             with self.subTest(text=text):
                 self.assertEqual([m for m in detect.scan(text, channel="tool") if m.type == "IP"], [])
         # three dotted numbers behind it are an embedded IPv4: the whole address is one hit, not its first part

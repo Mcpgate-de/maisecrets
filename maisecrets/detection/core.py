@@ -963,12 +963,13 @@ PRESIDIO_CARD_FIRST = {"credit-card": r"((4\d{3})|(5[0-5]\d{2})|(2(?:22[1-9]|2[3
 # Presidio's IPv6 pattern refuses a colon before the address and a digit after a dot behind it, so `peer :<v6>`,
 # `host=[x]:<v6>`, `<v6>.443` and `<v6>.53.1` (a port or a field after a dot, as tcpdump and some logs print it) left a
 # routable address in the clear (ai-gateway #1764, comment 112503). A colon still may not follow a word character or
-# another colon (`a:b::c` is no address after `a:`). An embedded IPv4 (`64:ff9b::<v4>`) is still one hit: the pattern
-# IPv4_embedded takes it whole, and the longer of two overlapping hits wins. The correction applies only to the
-# upstream text it expects
+# another colon (`a:b::c` is no address after `a:`). Three dotted numbers behind it are an embedded IPv4, which the
+# pattern IPv4_embedded takes whole: its prefix alone is no address (`::ffff:127.0.0.1`, as Node logs a client, gave
+# the hit `::ffff:127` while the whole address is private; Opus review). The correction applies only to the upstream
+# text it expects
 _IPV6_LEFT_UPSTREAM, _IPV6_RIGHT_UPSTREAM = r"(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){7}", r"(?![\w:]|\.\d)"
 _IPV6_LEFT = r"(?:(?<![\w:])|(?<=[^\w:]:)|(?<=^:))(?:(?:[0-9A-Fa-f]{1,4}:){7}"
-_IPV6_RIGHT = r"(?![\w:])"
+_IPV6_RIGHT = r"(?![\w:])(?!(?:\.\d{1,3}){3}(?!\d))"
 
 
 def _label_consumed(regex: str) -> tuple[str, int]:
