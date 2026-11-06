@@ -383,6 +383,9 @@ class PowerShellPartFailsClosedTests(MovedPluginFolderFailsClosedTests):
         for event, command in self.commands():
             with self.subTest(event):
                 r = self.run_command(command, root)
+                if event in CLEANUP_EVENTS:
+                    self.assertEqual(r.returncode, 0)      # the session is over: nothing to block
+                    continue
                 self.assertIn("could not start hooks/run.cmd", r.stdout)
                 if event == "session-start":
                     self.assertEqual(r.returncode, 0)
@@ -413,8 +416,9 @@ class CmdExeFailsClosedTests(MovedPluginFolderFailsClosedTests):
 
     def commands(self) -> list:
         data = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        # the cleanup event blocks nothing, so the fail-closed tests of this class leave it out
         found = [hook["commandWindows"] for groups in data["hooks"].values() for group in groups
-                 for hook in group["hooks"]]
+                 for hook in group["hooks"] if not any(f" {e})" in hook["commandWindows"] for e in CLEANUP_EVENTS)]
         out = [(next(e for e in EVENTS if f" {e})" in c), c) for c in found]
         self.assertEqual(sorted({e for e, _c in out}), sorted(EVENTS), "every event has a Windows command")
         return out
