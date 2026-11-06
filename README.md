@@ -808,6 +808,9 @@ This prompt was not sent. The value did not reach the AI.
   characters or has more than one line (maisecrets could not find it again),
   when it looks like ordinary text (words, a sentence, a hash, an id, a
   command: the answer says so; store such a password with `/maisecrets:put`),
+  when it looks like a test value (only words such as super, secret, geheim
+  or test, and digits, also after a label: `passwort: supergeheim123`; the
+  rules leave such a value alone on purpose, and the answer says so),
   when it holds a placeholder, or when the prompt did not come from you (a
   scheduled prompt, a subagent, `claude -p`). The client's own list of earlier
   prompts (the up arrow) may keep the prompt as typed; that is not measured.
