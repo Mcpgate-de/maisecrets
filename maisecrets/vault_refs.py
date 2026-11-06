@@ -1417,28 +1417,37 @@ def released(backend, session: str | None) -> list[tuple[str, str]]:
 
 def end_session(backend, session: str | None) -> int:
     """SessionEnd: the values a server gave this session leave the store now. Returns how many entries went. A crashed
-    session sends no SessionEnd; then its values go at their expiry, at the latest at the next session start."""
+    session sends no SessionEnd; then its values go at their expiry, at the latest at the next session start.
+    The entries are first marked expired and stay in the index, so a hook that the client stops in the middle leaves
+    them to the next prune; only the names whose delete went leave the index (Opus review). The deletes run outside
+    the lock: a keychain delete is a process each, and another session's tool output waits for this lock. A delete
+    of a name that is gone already succeeds in every backend."""
     if not session:
         return 0
     with _lock_for(DIR / ".lock"):
         data = _read_json(RELEASED) or {}
-        items = data.pop(session, None)
+        items = data.get(session)
+        if not isinstance(items, list):
+            return 0
+        data[session] = [{**i, "t": 0} for i in items if isinstance(i, dict) and isinstance(i.get("name"), str)]
         _write_released(data)
-    # outside the lock: a keychain delete is a process each, and another session's tool output waits for this lock
-    gone, keep = 0, []
-    for item in items if isinstance(items, list) else []:
+        names = [i["name"] for i in data[session]]
+    gone = set()
+    for name in names:
         try:
-            backend.delete(item["name"])
-            gone += 1
-        except (KeyError, TypeError, RuntimeError, OSError):
-            if isinstance(item, dict) and isinstance(item.get("name"), str):
-                keep.append({**item, "t": 0})     # expired: the next prune tries the delete again
-    if keep:
-        with _lock_for(DIR / ".lock"):
-            data = _read_json(RELEASED) or {}
-            data.setdefault(session, []).extend(keep)
-            _write_released(data)
-    return gone
+            backend.delete(name)
+            gone.add(name)
+        except (RuntimeError, OSError):
+            pass                                  # expired and indexed: the next prune tries the delete again
+    with _lock_for(DIR / ".lock"):
+        data = _read_json(RELEASED) or {}
+        keep = [i for i in data.get(session) or [] if not (isinstance(i, dict) and i.get("name") in gone)]
+        if keep:
+            data[session] = keep
+        else:
+            data.pop(session, None)
+        _write_released(data)
+    return len(gone)
 
 
 def _write_released(data: dict) -> None:

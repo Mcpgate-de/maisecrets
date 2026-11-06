@@ -738,6 +738,42 @@ class Online(OnlineBase):
         self.assertEqual(vault_refs.end_session(backend, "s2"), 1)
         self.assertFalse((HOME / "vault-refs" / "released.json").exists())
 
+    def test_a_delete_that_fails_at_the_session_end_stays_indexed_and_expired(self):
+        self.ready()
+        self.write(tok("NAME_2"))
+        backend = Vault().backend
+        vault_refs.remember_released(backend, "s1", {"NAME_9": ("second-" + "value9", self.srv.url)})
+        names = [i["name"] for i in json.loads((HOME / "vault-refs" / "released.json").read_text())["s1"]]
+        self.assertEqual(len(names), 2, "premise: two entries")
+        real = backend.delete
+
+        def one_fails(name):
+            if name == names[0]:
+                raise RuntimeError("keychain delete failed (rc 1)")
+            real(name)
+        with mock.patch.object(backend, "delete", one_fails):
+            self.assertEqual(vault_refs.end_session(backend, "s1"), 1)
+        left = json.loads((HOME / "vault-refs" / "released.json").read_text())["s1"]
+        self.assertEqual([(i["name"], i["t"]) for i in left], [(names[0], 0)], "only the failed one, expired")
+        self.assertEqual(vault_refs.released(backend, "s1"), [], "an expired entry is not hunted")
+        self.assertFalse((HOME / "vault-refs" / "released.json").exists(), "the prune took it")
+
+    def test_a_session_end_that_the_client_stops_leaves_its_values_to_the_next_prune(self):
+        # the client may stop a SessionEnd hook at its exit: entries popped before their delete stayed in the store
+        # with no index row naming them, past the 24 hours (Opus review)
+        import subprocess
+        self.ready()
+        self.write(tok("NAME_2"))
+        child = ("import os, sys\nsys.path[:0] = [sys.argv[1] + '/tests', sys.argv[1]]\n"
+                 "from maisecrets import vault_refs\nfrom maisecrets.vault import Vault\n"
+                 "b = Vault().backend\nb.delete = lambda name: os._exit(9)\nvault_refs.end_session(b, 's1')\n")
+        r = subprocess.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 9, r.stderr[-300:])
+        backend = Vault().backend
+        self.assertTrue([k for k in backend.keys() if k.startswith("_maisecrets_vrel_")], "premise: still stored")
+        vault_refs.prune_released(backend)
+        self.assertEqual([k for k in backend.keys() if k.startswith("_maisecrets_vrel_")], [])
+
     def test_repair_keeps_the_values_a_server_gave_this_hour(self):
         self.ready()
         self.write(tok("NAME_2"))
