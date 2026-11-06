@@ -2427,7 +2427,12 @@ and keeps its other keys. Written by hand, the setting looks like this:
   name in a prompt becomes a placeholder and never blocks it. `/maisecrets:ner prompts off` turns the prompt part off (the setting `"prompts": false`). A
   service on the network never gets a prompt, and Codex prompts keep the rules alone (Codex cannot rewrite a
   prompt). One request per tool call or prompt. A tool result waits `timeout_ms`
-  (300 by default, at most 5000; the name lookup and a slow answer count too). A prompt waits
+  (300 by default, at most 5000; the name lookup and a slow answer count too), plus a share
+  that grows with its length: 1.5 times the rate of this computer (ms per 1,000 characters,
+  from its last answers; 60 until it has five, the rate of the reference setup) per 1,000
+  characters, at most `max_timeout_ms` (3000 by default, at most 5000). `"timeout_scales": false`
+  keeps the fixed `timeout_ms`. `ner.log` names the reason of each result that the rules took
+  alone (timeout, too_long, refused …), and `/maisecrets:ner` counts the reasons. A prompt waits
   `prompt_timeout_ms` (1000 by default, at most 5000, never less than `timeout_ms`): you wait for
   your prompt anyway. If the service gives no answer in time, the prompt goes on with the rules alone,
   and maisecrets says once per session that its names were not checked, and why. On the reference setup
