@@ -269,11 +269,15 @@ missing from a 200 answer.
 - **Echo.** While the session works, the vault looks for each value a server
   gave in the later tool results of that session, as it does for a stored
   value, and puts the server's token back in its place. To do that it keeps
-  the values in its store: each tool result of the session keeps them for one
-  more hour, never longer than 24 hours after the server gave them, and the
+  the values in its store: a tool result of the session keeps them for about
+  one more hour (the renewal runs at most once a minute), never longer than 24 hours after the server gave them, and the
   SessionEnd hook deletes them when the session ends. A session that crashes
   sends no SessionEnd; its values go at their expiry, at the latest at the
-  next session start. A value under 8 characters or one that reads
+  next session start. A session that ends and is resumed (`claude --resume`)
+  starts without them: an echo is then masked by its shape only, until the
+  next value comes from the server. The SessionEnd entry is not
+  authenticated, as no hook entry is: an agent that calls the launcher with
+  its own session id ends its own window early, as it could run `wipe`. A value under 8 characters or one that reads
   as a word is not looked for: it would change every text that holds it.
 - **Paths.** A server value goes into the content of a file tool, never into
   its path. In Bash, a value that names the vault's own folder, a store file,

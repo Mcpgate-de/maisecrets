@@ -3373,7 +3373,8 @@ def _quarantine_running_rule(elapsed: float) -> None:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
-        sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start\n")
+        sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start|"
+                         "session-end\n")
         return 2
     event = argv[1]
     try:

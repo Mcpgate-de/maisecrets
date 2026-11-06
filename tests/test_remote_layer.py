@@ -174,6 +174,8 @@ class RemoteLayerTests(unittest.TestCase):
         for _ in range(R.RATE_SAMPLES):
             R.note_rate(10000, late)                 # a timeout counts with its wait: the rate grows
         self.assertEqual(R.rate(), 200.0)
+        Path(HOME, "ner-rate.json").write_text(json.dumps([[500, 10 ** 400]] * 10))
+        self.assertEqual(R.rate(), R.DEFAULT_RATE, "a damaged file keeps the default rate")
         Path(HOME, "ner-rate.json").unlink()
 
     def test_the_log_names_why_the_rules_ran_alone(self):

@@ -121,7 +121,9 @@ class SrefBashTests(unittest.TestCase):
         hooks._live_cache.clear()
         codex = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CODEX,
                                 "tool_input": {"command": f"printf %s {self.shown}"}})
-        self.assertNotIn(trap, json.dumps(codex), "Codex sends PostToolUse for a failed command")
+        command = codex["hookSpecificOutput"]["updatedInput"]["command"]     # an allow with a rewrite, no deny
+        self.assertIn("__ms_1", command)
+        self.assertNotIn(trap, command, "Codex sends PostToolUse for a failed command")
 
     def test_an_echo_of_the_value_comes_back_as_the_reference(self):
         self.login()

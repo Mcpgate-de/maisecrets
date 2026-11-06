@@ -125,7 +125,10 @@ def _samples() -> list:
 def rate() -> float:
     """ms per 1,000 characters on this computer: the 90th percentile of the last answers (a timeout counts with the
     time it waited, so a rate that was too low grows), or DEFAULT_RATE until there are RATE_MIN of them."""
-    got = sorted(ms * 1000 / chars for chars, ms in _samples())
+    try:
+        got = sorted(float(ms) * 1000 / float(chars) for chars, ms in _samples())
+    except (ArithmeticError, ValueError):
+        return DEFAULT_RATE      # a damaged file must not take the name service away (Fable review)
     if len(got) < RATE_MIN:
         return DEFAULT_RATE
     return got[min(len(got) - 1, int(len(got) * 0.9))]

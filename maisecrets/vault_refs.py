@@ -1420,28 +1420,36 @@ def end_session(backend, session: str | None) -> int:
     session sends no SessionEnd; then its values go at their expiry, at the latest at the next session start."""
     if not session:
         return 0
-    gone = 0
     with _lock_for(DIR / ".lock"):
         data = _read_json(RELEASED) or {}
         items = data.pop(session, None)
-        keep = []
-        for item in items if isinstance(items, list) else []:
-            try:
-                backend.delete(item["name"])
-                gone += 1
-            except (KeyError, TypeError, RuntimeError, OSError):
-                if isinstance(item, dict) and isinstance(item.get("name"), str):
-                    keep.append({**item, "t": 0})     # expired: the next prune tries the delete again
-        if keep:
-            data[session] = keep
-        if data:
-            atomic_write(RELEASED, json.dumps(data, indent=1))
-        else:
-            try:
-                RELEASED.unlink()
-            except OSError:
-                pass
+        _write_released(data)
+    # outside the lock: a keychain delete is a process each, and another session's tool output waits for this lock
+    gone, keep = 0, []
+    for item in items if isinstance(items, list) else []:
+        try:
+            backend.delete(item["name"])
+            gone += 1
+        except (KeyError, TypeError, RuntimeError, OSError):
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                keep.append({**item, "t": 0})     # expired: the next prune tries the delete again
+    if keep:
+        with _lock_for(DIR / ".lock"):
+            data = _read_json(RELEASED) or {}
+            data.setdefault(session, []).extend(keep)
+            _write_released(data)
     return gone
+
+
+def _write_released(data: dict) -> None:
+    """The released index, or no file when it is empty. Under DIR/.lock."""
+    if data:
+        atomic_write(RELEASED, json.dumps(data, indent=1))
+        return
+    try:
+        RELEASED.unlink()
+    except OSError:
+        pass
 
 
 def has_released() -> bool:

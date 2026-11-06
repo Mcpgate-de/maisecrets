@@ -136,7 +136,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-end":
         if isinstance(payload, dict) and isinstance(payload.get("session_id"), str):
             vault_refs.end_session(Vault(load_config()).backend, payload["session_id"])
     except Exception:  # noqa: BLE001 - the expiry and the next session start are the backstop
-        _marker("hook.session-end")
+        pass
     sys.exit(0)
 
 if len(sys.argv) == 2 and sys.argv[1] == "session-start":
