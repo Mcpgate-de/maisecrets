@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.8.25] - 2026-11-06
+
+### Fixes
+
+- a scan with a deadline now stops within one hit after it, also when your References callback is slow (09ba5c5)
+- an address or other value a server gave you comes back as the same Sensitive Reference when a command prints it, and is not stored on this computer (e907752)
+
 ## [0.8.24] - 2026-11-05
 
 ### Features
