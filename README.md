@@ -1340,7 +1340,9 @@ does not need to look like a real secret, and these forms are never a hit:
   `.test`, `.example`, `.invalid`, `.localhost`, a system mailbox such as `alerts@` or `noreply@`
   at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
   the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
-  `2001:db8::/32`, private and loopback addresses.
+  `2001:db8::/32`, private and loopback addresses, the public resolvers (`8.8.8.8`,
+  `1.1.1.1` and their IPv6 forms). An IPv6 address that wraps an IPv4 (6to4, Teredo, NAT64
+  `64:ff9b::/96`) is judged by the IPv4 it carries.
 - **A test value that vendor documentation publishes,** for its own type only: the payment
   test cards (Stripe, Braintree), the Stripe API reference keys, the jwt.io example token and
   the Twilio test numbers (`maisecrets/detection/rules/public_test_values.txt`, as sha256 digests). The
