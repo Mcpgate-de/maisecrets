@@ -769,7 +769,8 @@ def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None, exa
     if not check_value.looks_like_a_credential(value):
         # a check of ordinary words stored them for good, and every later prompt with them was blocked (field report,
         # 0.6.32): only a value that the credential checks of the detector take is stored here
-        return check_value.not_caught(check_value.ORDINARY)
+        return check_value.not_caught(check_value.TEST_VALUE if check_value.names_a_test_value(value)
+                                      else check_value.ORDINARY)
     try:
         e = Vault(cfg).put(value, "SECRET", "manual", session=session)
     except Exception as exc:  # noqa: BLE001 - the answer says it; the prompt stays blocked
