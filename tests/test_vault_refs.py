@@ -702,6 +702,42 @@ class Online(OnlineBase):
         names = [k for k in Vault().backend.keys() if k.startswith("_maisecrets_vrel_")]
         self.assertEqual(names, [])
 
+    def test_a_session_at_work_keeps_its_values_until_the_cap(self):
+        # each tool output of the session renews them for RELEASE_WINDOW; RELEASE_CAP after they were given they go
+        self.ready()
+        self.write(tok("NAME_2"))
+        backend, t0 = Vault().backend, time.time()
+        pair = (VALUES[1], tok("NAME_2"))
+        now, renewals = t0, 0
+        while now + vault_refs.RELEASE_WINDOW - 600 < t0 + vault_refs.RELEASE_CAP:
+            now += vault_refs.RELEASE_WINDOW - 600      # always inside the window of the last tool output
+            renewals += 1
+            with mock.patch.object(vault_refs.time, "time", return_value=now):
+                self.assertIn(pair, vault_refs.released(backend, "s1"), f"renewal {renewals}")
+        self.assertGreater(renewals, 20)
+        with mock.patch.object(vault_refs.time, "time", return_value=t0 + vault_refs.RELEASE_CAP + 1):
+            self.assertEqual(vault_refs.released(backend, "s1"), [])
+        self.assertEqual([k for k in backend.keys() if k.startswith("_maisecrets_vrel_")], [])
+
+    def test_a_session_without_a_tool_output_loses_its_values_after_the_window(self):
+        self.ready()
+        self.write(tok("NAME_2"))
+        with mock.patch.object(vault_refs.time, "time", return_value=time.time() + vault_refs.RELEASE_WINDOW + 10):
+            self.assertEqual(vault_refs.released(Vault().backend, "s1"), [])
+
+    def test_the_end_of_a_session_deletes_its_values_and_no_other(self):
+        self.ready()
+        self.write(tok("NAME_2"))
+        backend = Vault().backend
+        other = {"NAME_9": ("other-session-" + "value9", self.srv.url)}
+        vault_refs.remember_released(backend, "s2", other)
+        self.assertEqual(vault_refs.end_session(backend, "s1"), 1)
+        self.assertEqual(vault_refs.released(backend, "s1"), [])
+        self.assertEqual(vault_refs.released(backend, "s2"), [(other["NAME_9"][0], tok("NAME_9"))])
+        self.assertEqual(len([k for k in backend.keys() if k.startswith("_maisecrets_vrel_")]), 1)
+        self.assertEqual(vault_refs.end_session(backend, "s2"), 1)
+        self.assertFalse((HOME / "vault-refs" / "released.json").exists())
+
     def test_repair_keeps_the_values_a_server_gave_this_hour(self):
         self.ready()
         self.write(tok("NAME_2"))

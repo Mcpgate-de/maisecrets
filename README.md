@@ -460,8 +460,9 @@ run".
   value), `incidents.json` and `incident-marker.*` folders (maisecrets' own
   failures as closed codes), `vault-refs/` (the server tokens seen, the key ids
   and the endpoint of each server; never a value or a key; the values a server
-  gave stay in the store for one hour, so their echo in a tool result is
-  redacted); one
+  gave stay in the store while the session works, so their echo in a tool
+  result is redacted: one hour after the session's last tool result, at most
+  24 hours, and they go when the session ends); one
   `Client-Vault` header per user-scope MCP server in the config file the
   client uses (`~/.claude/.config.json` when it is not empty, else
   `~/.claude.json`), with a backup beside it ("Vault references"); in Codex one `http_headers_helper` line per such server in
