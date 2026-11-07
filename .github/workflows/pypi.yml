@@ -1,8 +1,7 @@
 # The detection core on TestPyPI and PyPI, published from the public mirror (docs/REPO-STANDARDS.md, "The detection
-# core on PyPI"). Only the GitLab mirror job writes this repository (its deploy key: the tested main, the release tag,
-# the release branch), so this file changes only through a merge to GitLab main. GitHub's environments `testpypi` and
-# `pypi` (deployment rule: tags v*) and a tag ruleset (v* only from the deploy key) are free for a public repository;
-# PyPI's GitHub publisher checks owner, repository, this workflow file and the environment.
+# core on PyPI"). The deploy key of the GitLab mirror job (run from protected GitLab refs) and the org admins write
+# this repository. GitHub's environments `testpypi` and `pypi` (deployment rule: tags v*) and a tag ruleset are free for
+# a public repository; PyPI's GitHub publisher checks owner, repository, this workflow file and the environment.
 # The repository variable MAISECRETS_PYPI switches it: off (unset), testpypi, or pypi (TestPyPI, then PyPI).
 name: pypi
 on:
@@ -27,6 +26,8 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6
         with:
           python-version: "3.12"
+      # the checks of the GitLab job verify_release: the tag is on the release commit that the release job made
+      - run: python3 scripts/verify_release_commit.py "$GITHUB_REF_NAME" origin/main
       # built once; the jobs below publish these files and nothing else
       - run: |
           pip install --quiet --no-cache-dir build==1.2.2

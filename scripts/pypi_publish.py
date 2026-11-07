@@ -102,10 +102,17 @@ def github_id_token(audience: str) -> str:
 
 
 def ci_tag() -> str:
-    """The tag of this pipeline: GitLab's CI_COMMIT_TAG, or the ref of a GitHub tag push."""
+    """The tag of this pipeline: GitLab's CI_COMMIT_TAG, or the ref of a GitHub tag push. In a CI run that is no tag
+    pipeline nothing is published: it stops (Opus review: an empty tag skipped the version check)."""
     if os.environ.get("CI_COMMIT_TAG"):
         return os.environ["CI_COMMIT_TAG"]
-    return os.environ.get("GITHUB_REF_NAME", "") if os.environ.get("GITHUB_REF_TYPE") == "tag" else ""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        if os.environ.get("GITHUB_REF_TYPE") != "tag":
+            raise SystemExit("this GitHub run is no tag push: nothing is published")
+        return os.environ.get("GITHUB_REF_NAME", "")
+    if os.environ.get("CI"):
+        raise SystemExit("this CI run is no tag pipeline: nothing is published")
+    return ""
 
 
 def mint_token(host: str, id_token: str) -> str:
