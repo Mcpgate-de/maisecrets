@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.8.28] - 2026-11-07
+
+### Fixes
+
+- finds a second number after a German call cue, and the cue reads only tool output (e26e8f9)
+- finds a phone number in a German sentence after a call cue and "unter" (2e975e9)
+- a card number right after a UUID is found (b5ee985)
+
 ## [0.8.27] - 2026-11-07
 
 ### Fixes
