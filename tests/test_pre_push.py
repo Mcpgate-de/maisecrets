@@ -16,6 +16,9 @@ HOOK = ROOT / ".githooks" / "pre-push"
 ZERO = "0" * 40
 
 
+# on Windows `bash` on the PATH is the WSL launcher, not the bash of Git that runs the hook there (windows-latest,
+# 2026-11-07: "Windows Subsystem for Linux has no installed distributions")
+@unittest.skipIf(os.name == "nt", "the hook runs under the bash of Git for Windows, not the bash on the PATH")
 @unittest.skipUnless(shutil.which("git") and shutil.which("bash"), "needs git and bash")
 class PrePushTests(unittest.TestCase):
     def setUp(self):
