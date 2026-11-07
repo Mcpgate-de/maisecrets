@@ -241,6 +241,31 @@ and OpenAI plugin directories.
   Each further organisation adds the same pair with the suffix `_2`, `_3` and so
   on, and its own read-only project token; every pair gets the event.
 
+## The detection core on PyPI
+
+The library (`pyproject.toml`: `maisecrets/__init__.py` and `maisecrets/detection/`, no plugin code) goes to PyPI
+under the name `maisecrets` with the version of the plugin release. The tag pipeline does it, after the release
+gates, with no step of its own by hand:
+
+1. `pypi_build` builds the wheel and the sdist once from the release commit of the tag (`python -m build`, pinned),
+   writes `SHA256SUMS`, and runs `scripts/wheel_smoke.py --wheel <the built wheel> --release` on that file.
+2. `pypi_testpypi` (GitLab environment `testpypi`) publishes these files to TestPyPI, and `pypi_publish`
+   (environment `pypi`) the same files to PyPI, both with `scripts/pypi_publish.py`: Trusted Publishing (the job's
+   OIDC token, `id_tokens` with the audience `testpypi` or `pypi`, exchanged for an upload token of minutes; no PyPI
+   token is stored), then the index must list the version with the same sha256 per file, and a fresh venv installs
+   `maisecrets==<version>` from the index alone and detects a probe value.
+3. A version on an index is never replaced: a rerun of the same tag with the same files passes, other files under
+   that version fail the job.
+
+The CI variable `MAISECRETS_PYPI` switches it: `off` (the default in `.gitlab-ci.yml`), `testpypi` (TestPyPI only) or
+`pypi` (TestPyPI, then PyPI). A project variable of that name overrides the default. The plugin release needs none
+of these jobs, so a failing publish stops no release.
+
+What the maintainer sets up once, outside this repository: an account on pypi.org and one on test.pypi.org, each with
+two-factor authentication; the organization `mcpgate-de` on pypi.org; and on each index a pending trusted publisher
+for the project `maisecrets` of the GitLab type with namespace `Sprinterli`, project `maisecrets`, top-level
+pipeline file `.gitlab-ci.yml`, and environment `testpypi` (TestPyPI) or `pypi` (PyPI).
+
 ## Remotes (now)
 
 - Primary: `gitlab.com/Sprinterli/maisecrets`, private; it is also the source
