@@ -26,6 +26,7 @@ import re
 from . import deadline as _deadline
 from .lazy_regex import LazyRx as _LazyRx
 from .text_index import field_end, field_start
+from .phone_forms import _DE_CALL_REGIONS, _PHONE_DE_CUE_RE, _e164_without_plus
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
@@ -1929,13 +1930,6 @@ _PHONE_NUMBER_WORD = r"(?:[ _-]?(?:number|no\.?|nr\.?|nummer|num[ée]ro|n[úu]me
 _PHONE_TIGHT_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r")" + _PHONE_NUMBER_WORD + r"(?![\w-])\.?[\"']?"
                         r"(?:[ \t]{0,3}(?:is|ist|est|es|è|é|:|=|-|–)[ \t]{0,3}|[ \t]{1,3})[\"']?[ \t]{0,2}"
                         r"(\+?(?:\(\d{1,8}\)|\d{1,15})(?:[ .\-/]{1,2}(?:\(\d{1,8}\)|\d{1,8})){0,5})(?![\w+]|[.,/:-]\d)")
-# a German call cue before `unter <number>`: erreichbar ab Montag unter 030 …, rufen Sie uns an unter …, bitte
-# zurückrufen unter … (ai-gateway #1764: a phone field that holds a sentence). `unter` alone is no cue (Bestellung
-# unter 030 …)
-_DE_CALL_REGIONS = frozenset({"de", "at", "ch"})
-_PHONE_DE_CUE_RE = _lazy(r"(?i)(?<![\w-])(?:erreichbar|erreichen|anrufen|anzurufen|ruf(?:en)?\s+(?:sie|mich|uns|an)"
-                         r"|rückruf|zurückrufen|zurückzurufen|melden\s+sie\s+sich|meldet\s+euch|kontaktieren)\b"
-                         r"[^\n\d]{0,40}?(?<![\w-])unter[ \t]+(\+?\d[\d \-/]{5,20}\d)(?![\w]|[.,:]\d)")
 # the verbs of a call before a North American number: call, calling, dial, reach … at, contact … at, and contact right
 # before the number (Nemotron-PII, 2026-10-20: `by calling`, `contact the report coordinator at`, `please contact`)
 _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed|ing)?|dial(?:ed|ing)?"
@@ -1967,30 +1961,6 @@ _PAREN_END_RE = _lazy(r"[ \t]*\([^()\n]{0,15}\)[ \t]*$")   # Phone (work): 938-2
 _PHONE_GAP_END_RE = _lazy(r"(?i)(?:" + _PHONE_LABEL_WORDS + r"|number|no\.?|nr\.?|#|num[ée]ro|n[úu]mero|nummer"
                           r"|contact(?:[ _-]?(?:information|info|details|person))?"
                           r"|(?:" + _PHONE_LABEL_WORDS + r")" + _PHONE_NUMBER_WORD + r" for(?: \w{1,15}){1,2})$")
-
-
-# the country calling codes of ITU-T E.164 in use, by their first digits: codes of 1 digit (1, 7), of 2 and of 3
-_CC1 = frozenset("17")
-_CC2 = frozenset({"20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45", "46", "47", "48",
-                  "49", "51", "52", "53", "54", "55", "56", "57", "58", "60", "61", "62", "63", "64", "65", "66", "81",
-                  "82", "84", "86", "90", "91", "92", "93", "94", "95", "98"})
-_CC3_HEADS = ("21", "22", "23", "24", "25", "26", "29", "35", "37", "38", "42", "50", "59", "67", "68", "69", "85",
-              "87", "88", "96", "97", "99")
-
-
-_DATE_HEAD_RE = _lazy(r"(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])")
-
-
-def _e164_without_plus(d: str) -> bool:
-    """A number in its international form without its +, as an API stores it in a JSON number or a messenger id
-    (49 and the subscriber digits): 11 to 15 digits after a country calling code in use, and in the North American
-    plan (1) exactly 11. A timestamp in milliseconds (13 digits from 1) and a national number that lost its trunk 0
-    (10 digits, as the seconds of a timestamp) stay no number (ai-gateway #1763)."""
-    if not 11 <= len(d) <= 15 or d[0] == "0" or _DATE_HEAD_RE.match(d):
-        return False   # a date in front is a timestamp: fax: 20261021120000 (YYYYMMDDhhmmss)
-    if d[0] == "1":
-        return len(d) == 11 and d[1] not in "01" and d[4] not in "01"   # NANP: area code and exchange from 2
-    return d[0] in _CC1 or d[:2] in _CC2 or d[:2] in _CC3_HEADS
 
 
 def _national_phone_ok(v: str) -> bool:
