@@ -61,11 +61,10 @@ for m in d.findings(text, channel="tool", path="notes.txt"):
 
 The rule tables and the helpers of `core.py` are no API: they change with the rules.
 
-`core.py` keeps seven parts in modules of their own, so that each file stays readable: `value_checks.py` (the
+`core.py` keeps six parts in modules of their own, so that each file stays readable: `value_checks.py` (the
 checks of a value), `own_rules.py` (`OWN_RULES`, `FALLBACK_RULES`), `text_index.py` (the index of a text and the
 test-code check), `encoded_mail.py` (an address with its @ as %40), `keyword_tail.py` (the vendored keyword
-rules in linear time), `deadline.py` (the deadline of a scan and `ScanIncomplete`) and `card_shape.py` (when a
-number is written as a card). `core.py` imports each of their names, so
+rules in linear time) and `deadline.py` (the deadline of a scan and `ScanIncomplete`). `core.py` imports each of their names, so
 `core.<name>` is the same object. A patch of such a name on the core does not reach the functions of the part:
 patch the module that defines the name.
 

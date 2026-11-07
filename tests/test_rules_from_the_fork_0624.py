@@ -246,48 +246,6 @@ class CardAsOneRunTests(unittest.TestCase):
         self.assertNotIn("credit-card", kinds("row 17: " + self.VISA, channel="prompt"))
 
 
-class CardAsUuidTests(unittest.TestCase):
-    """A card number in the first three groups of a UUID (8-4-4) is a card number dressed as an object id: masked
-    alone in a tool result like the other card layouts, with the prefix and the length of a card network and its check
-    digit. A UUID with a letter in those groups, a wrong check digit, a prefix of no network and a typed prompt without
-    the card word stay text."""
-    VISA = luhn10(J(["4532", "0151", "1283", "403"]))
-
-    @classmethod
-    def uuid(cls, card: str, rest: str = "A379-F4AF4F9AFBC4") -> str:
-        return f"{card[:8]}-{card[8:12]}-{card[12:16]}-{rest}"
-
-    def test_a_card_in_a_uuid_is_masked_alone_in_a_tool_result(self):
-        span = self.uuid(self.VISA)[:18]
-        for text in ("Open https://example.com/session/" + self.uuid(self.VISA) + "/view for details",
-                     "id " + self.uuid(self.VISA, "8379-104512345678"),      # a fourth group of digits only
-                     "ref " + span):
-            with self.subTest(text=text[:8]):
-                self.assertIn(("credit-card", span), found(text, channel="tool"))
-
-    def test_a_uuid_that_holds_no_card_stays_text(self):
-        bad = self.VISA[:-1] + str((int(self.VISA[-1]) + 1) % 10)
-        no_network = luhn10(J(["6612", "3456", "7890", "412"]))
-        for card in (bad, no_network):
-            with self.subTest(card=card[:2]):
-                self.assertNotIn("credit-card", kinds("see /x/" + self.uuid(card) + "/y", channel="tool"))
-        lettered = "4532015A-1283-4031-A379-F4AF4F9AFBC4"
-        self.assertNotIn("credit-card", kinds("see /x/" + lettered + "/y", channel="tool"))
-
-    def test_a_fourth_group_of_digits_counts_only_in_a_whole_uuid(self):
-        """Behind the 8-4-4 groups, four digits are the UUID's fourth group only when its last group follows and
-        ends there; otherwise they are a fifth group, as after any card layout."""
-        span = self.uuid(self.VISA)[:18]
-        self.assertIn(("credit-card", span), found("id " + self.uuid(self.VISA, "8379-104512345678") + " ok"))
-        for rest in ("8379-104512345678g", "8379-10451234567", "8379"):
-            with self.subTest(rest=rest):
-                self.assertNotIn("credit-card", kinds("id " + span + "-" + rest + " ok", channel="tool"))
-
-    def test_a_typed_prompt_still_needs_the_card_word(self):
-        self.assertNotIn("credit-card", kinds("see /x/" + self.uuid(self.VISA) + "/y", channel="prompt"))
-        self.assertIn("credit-card", kinds("my card " + self.uuid(self.VISA), channel="prompt"))
-
-
 class CardRangesPresidioMissedTests(unittest.TestCase):
     """Presidio's card pattern knew the first digits 1, 3, 4, 5 and 6: a Mastercard of the 2-series and a 15-digit JCB
     never reached the Luhn check (Benchmark V1, Mendeley, 681 card numbers, 2026-10-19)."""
