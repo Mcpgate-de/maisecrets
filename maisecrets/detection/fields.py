@@ -149,7 +149,8 @@ def names_no_secret(words) -> bool:
 
 # a last part that only holds the value of the object above it: {"phone": [{"value": ...}]}, {"phone": {"number": ...}}.
 # The part above it names the value (ai-gateway #1764: Pipedrive, HubSpot and vCard-like contacts)
-_WRAPPER_WORDS = frozenset({"value", "values", "number", "nummer", "wert", "val", "text"})
+# not `text`: it is the content of a message (Slack text and blocks[].text), and the label of a copy must stay the same
+_WRAPPER_WORDS = frozenset({"value", "values", "number", "nummer", "wert", "val"})
 # a phone word with qualifiers only names a phone: phone_home, telefon_privat, mobileBusiness, phone_cell. A name with
 # another word stays as it is: phone_type, phone_country_code and mobile_app_version name no phone number
 _PHONE_HEADS = frozenset({"phone", "telephone", "tel", "telefon", "mobile", "mobil", "handy", "cell", "fax"})

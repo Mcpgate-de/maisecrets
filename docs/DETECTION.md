@@ -85,7 +85,7 @@ d.findings("0171 4829173", channel="tool")                                      
   the path that is no list index is put before a copy of the value (`telefon: <value>`) and that line is scanned with
   the rules of the call. A hit inside the value is added when the bare value has none there and the scan of the whole
   text has none there either (`maisecrets/detection/fields.py`). Two parts of a name are read for what they name
-  (since 0.8.26, ai-gateway #1764): a last part that only wraps the value (`value`, `number`, `nummer`, `wert`, `text`)
+  (since 0.8.26, ai-gateway #1764): a last part that only wraps the value (`value`, `number`, `nummer`, `wert`)
   takes the name above it (`("phone", 0, "value")`, `("contact", "phone", "number")`, `("steuer_id", "value")`), and a
   phone word with qualifiers only (`phone_home`, `telefon_privat`, `mobileBusiness`, `phone_cell`, `phoneNumbers`) is
   the phone word. A name with another word (`phone_type`, `phone_country_code`, `mobile_app_version`) stays as it is.
