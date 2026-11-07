@@ -532,8 +532,10 @@ VALIDATORS = {
     "public_ip": _public_ip,
     "not_placeholder": lambda v: v.lower() not in {"placeholder", "changeme", "redacted", "example"}
     and not v.startswith("<"),
-    "person_email": lambda v: (v.split("@", 1)[0].lower() not in _SYSTEM_USERS and not _reserved_domain(v)
-                               and not _ssh_algorithm_name(v) and not _mail_shaped_id(v)),
+    # an IP literal (name@[<ip>]) is masked when the IP is public, also for a system mailbox: the IP names the host
+    "person_email": lambda v: (_public_ip(re.sub(r"(?i)^ipv6:", "", v[v.index("@[") + 2:-1])) if "@[" in v
+                               else v.split("@", 1)[0].strip('"').lower() not in _SYSTEM_USERS
+                               and not _reserved_domain(v) and not _ssh_algorithm_name(v) and not _mail_shaped_id(v)),
     # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
     "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
     "us_ssn": _us_ssn_ok,
@@ -969,6 +971,7 @@ PRESIDIO_CARD_FIRST = {"credit-card": r"((4\d{3})|(5[0-5]\d{2})|(2(?:22[1-9]|2[3
 # text it expects
 _IPV6_LEFT_UPSTREAM, _IPV6_RIGHT_UPSTREAM = r"(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){7}", r"(?![\w:]|\.\d)"
 _IPV6_LEFT = r"(?:(?<![\w:])|(?<=[^\w:]:)|(?<=^:))(?:(?:[0-9A-Fa-f]{1,4}:){7}"
+_IPV4_UPSTREAM = r"\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]"
 _IPV6_RIGHT = r"(?![\w:])(?!(?:\.\d{1,3}){3}(?!\d))"
 
 
@@ -1002,6 +1005,9 @@ def _presidio_regex(rec_id: str, regex: str) -> str:
         # Mendeley's 2,081 such numbers (Luhn-valid, each after a card word) stayed in the clear (2026-10-20). It
         # keeps the rule's Luhn check and its card word: alone in a tool result the issuer check takes 16 digits only
         return "(?:" + regex.replace(_CARD_FIRST_UPSTREAM, first) + r")|\b4\d{18}\b"
+    if rec_id == "ip" and regex.startswith(_IPV4_UPSTREAM):
+        # name@[<v4>] is the e-mail rule's address, which runs after this rule; any other @[ keeps the IP rule
+        return r"(?!(?<=[\w.+-]@\[)(?:\d{1,3}\.){3}\d{1,3}\])" + regex
     if rec_id == "ip" and regex.startswith(_IPV6_LEFT_UPSTREAM) and regex.endswith(_IPV6_RIGHT_UPSTREAM):
         return _IPV6_LEFT + regex[len(_IPV6_LEFT_UPSTREAM):-len(_IPV6_RIGHT_UPSTREAM)] + _IPV6_RIGHT
     if rec_id in PRESIDIO_NOT_AFTER_PLUS:
