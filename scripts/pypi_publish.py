@@ -204,7 +204,9 @@ def main(argv: list) -> int:
         if os.environ.get("GITHUB_ACTIONS") == "true":
             if subprocess.run([sys.executable, "-m", "pypi_attestations", "sign", *files]).returncode:
                 raise SystemExit("pypi-attestations could not sign the files: nothing uploaded")
+            # twine takes an attestation only from its own arguments: <file>.publish.attestation, which sign wrote
             attest = ["--attestations"]
+            files += [f + ".publish.attestation" for f in files]
         r = subprocess.run([sys.executable, "-m", "twine", "upload", *attest, "--repository-url", idx["upload"],
                             *files], env=env)
         if r.returncode:

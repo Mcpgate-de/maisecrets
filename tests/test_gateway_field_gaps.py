@@ -227,9 +227,6 @@ class MailFormTests(unittest.TestCase):
         self.assertEqual(hits("ip " + "93.184." + "216.34 up")[0][0], "IP", "a bare IP is the IP rule's")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class FileNameLabelTests(unittest.TestCase):
     """#28: the sha256 after a file name that holds the word secret is no secret; a credential label still is."""
@@ -244,3 +241,14 @@ class FileNameLabelTests(unittest.TestCase):
 
     def test_a_digest_after_a_credential_label_stays_a_secret(self):
         self.assertEqual([t for t, _v in hits(f"('client_secret', '{self.DIGEST}')")], ["SECRET"])
+
+    def test_the_password_of_an_archive_stays_a_secret(self):
+        # only a digest is dropped: a password after the archive's name is the value people write there
+        value = "Kq7" + "mZt4wPx9Lc2Rv"
+        for text in (f"The password for backup.zip: {value}", f"secret_key backup.tar.gz = {value}"):
+            with self.subTest(text=text[:24]):
+                self.assertEqual([t for t, _v in hits(text)], ["SECRET"])
+
+
+if __name__ == "__main__":
+    unittest.main()

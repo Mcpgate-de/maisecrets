@@ -179,7 +179,10 @@ lint:
         - beliefs/**/*
         - tests/**/*
         - scripts/replay_can_fail.py
+        - scripts/_run_tests_json.py
+        - scripts/lint_plugin.py
         - scripts/build_release_tree.py
+        - bench/bank/**/*
         - .gitlab-ci.yml
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: never

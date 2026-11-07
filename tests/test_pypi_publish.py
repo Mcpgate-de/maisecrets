@@ -82,9 +82,6 @@ class TokenSourceTests(unittest.TestCase):
             self.assertEqual(P.github_id_token("pypi"), "", "outside a GitHub job")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class AttestationTests(unittest.TestCase):
     """On GitHub Actions each file is signed and uploaded with its attestation (PEP 740 provenance)."""
@@ -112,9 +109,16 @@ class AttestationTests(unittest.TestCase):
         self.assertEqual(len(sign), 1)
         self.assertEqual(sorted(Path(f).name for f in sign[0][4:]), sorted(FILES))
         self.assertIn("--attestations", upload[0])
+        # twine takes an attestation only from its arguments, next to its file
+        self.assertEqual(sorted(Path(f).name for f in upload[0] if f.endswith(".publish.attestation")),
+                         sorted(n + ".publish.attestation" for n in FILES))
         self.assertLess(calls.index(sign[0]), calls.index(upload[0]), "signed before the upload")
 
     def test_gitlab_uploads_without_attestations(self):
         calls = self.run_main({"GITLAB_CI": "true", "CI_COMMIT_TAG": "v0.8.26", "TESTPYPI_ID_TOKEN": "id-token"})
         self.assertFalse([c for c in calls if "pypi_attestations" in c])
         self.assertNotIn("--attestations", [c for c in calls if "twine" in c][0])
+
+
+if __name__ == "__main__":
+    unittest.main()
