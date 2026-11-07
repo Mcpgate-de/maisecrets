@@ -95,7 +95,8 @@ class InternationalWithoutPlusTests(unittest.TestCase):
         for value, path in (("15148" + "29173", ("phone",)),            # seconds, or a number without its 0
                             ("17625" + "14829173", ("phone",)),         # milliseconds: 13 digits from 1
                             ("49151" + "48291736", ("order_id",)),
-                            ("49111" + "11111111", ("phone",))):         # a specimen
+                            ("49111" + "11111111", ("phone",)),          # a specimen
+                            ("20261021" + "120000", ("fax",))):          # a timestamp from 20, a country code
             with self.subTest(value=value, path=path):
                 self.assertEqual(leaf(value, *path), [])
         self.assertEqual(hits("order 49151" + "48291736"), [])

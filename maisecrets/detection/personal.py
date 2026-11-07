@@ -1971,13 +1971,16 @@ _CC3_HEADS = ("21", "22", "23", "24", "25", "26", "29", "35", "37", "38", "42", 
               "87", "88", "96", "97", "99")
 
 
+_DATE_HEAD_RE = _lazy(r"(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])")
+
+
 def _e164_without_plus(d: str) -> bool:
     """A number in its international form without its +, as an API stores it in a JSON number or a messenger id
     (49 and the subscriber digits): 11 to 15 digits after a country calling code in use, and in the North American
     plan (1) exactly 11. A timestamp in milliseconds (13 digits from 1) and a national number that lost its trunk 0
     (10 digits, as the seconds of a timestamp) stay no number (ai-gateway #1763)."""
-    if not 11 <= len(d) <= 15 or d[0] == "0":
-        return False
+    if not 11 <= len(d) <= 15 or d[0] == "0" or _DATE_HEAD_RE.match(d):
+        return False   # a date in front is a timestamp: fax: 20261021120000 (YYYYMMDDhhmmss)
     if d[0] == "1":
         return len(d) == 11 and d[1] not in "01" and d[4] not in "01"   # NANP: area code and exchange from 2
     return d[0] in _CC1 or d[:2] in _CC2 or d[:2] in _CC3_HEADS
