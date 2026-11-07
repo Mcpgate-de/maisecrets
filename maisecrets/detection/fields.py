@@ -149,7 +149,8 @@ def names_no_secret(words) -> bool:
 
 # a last part that only holds the value of the object above it: {"phone": [{"value": ...}]}, {"phone": {"number": ...}}.
 # The part above it names the value (ai-gateway #1764: Pipedrive, HubSpot and vCard-like contacts)
-_WRAPPER_WORDS = frozenset({"value", "values", "number", "nummer", "wert", "val", "text"})
+# not `text`: it is the content of a message (Slack text and blocks[].text), and the label of a copy must stay the same
+_WRAPPER_WORDS = frozenset({"value", "values", "number", "nummer", "wert", "val"})
 # a phone word with qualifiers only names a phone: phone_home, telefon_privat, mobileBusiness, phone_cell. A name with
 # another word stays as it is: phone_type, phone_country_code and mobile_app_version name no phone number
 _PHONE_HEADS = frozenset({"phone", "telephone", "tel", "telefon", "mobile", "mobil", "handy", "cell", "fax"})
@@ -171,11 +172,33 @@ def _part_label(part) -> str | None:
         return ""
     if len(words) == 1 and words[0] in _NO_LABEL_ALONE:
         return ""
+    return phone_head(words) or label
+
+
+def phone_head(words) -> str:
+    """The phone word of a name that is a phone word with qualifiers only (phone_home -> phone), else ""."""
     if len(words) >= 2 and (
             (words[0] in _PHONE_HEADS and all(w in _PHONE_QUALIFIERS for w in words[1:]))
             or (words[-1] in _PHONE_HEADS and all(w in _PHONE_QUALIFIERS for w in words[:-1]))):
         return words[0] if words[0] in _PHONE_HEADS else words[-1]
-    return label
+    return ""
+
+
+def named_key(keys) -> str:
+    """The key that names a value, from the string keys of its path, outermost first: a last key that only wraps the
+    value gives the key above it (not bare cell or mobile), and a phone word with qualifiers only gives the phone
+    word. The same reading as the labels of `fields=`, for the record scan of leaves.py (ai-gateway #1764: the
+    gateway's main path scans by leaf). "" when the wrapper has nothing above it that names."""
+    if not keys:
+        return ""
+    last = keys[-1]
+    words = label_words(last)
+    if len(keys) >= 2 and words and set(words) <= _WRAPPER_WORDS:
+        above = keys[-2]
+        if label_words(above) in (["cell"], ["mobile"]):
+            return ""
+        last, words = above, label_words(above)
+    return phone_head(words) or last
 
 
 def _label(name) -> str:
