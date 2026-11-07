@@ -102,6 +102,17 @@ class InternationalWithoutPlusTests(unittest.TestCase):
         self.assertEqual(hits("order 49151" + "48291736"), [])
 
 
+class CardAfterUuidTests(unittest.TestCase):
+    def test_a_card_right_after_a_uuid_is_found_whole(self):
+        # the card pattern started in the UUID's last group, Luhn refused that span, and the card stayed in the clear
+        card = "4508 " + "7194 0132 6529"
+        for uuid in ("550E8400-E29B-41D4-A716-" + "446655440000", "550e8400-e29b-41d4-a716-" + "446655440000"):
+            with self.subTest(uuid=uuid[:8]):
+                text = uuid + " " + card
+                self.assertEqual(hits(text), [("CARD", card)])
+                self.assertEqual(hits(uuid), [], "a UUID alone is no card")
+
+
 class PhoneSeriesTests(unittest.TestCase):
     def test_a_number_before_a_series_and_two_numbers_before_it_are_found(self):
         self.assertEqual(hits("Tel " + PHONE + " " + SERIES), [("PHONE", PHONE)])
