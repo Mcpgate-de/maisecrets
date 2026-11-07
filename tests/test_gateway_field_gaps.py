@@ -139,6 +139,13 @@ class GermanCallCueTests(unittest.TestCase):
 
 
 class CardAfterUuidTests(unittest.TestCase):
+    def test_a_uuid_whose_first_groups_pass_as_a_card_stays_a_uuid(self):
+        # about 1 in 62,500 random v4 UUIDs has 16 digits there with a network prefix and a valid check digit (3 million
+        # measured, 2026-11-07). Masking them broke ids in every tool result for a card that is only ever dressed up
+        # as a UUID on purpose; the gateway's write gate counts that form itself (ai-gateway #1780)
+        uuid = "45320151-1283-" + "4004-8f2a-1c3b5d7e9a0b"
+        self.assertEqual(hits(f"https://app.example.com/orders/{uuid}/items"), [])
+
     def test_a_card_right_after_a_uuid_is_found_whole(self):
         # the card pattern started in the UUID's last group, Luhn refused that span, and the card stayed in the clear
         card = "4508 " + "7194 0132 6529"
