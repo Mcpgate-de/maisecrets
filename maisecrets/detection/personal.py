@@ -26,7 +26,7 @@ import re
 from . import deadline as _deadline
 from .lazy_regex import LazyRx as _LazyRx
 from .text_index import field_end, field_start
-from .phone_forms import _DE_CALL_REGIONS, _PHONE_DE_CUE_RE, _e164_without_plus
+from .phone_forms import _DE_CALL_REGIONS, _PHONE_DE_CUE_RE, _PHONE_DE_NEXT_RE, _e164_without_plus
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
@@ -2256,11 +2256,13 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
     out: list = []
     if "phone-after-phone-word" not in want:
         return out
-    if "unter" in low and _DE_CALL_REGIONS.intersection(regions):
+    if not prompt and "unter" in low and _DE_CALL_REGIONS.intersection(regions):
         for m in _PHONE_DE_CUE_RE.finditer(text):
-            v = m.group(1).rstrip(" .-/")
-            if v.startswith(("0", "+")) and _national_phone_ok(v):   # its trunk 0 or +: no date or count
-                out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
+            while m:
+                v = m.group(1).rstrip(" .-/")
+                if _national_phone_ok(v):
+                    out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
+                m = _PHONE_DE_NEXT_RE.match(text, m.end(1))
     if not any(w in low for w in _PHONE_WORDS):
         return out
     us = bool(_US_PHONE_REGIONS.intersection(regions))

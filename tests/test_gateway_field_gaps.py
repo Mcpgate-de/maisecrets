@@ -112,14 +112,29 @@ class GermanCallCueTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(hits(text), [("PHONE", number)])
         from maisecrets.detection.leaves import findings_by_leaf
-        found = [(leaf.path, m.type) for leaf, m in findings_by_leaf(D, {"telefon": f"erreichbar unter {number}"})]
-        self.assertEqual(found, [(("telefon",), "PHONE")])
+        found = [(leaf.path, m.type) for leaf, m in findings_by_leaf(D, {"notiz": f"erreichbar unter {number}"})]
+        self.assertEqual(found, [(("notiz",), "PHONE")], "a free-text field, not only a phone field")
 
-    def test_unter_alone_or_a_date_is_no_cue(self):
+    def test_two_numbers_after_unter_are_two_hits(self):
+        # one span over both numbers left the subscriber digits of the second in the clear
+        second = "0171 " + "5829174"
+        self.assertEqual(hits("erreichbar unter 030 " + "48291736 " + second),
+                         [("PHONE", "030 " + "48291736"), ("PHONE", second)])
+
+    def test_unter_alone_a_date_or_a_number_that_is_no_phone_is_no_cue(self):
         for text in ("Bestellung unter 030 " + "48291736 abholen", "erreichbar unter 2026 11 07",
-                     "zu finden unter Abschnitt 4711 0815"):
+                     "erreichbar unter 0815-4711", "erreichbar unter 0 8080 8443"):
             with self.subTest(text=text):
                 self.assertEqual([h for h in hits(text) if h[0] == "PHONE"], [])
+
+    def test_the_cue_needs_a_german_speaking_region_and_tool_output(self):
+        text = "erreichbar unter 030 " + "48291736"
+        us = Detector(regions=Active(regions=("generic", "us"), languages=("en", "de"), source="gaps-test"),
+                      sources=NO_SOURCES, references=NO_REFERENCES, host=Host(user="", year=2026))
+        self.assertEqual([m.type for m in D.findings(text, channel="tool")], ["PHONE"])
+        self.assertEqual([m.type for m in us.findings(text, channel="tool")], [])
+        # a typed prompt takes only a number after a phone label (Wir erreichen das Limit unter …)
+        self.assertEqual([m.type for m in D.findings(text, channel="prompt")], [])
 
 
 class CardAfterUuidTests(unittest.TestCase):
