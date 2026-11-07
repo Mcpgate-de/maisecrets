@@ -771,7 +771,7 @@ _CARD_ISSUERS = _LazyRx(r"4\d{15}|5[1-5]\d{14}|2(?:2[2-9]|[3-6]\d|7[01])\d{13}|2
 _CARD_GROUPS = _LazyRx(r"\d{4}([ -])\d{4}\1\d{4}\1\d{4}|\d{4}([ -])\d{6}\2\d{5}|\d{4}([ -])\d{6}\3\d{4}")
 # the first three groups of a UUID (8-4-4): a card number dressed as an object id in a link
 _CARD_AS_UUID = _LazyRx(r"\d{8}-\d{4}-\d{4}")
-_UUID_REST = _LazyRx(r"-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![0-9A-Fa-f])")
+_UUID_REST = _LazyRx(r"-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?!\w)")
 
 
 # a label that names an id (order_id, event_id, "job_id", invoice no, imei, serial): the number after it is that id

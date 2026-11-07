@@ -274,6 +274,15 @@ class CardAsUuidTests(unittest.TestCase):
         lettered = "4532015A-1283-4031-A379-F4AF4F9AFBC4"
         self.assertNotIn("credit-card", kinds("see /x/" + lettered + "/y", channel="tool"))
 
+    def test_a_fourth_group_of_digits_counts_only_in_a_whole_uuid(self):
+        """Behind the 8-4-4 groups, four digits are the UUID's fourth group only when its last group follows and
+        ends there; otherwise they are a fifth group, as after any card layout."""
+        span = self.uuid(self.VISA)[:18]
+        self.assertIn(("credit-card", span), found("id " + self.uuid(self.VISA, "8379-104512345678") + " ok"))
+        for rest in ("8379-104512345678g", "8379-10451234567", "8379"):
+            with self.subTest(rest=rest):
+                self.assertNotIn("credit-card", kinds("id " + span + "-" + rest + " ok", channel="tool"))
+
     def test_a_typed_prompt_still_needs_the_card_word(self):
         self.assertNotIn("credit-card", kinds("see /x/" + self.uuid(self.VISA) + "/y", channel="prompt"))
         self.assertIn("credit-card", kinds("my card " + self.uuid(self.VISA), channel="prompt"))
