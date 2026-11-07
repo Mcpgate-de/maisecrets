@@ -171,11 +171,33 @@ def _part_label(part) -> str | None:
         return ""
     if len(words) == 1 and words[0] in _NO_LABEL_ALONE:
         return ""
+    return phone_head(words) or label
+
+
+def phone_head(words) -> str:
+    """The phone word of a name that is a phone word with qualifiers only (phone_home -> phone), else ""."""
     if len(words) >= 2 and (
             (words[0] in _PHONE_HEADS and all(w in _PHONE_QUALIFIERS for w in words[1:]))
             or (words[-1] in _PHONE_HEADS and all(w in _PHONE_QUALIFIERS for w in words[:-1]))):
         return words[0] if words[0] in _PHONE_HEADS else words[-1]
-    return label
+    return ""
+
+
+def named_key(keys) -> str:
+    """The key that names a value, from the string keys of its path, outermost first: a last key that only wraps the
+    value gives the key above it (not bare cell or mobile), and a phone word with qualifiers only gives the phone
+    word. The same reading as the labels of `fields=`, for the record scan of leaves.py (ai-gateway #1764: the
+    gateway's main path scans by leaf). "" when the wrapper has nothing above it that names."""
+    if not keys:
+        return ""
+    last = keys[-1]
+    words = label_words(last)
+    if len(keys) >= 2 and words and set(words) <= _WRAPPER_WORDS:
+        above = keys[-2]
+        if label_words(above) in (["cell"], ["mobile"]):
+            return ""
+        last, words = above, label_words(above)
+    return phone_head(words) or last
 
 
 def _label(name) -> str:

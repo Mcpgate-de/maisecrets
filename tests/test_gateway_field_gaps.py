@@ -61,6 +61,25 @@ class FieldNameTests(unittest.TestCase):
                 self.assertEqual(leaf(PHONE, name), [])
 
 
+class LeafRecordTests(unittest.TestCase):
+    """The record scan of leaves.py (findings_by_leaf, the gateway's main path) reads a key as `fields=` does."""
+
+    def found(self, obj) -> list:
+        from maisecrets.detection.leaves import findings_by_leaf
+        return [(leaf.path, m.type) for leaf, m in findings_by_leaf(D, obj) if leaf is not None]
+
+    def test_a_wrapped_value_and_a_qualified_phone_key_are_found_in_a_record(self):
+        for obj, path in (({"phone": [{"value": PHONE, "label": "mobile"}]}, ("phone", 0, "value")),
+                          ({"phoneNumbers": [{"value": PHONE, "type": "mobile"}]}, ("phoneNumbers", 0, "value")),
+                          ({"contact": {"phone": {"number": PHONE}}}, ("contact", "phone", "number")),
+                          ({"phone_cell": PHONE}, ("phone_cell",)), ({"telefon_privat": PHONE}, ("telefon_privat",))):
+            with self.subTest(path=path):
+                self.assertIn((path, "PHONE"), self.found(obj))
+        for obj in ({"phone_type": PHONE}, {"cell": {"value": "0815 " + "4711 0815"}}, {"order": {"number": PHONE}}):
+            with self.subTest(obj=list(obj)):
+                self.assertEqual([t for _p, t in self.found(obj) if t == "PHONE"], [])
+
+
 class PhoneSeriesTests(unittest.TestCase):
     def test_a_number_before_a_series_and_two_numbers_before_it_are_found(self):
         self.assertEqual(hits("Tel " + PHONE + " " + SERIES), [("PHONE", PHONE)])
