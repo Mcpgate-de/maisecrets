@@ -61,7 +61,10 @@ def built_files(dist: Path) -> dict:
 
 def version_of(files: dict) -> str:
     wheel = next(n for n in files if n.endswith(".whl"))
-    return wheel.split("-")[1]
+    version = wheel.split("-")[1]
+    if f"{PROJECT}-{version}.tar.gz" not in files:
+        raise SystemExit(f"the sdist does not carry the version of the wheel ({version}): {sorted(files)}")
+    return version
 
 
 def published(host: str, version: str) -> dict | None:
@@ -77,10 +80,13 @@ def published(host: str, version: str) -> dict | None:
 
 
 def decide(built: dict, on_index: dict | None) -> str:
-    """"upload", "done" (the same files are there already) or "conflict" (other files under this version)."""
+    """"upload" (none or a part of the built files is there, each with its built hash: a rerun after a partial upload
+    completes it), "done" (all of them are there already) or "conflict" (a file there that is not the built one)."""
     if on_index is None:
         return "upload"
-    return "done" if on_index == built else "conflict"
+    if any(built.get(name) != digest for name, digest in on_index.items()):
+        return "conflict"
+    return "done" if on_index == built else "upload"
 
 
 def mint_token(host: str, id_token: str) -> str:
@@ -97,7 +103,13 @@ def mint_token(host: str, id_token: str) -> str:
 def wait_listed(host: str, version: str, built: dict, seconds: int = 300) -> None:
     end = time.time() + seconds
     while True:
-        on_index = published(host, version)
+        try:
+            on_index = published(host, version)
+        except (urllib.error.URLError, OSError) as exc:   # a 5xx or a dropped connection: ask again
+            if time.time() > end:
+                raise SystemExit(f"the index did not answer: {exc}") from None
+            time.sleep(10)
+            continue
         if on_index == built:
             return
         if on_index is not None and set(on_index) == set(built):
@@ -114,8 +126,9 @@ def install_and_probe(simple: str, version: str, built: dict) -> None:
         subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
         py = venv / ("Scripts" if os.name == "nt" else "bin") / "python"
         for attempt in range(10):   # the simple index lags the JSON API by a minute at times
-            r = subprocess.run([str(py), "-m", "pip", "download", "--no-deps", "--no-cache-dir", "--index-url",
-                                simple, "-d", str(dl), f"{PROJECT}=={version}"], capture_output=True, text=True)
+            r = subprocess.run([str(py), "-m", "pip", "download", "--no-deps", "--no-cache-dir", "--only-binary",
+                                ":all:", "--index-url", simple, "-d", str(dl), f"{PROJECT}=={version}"],
+                               capture_output=True, text=True)
             if r.returncode == 0:
                 break
             time.sleep(15)
@@ -124,8 +137,9 @@ def install_and_probe(simple: str, version: str, built: dict) -> None:
         got = {p.name: sha256(p) for p in dl.iterdir()}
         if not got or any(built.get(n) != d for n, d in got.items()):
             raise SystemExit(f"the downloaded file is not the built one: {got}")
-        subprocess.run([str(py), "-m", "pip", "install", "--no-deps", "--no-cache-dir", "--index-url", simple,
-                        f"{PROJECT}=={version}"], check=True, capture_output=True)
+        wheel = next(p for p in dl.iterdir() if p.suffix == ".whl")    # the file whose hash was compared
+        subprocess.run([str(py), "-m", "pip", "install", "--no-deps", "--no-cache-dir", str(wheel)], check=True,
+                       capture_output=True)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "MAISECRETS"))}
         env["HOME"] = tmp
         out = subprocess.run([str(py), "-I", "-c", PROBE], capture_output=True, text=True, env=env, cwd=tmp)
@@ -155,7 +169,8 @@ def main(argv: list) -> int:
             raise SystemExit(f"no {idx['token_var']}: the job needs `id_tokens` with the audience of {argv[1]}")
         token = mint_token(idx["host"], id_token)
         env = dict(os.environ, TWINE_USERNAME="__token__", TWINE_PASSWORD=token, TWINE_NON_INTERACTIVE="1")
-        files = [str(dist / n) for n in sorted(built)]
+        on_index = published(idx["host"], version) or {}
+        files = [str(dist / n) for n in sorted(built) if n not in on_index]   # never a file name the index has
         r = subprocess.run([sys.executable, "-m", "twine", "upload", "--repository-url", idx["upload"], *files],
                            env=env)
         if r.returncode:

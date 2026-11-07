@@ -533,8 +533,11 @@ pypi_build:
   stage: test
   interruptible: false
   rules: *pypi_rules_build
-  needs: [verify_release]
+  # the release gates of mirror_tag: nothing goes to an index that the public mirror would not get
+  needs: [verify_release, plugin_validate, no_secrets_in_tree, manifests, lint]
   script:
+    # git: wheel_smoke.py --release checks that HEAD is the tag of the version
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git >/dev/null
     - pip install --quiet --no-cache-dir build==1.2.2
     - python -m build --sdist --wheel --outdir dist .
     - (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS && cat SHA256SUMS)

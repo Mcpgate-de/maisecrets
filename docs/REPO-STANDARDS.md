@@ -258,7 +258,16 @@ gates, with no step of its own by hand:
    that version fail the job.
 
 The CI variable `MAISECRETS_PYPI` switches it: `off` (the default in `.gitlab-ci.yml`), `testpypi` (TestPyPI only) or
-`pypi` (TestPyPI, then PyPI). A project variable of that name overrides the default. The plugin release needs none
+`pypi` (TestPyPI, then PyPI), in lower case exactly; any other value is off. The publish jobs need the gates that
+`mirror_tag` needs (`verify_release`, `plugin_validate`, `no_secrets_in_tree`, `manifests`, `lint`).
+
+Who can publish: PyPI trusts a job of this project whose OIDC token names `.gitlab-ci.yml` and the environment of the
+publisher; it does not check that the ref is protected (warehouse `oidc/models/gitlab.py`). A protected environment
+would limit the jobs that may use `testpypi` and `pypi` to Maintainers, but protected environments are a Premium
+feature of GitLab, and this project is on the Free plan: the API accepts the protection, the plan may not enforce it.
+So anyone who can push a branch of this project (the Developer role, also a bot token) can write a job that publishes
+under this name. Before `pypi` is switched on, the maintainer decides this: keep the Developer role to people and bots
+that may publish, move the plan to Premium, or publish from a project only Maintainers can write. A project variable of that name overrides the default. The plugin release needs none
 of these jobs, so a failing publish stops no release.
 
 What the maintainer sets up once, outside this repository: an account on pypi.org and one on test.pypi.org, each with

@@ -34,6 +34,9 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(P.decide(built, dict(built)), "done", "a rerun of the same tag with the same files")
         self.assertEqual(P.decide(built, {**built, "maisecrets-0.8.26.tar.gz": "0" * 64}), "conflict")
         self.assertEqual(P.decide(built, {"maisecrets-0.8.26-py3-none-any.whl": "1" * 64}), "conflict")
+        # a partial upload (the wheel went up, the sdist did not) is completed by a rerun, never replaced
+        self.assertEqual(P.decide(built, {"maisecrets-0.8.26-py3-none-any.whl": built[
+            "maisecrets-0.8.26-py3-none-any.whl"]}), "upload")
         self.assertEqual(P.version_of(built), "0.8.26")
 
     def test_files_that_are_not_the_build_are_refused(self):
@@ -41,6 +44,9 @@ class PublishTests(unittest.TestCase):
             P.built_files(dist(FILES, {n: "f" * 64 for n in FILES}))
         with self.assertRaises(SystemExit):
             P.built_files(dist({"maisecrets-0.8.26-py3-none-any.whl": b"wheel"}))   # no sdist
+        with self.assertRaises(SystemExit):
+            P.version_of(P.built_files(dist({"maisecrets-0.8.26-py3-none-any.whl": b"w",
+                                             "maisecrets-0.8.25.tar.gz": b"s"})))
 
 
 if __name__ == "__main__":
