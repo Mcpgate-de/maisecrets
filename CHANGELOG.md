@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [0.8.26] - 2026-11-07
+
+### Fixes
+
+- finds a phone number in more API field shapes and before a series of numbers, a surname after Mr or Ms, and two more e-mail forms (2994b27)
+- finds an IPv6 address after a colon or before a dotted port, and judges a wrapped IPv4 by the address it carries (8af1a63)
+- the name service gets time for a long tool result, and ner.log says why it did not answer (af9a100)
+- a command that prints a value from a server and fails no longer shows it to the AI (118f50a)
+- a value a server gave stays masked while the session works, and goes when it ends (51e7ba1)
+- two sessions that renew the gateway login at once keep it (c1ecdf5)
+- ms:( names a test value as one, not as ordinary text (bc7f4a6)
+
 ## [0.8.25] - 2026-11-06
 
 ### Fixes

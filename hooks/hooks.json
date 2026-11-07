@@ -90,6 +90,19 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session-end",
+            "timeout": 10,
+            "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" session-end",
+            "statusMessage": "maisecrets clears the values a server gave this session"
+          }
+        ]
+      }
     ]
   }
 }
