@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.8.29] - 2026-11-07
+
+### Fixes
+
+- a checksum next to a file name such as secrets.tar.gz is no longer masked as a secret (4f308ac)
+
 ## [0.8.28] - 2026-11-07
 
 ### Fixes
