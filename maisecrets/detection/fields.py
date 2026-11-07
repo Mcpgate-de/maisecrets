@@ -67,6 +67,10 @@ _LABEL_MAX = 64
 _NOT_IN_LABEL = _LazyRx(r"[\x00-\x1f\x7f\x85\u2028\u2029:=\"']")
 _CAMEL = _LazyRx(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")   # APIKeyCreatedAt: API, Key, Created, At
 _WORD_SPLIT = _LazyRx(r"[\s._\-]+")
+# a file name with an archive or package extension before the value names a file, not a field: the sha256 of
+# ('maisecrets-0.8.27.tar.gz', '<sha256>') is no secret (#28)
+FILE_LABEL_RE = _LazyRx(r"(?i)[\w.-]\.(?:tar\.gz|tar\.bz2|tar\.xz|tgz|tar|zip|whl|gz|jar|deb|rpm|dmg|msi|exe|apk"
+                        r"|nupkg|gem)[\"']?\s*[,:=]\s*[\"'`]?$")
 
 
 def checked(text: str, fields) -> tuple:
