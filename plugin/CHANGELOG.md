@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.8.27] - 2026-11-07
+
+### Fixes
+
+- finds a phone number that an API keeps in its international form without the + (b4bd1be)
+
 ## [0.8.26] - 2026-11-07
 
 ### Fixes
