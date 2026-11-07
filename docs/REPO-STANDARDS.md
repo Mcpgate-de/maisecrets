@@ -267,7 +267,17 @@ would limit the jobs that may use `testpypi` and `pypi` to Maintainers, but prot
 feature of GitLab, and this project is on the Free plan: the API accepts the protection, the plan may not enforce it.
 So anyone who can push a branch of this project (the Developer role, also a bot token) can write a job that publishes
 under this name. Before `pypi` is switched on, the maintainer decides this: keep the Developer role to people and bots
-that may publish, move the plan to Premium, or publish from a project only Maintainers can write. A project variable of that name overrides the default. The plugin release needs none
+that may publish, move the plan to Premium, or publish from a project only Maintainers can write.
+
+The path from the public mirror (prepared, off until the maintainer turns it on): `.github/workflows/pypi.yml` runs
+on a pushed `v*.*.*` tag of `Mcpgate-de/maisecrets` and does the same three steps (build once and smoke the wheel,
+TestPyPI, then PyPI with the same files, each with `scripts/pypi_publish.py`; the job's OIDC token comes from GitHub
+with the audience of the index). Only the deploy key of the GitLab mirror job writes that repository, so the workflow
+changes only through a merge to GitLab main. The maintainer sets up, once: the environments `testpypi` and `pypi` in
+the repository settings with the deployment rule "selected tags: `v*`", a tag ruleset that lets only the deploy key
+and the admins create `v*` tags, the PyPI and TestPyPI publishers of the GitHub type (owner `Mcpgate-de`, repository
+`maisecrets`, workflow `pypi.yml`, environment `pypi` or `testpypi`), and the repository variable `MAISECRETS_PYPI`
+(`testpypi` or `pypi`). Only one path publishes: with the GitHub path on, `MAISECRETS_PYPI` of GitLab stays `off`. A project variable of that name overrides the default. The plugin release needs none
 of these jobs, so a failing publish stops no release.
 
 What the maintainer sets up once, outside this repository: an account on pypi.org and one on test.pypi.org, each with
