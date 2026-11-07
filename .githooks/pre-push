@@ -14,10 +14,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     refs/tags/*) echo "pre-push: tag pushes are refused; CI tags releases from CHANGELOG.md"; exit 1 ;;
   esac
-  # a commit that a branch of origin already holds passed these checks and the GitLab pipeline there: a push of it
-  # to another remote (the bench host before a release gate) checks nothing new
+  # a commit on origin's main or next came through a merge request whose pipeline ran these checks: a push of it to
+  # another remote (the bench host before a release gate) checks nothing new
   case "$local_sha" in 0000000000000000000000000000000000000000) continue ;; esac
-  [ -n "$(git for-each-ref --contains "$local_sha" --count=1 refs/remotes/origin)" ] || new=1
+  [ -n "$(git for-each-ref --contains "$local_sha" --count=1 refs/remotes/origin/main refs/remotes/origin/next)" ] \
+    || new=1
 done
 if echo "$*" | grep -q -- "--tags"; then echo "pre-push: --tags refused"; exit 1; fi
 if [ "$new" = 0 ]; then echo "pre-push: every pushed commit is on origin already; nothing new to check"; exit 0; fi

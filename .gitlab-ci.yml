@@ -152,11 +152,13 @@ lint:
     # them; the pipeline on main after the release merge request runs every job on the same code
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
       when: never
-    # the release merge request (next into main): every merge into next ran these jobs, and the pipeline on main runs
-    # them once more on the merged tree before the release job, which needs them. The merge request ran them a second
-    # time on nearly the same tree, about 13 min per release (maintainer, 2026-11-07); it keeps the matrix and the
-    # checks of the validate stage
+    # the release merge request (next into main): next is protected (no push, merge only), so each of its commits came
+    # through a merge request that ran these jobs, and the pipeline on main runs them once more on the merged tree
+    # before the release job, which needs them. The merge request ran them a second time on nearly the same tree,
+    # about 13 min per release (maintainer, 2026-11-07); it keeps the matrix and the validate stage. Another branch
+    # into main (a hotfix) runs every job
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
+        && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "next"
       when: never
     - when: on_success
 
@@ -172,6 +174,7 @@ lint:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
+        && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "next"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:

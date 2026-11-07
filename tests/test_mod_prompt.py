@@ -227,6 +227,8 @@ class ScrubBySessionTests(unittest.TestCase):
             t.write_text(record)
             with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
                 child = hooks._scrub_transcript_later("", [GLPAT], [], seconds=40, session="sess-8")
+            self.addCleanup(child.wait, 15)
+            self.addCleanup(child.terminate)        # also when an assertion below fails: no child polls on
 
             def masked_soon() -> bool:
                 deadline = time.time() + 10

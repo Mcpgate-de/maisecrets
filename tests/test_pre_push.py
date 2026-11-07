@@ -21,7 +21,10 @@ class PrePushTests(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix="pre-push-"))
         self.addCleanup(shutil.rmtree, self.dir, True)
-        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="t",
+        # no GIT_* of the caller: a hook's environment (GIT_DIR, GIT_INDEX_FILE) would point the commits below at the
+        # outer repository
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env = dict(env, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="t",
                    GIT_COMMITTER_EMAIL="t@example.com", GIT_CONFIG_GLOBAL=os.devnull)
         self.env = env
         self.git("init", "-q", "-b", "main")
@@ -53,6 +56,12 @@ class PrePushTests(unittest.TestCase):
         r = self.push(self.new)
         self.assertNotIn("nothing new to check", r.stdout)
         self.assertNotEqual(r.returncode, 0)
+
+    def test_a_commit_on_another_branch_of_origin_runs_the_checks(self):
+        # a branch push gets no pipeline: only main and next count as checked
+        self.git("update-ref", "refs/remotes/origin/bench/x", self.new)
+        r = self.push(self.new)
+        self.assertNotIn("nothing new to check", r.stdout)
 
     def test_a_tag_push_is_refused_even_when_the_commit_is_on_origin(self):
         r = self.push(self.pushed, "refs/tags/v9.9.9")
