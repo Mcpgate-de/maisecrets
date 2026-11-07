@@ -1929,6 +1929,13 @@ _PHONE_NUMBER_WORD = r"(?:[ _-]?(?:number|no\.?|nr\.?|nummer|num[ée]ro|n[úu]me
 _PHONE_TIGHT_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r")" + _PHONE_NUMBER_WORD + r"(?![\w-])\.?[\"']?"
                         r"(?:[ \t]{0,3}(?:is|ist|est|es|è|é|:|=|-|–)[ \t]{0,3}|[ \t]{1,3})[\"']?[ \t]{0,2}"
                         r"(\+?(?:\(\d{1,8}\)|\d{1,15})(?:[ .\-/]{1,2}(?:\(\d{1,8}\)|\d{1,8})){0,5})(?![\w+]|[.,/:-]\d)")
+# a German call cue before `unter <number>`: erreichbar ab Montag unter 030 …, rufen Sie uns an unter …, bitte
+# zurückrufen unter … (ai-gateway #1764: a phone field that holds a sentence). `unter` alone is no cue (Bestellung
+# unter 030 …)
+_DE_CALL_REGIONS = frozenset({"de", "at", "ch"})
+_PHONE_DE_CUE_RE = _lazy(r"(?i)(?<![\w-])(?:erreichbar|erreichen|anrufen|anzurufen|ruf(?:en)?\s+(?:sie|mich|uns|an)"
+                         r"|rückruf|zurückrufen|zurückzurufen|melden\s+sie\s+sich|meldet\s+euch|kontaktieren)\b"
+                         r"[^\n\d]{0,40}?(?<![\w-])unter[ \t]+(\+?\d[\d \-/]{5,20}\d)(?![\w]|[.,:]\d)")
 # the verbs of a call before a North American number: call, calling, dial, reach … at, contact … at, and contact right
 # before the number (Nemotron-PII, 2026-10-20: `by calling`, `contact the report coordinator at`, `please contact`)
 _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed|ing)?|dial(?:ed|ing)?"
@@ -2277,7 +2284,14 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
     channels, as its FORMS entry says. A typed prompt takes only a number after a phone label: a call cue there
     (`call the function at`, `contact the API team at`) blocked developer prompts (review, 2026-11-02)."""
     out: list = []
-    if "phone-after-phone-word" not in want or not any(w in low for w in _PHONE_WORDS):
+    if "phone-after-phone-word" not in want:
+        return out
+    if "unter" in low and _DE_CALL_REGIONS.intersection(regions):
+        for m in _PHONE_DE_CUE_RE.finditer(text):
+            v = m.group(1).rstrip(" .-/")
+            if v.startswith(("0", "+")) and _national_phone_ok(v):   # its trunk 0 or +: no date or count
+                out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
+    if not any(w in low for w in _PHONE_WORDS):
         return out
     us = bool(_US_PHONE_REGIONS.intersection(regions))
     for rx in (_PHONE_TIGHT_RE,) if prompt else (_PHONE_TIGHT_RE, _PHONE_LOOSE_RE):

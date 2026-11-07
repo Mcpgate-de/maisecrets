@@ -102,6 +102,26 @@ class InternationalWithoutPlusTests(unittest.TestCase):
         self.assertEqual(hits("order 49151" + "48291736"), [])
 
 
+class GermanCallCueTests(unittest.TestCase):
+    """A phone field that holds a sentence (ai-gateway #1764): the number after a German call cue and `unter`."""
+
+    def test_a_number_after_a_call_cue_and_unter_is_found(self):
+        number = "030 " + "48291736"
+        for text in (f"erreichbar ab Montag unter {number}", f"Sie erreichen mich unter {number}.",
+                     f"Rufen Sie uns an unter {number}", f"bitte zurückrufen unter {number}"):
+            with self.subTest(text=text):
+                self.assertEqual(hits(text), [("PHONE", number)])
+        from maisecrets.detection.leaves import findings_by_leaf
+        found = [(leaf.path, m.type) for leaf, m in findings_by_leaf(D, {"telefon": f"erreichbar unter {number}"})]
+        self.assertEqual(found, [(("telefon",), "PHONE")])
+
+    def test_unter_alone_or_a_date_is_no_cue(self):
+        for text in ("Bestellung unter 030 " + "48291736 abholen", "erreichbar unter 2026 11 07",
+                     "zu finden unter Abschnitt 4711 0815"):
+            with self.subTest(text=text):
+                self.assertEqual([h for h in hits(text) if h[0] == "PHONE"], [])
+
+
 class CardAfterUuidTests(unittest.TestCase):
     def test_a_card_right_after_a_uuid_is_found_whole(self):
         # the card pattern started in the UUID's last group, Luhn refused that span, and the card stayed in the clear
