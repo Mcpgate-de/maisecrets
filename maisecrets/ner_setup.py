@@ -440,11 +440,23 @@ def _log_path():
     return HOME / "ner.log"
 
 
+_VERSION: list = []
+
+
+def _version() -> str:
+    """The plugin version, read once per process: a hook writes a log line for each tool result."""
+    if not _VERSION:
+        from .events import plugin_version
+        _VERSION.append(plugin_version())
+    return _VERSION[0]
+
+
 def log(source: str, kind: str, chars: int, names: int, why: str = "", ms: float = 0.0) -> None:
     """`why`: the reason no service answered (timeout, too_long, refused …), for a line of the rules alone."""
     LAST["source"] = source
     path = _log_path()
-    entry = {"t": int(time.time()), "source": source, "kind": kind, "chars": chars, "names": names, "ms": int(ms)}
+    entry = {"t": int(time.time()), "source": source, "kind": kind, "chars": chars, "names": names, "ms": int(ms),
+             "v": _version()}
     if why:
         entry["why"] = why
     line = json.dumps(entry)
@@ -464,13 +476,17 @@ def log(source: str, kind: str, chars: int, names: int, why: str = "", ms: float
 
 
 def today_counts(now: float | None = None) -> dict:
-    """{source: requests} of today (local time), and prompts per source under "prompt:<source>"."""
+    """{source: requests} of today (local time), prompts per source under "prompt:<source>", the reasons of the rules
+    alone under "why:<reason>", and under "other_version" the lines of a plugin version other than this one. A line
+    of the rules alone without a reason comes from a version before 0.8.29, which wrote none: a session keeps the
+    version it started with, so these lines are not a failure of their own (#25)."""
     start = time.mktime(time.localtime(now or time.time())[:3] + (0, 0, 0, 0, 0, -1))
     counts: dict = {}
     try:
         lines = _log_path().read_text(encoding="utf-8").splitlines()
     except OSError:
         return counts
+    current = _version()
     for line in lines:
         try:
             d = json.loads(line)
@@ -479,8 +495,10 @@ def today_counts(now: float | None = None) -> dict:
         if not isinstance(d, dict) or not isinstance(d.get("t"), int) or d["t"] < start:
             continue
         counts[d.get("source", "?")] = counts.get(d.get("source", "?"), 0) + 1
+        if d.get("v") != current:
+            counts["other_version"] = counts.get("other_version", 0) + 1
         if d.get("source") == "rules":
-            key = "why:" + str(d.get("why") or "unknown")
+            key = "why:" + str(d.get("why") or ("older version" if "v" not in d else "unknown"))
             counts[key] = counts.get(key, 0) + 1
         if d.get("kind") == "prompt":
             key = "prompt:" + str(d.get("source", "?"))
@@ -497,5 +515,9 @@ def counts_line(now: float | None = None) -> str:
     if whys and c.get("rules"):
         parts[-1] += " (" + ", ".join(f"{w} {v}" for v, w in whys) + ")"
     prompts = sum(v for k, v in c.items() if k.startswith("prompt:"))
-    return (f"today, your sessions on this computer (ner.log): {', '.join(parts)} (rules = no service answered); "
+    line = (f"today, your sessions on this computer (ner.log): {', '.join(parts)} (rules = no service answered); "
             f"prompts {prompts}, of them to a fallback {c.get('prompt:fallback', 0)}")
+    if c.get("other_version"):
+        line += (f"; requests from sessions of another version {c['other_version']} (a session keeps the version it "
+                 f"started with; a restart moves it to {_version()})")
+    return line
