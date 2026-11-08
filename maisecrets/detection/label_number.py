@@ -46,6 +46,7 @@ SAMPLES = {
     "phone-after-phone-word": (11, "01", "phone"),    # phone, telefon, mobile, fax (a national number)
     "credit-card": (13, "4", "luhn"),                 # card, credit: a 13-digit Visa (16 digits are found bare)
     "birth-date-after-label": (8, "19", r"re:19[5-9]\d(?:0[1-9]|1[0-2])(?:0[1-9]|1\d|2[0-8])"),  # a date
+    "label-otp-seed": (16, "", r"re:[2-7]{16}"),       # otp, totp, mfa_seed: base32 digits only (Opus review)
     # betterleaks rules whose keyword is the label and whose value can be digits only
     "airtable-api-key": (17, "", "after:airtable"),
     "asana-client-id": (16, "", "after:asana"),
@@ -209,6 +210,7 @@ def _digit_class(node) -> bool:
     return len(node) == 1 and node[0][0] is _sre.IN and _in_set(node[0][1], "5") and not _in_set(node[0][1], "a")
 
 
+ANSWERS_MAX = 4096   # labels kept per detector; the oldest goes first
 _CAP = 8   # strings per alternation: a regex with many alternatives samples the first ones
 
 
@@ -352,5 +354,9 @@ class LabelNumbers:
         st = _state(self)
         hit = st.answers.get(label)
         if hit is None:
-            hit = st.answers[label] = _decide(self, st, label)
+            hit = _decide(self, st, label)
+            with _LOCK:
+                if len(st.answers) >= ANSWERS_MAX:   # a response with ever new keys (dates, ids) must not grow it
+                    st.answers.pop(next(iter(st.answers)))
+                st.answers[label] = hit
         return hit

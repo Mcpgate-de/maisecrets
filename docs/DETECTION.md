@@ -96,9 +96,13 @@ d.label_names_a_number("order_id")                                 # False
   generic, de and us), the two forms differ for one word only (`cc `, text form alone); in the test's discovery the
   prompt channel adds one finding the tool channel does not give (a 16-digit card number after a card word). A rule of
   your own has no recipe: its samples are the digit runs its own regex can match, scanned with those rules.
-- **Cost:** the first call for a label scans the samples (about 1 to 160 ms on an M-series laptop: a True label
-  stops at the first sample that gives a finding); each later call is a dictionary lookup. The answers live with the
-  detector until `reset()`. It never scans a value of the caller.
+- **Cost:** the first call for a label scans the samples (about 1 to 160 ms on an M-series laptop, median about 36 ms
+  for a False label: a True label stops at the first sample that gives a finding); each later call is a dictionary
+  lookup. The answers live with the detector until `reset()`, at most `label_number.ANSWERS_MAX` (4,096) labels; the
+  oldest goes first. A caller whose keys change with every response (dates, ids) pays the first call for each new
+  key: bound the new labels per response. It never scans a value of the caller.
+- **A list index given as a string** (`phones.0` split at the dots into `("phones", "0")`) is no key since 0.8.30:
+  `leaves.label` gives the key above it, `phones`, as for an int index.
 - **What it cannot see:** a rule whose label-only finding needs a value that no recipe makes (a recipe gives one
   value per rule; a rule whose own filters accept only some values of a shape can refuse it), a rule of your own whose
   regex the sampler does not read (it takes the first 8 alternatives of an alternation and skips assertions and back

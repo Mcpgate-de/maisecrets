@@ -141,6 +141,8 @@ def _plain_values() -> list:
                 out.append(v)
                 break
     out += ["1985" + "03" + "14", "14" + "03" + "1985"]
+    # base32 digits only (2 to 7): an OTP seed after its label; random digits 0 to 9 never pass that rule (Opus review)
+    out += ["".join(rng.choice("234567") for _ in range(n)) for n in (16, 19)]
     return out
 
 
@@ -204,6 +206,29 @@ class PinnedTests(unittest.TestCase):
         self.assertTrue(d.label_names_a_number(leaves.label(("customer", "telefon"))))
         self.assertFalse(d.label_names_a_number(leaves.label(("items", 0, "order_id"))))
         self.assertFalse(d.label_names_a_number(""))
+
+    def test_a_list_index_given_as_a_string_is_no_label(self):
+        # the gateway splits phones.0 at the dots: "0" is the index, the key above it names the value (Opus review)
+        d = detector()
+        self.assertEqual(leaves.label(("phones", "0")), "phones")
+        self.assertTrue(d.label_names_a_number(leaves.label(("phones", "0"))))
+        self.assertTrue(d.label_names_a_number(leaves.label(("telefon", "2"))))
+        self.assertTrue(detector(("generic", "us"), ("en",)).label_names_a_number(
+            leaves.label(("data", "ssn", "1", "value"))))
+
+    def test_an_otp_label(self):
+        # an OTP seed of base32 digits (2 to 7) only, 16 or more of them (Opus review: no recipe, False before)
+        d = detector()
+        for w in ("otp", "totp"):
+            with self.subTest(label=w):
+                self.assertTrue(d.label_names_a_number(w))
+
+    def test_the_answers_are_bounded(self):
+        d = detector()
+        with mock.patch.object(label_number, "ANSWERS_MAX", 3):
+            for w in ("order_id", "deal_id", "customer_id", "kundennummer"):
+                d.label_names_a_number(w)
+            self.assertEqual(len(label_number._state(d).answers), 3)
 
     def test_the_text_form(self):
         # measured over the word pool: only `cc ` (a card context word with its space) gives a finding in the text
