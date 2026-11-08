@@ -18,7 +18,6 @@
 - leaves.label skips a list index given as a string (phones.0 is labelled phones) (5252f14)
 - a content digest (sha256:…, or an image pinned by it) after a secret or token label is no longer masked (c1d03fc)
 - /maisecrets:ner names the requests of sessions of an older version instead of calling them unknown (7c4339c)
-- masks a card number written as the first three groups of a UUID (9c99357)
 
 ### Dependencies
 
