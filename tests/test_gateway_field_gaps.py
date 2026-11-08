@@ -117,6 +117,16 @@ class GermanCallCueTests(unittest.TestCase):
         found = [(leaf.path, m.type) for leaf, m in findings_by_leaf(D, {"notiz": f"erreichbar unter {number}"})]
         self.assertEqual(found, [(("notiz",), "PHONE")], "a free-text field, not only a phone field")
 
+    def test_the_german_word_orders_around_a_call_cue_are_found(self):
+        # #27: office hours in the gap, the verb at the end, unter der Nummer, unter:, Rückrufe and Rückrufnummer
+        number = "030 " + "48291736"
+        for text in (f"erreichbar Mo-Fr 9-17 Uhr unter {number}", f"Sie können uns unter {number} erreichen.",
+                     f"Sie erreichen uns unter der Nummer {number}", f"erreichbar unter: {number}",
+                     f"Rückrufe unter {number}", f"Rückrufnummer unter {number}",
+                     f"Sie können mich unter der Rufnummer {number} jederzeit anrufen"):
+            with self.subTest(text=text):
+                self.assertEqual([h for h in hits(text) if h[0] == "PHONE"], [("PHONE", number)])
+
     def test_two_numbers_after_unter_are_two_hits(self):
         # one span over both numbers left the subscriber digits of the second in the clear
         second = "0171 " + "5829174"
@@ -125,7 +135,9 @@ class GermanCallCueTests(unittest.TestCase):
 
     def test_unter_alone_a_date_or_a_number_that_is_no_phone_is_no_cue(self):
         for text in ("Bestellung unter 030 " + "48291736 abholen", "erreichbar unter 2026 11 07",
-                     "erreichbar unter 0815-4711", "erreichbar unter 0 8080 8443"):
+                     "erreichbar unter 0815-4711", "erreichbar unter 0 8080 8443",
+                     "Bestellung unter der Nummer 030 " + "48291736 abholen", "Bestellung unter: 030 " + "48291736",
+                     "Rückruf am 07.11.2026 unter Vorbehalt", "erreichbar ab 2026-11-07 unter Last"):
             with self.subTest(text=text):
                 self.assertEqual([h for h in hits(text) if h[0] == "PHONE"], [])
 
