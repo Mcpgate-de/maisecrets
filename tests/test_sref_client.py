@@ -400,3 +400,30 @@ class FindTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReferenceIsNoFindingTests(unittest.TestCase):
+    """Field case 2026-11-08: a token in a mail came through the gateway as a reference of kind secret; the detector
+    took the reference's id for a token after the label "token:", and the mask broke the reference."""
+
+    IDS = ("Xq7mR2vKd9TfLw4HbN8cPz3sT6yUa1eQo5iWj0lN8Bh", "kQ2-vB9_xR7mT4nW8cZ1pL6sY3hJ5fD0gA")
+
+    def test_the_id_of_a_gateway_reference_is_no_secret(self):
+        from maisecrets import detect
+        for rid in self.IDS:
+            for ref in (f"⟦sref:secret:{rid}⟧", f"⟦sref:email:{rid}:le•••@•••.de⟧"):
+                text = f"Your access token: {ref} Please coordinate the integration."
+                self.assertEqual([text[h.start:h.end] for h in detect.scan(text)], [], ref)
+
+    def test_a_secret_next_to_a_reference_is_still_found(self):
+        from maisecrets import detect
+        value = "Nordlicht-2026" + "!Kq"          # joined here, so the tree scan sees no password
+        text = f"token: \u27e6sref:secret:{self.IDS[0]}\u27e7 and password: {value}"
+        self.assertIn(value, [text[h.start:h.end] for h in detect.scan(text)])
+
+    def test_the_detector_knows_the_reference_form_of_the_client(self):
+        from maisecrets import placeholder
+        rx = placeholder._rx("sref")
+        for text in (f"⟦sref:secret:{self.IDS[0]}⟧", f"⟦sref:name:{self.IDS[1]}:Jo…⟧",
+                     f"⟦sref:x:{'a' * 19}⟧", f"⟦sref:x:{self.IDS[0]}:⟧"):
+            self.assertEqual(bool(rx.fullmatch(text)), bool(S.SREF_RE.fullmatch(text)), text)
