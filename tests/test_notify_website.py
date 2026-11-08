@@ -117,7 +117,8 @@ class NotifyWebsiteTests(unittest.TestCase):
         self.assertTrue(seen, "git ran")
         path, mode, text = seen[0]
         self.assertNotEqual(path, str(key))
-        self.assertEqual(mode, 0o600)
+        if os.name != "nt":                   # Windows has no owner-only mode; the job runs on Linux
+            self.assertEqual(mode, 0o600)
         self.assertEqual(text, "not a real key\n")
 
 
