@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## [0.8.30] - 2026-11-08
+
+### API
+
+- leaves.label: a digit-only string segment counts as a list index (changed) (5252f14)
+- Detector.label_names_a_number(label) -> bool (new) (c3363be)
+
+### Features
+
+- a caller can ask whether a field label can make a number personal data (c3363be)
+
+### Fixes
+
+- leaves.label skips a list index given as a string (phones.0 is labelled phones) (5252f14)
+- a content digest (sha256:…, or an image pinned by it) after a secret or token label is no longer masked (c1d03fc)
+- /maisecrets:ner names the requests of sessions of an older version instead of calling them unknown (7c4339c)
+- masks a card number written as the first three groups of a UUID (9c99357)
+
+### Dependencies
+
+- the local name service starts from the current image v2.0.3798, pinned by its digest (de8bbcf)
+
 ## [0.8.29] - 2026-11-07
 
 ### Fixes
