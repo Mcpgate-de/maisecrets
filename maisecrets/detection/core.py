@@ -56,6 +56,7 @@ from . import deadline as _deadline
 from .deadline import ScanIncomplete  # noqa: F401  the library's name: maisecrets.detection.ScanIncomplete
 from . import registry as _registry
 from . import fields as _fields
+from .label_number import LabelNumbers as _LabelNumbers
 from .prefilter import NONE as _NO_PREFIX, any_keyword as _any_keyword, lacks_prefix as _lacks_prefix  # noqa: F401
 from .prefilter import lacks_required as _lacks_required, response_rules as _response_rules
 # The value checks, the own rules and the text index live in modules of their own, so that each file stays readable.
@@ -1723,7 +1724,7 @@ class Host:
 THIS_COMPUTER = Host()
 
 
-class Detector:
+class Detector(_LabelNumbers):
     """A detector with its own configuration: the regions and label languages (a regions.Active, or a function that
     returns one, asked when the rules load: the first scan and each reset()), the sources (a Sources object) and
     the reference form (a References object).
