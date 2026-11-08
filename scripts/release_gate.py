@@ -105,14 +105,19 @@ def default_baseline(version: str) -> Path | None:
 
 
 def last_holdout_recall() -> float | None:
-    rows = [r for r in (ROOT / "bench" / "HOLDOUT-LOG.md").read_text(encoding="utf-8").splitlines()
-            if "holdout-v2" in r and r.startswith("|")]
+    """The last Holdout V2 row of the committed HOLDOUT-LOG.md. A row comes into a commit only with the baseline of a
+    gate that passed; a run that failed leaves its row in the working file, and a second run read it (Opus review)."""
+    try:
+        text = _git("show", "HEAD:bench/HOLDOUT-LOG.md")
+    except subprocess.CalledProcessError:
+        return None
+    rows = [r for r in text.splitlines() if "holdout-v2" in r and r.startswith("|")]
     return float(rows[-1].split("|")[5]) if rows else None
 
 
 def holdout_pair(run_holdout) -> tuple:
-    """(the last release's recall, the candidate's): the last row is read BEFORE the candidate runs, because
-    bench/run.py appends the candidate's own row to HOLDOUT-LOG.md, and the gate compared a run with itself (#13)."""
+    """(the last release's recall, the candidate's), read before the candidate runs: bench/run.py appends the
+    candidate's own row to HOLDOUT-LOG.md, and the gate compared a run with itself (#13)."""
     before = last_holdout_recall()
     return before, run_holdout()
 

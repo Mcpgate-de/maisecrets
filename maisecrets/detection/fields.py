@@ -96,18 +96,19 @@ def file_digest(text: str, pos: int, end: int, value: str) -> bool:
 
 # the key of a Figma file (22 to 24 letters and digits) or of a component or a style (40 hex) after `key` or `file_key`
 # in a Figma answer: a public id, no credential (#22, about 138 false alarms in 12 hours at a gateway). The answer
-# shows itself by a figma.com URL, a node id (`1:23`, `I1:2;3:4`) or a field only Figma has; a figd_ token has another
-# shape and a key in another answer stays a hit
+# shows itself within 600 characters by a field only Figma has, or a thumbnail on figma.com. A figma.com link alone, a
+# time (`id: 10:30`) and a figd_ token are no sign: a key there stays a hit
 _FIGMA_KEY_LABEL_RE = _LazyRx(r"(?i)(?<![\w.-])(?:file_)?key[\"']?\s*:\s*[\"']?$")
 _FIGMA_KEY_RE = _LazyRx(r"[0-9a-f]{40}|(?=[a-f0-9]*[g-zA-Z])[A-Za-z0-9]{22,24}")
-_FIGMA_ANSWER_RE = _LazyRx(r"figma\.com/|\b(?:node_)?id[\"']?\s*:\s*[\"']?I?\d+:\d+|\"I?\d+:\d+(?:;\d+:\d+)*\"\s*:\s*\{"
-                           r"|\b(?:editorType|componentSetId|containing_frame|documentationLinks|styleType)\b")
-_FIGMA_WINDOW = 1500
+_FIGMA_ANSWER_RE = _LazyRx(r"\b(?:editorType|componentSetId|containing_frame|documentationLinks|styleType)\b"
+                           r"|\bnode_id[\"']?\s*:\s*[\"']?I?\d+:\d+"
+                           r"|\bthumbnail_?url[\"']?\s*:\s*[\"']?https://[\w.-]*\.figma\.com/")
+_FIGMA_WINDOW = 600
 
 
 def figma_id(text: str, pos: int, start: int, value: str) -> bool:
     """A Figma file, component or style key after `key` or `file_key` (text[pos:start]), in a text that shows a Figma
-    answer within 1500 characters of the value."""
+    answer within 600 characters of the value."""
     return bool(_FIGMA_KEY_RE.fullmatch(value.strip("\"'` ")) and _FIGMA_KEY_LABEL_RE.search(text, pos, start)
                 and _FIGMA_ANSWER_RE.search(text, max(0, start - _FIGMA_WINDOW), start + _FIGMA_WINDOW))
 

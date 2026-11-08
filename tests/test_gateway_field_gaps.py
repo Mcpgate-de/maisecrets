@@ -127,6 +127,13 @@ class GermanCallCueTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual([h for h in hits(text) if h[0] == "PHONE"], [("PHONE", number)])
 
+    def test_a_long_run_of_spaces_after_unter_takes_linear_time(self):
+        # `unter[ \t]*(…)?[ \t]+` matched the same spaces twice: 14 s for 50,000 spaces (Opus review)
+        import time
+        t = time.perf_counter()
+        hits("erreichbar unter" + " " * 50000 + "x")
+        self.assertLess(time.perf_counter() - t, 1.0)
+
     def test_two_numbers_after_unter_are_two_hits(self):
         # one span over both numbers left the subscriber digits of the second in the clear
         second = "0171 " + "5829174"
@@ -137,7 +144,9 @@ class GermanCallCueTests(unittest.TestCase):
         for text in ("Bestellung unter 030 " + "48291736 abholen", "erreichbar unter 2026 11 07",
                      "erreichbar unter 0815-4711", "erreichbar unter 0 8080 8443",
                      "Bestellung unter der Nummer 030 " + "48291736 abholen", "Bestellung unter: 030 " + "48291736",
-                     "Rückruf am 07.11.2026 unter Vorbehalt", "erreichbar ab 2026-11-07 unter Last"):
+                     "Rückruf am 07.11.2026 unter Vorbehalt", "erreichbar ab 2026-11-07 unter Last",
+                     # a cue in the sentence before (Opus review)
+                     "Bitte melden Sie sich bis 12 Uhr. Bestellung unter 030 " + "48291736"):
             with self.subTest(text=text):
                 self.assertEqual([h for h in hits(text) if h[0] == "PHONE"], [])
 
@@ -320,6 +329,14 @@ class FigmaKeyTests(unittest.TestCase):
                        {"items": [{"id": "12", "key": self.FILE, "name": "prod"}]}):
             with self.subTest(answer=list(answer)):
                 self.assertEqual([t for t, _v in hits(json.dumps(answer))], ["SECRET"])
+        # a Figma link, a time or an object keyed by time near the key is no Figma answer (Opus review)
+        c = self.COMPONENT
+        for text in (f"see {self.THUMB}\n" + "log line\n" * 10 + f"key: {c}",
+                     json.dumps({"id": "10:30", "service": "payments", "key": c}), f"id: 9:00\nkey: {c}",
+                     json.dumps({"slots": {"10:15": {"free": "yes"}}, "key": c}),
+                     f"frame-src https://www.figma.com/; var cfg = {{\"key\": \"{c}\"}}"):
+            with self.subTest(text=text[:16]):
+                self.assertEqual([t for t, _v in hits(text)], ["SECRET"])
         # a figd_ token in a Figma answer has another shape and stays a hit
         token = "figd_" + "Kq7mZt4wPx9Lc2Rv" + "Hs8nYb3Jd6Fg"
         self.assertEqual([t for t, _v in hits(f'{{"editorType": "figma", "key": "{token}"}}')], ["SECRET"])

@@ -2889,7 +2889,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     or _fields.file_digest(text, max(_line_start(text, start), start - 60), start, secret)
                     or _fields.figma_id(text, max(_line_start(text, start), start - 60), start, secret)):
                 continue   # a UUID, an elided value (sk-...), a label of a derived thing (secret_id, nextPageToken)
-                # or the digest of a file (secrets.tar.gz)
+                # or the digest of a file (secrets.tar.gz), or the key of a Figma file or component (#22)
             if "user-equals-password" in filters and _pass_equals_user(m.group(0), secret):
                 continue
             if ("sigv4-scope" in filters

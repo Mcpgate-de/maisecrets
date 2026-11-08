@@ -93,12 +93,17 @@ class HoldoutPairTests(unittest.TestCase):
         (root / "bench").mkdir()
         log = root / "bench" / "HOLDOUT-LOG.md"
         log.write_text("| 2026-11-07 | v0.8.29 | holdout-v2 | x | 0.6473 |\n", encoding="utf-8")
+        git(root, "init", "-q")
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "baseline")
 
         def run_candidate():
             with open(log, "a", encoding="utf-8") as f:
                 f.write("| 2026-11-08 | cand | holdout-v2 | x | 0.6100 |\n")
             return 0.61
         with mock.patch.object(gate, "ROOT", root):
+            self.assertEqual(gate.holdout_pair(run_candidate), (0.6473, 0.61))
+            # a second run of the gate: the failed row of the first stays in the working file, not in the baseline
             self.assertEqual(gate.holdout_pair(run_candidate), (0.6473, 0.61))
 
 
