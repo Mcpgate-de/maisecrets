@@ -799,7 +799,9 @@ PRESIDIO_EXTRA_CONTEXT = {
                     "reisepassnummer", "passeport", "pasaporte", "passaporte", "passaporto", "paspoort", "paszport"),
     "us-itin": ("itinnumber", "taxpayerid", "taxid", "taxidnumber"),
     # 2026-10-19, Benchmark V1: a CSV or JSON key `steuer_id` over a valid tax id; the checksum still decides
-    "de-tax-id": ("steuer_id", "steuer_identifikationsnummer", "steuer-identifikationsnummer", "steuer_idnr"),
+    # and the display name of a column, with a space (Metabase: "Steuer ID", ai-gateway #1795, 2026-11-08)
+    "de-tax-id": ("steuer_id", "steuer_identifikationsnummer", "steuer-identifikationsnummer", "steuer_idnr",
+                  "steuer id", "steuer idnr"),
     "credit-card": ("karte", "kreditkarte", "kartennummer", "kartennr", "debitkarte", "bankkarte", "ec-karte",
                     "girocard", "carte", "cartes", "carta", "tarjeta", "creditcard", "kaart", "cart\u00e3o", "karta",
                     # 0.6.24, review: the PAN of a payment log, a camelCase key, and the Nordic and Polish words
