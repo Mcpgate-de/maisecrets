@@ -418,6 +418,21 @@ class SrefBashTests(unittest.TestCase):
         self.assertEqual(run.returncode, 97)
         self.assertEqual(run.stdout, "", "printf never ran with an empty value")
 
+    def test_a_login_without_commands_names_the_reason_and_runs_nothing(self):
+        # mcpgate 2.0.3815: the process sink needs its own scope; a login without it (Windows, an old login) is
+        # refused, and the command says why instead of a delivery timeout
+        self.found = {**self.found, "scope": S.SCOPE}
+        self.login()
+        self.result()
+        run = self.run_command(f"printf 'got:%s' {self.shown}")
+        self.assertEqual(run.returncode, 97)
+        self.assertEqual(run.stdout, "", "printf never ran")
+        self.assertIn("does not allow real values in commands", run.stderr)
+        self.assertIn("/maisecrets:sref login", run.stderr)
+        self.assertNotIn("served for 120 s", run.stderr)
+        self.assertNotIn(VALUE, run.stderr)
+        self.assertEqual(self.srv.resolved, [], "the gateway gave no value")
+
     def test_the_audit_names_the_reference_without_its_id(self):
         self.login()
         self.result()
