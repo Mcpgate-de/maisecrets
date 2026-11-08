@@ -37,6 +37,7 @@ TOKEN = "glpat-" + "Sv7kQm2xRt9LpW4nZb8c"   # synthetic: a GitLab token shape, n
 PLACEHOLDER = "⟦" + "SECRET_c1" + "⟧"
 REPLY = f"Der Token lautet {PLACEHOLDER} und gilt bis Freitag."
 COLS, ROWS = 140, 40
+TURNS: list | None = None     # another scenario for a probe or a screenshot; None: the checks below
 KEY = "sk-ant-api03-" + "fakefakefake" * 6 + "-AAAA"
 
 
@@ -76,7 +77,7 @@ def run(layout: str, port: int) -> list[str]:
         "customApiKeyResponses": {"approved": [KEY[-20:]], "rejected": []},
         "projects": {str(cwd.resolve()): {"hasTrustDialogAccepted": True, "hasCompletedProjectOnboarding": True}},
     }))
-    turns = [{"match": "Bitte pruefe", "text": REPLY},
+    turns = TURNS or [{"match": "Bitte pruefe", "text": REPLY},
              # a tool result with the placeholder: maisecrets puts the value into the command and masks the output
              {"match": "zeig die Datei", "tool": "Bash",
               "input": {"command": f"printf 'token=%s\\n' {PLACEHOLDER}", "description": "Datei zeigen"}},

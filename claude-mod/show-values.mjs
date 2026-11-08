@@ -188,6 +188,41 @@ async function reveal($, ref) {
   }
 }
 
+// any other tool's call row and result (an MCP tool, Write, Edit …): the client draws them itself, with the values
+// put into its input and output for the drawing (always only; a line with a link, a URL or HTML keeps its
+// placeholders). Bash keeps its own drawing above, where a click copies
+const DEEP_MAX = 8
+function collect(v, out, depth = 0) {
+  if (depth > DEEP_MAX) return
+  if (typeof v === 'string') { if (v.includes('\u27e6')) for (const k of keysIn(v)) out.add(k); return }
+  if (Array.isArray(v)) { for (const x of v) collect(x, out, depth + 1); return }
+  if (v && typeof v === 'object') for (const x of Object.values(v)) collect(x, out, depth + 1)
+}
+function shown(v, depth = 0) {
+  if (depth > DEEP_MAX) return v
+  if (typeof v === 'string') {
+    if (!v.includes('\u27e6')) return v
+    return v.split('\n').map(line => LINKY.test(line) ? line : line.replace(KEY_RE, (all, k) =>
+      cache.has(k) ? `${cache.get(k)} \u{1F512}` : all)).join('\n')
+  }
+  if (Array.isArray(v)) return v.map(x => shown(x, depth + 1))
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shown(x, depth + 1)]))
+  return v
+}
+function rewriteProps($, e, fields) {
+  const keys = new Set()
+  for (const f of fields) collect(e.props?.[f], keys)
+  if (!keys.size) return null
+  if (e.props?.onScreen !== null) {
+    for (const k of keys) if (!cache.has(k) && !absent.has(k)) wanted.add(k)
+    fetchLater($)
+  }
+  if (mode !== 'always' || ![...keys].some(k => cache.has(k))) return null
+  const props = { ...e.props }
+  for (const f of fields) if (f in props) props[f] = shown(props[f])
+  return { ...e, props }
+}
+
 // the origins of a person's own prompt (maisecrets-mod.mjs PERSON)
 const OWN_PROMPT = new Set(['composer', 'bridge', 'sdk'])
 
@@ -297,7 +332,16 @@ export function registerShowValues(on) {
     return tree ?? next(e)
   })
 
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    if (e.props?.tool === 'Bash' || !drawsHere(e)) return next(e)
+    return next(rewriteProps($, e, ['input', 'output']) ?? e)
+  })
+
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    if (e.props?.tool !== 'Bash') {
+      if (!drawsHere(e) || e.props?.isErrored) return next(e)
+      return next(rewriteProps($, e, ['output']) ?? e)
+    }
     const out = e.props?.output
     const text = typeof out?.stdout === 'string' ? out.stdout : ''
     // an error, an output with stderr and a collapsed row stay the engine's: this drawing has stdout alone

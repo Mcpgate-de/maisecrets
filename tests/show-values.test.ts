@@ -13,7 +13,7 @@ const LINK = 'https://mcpgate.de/maisecrets/v#'
 const real = (md: any, key: string) => (md.props.pressableLinks as string[]).find(l => l.endsWith('/' + key))!
 
 function world(on, opts: { mode?: string, links?: boolean, asked?: string[][], sessions?: string[],
-  ids?: { id: string }, copied?: string[] } = {}) {
+  ids?: { id: string }, copied?: string[], seen?: any[] } = {}) {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   on('session.id', () => ({ value: opts.ids?.id ?? 'sess-1' }))
@@ -33,6 +33,7 @@ function world(on, opts: { mode?: string, links?: boolean, asked?: string[][], s
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   // the engine's own drawing of a reply: its text as it came
   on('ui.render', ($, e) => {
+    ;(opts as any).seen?.push(e.props)
     const { Markdown } = $.ui.resolve(e)
     return (globalThis as any).h(Markdown, { key: 'engine', text: e.props.text ?? e.props.output?.stdout ?? '' })
   })
@@ -254,5 +255,25 @@ test('the full view and an export of a prompt (isExpanded) keep the placeholders
     viewport: FULL })
   await clock.advance(10)
   expect((await ui.find({ type: 'Markdown' }))?.key).toBe('engine')
+  await ui.unmount()
+})
+
+test('an MCP call row and its result show the values (always), a line with a URL keeps its placeholder', async ($, on) => {
+  const seen: any[] = []
+  const clock = world(on, { seen })
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  const props = { tool_use_id: 't1', tool: 'mcp__crm__get', input: { id: 7, note: `for ${P('NAME_c1')}` },
+    isRunning: false, isErrored: false, isInterrupted: false, isExpanded: true,
+    output: { content: [{ type: 'text', text: `name: ${P('NAME_c1')}\nsee https://crm.example/?q=${P('EMAIL_c2')}` }] } }
+  const ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'terminal', component: 'ToolUse', props: props as any,
+    viewport: FULL, requestId: 't1' })
+  await clock.advance(10)
+  await ui.redraw(props as any)
+  const drawn = seen[seen.length - 1]
+  expect(drawn.input.note).toBe('for Max Mustermann \u{1F512}')
+  expect(drawn.output.content[0].text).toContain('name: Max Mustermann \u{1F512}')
+  expect(drawn.output.content[0].text).toContain(P('EMAIL_c2'))
+  expect(drawn.output.content[0].text).not.toContain('max@example.com')
   await ui.unmount()
 })
