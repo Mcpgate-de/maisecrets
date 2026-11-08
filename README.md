@@ -2335,6 +2335,7 @@ a source, with one command typed as your own prompt:
 | `/maisecrets:ner off` | the rules alone (the default) |
 | `/maisecrets:ner fallback url URL` | a second service for tool results while the local one is not running (`fallback off` removes it) |
 | `/maisecrets:ner prompts off` | the prompts you type keep the rules alone; tool results still go to the service (`prompts on` turns it back on) |
+| `/maisecrets:ner updates off` | the image of the local service stays as it is; by default it follows the plugin (`updates on` turns that back on) |
 | `/maisecrets:ner` | which source is set, and whether it answers |
 
 In Codex, send `maisecrets: ner local` (or `url URL`, `off`) alone as your
@@ -2367,6 +2368,22 @@ maisecrets does not verify that it is `mcpgate/ner`.
   restart, maisecrets starts the container again at the next session start
   (`docker start ner`, only for a container whose image is `mcpgate/ner`);
   until it answers, the rules work alone.
+  **Updates:** each plugin version pins one image of `mcpgate/ner` by its
+  digest. When a plugin update pins a newer one, the next session start updates
+  the container in the background. A stopped container starts first; then the
+  new image downloads while the old container runs (if the download fails,
+  nothing changes). The old container stops and waits as `ner-prev`, and a new
+  one starts with the same secret. Only when the new one proves the secret is
+  the old one removed, with its image. If the new one does not prove it within
+  90 seconds, it goes, the old one runs again, and maisecrets tries that image
+  again after a day, not at each session start. For the seconds of the change
+  the rules work alone. The image only moves forward: a session that still
+  runs an older plugin version never takes a newer image back. This applies
+  only to a container that `run.sh ner start` set up; a container you started
+  by hand is never replaced, and `/maisecrets:ner` says which image runs and
+  which one the plugin pins. `/maisecrets:ner updates off` keeps the image as
+  it is; it counts as a weaker setting, because the old image keeps its old
+  fixes.
 - **url**: the text of each tool result goes to that service, with each value
   the rules found as filler. The service has no sign-in: run it only on a
   network that only its users reach. It must use https or a private address
