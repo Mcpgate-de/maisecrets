@@ -34,9 +34,11 @@ from .detection import remote
 
 LOCAL_URL = "http://127.0.0.1:8765/"
 IMAGE = "mcpgate/ner"
-# the first tag whose container proves its secret (NER_CLIENT_SECRET, #1699): `run.sh ner start` runs this tag, never
+# the first tag whose container proves its secret (NER_CLIENT_SECRET, #1699)
+FIRST_SECRET_IMAGE = IMAGE + ":v2.0.3584"
+# what `run.sh ner start` runs: a fixed tag, pinned by its digest (multi-arch index on Docker Hub, 2026-11-07), never
 # `latest`, which docker does not pull again when an old one is on the machine
-SECRET_IMAGE = IMAGE + ":v2.0.3584"
+SECRET_IMAGE = IMAGE + ":v2.0.3798@sha256:38c0442e10f75e2b41bdcf5a66c6aee02961f9609bf7ebb7d1ce64c1f9c907cf"
 START = f"docker run -d --name ner --restart unless-stopped -p 127.0.0.1:8765:8765 {IMAGE}"
 # the keys a source sets; any other key of the setting is the person's tuning and stays
 SOURCE_KEYS = ("url", "format", "model", "allow_network", "mask", "ask_labels")
@@ -361,8 +363,8 @@ def report(conf, wait: float = 0.0) -> tuple[int, list]:
             return 1, lines
         elif not _info(conf).get("client_secret"):
             # an image before the secret check: it gets no text, and the fault is the image, not an impostor
-            lines.append(f"the container cannot prove its secret: its image is older than {SECRET_IMAGE}. Remove it "
-                         "(docker rm -f ner) and run /maisecrets:ner again; until then it gets no text.")
+            lines.append(f"the container cannot prove its secret: its image is older than {FIRST_SECRET_IMAGE}. "
+                         "Remove it (docker rm -f ner) and run /maisecrets:ner again; until then it gets no text.")
             return 1, lines
         elif not _proves(conf):
             lines.append("the service on 127.0.0.1:8765 is not the container that maisecrets started: it cannot prove "
