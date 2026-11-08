@@ -46,6 +46,9 @@ async function runValues($, stdin) {
 }
 
 async function ask($, keys) {
+  // the id of each question: /clear and a resume start another session without session.start
+  const id = await $.session.id()
+  if (id !== session) { session = id; cache.clear(); absent.clear(); open.clear() }
   const r = await runValues($, JSON.stringify({ keys, session_id: session }))
   if (!r) return false
   let a
@@ -68,7 +71,7 @@ async function ask($, keys) {
 
 // one question for every key the drawings of this moment miss, outside the drawing (a ui.render hook may not act)
 function fetchLater($) {
-  if (asking || !wanted.size || !session) return
+  if (asking || !wanted.size) return
   asking = true
   $.clock.after(0, async () => {
     const keys = [...wanted].slice(0, 200)
@@ -91,8 +94,16 @@ function code(v) {
   return `${ticks}${pad}${s} 🔒${pad}${ticks}`
 }
 
+// a line with a link, a URL or HTML keeps its placeholders: a value there could become part of a link target
+// that the model wrote (`[x](https://host/?q=` + placeholder), and a click would send it away (Opus review)
+const LINKY = /:\/\/|\]\(|\]\[|^\s*\[[^\]]*\]:|<[a-z!/]|www\./i
+
 function rewrite(text, address) {
-  const shown = open.get(address)
+  const shown = open.get(address)?.keys
+  return text.split('\n').map(line => LINKY.test(line) ? line : rewriteLine(line, shown)).join('\n')
+}
+
+function rewriteLine(text, shown) {
   return text.replace(PH, (all, k) => {
     if (!k) return all
     const v = cache.get(k)
@@ -142,9 +153,13 @@ function draw($, e, text, address, wrap) {
       } catch { /* nothing copied */ }
       return
     }
-    open.set(address, new Set(keys))
+    // a second click starts the 10 seconds again: only the timer of the last click closes the view
+    const view = { keys: new Set(keys) }
+    open.set(address, view)
     $.ui.invalidate('ui.render')
-    $.clock.after(CLICK_MS, () => { if (open.delete(address)) $.ui.invalidate('ui.render') })
+    $.clock.after(CLICK_MS, () => {
+      if (open.get(address) === view) { open.delete(address); $.ui.invalidate('ui.render') }
+    })
   }
   const pressable = links || mode === 'click'
   const md = pressable
@@ -157,6 +172,7 @@ function draw($, e, text, address, wrap) {
 // a prompt that names show_values may change the mode (the settings hook writes it): ask again after it
 // (called from the prompt.submit hook of maisecrets-mod.mjs: one hook per event and module)
 export function afterPrompt($, text) {
+  absent.clear()      // a key the person typed into a prompt is this session's now
   if (typeof text !== 'string' || !text.includes('show_values')) return
   $.clock.after(1500, async () => {
     try { if (await ask($, [])) $.ui.invalidate('ui.render') } catch { /* the mode stays */ }
@@ -170,8 +186,7 @@ const lineAsMarkdown = (l) => l.split(/(⟦[^⟧\n]{1,140}⟧)/).map((part, i) =
 export function registerShowValues(on) {
   on('session.start', async ($, e, next) => {
     try {
-      session = await $.session.id()
-      await ask($, [])
+      if (await ask($, [])) $.ui.invalidate('ui.render')
     } catch { /* off until an answer */ }
     return next(e)
   })
@@ -194,7 +209,10 @@ export function registerShowValues(on) {
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     const out = e.props?.output
     const text = typeof out?.stdout === 'string' ? out.stdout : ''
-    if (!text.includes('⟦') || !drawsHere(e)) return next(e)
+    // an error, an output with stderr and a collapsed row stay the engine's: this drawing has stdout alone
+    if (!text.includes('⟦') || !drawsHere(e) || e.props.isErrored || out?.stderr || e.props.isExpanded === false) {
+      return next(e)
+    }
     // plain text as markdown: escaped, with its line breaks
     const md = text.trimEnd().split('\n').map(lineAsMarkdown).join('  \n')
     const tree = draw($, e, md, `t-${e.requestId}`, (m, Box) => h(Box, { paddingLeft: 4 }, m))

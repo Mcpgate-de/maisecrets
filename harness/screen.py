@@ -76,7 +76,13 @@ def run(layout: str, port: int) -> list[str]:
         "customApiKeyResponses": {"approved": [KEY[-20:]], "rejected": []},
         "projects": {str(cwd.resolve()): {"hasTrustDialogAccepted": True, "hasCompletedProjectOnboarding": True}},
     }))
-    (run_dir / "scenario.json").write_text(json.dumps({"turns": [{"text": REPLY}, {"text": "ok"}, {"text": "ok"}]}))
+    turns = [{"match": "Bitte pruefe", "text": REPLY},
+             # a tool result with the placeholder: maisecrets puts the value into the command and masks the output
+             {"match": "zeig die Datei", "tool": "Bash",
+              "input": {"command": f"printf 'token=%s\\n' {PLACEHOLDER}", "description": "Datei zeigen"}},
+             {"match": "token=", "text": "Die Datei ist gezeigt."},
+             {"text": "ok"}]
+    (run_dir / "scenario.json").write_text(json.dumps({"turns": turns}))
     srv = subprocess.Popen([sys.executable, str(ROOT / "harness" / "fake_anthropic.py"), str(run_dir / "scenario.json"),
                             str(out), str(port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -93,8 +99,9 @@ def run(layout: str, port: int) -> list[str]:
                    MAISECRETS_GUARD_CLIPBOARD="off")
         if layout == "main":
             env["CLAUDE_CODE_NO_FLICKER"] = "0"
-        args = [shutil.which("claude") or "claude", "--plugin-dir", str(ROOT), "--debug-file",
-                str(run_dir / "debug.log")]
+        args = [shutil.which("claude") or "claude", "--plugin-dir", str(ROOT), "--permission-mode", "default",
+                "--allowedTools", "Bash",
+                "--debug-file", str(run_dir / "debug.log")]
         return _drive(args, env, cwd, out, cfg, run_dir, layout)
     finally:
         srv.terminate()
@@ -144,7 +151,11 @@ def _drive(args, env, cwd, out, cfg, run_dir, layout) -> list[str]:
             failures.append(f"{layout}: the reply on the screen does not show the value: {reply[0].strip()[:80]}")
         elif layout == "main" and TOKEN in reply[0]:
             failures.append(f"{layout}: the main screen shows the value (scrollback and /export keep it)")
+        # after the drawing: a tool result with the value, and one more request that carries all of it
+        typ("zeig die Datei", 15)
+        typ("danke", 8)
         typ("/export export.txt", 5)
+        (run_dir / "screen-end.txt").write_text(screen())
     finally:
         for b in (b"\x03", b"\x03"):
             try:
@@ -157,9 +168,15 @@ def _drive(args, env, cwd, out, cfg, run_dir, layout) -> list[str]:
         except OSError:
             pass
     requests = sorted(out.glob("request_*.json"))
-    if not requests:
-        failures.append(f"{layout}: no model request was made")
-    places = {"a model request": requests, "the transcript": list((cfg / "projects").rglob("*.jsonl")),
+    if len(requests) < 4:
+        failures.append(f"{layout}: {len(requests)} model requests, not the 4 of the scenario: the later turns did not "
+                        "run, and a request after the drawing is not checked")
+    transcripts = list((cfg / "projects").rglob("*.jsonl"))
+    if not transcripts:
+        failures.append(f"{layout}: no transcript was written: the check of the transcript would read nothing")
+    if not list(cwd.glob("export*.txt")):
+        failures.append(f"{layout}: /export wrote no file: the check of /export would read nothing")
+    places = {"a model request": requests, "the transcript": transcripts,
               "the debug log": [run_dir / "debug.log"], "the /export file": list(cwd.glob("export*.txt"))}
     for where, files in places.items():
         hits = sum(f.read_text(errors="replace").count(TOKEN) for f in files if f.exists())
