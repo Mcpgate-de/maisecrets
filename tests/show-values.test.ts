@@ -186,3 +186,48 @@ test('a link the model wrote with the bare prefix copies nothing; the drawn link
   expect(copied).toEqual(['Max Mustermann'])
   await ui.unmount()
 })
+
+const SREF = 'sref:email:' + 'A'.repeat(24)
+
+function gateway(on, revealAnswer: object, runs: string[][]) {
+  on('process.run', ($, e) => {
+    runs.push(e.argv)
+    if (e.argv[2] === 'mod-reveal') {
+      return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-reveal', ...revealAnswer }) } }
+    }
+    return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-values', mode: 'always',
+      links: true, values: {} }) } }
+  })
+}
+
+test('a gateway reference: drawing asks the gateway nothing; one click shows its value, a click on that copies it',
+  async ($, on) => {
+    const runs: string[][] = []
+    const clock = mock.clock(on, { now: 1_000_000 })
+    mock.store(on)
+    on('session.id', () => ({ value: 'sess-1' }))
+    on('ui.toast', () => ({ value: undefined }))
+    const copied: string[] = []
+    on('ui.copy', ($, e) => { copied.push(e.text); return { value: { isCopied: true } } })
+    gateway(on, { value: 'gw@example.com' }, runs)
+    on('session.start', (_, e) => ({ cwd: e.cwd }))
+    on('ui.render', ($, e) => (globalThis as any).h($.ui.resolve(e).Markdown, { key: 'engine', text: e.props.text }))
+    await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'terminal', component: 'AssistantMessage',
+      props: { text: `Mail ${P(SREF + ':gw\u2022\u2022\u2022@example.com')}`, isFirstOfReply: true } as any,
+      viewport: FULL })
+    await clock.advance(10)
+    expect(runs.filter(a => a[2] === 'mod-reveal')).toEqual([])
+    const md = await ui.find({ type: 'Markdown' })
+    await ui.press({ key: md!.key!, link: { href: real(md, SREF) } as any })
+    const after = await ui.find({ type: 'Markdown' })
+    expect(after?.props.text).toContain('`gw@example.com \u{1F512}`')
+    expect(runs.filter(a => a[2] === 'mod-reveal').length).toBe(1)
+    await ui.press({ key: md!.key!, link: { href: real(md, SREF) } as any })
+    expect(runs.filter(a => a[2] === 'mod-reveal').length).toBe(1)
+    expect(copied).toEqual([])
+    await ui.press({ key: md!.key!, link: { href: real(after, 'copy/' + SREF) } as any })
+    expect(copied).toEqual(['gw@example.com'])
+    expect(runs.filter(a => a[2] === 'mod-reveal').length).toBe(1)
+    await ui.unmount()
+  })

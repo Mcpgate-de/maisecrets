@@ -84,6 +84,8 @@ except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         sys.exit(1)       # no traceback: the mod passes the prompt on and the hook decides (above: it blocks)
     if len(sys.argv) == 2 and sys.argv[1] == "mod-values":
         sys.exit(1)       # no traceback: the mod draws the placeholders as they are
+    if len(sys.argv) == 2 and sys.argv[1] == "mod-reveal":
+        sys.exit(1)       # no traceback: the mod says it could not get the value
     raise
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
@@ -121,6 +123,18 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-values":
     except Exception:  # noqa: BLE001 - no traceback, no value in an error text
         sys.exit(1)
     print(json.dumps({"maisecrets": "mod-values", **answer}))
+    sys.exit(0)
+
+if len(sys.argv) == 2 and sys.argv[1] == "mod-reveal":
+    # a click on a gateway's reference (maisecrets/show_values.py reveal). Any failure answers nothing
+    import json
+    try:
+        from maisecrets.show_values import reveal as show_reveal  # noqa: E402
+        payload = json.load(sys.stdin)
+        answer = show_reveal(payload if isinstance(payload, dict) else {})
+    except Exception:  # noqa: BLE001 - no traceback, no value in an error text
+        sys.exit(1)
+    print(json.dumps({"maisecrets": "mod-reveal", **answer}))
     sys.exit(0)
 
 if len(sys.argv) >= 2 and sys.argv[1] == "pending":

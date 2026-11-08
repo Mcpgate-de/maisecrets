@@ -11,7 +11,8 @@
 // A value lives only in this module's memory (at most CACHE_MAX, gone with the session): never in $.state, $.store,
 // a log or a file. dispatch.py mod-values gives it, for this session's keys only (maisecrets/show_values.py).
 
-const PH = /`[^`\n]*`|⟦([A-Z][A-Z0-9_]{0,40}_c\d{1,9})(?::[^⟧\n]{0,80})?⟧/g
+const PH = /`[^`\n]*`|⟦([A-Z][A-Z0-9_]{0,40}_c\d{1,9})(?::[^⟧\n]{0,80})?⟧|⟦(sref:[A-Za-z0-9_-]{1,32}:[A-Za-z0-9_-]{20,128})(?::[^⟧\n]{1,256})?⟧/g
+const SREF_RE = /⟦(sref:[A-Za-z0-9_-]{1,32}:[A-Za-z0-9_-]{20,128})(?::[^⟧\n]{1,256})?⟧/g
 const KEY_RE = /⟦([A-Z][A-Z0-9_]{0,40}_c\d{1,9})(?::[^⟧\n]{0,80})?⟧/g
 // the link of a value carries a random part of this process, which only the drawing holds: the model cannot write a
 // link that the mod answers (a link with the bare prefix and a key in a reply copied that value, Opus review of #30)
@@ -27,6 +28,10 @@ const ASK_MS = 4000
 const CLICK_MS = 10000
 const SHOWN_CHARS = 80
 const HINT_SESSIONS = 3
+// a gateway's reference: only a click resolves it, once per session, at most REVEAL_MAX per session (#30); a click
+// on the value it shows then copies it, as for a value of the store
+const REVEAL_MAX = 20
+const REVEAL_MS = 8000
 
 let mode = 'off'          // until the first answer: nothing is drawn
 let links = true
@@ -37,6 +42,9 @@ const wanted = new Set()
 let asking = false
 const open = new Map()    // click: the text's address -> keys shown until CLICK_MS
 let hinted = false
+const revealed = new Map()  // a gateway reference -> its value, for this session
+let revealing = false
+let reveals = 0
 
 async function runValues($, stdin) {
   // the same Pythons as the prompt path, fixed command lines (claude-mod/maisecrets-mod.mjs)
@@ -56,7 +64,7 @@ async function runValues($, stdin) {
 async function ask($, keys) {
   // the id of each question: /clear and a resume start another session without session.start
   const id = await $.session.id()
-  if (id !== session) { session = id; cache.clear(); absent.clear(); open.clear() }
+  if (id !== session) { session = id; cache.clear(); absent.clear(); open.clear(); revealed.clear(); reveals = 0 }
   const r = await runValues($, JSON.stringify({ keys, session_id: session }))
   if (!r) return false
   let a
@@ -65,7 +73,7 @@ async function ask($, keys) {
   const was = mode
   mode = ['always', 'click', 'off'].includes(a.mode) ? a.mode : 'off'
   links = a.links !== false
-  if (mode === 'off') { cache.clear(); absent.clear(); open.clear() }
+  if (mode === 'off') { cache.clear(); absent.clear(); open.clear(); revealed.clear() }
   const values = a.values && typeof a.values === 'object' ? a.values : {}
   for (const k of keys) {
     if (typeof values[k] === 'string') {
@@ -112,7 +120,11 @@ function rewrite(text, address) {
 }
 
 function rewriteLine(text, shown) {
-  return text.replace(PH, (all, k) => {
+  return text.replace(PH, (all, k, ref) => {
+    if (ref) {
+      // a gateway's reference: a link that a click resolves; then the value in its place, a click copies it
+      return revealed.has(ref) ? `[${code(revealed.get(ref))}](${LINK}copy/${ref})` : `[${all}](${LINK}${ref})`
+    }
     if (!k) return all
     const v = cache.get(k)
     if (mode === 'always' && v !== undefined) return links ? `[${code(v)}](${LINK}${k})` : code(v)
@@ -141,19 +153,70 @@ function hint($) {
   })
 }
 
+// one click, one reference: the gateway resolves it for the screen (sink display) through dispatch.py mod-reveal,
+// which checks that this session got the reference from a user-scope gateway; never from a drawing (Opus review)
+async function reveal($, ref) {
+  if (revealed.has(ref) || revealing) return
+  if (reveals >= REVEAL_MAX) {
+    $.ui.toast(`maisecrets shows at most ${REVEAL_MAX} gateway values per session.`)
+    return
+  }
+  revealing = true
+  reveals += 1
+  try {
+    const id = session ?? await $.session.id()
+    const init = { cwd: $.plugin.root, stdin: JSON.stringify({ ref, session_id: id }), timeoutMs: REVEAL_MS,
+      env: { PYTHONUTF8: '1' } }
+    let r = null
+    for (const argv of [['python3', 'hooks/dispatch.py', 'mod-reveal'], ['py', '-3', 'hooks/dispatch.py', 'mod-reveal'],
+      ['python', 'hooks/dispatch.py', 'mod-reveal']]) {
+      try {
+        r = await $.process.run(argv, init)
+        if (r.exitCode === 0) break
+      } catch { r = null }
+    }
+    let a = null
+    try { a = r && r.exitCode === 0 ? JSON.parse(r.stdout) : null } catch { a = null }
+    if (a?.maisecrets === 'mod-reveal' && typeof a.value === 'string') {
+      revealed.set(ref, a.value)
+      $.ui.invalidate('ui.render')
+    } else {
+      $.ui.toast(typeof a?.reason === 'string' ? a.reason.slice(0, 300) : 'maisecrets could not get the value.')
+    }
+  } finally {
+    revealing = false
+  }
+}
+
+const srefsIn = (t) => [...new Set([...t.matchAll(SREF_RE)].map(m => m[1]))]
+
 function draw($, e, text, address, wrap) {
   const keys = keysIn(text)
+  const refs = srefsIn(text)
   // a message drawn outside the viewport (onScreen null) asks for nothing: it asks when a scroll brings it in
   if (e.props?.onScreen !== null) {
     for (const k of keys) if (!cache.has(k) && !absent.has(k)) wanted.add(k)
     fetchLater($)
   }
-  if (mode === 'off' || !keys.some(k => cache.has(k))) return null
+  if (mode === 'off' || (!keys.some(k => cache.has(k)) && !refs.length)) return null
   if (mode === 'always') hint($)
   const { Markdown, Box, Text } = $.ui.resolve(e)
   const press = async (link, p) => {
     if (typeof link?.href !== 'string' || !link.href.startsWith(LINK)) return
     const k = link.href.slice(LINK.length)
+    if (k.startsWith('sref:')) {
+      if (refs.includes(k)) await reveal($, k)
+      return
+    }
+    if (k.startsWith('copy/sref:')) {
+      const ref = k.slice(5)
+      if (!refs.includes(ref) || !revealed.has(ref)) return
+      try {
+        const r = await $.ui.copy({ text: revealed.get(ref), surface: p?.surface ?? e.surface })
+        $.ui.toast(r?.isCopied ? 'Copied. Claude knows only the reference.' : 'Not copied.')
+      } catch { /* nothing copied */ }
+      return
+    }
     if (!cache.has(k)) return
     if (mode === 'always') {
       try {
@@ -170,10 +233,10 @@ function draw($, e, text, address, wrap) {
       if (open.get(address) === view) { open.delete(address); $.ui.invalidate('ui.render') }
     })
   }
-  const pressable = links || mode === 'click'
+  const pressable = links || mode === 'click' || refs.length > 0
   const md = pressable
     ? h(Markdown, { key: `ms-${address}`, text: rewrite(text, address),
-      pressableLinks: keys.map(k => LINK + k), onLinkPress: press })
+      pressableLinks: [...keys, ...refs, ...refs.map(r => 'copy/' + r)].map(k => LINK + k), onLinkPress: press })
     : h(Markdown, { key: `ms-${address}`, text: rewrite(text, address) })
   return wrap(md, Box, Text)
 }
