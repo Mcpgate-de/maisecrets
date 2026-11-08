@@ -466,3 +466,24 @@ class ProfileNameTests(unittest.TestCase):
     def test_a_found_record_without_sink_types_reads_the_profile_names(self):
         self.assertNotIn("does not resolve into a command",
                          self.refusal({"origin": self.ORIGIN, "sinks": ["mcpgate-process-1"]}))
+
+
+class StoredIdIsNotReplacedTests(unittest.TestCase):
+    """0.9.1 stored the id of a reference with its closing bracket as a secret; each later read of the same mail broke
+    the reference again through the exact replacement of stored values (field case 2026-11-08)."""
+
+    def test_a_stored_value_that_is_a_reference_id_leaves_the_reference_whole(self):
+        from _hygiene import CLAUDE
+        from maisecrets import hooks
+        from maisecrets.vault import Vault
+        rid = "Xq7mR2vKd9TfLw4HbN8cPz3sT6yUa1eQo5iWj0lN8Bh"
+        Vault().put(rid + "⟧", "SECRET", "manual", session="s1")
+        ref = f"⟦sref:secret:{rid}⟧"
+        hooks._live_cache.clear()
+        out = hooks._post_tool_guarded({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                                        "tool_input": {"command": "cat mail.txt"},
+                                        "tool_response": {"stdout": f"Your access token: {ref}\nPlease and {rid}⟧",
+                                                          "stderr": ""}})
+        shown = json.dumps(out.get("hookSpecificOutput", {}).get("updatedToolOutput", {}), ensure_ascii=False)
+        self.assertIn(ref, shown, "the reference stays whole")
+        self.assertIn("Please and ⟦SECRET_c", shown, "the same text outside a reference is still replaced")
