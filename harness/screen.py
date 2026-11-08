@@ -82,6 +82,10 @@ def run(layout: str, port: int) -> list[str]:
              {"match": "zeig die Datei", "tool": "Bash",
               "input": {"command": f"printf 'token=%s\\n' {PLACEHOLDER}", "description": "Datei zeigen"}},
              {"match": "token=", "text": "Die Datei ist gezeigt."},
+             # a tool row that is not Bash (the mod rewrites its input for the drawing only)
+             {"match": "schreib die Notiz", "tool": "Write",
+              "input": {"file_path": str(cwd / "notiz.txt"), "content": f"token {PLACEHOLDER}\n"}},
+             {"match": "notiz.txt", "text": "Notiz geschrieben."},
              {"text": "ok"}]
     (run_dir / "scenario.json").write_text(json.dumps({"turns": turns}))
     srv = subprocess.Popen([sys.executable, str(ROOT / "harness" / "fake_anthropic.py"), str(run_dir / "scenario.json"),
@@ -101,7 +105,7 @@ def run(layout: str, port: int) -> list[str]:
         if layout == "main":
             env["CLAUDE_CODE_NO_FLICKER"] = "0"
         args = [shutil.which("claude") or "claude", "--plugin-dir", str(ROOT), "--permission-mode", "default",
-                "--allowedTools", "Bash",
+                "--allowedTools", "Bash,Write",
                 "--debug-file", str(run_dir / "debug.log")]
         return _drive(args, env, cwd, out, cfg, run_dir, layout)
     finally:
@@ -162,6 +166,7 @@ def _drive(args, env, cwd, out, cfg, run_dir, layout) -> list[str]:
             failures.append(f"{layout}: the main screen shows the value (scrollback and /export keep it)")
         # after the drawing: a tool result with the value, and one more request that carries all of it
         typ("zeig die Datei", 15)
+        typ("schreib die Notiz", 15)
         typ("danke", 8)
         typ("/export export.txt", 5)
         (run_dir / "screen-end.txt").write_text(screen())
@@ -177,8 +182,8 @@ def _drive(args, env, cwd, out, cfg, run_dir, layout) -> list[str]:
         except OSError:
             pass
     requests = sorted(out.glob("request_*.json"))
-    if len(requests) < 4:
-        failures.append(f"{layout}: {len(requests)} model requests, not the 4 of the scenario: the later turns did not "
+    if len(requests) < 6:
+        failures.append(f"{layout}: {len(requests)} model requests, not the 6 of the scenario: the later turns did not "
                         "run, and a request after the drawing is not checked")
     transcripts = list((cfg / "projects").rglob("*.jsonl"))
     if not transcripts:

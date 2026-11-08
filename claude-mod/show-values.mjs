@@ -112,7 +112,7 @@ function code(v) {
 
 // a line with a link, a URL or HTML keeps its placeholders: a value there could become part of a link target
 // that the model wrote (`[x](https://host/?q=` + placeholder), and a click would send it away (Opus review)
-const LINKY = /:\/\/|\]\(|\]\[|^\s*\[[^\]]*\]:|<[a-z!/]|www\./i
+const LINKY = /:\/\/|\]\(|\]\[|^\s*\[[^\]]*\]:|<[a-z!/]|www\.|\b(?:mailto|data|file|tel|sms|javascript|ftp):|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\?/i
 
 function rewrite(text, address) {
   const shown = open.get(address)?.keys
@@ -164,7 +164,8 @@ async function reveal($, ref) {
   revealing = true
   reveals += 1
   try {
-    const id = session ?? await $.session.id()
+    const id = await $.session.id()
+    if (id !== session) { session = id; cache.clear(); absent.clear(); open.clear(); revealed.clear(); reveals = 0 }
     const init = { cwd: $.plugin.root, stdin: JSON.stringify({ ref, session_id: id }), timeoutMs: REVEAL_MS,
       env: { PYTHONUTF8: '1' } }
     let r = null
@@ -251,7 +252,7 @@ function draw($, e, text, address, wrap) {
       if (!refs.includes(ref) || !revealed.has(ref)) return
       try {
         const r = await $.ui.copy({ text: revealed.get(ref), surface: p?.surface ?? e.surface })
-        $.ui.toast(r?.isCopied ? 'Copied. Claude knows only the reference.' : 'Not copied.')
+        $.ui.toast(r?.isCopied ? 'Copied.' : 'Not copied.')
       } catch { /* nothing copied */ }
       return
     }

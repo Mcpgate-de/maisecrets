@@ -277,3 +277,64 @@ test('an MCP call row and its result show the values (always), a line with a URL
   expect(drawn.output.content[0].text).not.toContain('max@example.com')
   await ui.unmount()
 })
+
+const TOOL = { tool_use_id: 't2', tool: 'mcp__crm__get', input: { note: `for ${P('NAME_c1')}` }, isRunning: false,
+  isErrored: false, isInterrupted: false, isExpanded: true, output: { content: [{ type: 'text', text: `n ${P('NAME_c1')}` }] } }
+
+for (const [what, surface, viewport, mode] of [
+  ['the main screen', 'terminal', { ...FULL, isFullscreen: false }, 'always'],
+  ['the phone', 'mobile', { ...FULL, isFullscreen: false }, 'always'],
+  ['mode click', 'terminal', FULL, 'click'],
+  ['mode off', 'terminal', FULL, 'off'],
+] as const) {
+  test(`a tool row keeps its placeholders on ${what}`, async ($, on) => {
+    const seen: any[] = []
+    const clock = world(on, { seen, mode })
+    await $.session.start({ cwd: '/work', surface, isInteractive: true })
+    const ui = await $.ui.mount({ plugin: 'maisecrets', surface, component: 'ToolUse', props: TOOL as any, viewport,
+      requestId: 't2' })
+    await clock.advance(10)
+    await ui.redraw(TOOL as any)
+    const last = seen[seen.length - 1]
+    expect(JSON.stringify(last)).not.toContain('Max Mustermann')
+    await ui.unmount()
+  })
+}
+
+test('a non-Bash tool result shows the values; an errored one keeps its placeholders', async ($, on) => {
+  const seen: any[] = []
+  const clock = world(on, { seen })
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  const res = { tool_use_id: 't3', tool: 'mcp__crm__get', isErrored: false, isExpanded: true,
+    output: { content: [{ type: 'text', text: `n ${P('NAME_c1')}` }] } }
+  let ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'terminal', component: 'ToolResult', props: res as any,
+    viewport: FULL, requestId: 't3' })
+  await clock.advance(10)
+  await ui.redraw(res as any)
+  expect(JSON.stringify(seen[seen.length - 1])).toContain('Max Mustermann \u{1F512}')
+  await ui.unmount()
+  const errored = { ...res, tool_use_id: 't4', isErrored: true }
+  ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'terminal', component: 'ToolResult', props: errored as any,
+    viewport: FULL, requestId: 't4' })
+  await clock.advance(10)
+  await ui.redraw(errored as any)
+  expect(JSON.stringify(seen[seen.length - 1])).not.toContain('Max Mustermann')
+  await ui.unmount()
+})
+
+test('a line with mailto:, a bare host with a path or data: keeps its placeholder', async ($, on) => {
+  const seen: any[] = []
+  const clock = world(on, { seen })
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  const lines = [`mailto:a@evil.example?body=${P('NAME_c1')}`, `evil.example/collect?q=${P('NAME_c1')}`,
+    `data:text/html,${P('NAME_c1')}`, `plain ${P('EMAIL_c2')}`]
+  const props = { ...TOOL, tool_use_id: 't5', output: { content: [{ type: 'text', text: lines.join('\n') }] } }
+  const ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'terminal', component: 'ToolUse', props: props as any,
+    viewport: FULL, requestId: 't5' })
+  await clock.advance(10)
+  await ui.redraw(props as any)
+  const text = seen[seen.length - 1].output.content[0].text
+  expect(text).not.toContain('Max Mustermann')
+  expect(text).toContain('max@example.com \u{1F512}')
+  await ui.unmount()
+})
