@@ -2306,7 +2306,9 @@ resolve, output that prints the value shows the reference instead.
    and no value.
 3. In a Bash command the value is fetched only when the command starts and
    reads it; a command that never runs costs no resolve. maisecrets sends the
-   program's name as the target (sink `process`). In the content of Write,
+   program's name as the target (sink `process`). mcpgate refuses that sink
+   (since gateway 2.0.3794): the command then prints that the value was not
+   delivered and ends with exit code 97, without the value. In the content of Write,
    Edit, MultiEdit, NotebookEdit or a Codex patch the file gets the value, and
    maisecrets sends the path as the target (sink `local_file`); mcpgate checks
    the kind of target, not the path. The value of a file write is fetched
