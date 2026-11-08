@@ -144,6 +144,14 @@ def _drive(args, env, cwd, out, cfg, run_dir, layout) -> list[str]:
         pump(10)
         typ(f"Bitte pruefe den Token {TOKEN} im CI", 12)
         reply = [line for line in screen().split("\n") if "Der Token lautet" in line]
+        # the person's own prompt row (UserMessage): the value the person typed, on the fullscreen only
+        asked = [line for line in screen().split("\n") if "Bitte pruefe den Token" in line]
+        if not asked:
+            failures.append(f"{layout}: the prompt row is not on the screen")
+        elif layout == "fullscreen" and TOKEN not in asked[0]:
+            failures.append(f"{layout}: the prompt row does not show the value typed: {asked[0].strip()[:80]}")
+        elif layout == "main" and TOKEN in asked[0]:
+            failures.append(f"{layout}: the main screen shows the value in the prompt row")
         (run_dir / "screen.txt").write_text(screen())
         if not reply:
             failures.append(f"{layout}: the reply is not on the screen ({run_dir / 'screen.txt'})")

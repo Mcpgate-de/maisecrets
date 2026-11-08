@@ -231,3 +231,28 @@ test('a gateway reference: drawing asks the gateway nothing; one click shows its
     expect(runs.filter(a => a[2] === 'mod-reveal').length).toBe(1)
     await ui.unmount()
   })
+
+for (const [kind, shows] of [['composer', true], ['peer', false], ['task-notification', false]] as const) {
+  test(`a prompt of origin ${kind} ${shows ? 'shows' : 'keeps'} the values the person typed`, async ($, on) => {
+    const clock = world(on)
+    await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'terminal', component: 'UserMessage',
+      props: { text: `Kunde ${P('NAME_c1')} anrufen`, origin: { kind }, isExpanded: false } as any, viewport: FULL })
+    await clock.advance(10)
+    const md = await ui.find({ type: 'Markdown' })
+    if (shows) expect(md?.props.text).toContain('`Max Mustermann \u{1F512}`')
+    else expect(md?.props.text ?? '').not.toContain('Max Mustermann')
+    await ui.unmount()
+  })
+}
+
+test('the full view and an export of a prompt (isExpanded) keep the placeholders', async ($, on) => {
+  const clock = world(on)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'terminal', component: 'UserMessage',
+    props: { text: `Kunde ${P('NAME_c1')} anrufen`, origin: { kind: 'composer' }, isExpanded: true } as any,
+    viewport: FULL })
+  await clock.advance(10)
+  expect((await ui.find({ type: 'Markdown' }))?.key).toBe('engine')
+  await ui.unmount()
+})

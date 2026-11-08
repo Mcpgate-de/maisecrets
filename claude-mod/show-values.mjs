@@ -188,6 +188,9 @@ async function reveal($, ref) {
   }
 }
 
+// the origins of a person's own prompt (maisecrets-mod.mjs PERSON)
+const OWN_PROMPT = new Set(['composer', 'bridge', 'sdk'])
+
 const srefsIn = (t) => [...new Set([...t.matchAll(SREF_RE)].map(m => m[1]))]
 
 function draw($, e, text, address, wrap) {
@@ -275,6 +278,22 @@ export function registerShowValues(on) {
     const tree = draw($, e, text, `a-${e.requestId}`, (md, Box, Text) => h(Box, { flexDirection: 'row' },
       h(Text, null, e.props.isFirstOfReply ? '● ' : '  '),
       h(Box, { flexDirection: 'column', flexGrow: 1, flexShrink: 1 }, md)))
+    return tree ?? next(e)
+  })
+
+  // the person's own prompt, as the mod sent it: the values the person typed come back on the screen (a message of
+  // another session, a notification or a channel keeps its row: it is not the person's text)
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
+    const text = e.props?.text
+    // only the row of the normal view (isExpanded false): ctrl+o, --verbose and an export draw it in full, and those
+    // stay the engine's
+    if (typeof text !== 'string' || !text.includes('\u27e6') || !drawsHere(e) || e.props.isExpanded !== false
+        || !OWN_PROMPT.has(e.props.origin?.kind)) {
+      return next(e)
+    }
+    const md = text.split('\n').map(lineAsMarkdown).join('  \n')
+    const tree = draw($, e, md, `u-${e.requestId}`, (m, Box, Text) => h(Box, { flexDirection: 'row' },
+      h(Text, null, '\u276f '), h(Box, { flexDirection: 'column', flexGrow: 1, flexShrink: 1 }, m)))
     return tree ?? next(e)
   })
 
