@@ -520,6 +520,8 @@ class ScannerEdgeTests(unittest.TestCase):
             ')" || { echo "maisecrets: the value for ' + self.e.key + ' was not delivered (served for 120 s, or '
             'read by another process); the command did not run. Run it again once; if it fails again, stop and '
             'tell the user" >&2; exit 97; }; ')
+        from maisecrets import exit_wrap        # Claude Code: the exit-0 trap after the reads (0.9.1)
+        prelude += re.escape(exit_wrap.trap() + "; ")
         self.assertRegex(got, "^" + prelude + re.escape("cat <<EOF\r\nk: ${__ms_1}\r\nEOF\r\n") + r"\Z")
         self.assertNotIn(NASTY, got)
         r = subprocess.run([BASH, "-c", got], capture_output=True)   # bytes: text mode would eat the \r
