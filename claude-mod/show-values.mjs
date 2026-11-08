@@ -119,10 +119,15 @@ function rewrite(text, address) {
   return text.split('\n').map(line => LINKY.test(line) ? line : rewriteLine(line, shown)).join('\n')
 }
 
+const isSecretRef = (ref) => ref.startsWith('sref:secret:')
+
 function rewriteLine(text, shown) {
   return text.replace(PH, (all, k, ref) => {
     if (ref) {
-      // a gateway's reference: a link that a click resolves; then the value in its place, a click copies it
+      // a gateway's reference: a link that a click resolves; then the value in its place, a click copies it. A secret
+      // is never drawn (a screenshot, a shared screen; the desktop app put its own masking control on a token, whose
+      // click opened the link in the browser): its click copies it at once
+      if (isSecretRef(ref)) return `[${all}](${LINK}${ref})`
       return revealed.has(ref) ? `[${code(revealed.get(ref))}](${LINK}copy/${ref})` : `[${all}](${LINK}${ref})`
     }
     if (!k) return all
@@ -244,7 +249,14 @@ function draw($, e, text, address, wrap) {
     if (typeof link?.href !== 'string' || !link.href.startsWith(LINK)) return
     const k = link.href.slice(LINK.length)
     if (k.startsWith('sref:')) {
-      if (refs.includes(k)) await reveal($, k)
+      if (!refs.includes(k)) return
+      await reveal($, k)
+      if (isSecretRef(k) && revealed.has(k)) {
+        try {
+          const r = await $.ui.copy({ text: revealed.get(k), surface: p?.surface ?? e.surface })
+          $.ui.toast(r?.isCopied ? 'Copied. The secret stays hidden on the screen.' : 'Not copied.')
+        } catch { /* nothing copied */ }
+      }
       return
     }
     if (k.startsWith('copy/sref:')) {

@@ -908,10 +908,14 @@ logged as a loosened protection.
   `/export`, so the mod draws nothing there. VS Code and the phone also keep
   the placeholders.
 - **Which values:** only values of this computer's store that this session may
-  use (the session rule of every resolve). A server's token and a Sensitive
-  Reference are never resolved for the screen: each resolve costs the
-  gateway's quota and writes its audit. A display is no use of a value: no
-  audit line, no limiter, no renewal.
+  use (the session rule of every resolve). A display of these is no use of a
+  value: no audit line, no limiter, no renewal.
+- **Sensitive References of a gateway** resolve for the screen only on your
+  click, through the gateway's display sink and its own scope: the first click
+  shows the value, a second click copies it. Each click costs the gateway's
+  quota and writes its audit. A secret (`⟦sref:secret:…⟧`) is never drawn: one
+  click copies it, and the reference stays in the text, so a screenshot or a
+  shared screen does not show it.
 - **How:** the mod asks `python3 hooks/dispatch.py mod-values` (the same
   fixed command lines as the prompt path) for the keys of the replies in view.
   A reply outside the view asks for nothing until you scroll to it. The values

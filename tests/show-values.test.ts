@@ -233,6 +233,36 @@ test('a gateway reference: drawing asks the gateway nothing; one click shows its
     await ui.unmount()
   })
 
+test('a gateway secret is never drawn: one click copies it, and the text keeps the reference', async ($, on) => {
+  // field case 2026-11-08: the desktop app put its own masking control on a drawn token, and a click on it opened the
+  // copy link in the browser; a secret on the screen is also what a screenshot or a shared screen shows
+  const SECRET = 'sref:secret:' + 'B'.repeat(24)
+  const runs: string[][] = []
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  on('session.id', () => ({ value: 'sess-1' }))
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => { toasts.push(String(e.text)); return { value: undefined } })
+  const copied: string[] = []
+  on('ui.copy', ($, e) => { copied.push(e.text); return { value: { isCopied: true } } })
+  gateway(on, { value: 'my-test-token' }, runs)
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('ui.render', ($, e) => (globalThis as any).h($.ui.resolve(e).Markdown, { key: 'engine', text: e.props.text }))
+  await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'desktop', component: 'AssistantMessage',
+    props: { text: `Your access token: ${P(SECRET)}`, isFirstOfReply: true } as any, viewport: FULL })
+  await clock.advance(10)
+  const md = await ui.find({ type: 'Markdown' })
+  await ui.press({ key: md!.key!, link: { href: real(md, SECRET) } as any })
+  expect(copied).toEqual(['my-test-token'])
+  expect(toasts.some(t => t.startsWith('Copied.'))).toBe(true)
+  const after = await ui.find({ type: 'Markdown' })
+  expect(after?.props.text).not.toContain('my-test-token')
+  expect(after?.props.text).toContain(SECRET)
+  expect(runs.filter(a => a[2] === 'mod-reveal').length).toBe(1)
+  await ui.unmount()
+})
+
 for (const [kind, shows] of [['composer', true], ['peer', false], ['task-notification', false]] as const) {
   test(`a prompt of origin ${kind} ${shows ? 'shows' : 'keeps'} the values the person typed`, async ($, on) => {
     const clock = world(on)
