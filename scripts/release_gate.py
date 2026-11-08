@@ -108,7 +108,7 @@ def last_holdout_recall() -> float | None:
     """The last Holdout V2 row of the committed HOLDOUT-LOG.md. A row comes into a commit only with the baseline of a
     gate that passed; a run that failed leaves its row in the working file, and a second run read it (Opus review)."""
     try:
-        text = _git("show", "HEAD:bench/HOLDOUT-LOG.md")
+        text = _git("show", "HEAD:bench/HOLDOUT-LOG.md", cwd=ROOT)   # ROOT now: the default was bound at import
     except subprocess.CalledProcessError:
         return None
     rows = [r for r in text.splitlines() if "holdout-v2" in r and r.startswith("|")]
