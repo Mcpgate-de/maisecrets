@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.9.2] - 2026-11-08
+
+### Fixes
+
+- commands keep their values when the gateway lists the command sink as "process-1" (36567d3)
+- a gateway reference after a label such as "token:" stays whole in a tool result (ee3141e)
+
 ## [0.9.1] - 2026-11-08
 
 ### Features
