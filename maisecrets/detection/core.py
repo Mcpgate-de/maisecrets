@@ -2879,7 +2879,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 20)
                     or _names_no_secret(text, start, secret.strip("\"'` "))
                     or _DERIVED_LABEL_RE.search(text, max(_line_start(text, start), start - 60), start)
-                    or _fields.file_digest(text, max(_line_start(text, start), start - 60), start, secret)):
+                    or _fields.file_digest(text, max(_line_start(text, start), start - 60), start, secret)
+                    or _fields.figma_id(text, max(_line_start(text, start), start - 60), start, secret)):
                 continue   # a UUID, an elided value (sk-...), a label of a derived thing (secret_id, nextPageToken)
                 # or the digest of a file (secrets.tar.gz)
             if "user-equals-password" in filters and _pass_equals_user(m.group(0), secret):
