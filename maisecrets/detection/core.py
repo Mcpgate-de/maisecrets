@@ -737,10 +737,8 @@ ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CA
 # address with its postcode is personal.py's
 PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "de-id-card", "de-passport",
                  "crypto", "de-handelsregister", "uk-postcode"}
-# 2.2.365 (rulespec.presidio_patches has the reasons): own label rules cover the member and the tax id; the claim
-# and prior authorization ids took any number after the word (474 false alarms on Mendeley val, #17)
-PRESIDIO_SKIP |= {"us-health-insurance-member-id", "us-provider-tax-id", "us-claim-number",
-                  "us-prior-authorization-number"}
+# 2.2.365 (rulespec.presidio_patches has the reasons): own label rules cover the member and the tax id
+PRESIDIO_SKIP |= {"us-health-insurance-member-id", "us-provider-tax-id"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
@@ -774,7 +772,12 @@ PRESIDIO_NOT_AFTER_PLUS = {"us-license", "us-passport"}
 # ("claim number: "), which Python's `re` refuses (their other patterns have none). The label becomes a consumed
 # group before the value, and the hit is the value group (2.2.365: the scan raised on every text and the whole suite
 # went red)
-PRESIDIO_LABEL_CONSUMED = frozenset({"us-prescription-number", "us-referral-number"})
+PRESIDIO_LABEL_CONSUMED = frozenset({"us-prescription-number", "us-referral-number", "us-claim-number",
+                                     "us-prior-authorization-number"})
+# a claim or prior authorization id only after a real label (claim number:, claim #, prior auth no.): upstream also
+# takes the word and a space alone, `claim 12345678`, 474 false alarms on Mendeley val and none of them a label (#17)
+PRESIDIO_LABEL_REQUIRED = frozenset({"us-claim-number", "us-prior-authorization-number"})
+_WORD_ALONE = r"|\s+))"
 # 2.2.365 patterns that fired on developer text next to a common context word: a code in the shape of an ID number
 # (PA123456 near "auth", A1B2C3 near "zip"). The labelled forms of the same recognizers stay
 PRESIDIO_SKIP_PATTERNS = frozenset({"ca-postal-code#1", "us-claim-number#1", "us-prescription-number#2",
@@ -1005,6 +1008,10 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
             if rule_id in PRESIDIO_SKIP_PATTERNS:
                 continue
             regex, group = _re2_to_python(pat["regex"]), 0
+            if rec["id"] in PRESIDIO_LABEL_REQUIRED and regex.startswith("(?<="):
+                if _WORD_ALONE not in regex:
+                    raise ValueError(f"{rule_id}: the label alternative of the word alone is gone upstream")
+                regex = regex.replace(_WORD_ALONE, "))", 1)
             if rec["id"] in PRESIDIO_LABEL_CONSUMED and regex.startswith("(?<="):
                 regex, group = _label_consumed(regex)
             out.append(Rule(

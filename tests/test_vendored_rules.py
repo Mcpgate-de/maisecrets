@@ -96,12 +96,21 @@ class PresidioPatternsCompileTests(unittest.TestCase):
                 self.assertEqual([m.kind for m in self.core.scan(text, channel="tool", rule_list=rules)], [])
 
     def test_a_number_after_the_word_claim_or_authorization_is_no_id(self):
-        # 474 false alarms on Mendeley val, 39 on Nemotron val (release gate, 2026-10-30)
+        # the word alone: 474 false alarms on Mendeley val, 39 on Nemotron val (release gate, 2026-10-30; #17)
         rules = self.core._load_presidio(("us",))
         n = "".join(str((3 * i + 1) % 10) for i in range(9))
-        for text in (f"The insurance claim {n} was settled.", f"Claim number: {n}", f"prior authorization {n} ok"):
+        for text in (f"The insurance claim {n} was settled.", f"prior authorization {n} ok", f"claim {n}",
+                     f"Claim CLM-{n}"):
             with self.subTest(text=text[:12]):
                 self.assertEqual([m.kind for m in self.core.scan(text, channel="tool", rule_list=rules)], [])
+
+    def test_a_claim_or_prior_authorization_number_after_its_label_is_an_id(self):
+        rules = self.core._load_presidio(("us",))
+        n = "".join(str((3 * i + 1) % 10) for i in range(9))
+        for text in (f"Claim number: {n}", f"claim # {n}", f"CLAIM NO. {n}", f"claim id {n}", f"medical claim: {n}",
+                     f"Prior authorization number: {n}", f"prior auth # {n}", f"preauthorization no. {n}"):
+            with self.subTest(text=text[:16]):
+                self.assertEqual([m.value for m in self.core.scan(text, channel="tool", rule_list=rules)], [n])
 
     def test_the_spaced_postal_code_and_a_passport_after_its_word_stay_hits(self):
         rules = self.core._load_presidio(("ca", "ph"))
