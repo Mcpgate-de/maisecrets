@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## [0.9.0] - 2026-11-08
+
+### Features
+
+- a Sensitive Reference in a Bash command gets its value again, with a login that allows commands; a refused one names the gateway's reason (1761905)
+- values show on your screen with a lock in Claude Code and the desktop app, never for the AI; a click copies one (setting show_values) (90c28f9)
+- a phone number in more German sentences is masked: office hours before unter, the verb at the end, unter der Nummer, unter:, Rückrufe unter (c5df62b)
+- the local name service gets the image a plugin update pins, at the next session start (05ce1be)
+
+### Fixes
+
+- a value that starts with the refusal marker is never printed; the reason goes out with printf (24bde99)
+- a value never stands in a link or URL the AI wrote, so a click cannot send it away (0afc5a4)
+- the German call-cue scan takes linear time on a long run of spaces, and the Figma exception needs a field only Figma has (7abcaec)
+- the key of a Figma file, component or style in a Figma answer is no longer masked as an API key (9b44348)
+- a German tax id under the display name "Steuer ID" (with a space) is found (a85cd46)
+- a change taken back before its release is no longer listed in the release notes (a023360)
+
 ## [0.8.30] - 2026-11-08
 
 ### API
@@ -18,7 +36,6 @@
 - leaves.label skips a list index given as a string (phones.0 is labelled phones) (5252f14)
 - a content digest (sha256:…, or an image pinned by it) after a secret or token label is no longer masked (c1d03fc)
 - /maisecrets:ner names the requests of sessions of an older version instead of calling them unknown (7c4339c)
-- masks a card number written as the first three groups of a UUID (9c99357)
 
 ### Dependencies
 
