@@ -223,7 +223,23 @@ def finish_login(cfg: dict, backend, found: dict, client_id: str, redirect: str,
                                "client_id": client_id, "code_verifier": verifier}, deadline)
     _keep(backend, found["origin"], {"client_id": client_id, "access": data["access_token"],
                                      "refresh": data["refresh_token"], "scope": _granted(data, found["scope"]),
+                                     "account": _hint(data),
                                      "expires": time.time() + float(data.get("expires_in") or 3600)})
+
+
+def _hint(data: dict) -> str:
+    """The masked account a token belongs to (`account_hint`, Concept 0.7), when the answer has one of a sane form;
+    else "". Only shown: two accounts of one person resolve each other's references never (409 unknown)."""
+    hint = data.get("account_hint")
+    if not isinstance(hint, str) or not 1 <= len(hint) <= 256 or "@" not in hint and hint != "\u2026":
+        return ""
+    return "" if any(ord(c) < 32 or 0x7f <= ord(c) < 0xa0 for c in hint) else hint
+
+
+def account(backend, origin: str) -> str:
+    """The masked account of the stored login, or "" (an older login, or a gateway without the hint)."""
+    hint = _load(backend, origin).get("account")
+    return hint if isinstance(hint, str) else ""
 
 
 def _granted(data: dict, asked: str) -> str:
@@ -298,6 +314,7 @@ def _access(cfg: dict, backend, found: dict, deadline: float, stale: str | None 
                 raise
             _keep(backend, found["origin"], {**rec, "access": data["access_token"], "refresh": data["refresh_token"],
                                              "scope": _granted(data, str(rec.get("scope") or SCOPE)),
+                                             "account": _hint(data) or rec.get("account", ""),
                                              "expires": time.time() + float(data.get("expires_in") or 3600)})
             return data["access_token"]
     except LockTimeout:

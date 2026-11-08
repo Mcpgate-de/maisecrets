@@ -86,6 +86,13 @@ class SrefClientTests(unittest.TestCase):
         self.assertEqual(sorted(self.found["sinks"]), ["display-1", "local-file-1", "process-1"])
         self.assertEqual(self.found["sink_types"], ["display", "local_file", "process"])
 
+    def test_the_login_keeps_the_masked_account_and_a_refresh_keeps_it(self):
+        self.login()
+        self.assertEqual(S.account(self.backend, self.found["origin"]), "ope\u2026@example.com")
+        self.assertEqual(S._hint({"account_hint": "a\x07b@x.de"}), "", "a control character is not shown")
+        self.assertEqual(S._hint({"account_hint": "x" * 300 + "@x.de"}), "")
+        self.assertEqual(S._hint({}), "")
+
     def test_the_login_keeps_the_tokens_in_the_store(self):
         self.assertFalse(S.logged_in(self.backend, self.found["origin"]))
         self.login()

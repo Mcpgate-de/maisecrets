@@ -980,7 +980,8 @@ def cmd_sref(args: list[str]) -> int:
                 more = [w for w in then if w not in now]
                 if more:
                     state += f" (log in again to allow {' and '.join(more)}: /maisecrets:sref login {server})"
-            print(f"{server} ({urlsplit(f['origin']).hostname}): {state}")
+            who = sref_client.account(backend, f["origin"]) if sref_client.logged_in(backend, f["origin"]) else ""
+            print(f"{server} ({urlsplit(f['origin']).hostname}): {state}" + (f"; account {who}" if who else ""))
         return 0
     if len(found) > 1:
         print("maisecrets: more than one server offers Sensitive References; name one: " + ", ".join(found))
@@ -1006,8 +1007,9 @@ def cmd_sref(args: list[str]) -> int:
     except sref_client.Refused as exc:
         print(f"maisecrets: the login to {host} did not complete: {exc}")
         return 1
-    print(f"maisecrets: logged in to {host}. A reference that this gateway shows in a session now gets its value "
-          "where a tool call needs it.")
+    who = sref_client.account(backend, f["origin"])
+    print(f"maisecrets: logged in to {host}" + (f" as {who}" if who else "") + ". A reference that this gateway "
+          "shows in a session now gets its value where a tool call needs it.")
     return 0
 
 
