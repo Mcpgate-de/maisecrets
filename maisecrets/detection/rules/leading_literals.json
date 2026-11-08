@@ -875,15 +875,6 @@ false,
 false,
 []
 ],
-"4e2649d8568310fe8147cb1e": [
-"",
-false,
-[
-"claim",
-"healthcare",
-"medical"
-]
-],
 "4ede2611ed0d9f1b89451a0b": [
 "jca_",
 false
@@ -2005,16 +1996,6 @@ false,
 "c0ef87dedd7b97c65678a440": [
 "os_v2_app_",
 false
-],
-"c167c7d6dd9e32be83102dab": [
-"",
-false,
-[
-"authorization",
-"pre-auth",
-"preauthorization",
-"prior"
-]
 ],
 "c19e56e72a1fb9d1dace6638": [
 "",
