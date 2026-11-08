@@ -110,6 +110,13 @@ def last_holdout_recall() -> float | None:
     return float(rows[-1].split("|")[5]) if rows else None
 
 
+def holdout_pair(run_holdout) -> tuple:
+    """(the last release's recall, the candidate's): the last row is read BEFORE the candidate runs, because
+    bench/run.py appends the candidate's own row to HOLDOUT-LOG.md, and the gate compared a run with itself (#13)."""
+    before = last_holdout_recall()
+    return before, run_holdout()
+
+
 def report(kind: dict, results: dict, holdout: tuple | None) -> tuple:
     lines = ["## Release gate", ""]
     if not kind["retest"] and not kind["live"]:
@@ -394,11 +401,13 @@ def main(argv: list) -> int:
     holdout = None
     if a.holdout:
         out = a.out / "holdout-v2.json"
-        subprocess.run([env.get("BENCH_PYTHON", sys.executable), "bench/run.py", "--scanner", "maisecrets",
-                        "--maisecrets", str(cand), "--source", "holdout-v2", "--holdout", str(a.holdout),
-                        "--release-candidate", "--out", str(out)], cwd=ROOT, check=True)
-        m = json.loads(out.read_text(encoding="utf-8"))["metrics"].get("all", {})
-        holdout = (last_holdout_recall(), m.get("recall_strict"))
+
+        def run_holdout() -> float | None:
+            subprocess.run([env.get("BENCH_PYTHON", sys.executable), "bench/run.py", "--scanner", "maisecrets",
+                            "--maisecrets", str(cand), "--source", "holdout-v2", "--holdout", str(a.holdout),
+                            "--release-candidate", "--out", str(out)], cwd=ROOT, check=True)
+            return json.loads(out.read_text(encoding="utf-8"))["metrics"].get("all", {}).get("recall_strict")
+        holdout = holdout_pair(run_holdout)
     text, failed = report(kind, results, holdout)
     extra = []
     if a.catalogs:
