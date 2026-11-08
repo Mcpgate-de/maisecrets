@@ -27,7 +27,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
+import platform
 import re
 import secrets
 import time
@@ -76,7 +76,7 @@ def login_scope(resolve_scope: str, process_scope: object, windows: bool | None 
     """The scopes a login asks for: the resolve scope, and the gateway's process scope on top where maisecrets masks
     command output (macOS and Linux: Bash on Windows gets no server value, C27). Without it the gateway refuses the
     process sink (mcpgate 2.0.3815: 403 insufficient_scope), and a file still gets its value."""
-    windows = os.name == "nt" if windows is None else windows
+    windows = platform.system() == "Windows" if windows is None else windows   # the same test as the Bash refusal
     if isinstance(process_scope, str) and _SCOPE_RE.fullmatch(process_scope) and process_scope != resolve_scope \
             and not windows:
         return f"{resolve_scope} {process_scope}"

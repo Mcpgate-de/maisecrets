@@ -433,6 +433,18 @@ class SrefBashTests(unittest.TestCase):
         self.assertNotIn(VALUE, run.stderr)
         self.assertEqual(self.srv.resolved, [], "the gateway gave no value")
 
+    def test_a_value_that_starts_with_the_refusal_marker_is_never_printed(self):
+        # Opus review: the prelude printed what follows the marker, before the exit trap, so the model saw it
+        self.login()
+        planted = "maisecrets-refused:" + "PlantedValue" + "7Kq2"
+        ref = self.srv.mint("secret", planted)
+        hooks._post_tool_guarded({"tool_name": "mcp__gw__gitlab_read_actions", "session_id": "s1", **CLAUDE,
+                                  "mcp_server": {"name": "gw", "source": "user"}, "tool_input": {"iid": 8},
+                                  "tool_response": {"content": [{"type": "text", "text": "token: " + ref}]}})
+        run = self.run_command(f"printf 'got:%s' {ref}")
+        self.assertEqual(run.returncode, 97)
+        self.assertNotIn("PlantedValue", run.stdout + run.stderr)
+
     def test_the_audit_names_the_reference_without_its_id(self):
         self.login()
         self.result()

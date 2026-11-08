@@ -1226,6 +1226,8 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
         "            sys.path.insert(0, spec['root'])\n"
         "            from maisecrets import sref_hooks\n"
         "            spec['value'] = sref_hooks.serve(**spec['sref'])\n"
+        "            if spec['value'].startswith(SREF_REFUSED):\n"
+        "                spec['value'] = ''\n"
         "        except Exception as e:\n"
         "            why = ' '.join(str(e).split())[:400] if type(e).__name__ in ('Refused', '_Revoked') else ''\n"
         "            spec['value'] = SREF_REFUSED + why if why else ''\n"
@@ -1910,9 +1912,10 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         if key in srefs:
             # a refused resolve writes its reason (fixed text and counts, never a value) after a marker: the person
             # reads why, not a delivery timeout (mcpgate 2.0.3815: a login without the process scope)
-            check += (f' && case "${{{var}}}" in {SREF_REFUSED}*) echo "maisecrets: the value for {key} was not '
-                      f'given: ${{{var}#{SREF_REFUSED}}}. The command did not run; do not retry, tell the user." >&2; '
-                      f'exit 97;; esac')
+            # (a real value that starts with the marker is no value: the child serves nothing for it, Opus review)
+            check += (f' && case "${{{var}}}" in {SREF_REFUSED}*) printf \'%s\\n\' "maisecrets: the value for {key} '
+                      f'was not given: ${{{var}#{SREF_REFUSED}}}. The command did not run; do not retry, tell the '
+                      f'user." >&2; exit 97;; esac')
         prelude.append(f'{var}="{read}"{check} || {{ echo "maisecrets: the value for {key} was not delivered '
                        f'(served for 120 s, or read by another process); the command did not run. Run it again '
                        f'once; if it fails again, stop and tell the user" >&2; exit 97; }}')
