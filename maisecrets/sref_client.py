@@ -114,11 +114,21 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None) -> dict | N
     table = block.get("sinks") if isinstance(block.get("sinks"), dict) else {}
     types = sorted({(table[x].get("sink_type") if isinstance(table.get(x), dict) else None) or _PROFILE_TYPES.get(x)
                     for x in sinks} - {None})
+    # the scope a sink needs on top of the resolve scope: sinks.<profile>.scopes (Concept 0.7), else the named fields
+    resolve_scope = block.get("resolve_scope") or SCOPE
+    extra: dict = {}
+    for x in sinks:
+        entry = table.get(x)
+        if isinstance(entry, dict) and isinstance(entry.get("scopes"), list):
+            more = [c for c in entry["scopes"] if isinstance(c, str) and c != resolve_scope]
+            if len(more) == 1:
+                extra.setdefault(entry.get("sink_type"), more[0])
+    process_scope = block.get("process_scope") if isinstance(block.get("process_scope"), str) else extra.get("process")
+    display_scope = block.get("display_scope") if isinstance(block.get("display_scope"), str) else extra.get("display")
     return {"origin": origin, "resolve": block["resolve_endpoint"],
-            "scope": login_scope(block.get("resolve_scope") or SCOPE, block.get("process_scope"),
-                                 display_scope=block.get("display_scope")),
-            "process_scope": block.get("process_scope") if isinstance(block.get("process_scope"), str) else None,
-            "display_scope": block.get("display_scope") if isinstance(block.get("display_scope"), str) else None,
+            "scope": login_scope(resolve_scope, process_scope, display_scope=display_scope),
+            "process_scope": process_scope if isinstance(process_scope, str) else None,
+            "display_scope": display_scope if isinstance(display_scope, str) else None,
             "sinks": sinks, "sink_types": types,
             "authorize": ends["authorization"], "token": ends["token"], "register": ends["registration"]}
 

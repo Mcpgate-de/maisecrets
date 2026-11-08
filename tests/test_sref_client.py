@@ -464,6 +464,19 @@ class ProfileNameTests(unittest.TestCase):
                 self.assertEqual(found["sink_types"], ["process"])
                 self.assertNotIn("does not resolve into a command", self.refusal(found))
 
+    def test_the_scopes_come_from_the_sinks_map_when_the_named_fields_are_missing(self):
+        found = self.found({"sink_profiles": ["process-1", "display-1"], "sinks": {
+            "process-1": {"sink_type": "process", "scopes": ["sensitive-references.resolve", "x.process"]},
+            "display-1": {"sink_type": "display", "scopes": ["sensitive-references.resolve", "x.display"]}}})
+        self.assertEqual((found["process_scope"], found["display_scope"]), ("x.process", "x.display"))
+        self.assertIn("x.display", found["scope"].split())
+        if os.name != "nt":
+            self.assertIn("x.process", found["scope"].split())
+        named = self.found({"sink_profiles": ["process-1"], "process_scope": "y.process",
+                            "sinks": {"process-1": {"sink_type": "process", "scopes": ["sensitive-references.resolve",
+                                                                                        "x.process"]}}})
+        self.assertEqual(named["process_scope"], "y.process", "a named field still wins")
+
     def test_a_server_without_a_command_profile_gets_no_command_value(self):
         for block in ({"sink_profiles": ["local-file-1"]}, {"sink_profiles": ["acme-exec-2"]},
                       {"sink_profiles": [], "sinks": {"process-1": {"sink_type": "process"}}}):
