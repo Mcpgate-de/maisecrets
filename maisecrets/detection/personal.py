@@ -2840,6 +2840,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             out.append((m.start(1), m.end(1), "name-before-email", NAME))
     if "csv-personal-column" in want and "\n" in text:
         out += _csv_hits(text)
+    if "secret-under-password-column" in want and "\n" in text and ("|" in text or "\t" in text):
+        from .secret_table import secret_table_hits
+        out += secret_table_hits(text)
     if "address-street-postcode-city" in want and "," in text:
         for m in _STREET_POSTCODE_CITY_RE.finditer(text):
             if not _STREET_WORD_RE.search(m.group(1)):
