@@ -1372,10 +1372,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
         return _protect_refusal(fresh, "Nothing ran.")       # Codex takes no ask with a rewritten input
     if decision == "ask" or (fresh and decision in ("defer", "allow")):
         return _ask(new_input, _protect_text(fresh) + reason)
-    if decision in ("defer", "allow") and path == "mcp" and client_of(payload) == "claude" \
-            and payload.get("permission_mode") == "auto":
-        # auto mode's server review saw the placeholder: Claude Code denies an MCP call whose input a hook changed,
-        # and its denial shows the model the changed input, value included (2.1.319, #31). The person decides
+    if decision in ("defer", "allow") and rehydration.auto_mode_asks(client_of(payload), path, payload):
         return _ask(new_input, reason)
     if decision in ("defer", "allow"):
         return _updated(payload, new_input)
