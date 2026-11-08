@@ -13,7 +13,15 @@
 
 const PH = /`[^`\n]*`|⟦([A-Z][A-Z0-9_]{0,40}_c\d{1,9})(?::[^⟧\n]{0,80})?⟧/g
 const KEY_RE = /⟦([A-Z][A-Z0-9_]{0,40}_c\d{1,9})(?::[^⟧\n]{0,80})?⟧/g
-const LINK = 'https://mcpgate.de/maisecrets/v#'
+// the link of a value carries a random part of this process, which only the drawing holds: the model cannot write a
+// link that the mod answers (a link with the bare prefix and a key in a reply copied that value, Opus review of #30)
+const NONCE = (() => {
+  const a = new Uint32Array(4)
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(a)
+  else for (let i = 0; i < 4; i++) a[i] = Math.floor(Math.random() * 2 ** 32)
+  return [...a].map(n => n.toString(36)).join('')
+})()
+const LINK = `https://mcpgate.de/maisecrets/v#${NONCE}/`
 const CACHE_MAX = 500
 const ASK_MS = 4000
 const CLICK_MS = 10000
@@ -144,6 +152,7 @@ function draw($, e, text, address, wrap) {
   if (mode === 'always') hint($)
   const { Markdown, Box, Text } = $.ui.resolve(e)
   const press = async (link, p) => {
+    if (typeof link?.href !== 'string' || !link.href.startsWith(LINK)) return
     const k = link.href.slice(LINK.length)
     if (!cache.has(k)) return
     if (mode === 'always') {

@@ -9,14 +9,18 @@ const TEXT = `Kunde ${P('NAME_c1')}, Mail ${P('EMAIL_c2:ma•••@example.com'
 const FULL = { columns: 120, rows: 40, isFullscreen: true }
 const LINK = 'https://mcpgate.de/maisecrets/v#'
 
+// the link the mod drew for a key: its URL holds a random part of the process
+const real = (md: any, key: string) => (md.props.pressableLinks as string[]).find(l => l.endsWith('/' + key))!
+
 function world(on, opts: { mode?: string, links?: boolean, asked?: string[][], sessions?: string[],
-  ids?: { id: string } } = {}) {
+  ids?: { id: string }, copied?: string[] } = {}) {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   on('session.id', () => ({ value: opts.ids?.id ?? 'sess-1' }))
   on('session.cwd', () => ({ value: '/work' }))
   on('ui.log', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
+  on('ui.copy', ($, e) => { (opts as any).copied?.push(e.text); return { value: { isCopied: true } } })
   on('process.run', ($, e) => {
     if (e.argv[2] !== 'mod-values') return { value: { exitCode: 1, stdout: '', stderr: '' } }
     const q = JSON.parse(e.init.stdin)
@@ -92,7 +96,7 @@ test('click: a click shows the values of that text for 10 seconds', async ($, on
   const clock = world(on, { mode: 'click' })
   const { ui, md } = await shown($, clock, 'terminal', FULL)
   expect(md?.props.text).not.toContain('Max Mustermann')
-  await ui.press({ key: md!.key!, link: { href: LINK + 'NAME_c1' } as any })
+  await ui.press({ key: md!.key!, link: { href: real(md, 'NAME_c1') } as any })
   let now = await ui.find({ type: 'Markdown' })
   expect(now?.props.text).toContain('`Max Mustermann \u{1F512}`')
   expect(now?.props.text).toContain('`max@example.com \u{1F512}`')
@@ -160,7 +164,7 @@ test('after /clear the next question carries the new session id', async ($, on) 
 test('click: a second click starts the 10 seconds again', async ($, on) => {
   const clock = world(on, { mode: 'click' })
   const { ui, md } = await shown($, clock, 'terminal', FULL)
-  const click = () => ui.press({ key: md!.key!, link: { href: LINK + 'NAME_c1' } as any })
+  const click = () => ui.press({ key: md!.key!, link: { href: real(md, 'NAME_c1') } as any })
   await click()
   await clock.advance(9_000)
   await click()
@@ -168,5 +172,17 @@ test('click: a second click starts the 10 seconds again', async ($, on) => {
   expect((await ui.find({ type: 'Markdown' }))?.props.text).toContain('`Max Mustermann \u{1F512}`')
   await clock.advance(9_000)
   expect((await ui.find({ type: 'Markdown' }))?.props.text).not.toContain('Max Mustermann')
+  await ui.unmount()
+})
+
+test('a link the model wrote with the bare prefix copies nothing; the drawn link copies its value', async ($, on) => {
+  const copied: string[] = []
+  const clock = world(on, { copied })
+  const { ui, md } = await shown($, clock, 'terminal', FULL)
+  expect(real(md, 'NAME_c1')).not.toBe(LINK + 'NAME_c1')
+  await ui.press({ key: md!.key!, link: { href: LINK + 'NAME_c1' } as any })
+  expect(copied).toEqual([])
+  await ui.press({ key: md!.key!, link: { href: real(md, 'NAME_c1') } as any })
+  expect(copied).toEqual(['Max Mustermann'])
   await ui.unmount()
 })
