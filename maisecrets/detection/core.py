@@ -72,7 +72,7 @@ from .own_rules import (  # noqa: F401
     OWN_RULES, FALLBACK_RULES,
 )
 from .value_checks import (  # noqa: F401
-    _a_version, _LABEL_WORDS_TAIL_RE, _bitlocker_key_ok,
+    _a_version, _in_dotted_run, _LABEL_WORDS_TAIL_RE, _bitlocker_key_ok,
     _re2_to_python, _POSIX_CLASSES, shannon_entropy, ENTROPY_BY_ALPHABET, ENTROPY_BY_ALPHABET_RULES, _B62, _ALPHABETS,
     alphabet_of, _base64_of_text, _entropy_ok, _luhn_ok, IBAN_LENGTH, _iban_ok, _RESOLVER_IPS, _public_ip,
     _de_tax_id_ok, _de_social_security_ok, _de_health_insurance_ok, _de_lanr_ok, _de_vat_id_ok, _B64_PEM_PRIVATE_RE,
@@ -2904,6 +2904,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
             if rule.id == "ip#2" and _a_version(text, start, end, secret):
                 continue
+            if rule.type == "IP" and ":" not in secret and _in_dotted_run(text, start, end):
+                continue   # a part of a longer dotted run is no IPv4 address
             if overlaps(start, end):
                 continue
             if rule.entropy and not _entropy_ok(rule, secret, channel):
