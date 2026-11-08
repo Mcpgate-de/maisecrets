@@ -337,7 +337,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 40 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 15 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 399 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 401 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -552,7 +552,7 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
 ### Settings you decide
 
 `/maisecrets:settings` shows the settings that are yours to decide, grouped
-(Protection, Using stored values, PDFs and images), one card each: the value, its state (`not
+(Protection, Using stored values, PDFs and images, Your screen), one card each: the value, its state (`not
 decided`, `set by you`, `set by a policy`), what it does, and the command for
 the next step:
 
@@ -847,8 +847,9 @@ plugin ("mods"). maisecrets ships one in its own folder: `claude-mod/maisecrets-
 named by the manifest (`"hooks": "./claude-mod/maisecrets-mod.json"`). Nothing else in
 the plugin points into that folder.
 
-- **The one event it handles:** `prompt.submit`, which fires when a prompt is about
-  to be sent. The mod handles the event; it never calls `$.prompt.submit` itself,
+- **The events it handles:** `prompt.submit`, which fires when a prompt is about
+  to be sent, and for the values on your screen (below) `ui.render` of a reply and
+  a tool result, `session.start` and `prompt.change`. The mod handles the event; it never calls `$.prompt.submit` itself,
   so it submits no prompt and changes no prompt of other code. It acts on a
   person's own prompt only (typed or queued at the terminal, sent through Remote
   Control, or the turn of `claude -p`). A subagent's report, another session's or
@@ -883,6 +884,47 @@ with Claude Code 2.1.288: the prompt is rewritten and the model gets the
 placeholder; your own message bubble there shows the text as you typed it, which
 is the app's local display. Cowork is not measured. Mods are a rollout switch of the client:
 where they are off (a saved switch, some third-party setups), the hook blocks.
+
+**Values on your screen (`show_values`).** In Claude Code with mods, the mod
+draws a reply or a tool result again with each value of your store in place
+of its placeholder, as inline code with a lock: `Max Mustermann 🔒`. Claude
+and the transcript keep the placeholder. Only the drawing on your screen
+changes, and it reaches no model request, no transcript, no debug log and no
+`/export` file (measured on Claude Code 2.1.319, `harness/screen.py`).
+
+| `show_values` | What you see |
+|---|---|
+| `always` (default) | Each value stands in the text. A click copies it, and a toast says that Claude knows only the placeholder. |
+| `click` | Placeholders. A click on one shows every value of that reply for 10 seconds; typing in the prompt hides them. |
+| `off` | Placeholders only, as before. |
+
+Change it with `/maisecrets:settings show_values click` as your own prompt. A
+policy can set `click` or `off` for everyone. A change towards `always` is
+logged as a loosened protection.
+
+- **Where:** the fullscreen terminal of Claude Code (its default layout) and
+  the Code tab of the desktop app. On the terminal's main screen
+  (`CLAUDE_CODE_NO_FLICKER=0`) the drawing would stay in the scrollback and in
+  `/export`, so the mod draws nothing there. VS Code and the phone also keep
+  the placeholders.
+- **Which values:** only values of this computer's store that this session may
+  use (the session rule of every resolve). A server's token and a Sensitive
+  Reference are never resolved for the screen: each resolve costs the
+  gateway's quota and writes its audit. A display is no use of a value: no
+  audit line, no limiter, no renewal.
+- **How:** the mod asks `python3 hooks/dispatch.py mod-values` (the same
+  fixed command lines as the prompt path) for the keys of the replies in view.
+  A reply outside the view asks for nothing until you scroll to it. The values
+  live only in the mod's memory, at most 500, and are gone with the session.
+  The AI cannot ask the same question: a Bash command that names this entry is
+  refused, and a value in a tool output is masked again.
+- **Terminal.app** shows no embedded links: Claude Code writes the URL after
+  the text. There the values have no link, and you copy one by selecting it.
+- **Screen sharing:** `always` shows every value in view. Use `click` or `off`
+  when others can see your screen.
+- **Other plugins** get the tool output before maisecrets masks it for the
+  model, because Claude Code gives every hook the same payload. A plugin that
+  logs tool output can store a value in clear text (#29).
 
 **Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
 it is, without the clipboard. A plugin cannot register a command without its

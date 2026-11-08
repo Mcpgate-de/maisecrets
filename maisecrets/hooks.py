@@ -1421,7 +1421,8 @@ _SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets setting
                           "as their own prompt (/maisecrets:settings KEY VALUE). The command did not run. Tell the "
                           "user the prompt to send.")
 _HOOK_ENTRY_TEXT_RE = _LazyRx(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
-                                 r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", re.I)
+                                 r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt|"
+                                 r"mod-values)\b", re.I)
 _GRANT_RE = _LazyRx(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
 
 

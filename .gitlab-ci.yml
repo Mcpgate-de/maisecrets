@@ -282,6 +282,9 @@ harness_claude:
     # the mod's own tests (tests/mod.test.ts), with $.process.run stubbed: the fallback order and every failure path
     - claude plugin test .
     - python3 harness/run.py
+    # the values on the person's screen: the interactive client in a pty (show_values, harness/screen.py)
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends python3-pyte >/dev/null
+    - python3 harness/screen.py
 
 harness_codex:
   stage: test
