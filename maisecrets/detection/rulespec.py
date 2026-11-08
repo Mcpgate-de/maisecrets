@@ -134,9 +134,6 @@ def presidio_patches(detect) -> dict:
     for rid in sorted(detect.PRESIDIO_LABEL_CONSUMED):
         add(rid, "regex", "replace", "(?<=LABEL)VALUE -> (?:LABEL)(VALUE)",
             "a look-behind of variable width, which Python's re refuses; the hit is the value group")
-    for rid in sorted(detect.PRESIDIO_LABEL_REQUIRED):
-        add(rid, "regex", "remove", "label alternative |\\s+ (the word alone)",
-            "claim 12345678 is no label: 474 false alarms on Mendeley val, none of them labelled (#17)")
     for rid in sorted(detect.PRESIDIO_LEFT_SUBFIELD):
         add(rid, "regex", "replace", "left boundary: also after ?NN", "an MT940 subfield code before the IBAN (0.6.24)")
     for rid in sorted(detect.PRESIDIO_PATTERN_CONTEXT):
