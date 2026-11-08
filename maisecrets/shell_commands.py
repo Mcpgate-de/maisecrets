@@ -33,6 +33,8 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("the ssh approval store", r"ssh-approvals|ssh_approval|ssh-consent\.json"),
     # the mod's question stores values and scrubs a transcript by session id: for the mod, not the agent
     ("the mod's question", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-prompt\b"),
+    # the values for the person's screen (show_values.py): for the mod's drawing, never for the agent
+    ("the mod's values", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-values\b"),
     # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
     ("the maisecrets guard", r"maisecrets-guard\.py"),     # guard.json sits in the home, covered above
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
