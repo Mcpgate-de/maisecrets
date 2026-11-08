@@ -101,6 +101,8 @@ SAMPLES = {
     "us-passport#0": (9, "", None),
     "us-prescription-number#0": (8, "", None),        # rx: <digits> (the label is in the regex)
     "us-prescription-number#1": (8, "", None),
+    "us-claim-number#0": (8, "", None),               # claim number: <digits> (the label is in the regex)
+    "us-prior-authorization-number#0": (8, "", None),
     "us-referral-number#0": (8, "", None),
     "us-ssn#3": (9, "", "us_ssn"),
 }
