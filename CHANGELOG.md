@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## [0.9.1] - 2026-11-08
+
+### Features
+
+- the session start says that values with a lock are on your screen only; Claude sees placeholders (fc2124b)
+- the call and result of an MCP tool or any other tool show your values on your screen too (45fe01e)
+- your own prompt shows the values you typed, with the lock, on your screen only (754f4a5)
+- a click on a gateway reference shows its value on your screen, and a second click copies it; /maisecrets:sref says what the login allows (7a80b0b)
+
+### Fixes
+
+- a term from your term list keeps its placeholder on the screen (d7c1a43)
+- an MCP call that gets a stored value asks you instead of being refused (d7f7053)
+- review of 0.9.1: a link without :// keeps its placeholder, a reveal follows a new session, and the guards of the tool rows are tested (d045ada)
+- the AI is told to keep a placeholder whole when it shows one, so you see the value on your screen (43d6051)
+- the plugin syncs to a claude.ai organisation again: old benchmark baselines leave the tree, which stays under 150 MB (7d1852e)
+- a failed command that printed a stored value no longer shows it to the AI in Claude Code (e6cb41c)
+- a link the AI writes can no longer copy a value: each copy link carries a random part only the drawing holds (eefc0d4)
+
 ## [0.9.0] - 2026-11-08
 
 ### Features
