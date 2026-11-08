@@ -298,7 +298,7 @@ function draw($, e, text, address, wrap) {
 }
 
 // a prompt that names show_values may change the mode (the settings hook writes it): ask again after it
-// (called from the prompt.submit hook of maisecrets-mod.mjs: one hook per event and module)
+// (called from the prompt hook of maisecrets-mod.mjs: one hook per event and module)
 export function afterPrompt($, text) {
   absent.clear()      // a key the person typed into a prompt is this session's now
   if (typeof text !== 'string' || !text.includes('show_values')) return
