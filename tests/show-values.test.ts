@@ -4,7 +4,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 const P = (k: string) => '⟦' + k + '⟧'
-const STORE: Record<string, string> = { NAME_c1: 'Max Mustermann', EMAIL_c2: 'max@example.com' }
+const STORE: Record<string, string> = { NAME_c1: 'Max Mustermann', EMAIL_c2: 'max@example.com', SECRET_c3: 'my-test-token' }
 const TEXT = `Kunde ${P('NAME_c1')}, Mail ${P('EMAIL_c2:ma•••@example.com')}, fremd ${P('IBAN_c9')}.`
 const FULL = { columns: 120, rows: 40, isFullscreen: true }
 const LINK = 'https://mcpgate.de/maisecrets/v#'
@@ -366,5 +366,42 @@ test('a line with mailto:, a bare host with a path or data: keeps its placeholde
   const text = seen[seen.length - 1].output.content[0].text
   expect(text).not.toContain('Max Mustermann')
   expect(text).toContain('max@example.com \u{1F512}')
+  await ui.unmount()
+})
+
+
+for (const mode of ['always', 'click'] as const) {
+  test(`a secret of the store is never drawn (${mode}): its placeholder stays, a click copies it`, async ($, on) => {
+    const copied: string[] = []
+    const clock = world(on, { mode, copied })
+    await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'desktop', component: 'AssistantMessage',
+      props: { text: `Token ${P('SECRET_c3')} und ${P('NAME_c1')}`, isFirstOfReply: true } as any, viewport: FULL })
+    await clock.advance(10)
+    const md = await ui.find({ type: 'Markdown' })
+    expect(md?.props.text).not.toContain('my-test-token')
+    expect(md?.props.text).toContain(P('SECRET_c3') + ' \u{1F512}')
+    await ui.press({ key: md!.key!, link: { href: real(md, 'SECRET_c3') } as any })
+    expect(copied).toEqual(['my-test-token'])
+    const after = await ui.find({ type: 'Markdown' })
+    expect(after?.props.text).not.toContain('my-test-token')
+    await ui.unmount()
+  })
+}
+
+test('a tool row keeps the placeholder of a secret and shows the other values', async ($, on) => {
+  const seen: any[] = []
+  const clock = world(on, { seen })
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  const props = { tool_use_id: 't9', tool: 'mcp__crm__get', input: { note: `${P('SECRET_c3')} ${P('NAME_c1')}` },
+    isRunning: false, isErrored: false, isInterrupted: false, isExpanded: true, output: { content: [] } }
+  const ui = await $.ui.mount({ plugin: 'maisecrets', surface: 'terminal', component: 'ToolUse', props: props as any,
+    viewport: FULL, requestId: 't9' })
+  await clock.advance(10)
+  await ui.redraw(props as any)
+  const note = seen[seen.length - 1].input.note
+  expect(note).toContain(P('SECRET_c3'))
+  expect(note).not.toContain('my-test-token')
+  expect(note).toContain('\u{1F512}')
   await ui.unmount()
 })

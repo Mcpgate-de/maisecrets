@@ -120,6 +120,9 @@ function rewrite(text, address) {
 }
 
 const isSecretRef = (ref) => ref.startsWith('sref:secret:')
+// a secret of this computer's store is never drawn either, as a gateway's (consistent): its click copies it
+const isSecretKey = (k) => k.startsWith('SECRET_')
+const SECRET_TOAST = 'Copied. The secret stays hidden on the screen.'
 
 function rewriteLine(text, shown) {
   return text.replace(PH, (all, k, ref) => {
@@ -132,6 +135,7 @@ function rewriteLine(text, shown) {
     }
     if (!k) return all
     const v = cache.get(k)
+    if (isSecretKey(k)) return links && v !== undefined && mode !== 'off' ? `[${all} \u{1F512}](${LINK}${k})` : all
     if (mode === 'always' && v !== undefined) return links ? `[${code(v)}](${LINK}${k})` : code(v)
     if (mode === 'click') {
       const link = `[${all}](${LINK}${k})`
@@ -209,7 +213,7 @@ function shown(v, depth = 0) {
   if (typeof v === 'string') {
     if (!v.includes('\u27e6')) return v
     return v.split('\n').map(line => LINKY.test(line) ? line : line.replace(KEY_RE, (all, k) =>
-      cache.has(k) ? `${cache.get(k)} \u{1F512}` : all)).join('\n')
+      cache.has(k) && !isSecretKey(k) ? `${cache.get(k)} \u{1F512}` : all)).join('\n')
   }
   if (Array.isArray(v)) return v.map(x => shown(x, depth + 1))
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shown(x, depth + 1)]))
@@ -254,7 +258,7 @@ function draw($, e, text, address, wrap) {
       if (isSecretRef(k) && revealed.has(k)) {
         try {
           const r = await $.ui.copy({ text: revealed.get(k), surface: p?.surface ?? e.surface })
-          $.ui.toast(r?.isCopied ? 'Copied. The secret stays hidden on the screen.' : 'Not copied.')
+          $.ui.toast(r?.isCopied ? SECRET_TOAST : 'Not copied.')
         } catch { /* nothing copied */ }
       }
       return
@@ -269,10 +273,11 @@ function draw($, e, text, address, wrap) {
       return
     }
     if (!cache.has(k)) return
-    if (mode === 'always') {
+    if (mode === 'always' || isSecretKey(k)) {
       try {
         const r = await $.ui.copy({ text: cache.get(k), surface: p?.surface ?? e.surface })
-        $.ui.toast(r?.isCopied ? 'Copied. Claude knows only the placeholder.' : 'Not copied.')
+        $.ui.toast(r?.isCopied ? (isSecretKey(k) ? SECRET_TOAST : 'Copied. Claude knows only the placeholder.')
+          : 'Not copied.')
       } catch { /* nothing copied */ }
       return
     }
