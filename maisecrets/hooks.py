@@ -1936,7 +1936,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         shift = len(rewritten) - len(command)
         rewritten = rewritten[:at + shift] + _proxy_option() + rewritten[at + shift:]
         prelude.insert(0, _sandbox_guard())
-    if client_of(payload) != "codex" and any(k in srefs or k in fetched for k in plan):
+    # every command that gets a value, a stored one too: a failed one showed it through PostToolUseFailure (#97278)
+    if client_of(payload) != "codex" and plan:
         from . import exit_wrap
         prelude.append(exit_wrap.trap())     # after the reads: an undelivered value still ends with 97
     new_input = dict(tool_input)
