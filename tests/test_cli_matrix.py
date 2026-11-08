@@ -1726,8 +1726,9 @@ class RefusingStoreTests(unittest.TestCase):
 
 
 class OwnOutputIsNoFindingTests(unittest.TestCase):
-    """Field case 2026-11-08: the old line put a key, a colon and the word for the result in a row; it read as a label
-    and its value, so the masking of the tool output stored the word as a new secret. The output of forget is a sentence now."""
+    """Field case 2026-11-08: the old line put a key, a colon and the word for the result in a row; it read as a
+    label and its value, so the masking of the tool output stored the word as a new secret. The output of forget is
+    a sentence now."""
 
     def test_the_lines_of_forget_hold_no_finding(self):
         import contextlib
