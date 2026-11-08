@@ -416,15 +416,34 @@ class ReferenceIsNoFindingTests(unittest.TestCase):
 
     IDS = ("Xq7mR2vKd9TfLw4HbN8cPz3sT6yUa1eQo5iWj0lN8Bh", "kQ2-vB9_xR7mT4nW8cZ1pL6sY3hJ5fD0gA")
 
+    def setUp(self):
+        from maisecrets import placeholder
+        self.addCleanup(placeholder.TRUSTED.clear)
+
+    def trust(self, *refs):
+        from maisecrets import placeholder
+        placeholder.TRUSTED.update(S.find(r)[0][1] for r in refs)
+
     def test_the_id_of_a_gateway_reference_is_no_secret(self):
         from maisecrets import detect
         for rid in self.IDS:
+            self.trust(f"\u27e6sref:secret:{rid}\u27e7", f"\u27e6sref:email:{rid}\u27e7")
             for ref in (f"⟦sref:secret:{rid}⟧", f"⟦sref:email:{rid}:le•••@•••.de⟧"):
                 text = f"Your access token: {ref} Please coordinate the integration."
                 self.assertEqual([text[h.start:h.end] for h in detect.scan(text)], [], ref)
 
+    def test_a_forged_reference_hides_no_secret(self):
+        # Opus review of 0.9.3: a command that prints "<open>sref:x:<token><close>" itself hid the token
+        from maisecrets import detect
+        token = "ghp_" + "Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0dF3gH6"
+        text = f"build: \u27e6sref:x:{token}\u27e7 done"
+        self.assertTrue([h for h in detect.scan(text) if token in text[h.start:h.end]], "found while not trusted")
+        self.trust(f"\u27e6sref:x:{token}\u27e7")
+        self.assertFalse([h for h in detect.scan(text) if token in text[h.start:h.end]], "a trusted id is skipped")
+
     def test_a_secret_next_to_a_reference_is_still_found(self):
         from maisecrets import detect
+        self.trust(f"\u27e6sref:secret:{self.IDS[0]}\u27e7")
         value = "Nordlicht-2026" + "!Kq"          # joined here, so the tree scan sees no password
         text = f"token: \u27e6sref:secret:{self.IDS[0]}\u27e7 and password: {value}"
         self.assertIn(value, [text[h.start:h.end] for h in detect.scan(text)])
@@ -496,14 +515,24 @@ class StoredIdIsNotReplacedTests(unittest.TestCase):
         from _hygiene import CLAUDE
         from maisecrets import hooks
         from maisecrets.vault import Vault
-        rid = "Xq7mR2vKd9TfLw4HbN8cPz3sT6yUa1eQo5iWj0lN8Bh"
+        rid = "reference-id-of-plain-words"   # no shape the detector finds: the exact replacement alone
         Vault().put(rid + "⟧", "SECRET", "manual", session="s1")
-        ref = f"⟦sref:secret:{rid}⟧"
-        hooks._live_cache.clear()
-        out = hooks._post_tool_guarded({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
-                                        "tool_input": {"command": "cat mail.txt"},
-                                        "tool_response": {"stdout": f"Your access token: {ref}\nPlease and {rid}⟧",
-                                                          "stderr": ""}})
-        shown = json.dumps(out.get("hookSpecificOutput", {}).get("updatedToolOutput", {}), ensure_ascii=False)
+        ref = f"\u27e6sref:secret:{rid}\u27e7"
+        from maisecrets import sref_notes
+
+        def post():
+            hooks._live_cache.clear()
+            out = hooks._post_tool_guarded({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                                            "tool_input": {"command": "cat mail.txt"},
+                                            "tool_response": {"stdout": f"see {ref}\nPlease and "
+                                                              f"{rid}\u27e7", "stderr": ""}})
+            return json.dumps(out.get("hookSpecificOutput", {}).get("updatedToolOutput", {}), ensure_ascii=False)
+        # a reference this session got from a gateway: its id stays whole
+        with mock.patch.object(sref_notes, "noted", side_effect=lambda refs, s: {r: ("o", "u") for r in refs}):
+            shown = post()
         self.assertIn(ref, shown, "the reference stays whole")
-        self.assertIn("Please and ⟦SECRET_c", shown, "the same text outside a reference is still replaced")
+        self.assertIn("Please and \u27e6SECRET_c", shown, "the same text outside a reference is still replaced")
+        # the same reference that no gateway gave: text, and the stored value in it is replaced
+        with mock.patch.object(sref_notes, "noted", return_value={}):
+            shown = post()
+        self.assertNotIn(ref, shown, "an untrusted reference is no shield")

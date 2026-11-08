@@ -379,8 +379,9 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
 def _replace_outside_references(text: str, raw: str, ref: str) -> tuple[str, int]:
     """text with each raw replaced by ref, except where raw starts in the kind or the id of a gateway's reference: a
     value that a rule once took from such an id (0.9.1) broke the reference again at each later read (2026-11-08)."""
-    from .placeholder import _rx
-    guarded = [(m.start(), m.end("id")) for m in _rx("sref").finditer(text)] if "\u27e6sref:" in text else []
+    from .placeholder import _rx, trusted
+    guarded = [(m.start(), m.end("id")) for m in _rx("sref").finditer(text) if trusted(m)] if "\u27e6sref:" in text \
+        else []
     parts, at, n = [], 0, 0
     while True:
         i = text.find(raw, at)
