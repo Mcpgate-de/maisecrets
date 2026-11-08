@@ -287,6 +287,19 @@ class ValidatorTests(unittest.TestCase):
         embedded = "64:ff9b::" + "93.184.216.34"
         self.assertEqual([embedded[m.start:m.end] for m in detect.scan(embedded, channel="tool")], [embedded])
 
+    def test_an_ipv4_shape_inside_a_longer_dotted_run_is_no_address(self):
+        # a Received header: the dotted digits of the message id gave an IP hit (field case, 2026-11-08)
+        tail = "48.2026." + "11.08.11.21.20"
+        for text in ("Received: by mx.example.com with SMTPS id a0b1c2d3e4f56-0123456789asi1234567a8b." + tail,
+                     "oid 1.3.6." + "93.184.216.34.1", "build 7.93.184." + "216.34"):
+            with self.subTest(text=text[-24:]):
+                self.assertEqual([m for m in detect.scan(text, channel="tool") if m.type == "IP"], [])
+        # an address alone, at the end of a sentence, and before the port of a tcpdump line stays one
+        ip = "93.184." + "216.34"
+        for text in (f"from {ip} port 22", f"connected to {ip}.", f"IP {ip}.443 > 10.0.0.1.52344: Flags"):
+            with self.subTest(text=text):
+                self.assertIn(ip, [m.value for m in detect.scan(text, channel="tool") if m.type == "IP"])
+
     def test_german_tax_id(self):
         self.assertTrue(detect._de_tax_id_ok("86095742719"))
         for bad in ("86095742710", "06095742719", "8609574271", "8609574271x", "11112345671"):
