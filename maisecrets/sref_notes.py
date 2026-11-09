@@ -46,6 +46,23 @@ def _keys(node, into: set) -> None:
 
 
 _DISPLAY_BAD = set("[]()<>`\\\n\r\t\u2028\u2029")
+# format characters (bidi overrides, zero-width), line and paragraph separators: they hide or reorder what a display
+# shows on the screen (review of the branch)
+_DISPLAY_BAD_CATEGORIES = ("Cf", "Zl", "Zp")
+
+
+def _plain_display(d: str) -> bool:
+    """A display the screen may draw: short plain text, and nothing in it the detector finds. A gateway that puts a
+    clear name or address into a display must not get it drawn; a detector that fails keeps no display."""
+    import unicodedata
+    if not (d and len(d) <= 64) or any(c in _DISPLAY_BAD or ord(c) < 32
+                                        or unicodedata.category(c) in _DISPLAY_BAD_CATEGORIES for c in d):
+        return False
+    try:
+        from . import detect
+        return not detect.findings(d, channel="tool")
+    except Exception:  # noqa: BLE001 - no display rather than one that was not checked
+        return False
 
 
 def _displays(node, into: dict) -> None:
@@ -54,7 +71,7 @@ def _displays(node, into: dict) -> None:
         if "sref:" in node:
             for m in sref_client.SREF_RE.finditer(node):
                 d = m.group("display")
-                if d and len(d) <= 64 and not any(c in _DISPLAY_BAD or ord(c) < 32 for c in d):
+                if _plain_display(d):
                     into.setdefault(f"{m.group('kind')}:{m.group('id')}", d)
     elif isinstance(node, list):
         for x in node:

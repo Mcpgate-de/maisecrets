@@ -151,3 +151,18 @@ class DisplayLabelTests(unittest.TestCase):
         self.assertEqual(show_values.answer({"keys": [], "refs": [ref], "session_id": "s2"}, cfg())["displays"], {})
         off = show_values.answer({"keys": [], "refs": [ref], "session_id": "s1"}, cfg("off"))
         self.assertEqual(off["displays"], {})
+
+    def test_a_display_with_a_hidden_character_or_a_value_the_detector_finds_is_not_kept(self):
+        # review of the branch: a bidi override or a zero-width character reorders or hides what the screen draws, and a
+        # gateway that puts a clear address into a display must not get it drawn
+        rid = "C" * 24
+        mail = "jo.demo" + "@nordlicht-demo.de"
+        for display in ("Jo\u202e\u2022\u2022\u2022", "Jo\u200b\u2022\u2022\u2022", "Jo\ufeff\u2022",
+                        "Jo\u2028x", "Jo\u2029x", mail, "+49 171 " + "4829173", "DE89 3704 0044 " + "0532 0130 00"):
+            found = {}
+            self.notes._displays({"t": f"\u27e6sref:name:{rid}:{display}\u27e7"}, found)
+            with self.subTest(display=display):
+                self.assertEqual(found, {})
+        found, masked = {}, "jo\u2022\u2022\u2022@\u2022\u2022\u2022.de"
+        self.notes._displays({"t": f"\u27e6sref:email:{rid}:{masked}\u27e7"}, found)
+        self.assertEqual(found, {f"email:{rid}": masked}, "a masked display stays")
