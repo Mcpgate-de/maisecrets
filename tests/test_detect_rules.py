@@ -519,6 +519,29 @@ class ScanRuleTests(unittest.TestCase):
         self.assertEqual(kinds(f"postgres://app:{pw}@db.example.org/app"), [("ds-basic-auth", pw)],
                          "with a user the detect-secrets rule keeps the span")
 
+    def test_a_url_password_before_a_host_with_a_dot_is_a_secret_and_no_address(self):
+        # issue #39: where ds-basic-auth refused the value, the e-mail rule took <password>@host.with.dot as an address;
+        # the password of a URL is a SECRET over the password alone, whatever the host
+        for pw in ("geheim" + "123", "S3cr3t" + "!x", "Pass" + "w0rd"):
+            for host in ("host.with.dot", "db.shop-test.de:5432"):
+                text = f"db: postgres://admin:{pw}@{host}/app"
+                with self.subTest(pw=pw, host=host):
+                    self.assertEqual(kinds(text), [("ds-basic-auth", pw)])
+                    self.assertEqual(kinds(text, channel="tool"), [("ds-basic-auth", pw)])
+        # a placeholder, a password equal to the user and a documented host (the address there was no hit either)
+        # stay text, as ds-basic-auth leaves them; a URL with a user and no password keeps its address
+        # and a password of 5 characters or fewer (pass, x), as with a host without a dot
+        for text in ("https://user:secret@host.with.dot/", "https://user:changeme@host.with.dot/",
+                     "scheme://user:" + "pa" + "ss@host.with.dot/", "https://reader:x@docs.internal/api",
+                     "amqp://guest:guest@mq.shop-test.de/", "https://user:" + "pa" + "ss@example.com/path",
+                     "https://app:x@api.example.net/"):
+            with self.subTest(text=text):
+                self.assertEqual(kinds(text), [])
+        mail = "dana.okafor" + "@mailbox-test.net"
+        self.assertEqual(kinds("ftp://" + mail + "/pub"), [("email", mail)])
+        self.assertEqual(kinds("mail " + mail + " or http://example.org"), [("email", mail)])
+        self.assertEqual(kinds("https://user:" + "pa" + "ss@host.with.dot/", enabled={"email"}), [])
+
     def test_the_key_id_in_a_sigv4_credential_scope_is_not_a_secret(self):
         kid = "AKIA" + rnd(16, string.ascii_uppercase + "234567")       # base32, as the aws-access-token rule reads it
         scope = f"{kid}%2F20261008%2Feu-central-1%2Fs3%2Faws4_request"

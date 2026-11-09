@@ -97,3 +97,20 @@ def _names_a_mail_column(cell: str) -> bool:
     if words and words[-1] in _OWNER_TAILS and len(words) >= 2 and words[-2] in _OWNER_WORDS:
         return True
     return bool(words) and (words[-1] in _OWNER_WORDS or words[-2:] in _OWNER_PAIRS)
+
+
+# the user and the password of a URL up to its @: scheme://user:<password>@ (the classes of url-password-signs)
+_URL_USERINFO_RE = _LazyRx(r"(?<![\w+.-])[A-Za-z][A-Za-z0-9+.-]{1,15}://([^\s:/?#\[\]@'\"`<>]{1,64}):"
+                           r"([^\s/@'\"`<>]{1,128})$")
+
+
+def _url_userinfo(text: str, at: int) -> tuple[int, int] | None:
+    """(start, end) of the password of a URL whose user information ends at the @ at `at`, else None: the local part
+    of an address there is the password (issue #39). A password equal to the user is a default (guest:guest), as
+    ds-basic-auth reads it: an empty span, so no hit at all."""
+    if at <= 0 or text[at] != "@" or "://" not in text[max(0, at - 220):at]:
+        return None
+    m = _URL_USERINFO_RE.search(text, max(0, at - 220), at)
+    if not m:
+        return None
+    return (m.start(2), m.end(2) if m.group(1).lower() != m.group(2).lower() else m.start(2))

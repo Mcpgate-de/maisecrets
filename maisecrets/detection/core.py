@@ -76,6 +76,7 @@ from .value_checks import (  # noqa: F401
     _a_version, _LABEL_WORDS_TAIL_RE, _bitlocker_key_ok,
     _re2_to_python, _POSIX_CLASSES, shannon_entropy, ENTROPY_BY_ALPHABET, ENTROPY_BY_ALPHABET_RULES, _B62, _ALPHABETS,
     alphabet_of, _base64_of_text, _entropy_ok, _luhn_ok, IBAN_LENGTH, _iban_ok, _RESOLVER_IPS, _public_ip,
+    _IBAN_GROUP_SEP_UPSTREAM, PRESIDIO_GROUP_SEP,
     _de_tax_id_ok, _de_social_security_ok, _de_health_insurance_ok, _de_lanr_ok, _de_vat_id_ok, _B64_PEM_PRIVATE_RE,
     _OPENSSH_MAGIC, _pem_body_ok, _B64_LINE_RE, _B64_PEM_STARTS, _b64_needles, _PRIVATE_KEY_NEEDLES, _PEM_END_RE,
     _pem_ended, _base64_wrapped_end, _base64_pem_ok, _us_ssn_ok, _DS_TEMPLATED, _DS_INDIRECT, _DS_REFERENCE,
@@ -100,13 +101,13 @@ from .value_checks import (  # noqa: F401
     _PARTS, _PLACEHOLDER_PART_RE, looks_like_placeholder, _ssh_algorithm_name, _mail_shaped_id,
 )
 from .encoded_mail import (  # noqa: F401
-    _ENCODED_MAIL_CONTEXT_RE, _ENCODED_MAIL_TO_RE, _encoded_mail_expected, _MAIL_COLUMN_RE, _OWNER_WORDS,
+    _ENCODED_MAIL_CONTEXT_RE, _ENCODED_MAIL_TO_RE, _encoded_mail_expected, _MAIL_COLUMN_RE, _OWNER_WORDS, _url_userinfo,
     _OWNER_PAIRS, _OWNER_TAILS, _FILE_EXTENSIONS, _names_a_mail_column,
 )
 
 RULES_DIR = Path(__file__).resolve().parent / "rules"
 
-CHANNELS = ("prompt", "tool")   # a person typed it; a tool result or a file
+CHANNELS = ("prompt", "tool")
 
 
 @dataclass(frozen=True)
@@ -932,10 +933,6 @@ def presidio_region(rec_id: str) -> str:
 # (danszymkowiak/maisecrets 8c943ee, Apache-2.0); the subfield code is `?` and two digits
 _IBAN_LEFT = "(?<![A-Z0-9])"
 PRESIDIO_LEFT_SUBFIELD = {"iban": "(?:(?<![A-Z0-9])|(?<=\\?[0-9]{2}))"}
-# the groups of an IBAN with a no-break space (U+00A0, U+202F) between them, as a word processor or a bank's web page
-# writes them: Presidio takes only a space or a hyphen, and the IBAN stayed in the clear (issue #39)
-_IBAN_GROUP_SEP_UPSTREAM = "[ -]"
-PRESIDIO_GROUP_SEP = {"iban": "[ \u00a0\u202f-]"}
 
 
 # Presidio's card pattern takes the first digits 1, 3, 4, 5 and 6, so a Mastercard of the 2-series (2221 to 2720,
@@ -1755,7 +1752,7 @@ class Detector(_LabelNumbers):
 
     def __init__(self, regions=None, sources=None, references=None, host=None):
         if isinstance(regions, _regions.Active):
-            _regions.check(regions)   # an unknown region or label language raises ValueError, as the entry point
+            _regions.check(regions)   # ValueError, as the entry point
         self.host = THIS_COMPUTER if host is None else host
         self._given_regions = regions
         self._given_sources = sources
@@ -1822,8 +1819,8 @@ class Detector(_LabelNumbers):
         """findings(), then a remote detector (remote.RemoteDetector) for what the rules left: a Result with the
         findings and the RemoteStatus of this call. The service only adds a span where no finding lies; it never
         removes, narrows or retypes one, and a service that fails leaves the findings as they are. `deadline`: a
-        time.monotonic() value that ends the request earlier than its own timeout (one budget for several texts). It
-        bounds the scan of the rules too: past it the rules raise ScanIncomplete, as findings() does."""
+        time.monotonic() value that ends the request earlier than its own timeout (one budget for several texts), and
+        the rules (ScanIncomplete, as findings())."""
         from .remote import OFF, Result
         found = self.findings(text, channel, path, fields=fields, deadline=deadline)
         if remote is None:
@@ -2423,6 +2420,13 @@ def _label_before(text: str, start: int) -> str:
     return m.group(1) if m else ""
 
 
+def _not_a_url_password(text: str, start: int, pw: str, enabled, allow: bool) -> bool:
+    """Short (pass, x), a placeholder, a reference, or ds-basic-auth off: the password of a URL that is no SECRET."""
+    return (len(pw) < 6 or looks_like_placeholder(pw) or _references().hit_is_a_reference(text, start, pw)
+            or (enabled is not None and not {"ds-basic-auth", "detect-secrets:ds-basic-auth"} & set(enabled))
+            or (allow and switched_off("ds-basic-auth", allow_list()[1])))
+
+
 def _pass_equals_user(whole: str, secret: str) -> bool:
     """`postgres:postgres@`, `curl -u admin:admin`: a password equal to the user name is a default."""
     sec = secret.strip("\"' ")
@@ -2520,8 +2524,7 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", pa
     a key one
     of them. A text that is not a str (bytes, None) raises TypeError; a subclass of str is a str. `fields`, a list of
     (start, end, name) with a field path as name, adds what each field name says as a label before its value would
-    (maisecrets/detection/fields.py); without it the scan is the one of before. A channel other than "prompt" or
-    "tool" raises ValueError."""
+    (maisecrets/detection/fields.py); without it the scan is the one of before."""
     if not isinstance(text, str):
         raise TypeError(f"text must be a str, not {type(text).__name__}")
     if channel not in CHANNELS:
@@ -2818,6 +2821,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 secret = text[start:end]
                 if not secret or secret[0] in "@.":
                     continue
+            # scheme://user:<password>@host.example: a SECRET, no address (#39)
+            userinfo = _url_userinfo(text, start + secret.find("@")) if "url-userinfo" in filters else None
             if "base64-wrapped-end" in filters:
                 end = _base64_wrapped_end(text, start, end)   # the further lines of a wrapped value
                 secret = text[start:end]
@@ -3040,6 +3045,14 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 if ext:
                     end = ext.end()
                     secret = text[start:end]
+            if userinfo is not None:
+                start, end = userinfo
+                secret = text[start:end]
+                if (not secret or overlaps(start, end)
+                        or _not_a_url_password(text, start, secret, enabled, rule_list is None)):
+                    continue
+                take(Match("ds-basic-auth", "SECRET", secret, start, end), own)
+                continue
             take(Match(rule.id, rule.type, secret, start, end), own)
     found.sort(key=lambda x: x.start)
     return found
