@@ -92,7 +92,7 @@ def fake_value(prefix: str = "Fk") -> str:
 
 
 # the lock sentence of the session start in Claude Code (show_values, C32)
-SCREEN = " Values with \U0001F512 are on your screen only; Claude sees placeholders."
+SCREEN = " Claude never saw a value with \U0001F512, only its placeholder."
 
 class Sandbox:
     """One temp world: vault home, user home, tmp, fake tools, optional policy file."""
