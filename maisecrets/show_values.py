@@ -54,7 +54,9 @@ def reveal(payload: dict, cfg: dict | None = None) -> dict:
     try:
         got = sref_hooks.fetch(cfg, vault.backend, [ref], session, ("display", "screen"))
     except sref_client.Refused as exc:
-        return {"reason": f"maisecrets: {exc}"}
+        # the client names the plugin before a toast itself: "maisecrets: maisecrets: …" otherwise
+        why = str(exc)
+        return {"reason": why[len("maisecrets: "):] if why.startswith("maisecrets: ") else why}
     if ref not in got:
         return {"reason": "maisecrets: this reference did not come from a gateway result of this session."}
     released, why = _server_release(vault, got, session, "Display", "screen")
