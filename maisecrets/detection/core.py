@@ -549,7 +549,7 @@ VALIDATORS = {
                                else v.split("@", 1)[0].strip('"').lower() not in _SYSTEM_USERS
                                and not _reserved_domain(v) and not _ssh_algorithm_name(v) and not _mail_shaped_id(v)),
     # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
-    "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
+    "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@").replace("\\u0040", "@")),
     "us_ssn": _us_ssn_ok,
     # checksums.py: ports of Presidio validators that were missing, the German document number, Switzerland, Austria
     # and the crypto wallet secrets

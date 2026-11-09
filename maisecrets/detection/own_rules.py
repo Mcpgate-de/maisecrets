@@ -94,8 +94,9 @@ OWN_RULES: list[dict] = [
               r"(?![A-Za-z0-9])"},
     {"id": "email-percent-encoded", "type": "EMAIL", "validator": "person_email_encoded",
      # the @ as %40 in a query string, a form body, an access log (public benchmark, 2026-10-11: 7 addresses
-     # passed); scan() keeps it only where an address is expected (_ENCODED_MAIL_CONTEXT_RE)
-     "regex": r"(?:(?<![\w.+%-])|(?<=(?i:mailto%3a))|(?<=%3[Dd]))[\w.+-]{1,64}%40"
+     # passed); scan() keeps it only where an address is expected (_ENCODED_MAIL_CONTEXT_RE). Also the JSON escape
+     # \u0040 of the @ (#39)
+     "regex": r"(?:(?<![\w.+%-])|(?<=(?i:mailto%3a))|(?<=%3[Dd]))[\w.+-]{1,64}(?:%40|\\u0040)"
               r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
      # a CJK letter before or after the number is a boundary, as in the e-mail rule

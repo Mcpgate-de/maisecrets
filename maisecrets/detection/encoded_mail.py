@@ -24,12 +24,15 @@ _ENCODED_MAIL_TO_RE = _LazyRx(r"(?i)(?<![/\w])(?:sent|send|mailed|forwarded|repl
 
 def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
     """Where an address with its @ as %40 is an address: after a mail word or `=` (_ENCODED_MAIL_CONTEXT_RE), after
-    `sent to` in prose, or as a whole cell of a CSV row (a column of a roster export, holdout 2026-10-15)."""
+    `sent to` in prose, or as a whole cell of a CSV row (a column of a roster export, holdout 2026-10-15). The JSON
+    escape \\u0040 is an @ wherever it stands, and a %40 address may be a whole segment of a URL path (#39)."""
+    value = text[start:end]
+    if "\\u0040" in value or _in_url_path(text, start, end):
+        return not _an_asset_or_version(value)
     line = _line_start(text, start)
     if _ENCODED_MAIL_CONTEXT_RE.search(text, max(line, start - 40), start) or _ENCODED_MAIL_TO_RE.search(
             text, max(line, start - 40), start):
         return True
-    value = text[start:end]
     # a cell may have spaces around it (`Dana, name%40host.de`) and quotes ("name%40host.de"), in that order
     while start > line and text[start - 1] == " ":
         start -= 1
@@ -49,9 +52,8 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
     sep = before or (after if after in (",", ";", "\t") else ",")
     if not before and not after:
         return False   # a value alone on its line is no cell of a row
-    labels = value.rsplit("%40", 1)[-1].lower().split(".")
-    if labels[-1] in _FILE_EXTENSIONS or sum(x.isdigit() for x in labels) >= 2:
-        return False   # logo%402x.png is an asset at twice the size, pkg%401.0.0-beta.rc a version
+    if _an_asset_or_version(value):
+        return False
     import csv   # here: the hooks pay for every module at import
     col = len(next(csv.reader([text[line:start + 1]], delimiter=sep), [""])) - 1
     # the first five lines of the text, and up to 20 lines above the row within 4,000 characters: a header after a
@@ -65,6 +67,25 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
                 and _names_a_mail_column(cells[col])):
             return True
     return False
+
+
+
+def _an_asset_or_version(value: str) -> bool:
+    """logo%402x.png is an asset at twice the size, pkg%401.0.0-beta.rc a version: no address."""
+    labels = value.replace("\\u0040", "%40").rsplit("%40", 1)[-1].lower().split(".")
+    return labels[-1] in _FILE_EXTENSIONS or sum(x.isdigit() for x in labels) >= 2
+
+
+# a URL before a path segment: scheme://host/ and any segments, up to the segment of the value
+_URL_PATH_BEFORE_RE = _LazyRx(r"[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\s/?#]+/(?:[^\s/?#]*/)*$")
+
+
+def _in_url_path(text: str, start: int, end: int) -> bool:
+    """The value is a whole segment of a URL path: after a / of the path, before /, ?, # or the end of the URL
+    (https://click.host.example/ls/name%40host.example/abc, a link of a mail tracker)."""
+    if text[start - 1:start] != "/" or not (end == len(text) or text[end] in "/?#\"'<>) \t\r\n"):
+        return False
+    return bool(_URL_PATH_BEFORE_RE.search(text, max(0, start - 300), start))
 
 
 # a header cell of a column of addresses: a mail word in a few languages, or a word that names who an address
