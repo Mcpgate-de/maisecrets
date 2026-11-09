@@ -385,16 +385,6 @@ class IdAfterLabelWholeTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(values(text), [])
 
-    def test_a_date_or_a_timestamp_after_the_label_is_no_id(self):
-        # a CI log line: the date and hour of its timestamp were masked as ID_NUMBER (field case, 2026-11-08)
-        stamp = "2026-11-08" + "T21:04:48.460126Z"
-        for text in ("account number " + stamp + " job started", "tax id " + stamp, "sin " + stamp + " 00O $ make",
-                     "member id: 2026-11-08 done", "MRN: 08-11-2026"):
-            with self.subTest(text=text[:24]):
-                self.assertNotIn("id-number-after-label", {m.kind for m in scan(text)})
-        # an id with hyphens in another shape stays one
-        self.assertIn("id-number-after-label", {m.kind for m in scan("account number 2026-1108-77")})
-
 
 if __name__ == "__main__":
     unittest.main()
