@@ -487,16 +487,39 @@ def unescape_json(text: str) -> tuple:
     starts: list = []
     ends: list = []
     at = 0
-    for m in _ESCAPE_RE.finditer(text):
+    found = list(_ESCAPE_RE.finditer(text))
+    skip = False
+    for n, m in enumerate(found):
+        if skip:
+            skip = False
+            continue
         for i in range(at, m.start()):
             plain.append(text[i])
             starts.append(i)
             ends.append(i + 1)
-        plain.append(chr(int(m.group(1), 16)) if m.group(1) else _ESCAPED[m.group(2)])
+        code = int(m.group(1), 16) if m.group(1) else -1
+        if 0xD800 <= code <= 0xDFFF:
+            # an emoji is two escapes, a high and a low surrogate: one character for both. A lone surrogate stays its
+            # raw text: as a character it cannot be sent as UTF-8, and one emoji failed the request of a whole result
+            nxt = found[n + 1] if n + 1 < len(found) else None
+            low = int(nxt.group(1), 16) if nxt is not None and nxt.start() == m.end() and nxt.group(1) else -1
+            if code <= 0xDBFF and 0xDC00 <= low <= 0xDFFF:
+                plain.append(chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)))
+                starts.append(m.start())
+                ends.append(nxt.end())
+                at, skip = nxt.end(), True
+                continue
+            for i in range(m.start(), m.end()):
+                plain.append(text[i])
+                starts.append(i)
+                ends.append(i + 1)
+            at = m.end()
+            continue
+        plain.append(chr(code) if code >= 0 else _ESCAPED[m.group(2)])
         starts.append(m.start())
         ends.append(m.end())
         at = m.end()
-    if at == 0:
+    if not plain:
         return text, None, None
     for i in range(at, len(text)):
         plain.append(text[i])

@@ -669,6 +669,21 @@ class JsonEscapedTextTests(unittest.TestCase):
                 self.assertNotIn("\\", svc.received[-1]["inputs"])     # the service read the characters
                 self.assertEqual(r.remote.state, "ok")
 
+    def test_an_escaped_emoji_next_to_a_name_and_a_lone_surrogate_do_not_stop_the_request(self):
+        # review of the branch: an emoji arrives as two \uXXXX escapes (a surrogate pair); as two lone surrogates the
+        # body could not be encoded, and the whole result lost its name detection ("answer")
+        emoji = "\\ud83d" + "\\ude00"
+        for text, want in ((J(["Danke ", emoji, " ", self.FIRST, "\\n"]), [self.FIRST]),
+                           (J(["x \\ud83d y\\n", self.FIRST, "\\n"]), [self.FIRST]),      # a lone high surrogate
+                           (J(["\\ude00", "\\n", self.FIRST]), [self.FIRST])):         # a lone low surrogate
+            svc = Service("hf", answer=self.tokenizer_names(self.FIRST))
+            with self.subTest(text=text):
+                r, names = self.found(text, svc)
+                self.assertEqual((r.remote.state, names), ("ok", want))
+        plain, starts, ends = rm.unescape_json("a " + emoji + " b")
+        self.assertEqual(plain, "a \U0001F600 b")
+        self.assertEqual(J(["a ", emoji, " b"])[starts[2]:ends[2]], emoji)   # one character for both escapes
+
     def test_a_finding_of_the_rules_inside_an_escaped_text_still_goes_out_as_filler(self):
         text = J(["Call\\n", self.FIRST, "\\nat ", PHONE, "\\n"])
         svc = Service("hf", answer=self.tokenizer_names(self.FIRST))
