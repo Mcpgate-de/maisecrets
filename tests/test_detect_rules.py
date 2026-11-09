@@ -542,6 +542,24 @@ class ScanRuleTests(unittest.TestCase):
         self.assertEqual(kinds("mail " + mail + " or http://example.org"), [("email", mail)])
         self.assertEqual(kinds("https://user:" + "pa" + "ss@host.with.dot/", enabled={"email"}), [])
 
+    def test_an_address_with_a_sign_or_digits_glued_to_its_end_is_found_and_they_stay_outside(self):
+        # gateway shadow comparison (#39 follow-up): an underscore, a run of hyphens, a phone number without its space
+        # and a CJK letter after the last label dropped the whole address
+        mail = "jo.demo" + "@demo-firma.de"
+        for text, want in ((mail + "0151 2345678", mail), (mail + "-----", mail), ("_" + mail + "_", "_" + mail),
+                           (mail + "- weiter", mail), ("Mail: " + mail + "_alt", mail), (mail + "まで", mail)):
+            with self.subTest(text=text):
+                self.assertEqual([(k, v) for k, v in kinds(text) if k == "email"], [("email", want)])
+
+    def test_a_host_label_that_goes_on_or_a_glued_letter_ends_no_address(self):
+        # 2026-09-26: the alphabetic last label must not end inside a label (a login at a host: user@host.dev-box is no
+        # address at host.dev), and 0.6.24: a Latin, Cyrillic or Greek letter glued to the address ends nothing
+        for text in ("build" + "@web-01.prod-2", "deploy" + "@host.dev-box", "user" + "@mail.server2",
+                     "user" + "@host.de0151x", "jo.demo" + "@demo-firma.de\u00e9", "jo.demo" + "@demo-firma.de\u0436a",
+                     "lodash" + "@4.17.21"):
+            with self.subTest(text=text):
+                self.assertEqual([k for k, _ in kinds(text) if k == "email"], [])
+
     def test_the_key_id_in_a_sigv4_credential_scope_is_not_a_secret(self):
         kid = "AKIA" + rnd(16, string.ascii_uppercase + "234567")       # base32, as the aws-access-token rule reads it
         scope = f"{kid}%2F20261008%2Feu-central-1%2Fs3%2Faws4_request"
