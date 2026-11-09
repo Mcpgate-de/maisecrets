@@ -107,6 +107,10 @@ _ID_RE = _LazyRx(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|num
                  # a comma too: `your health plan beneficiary number, <id>, to medical professionals` (Nemotron-PII)
                  r"\s{0,3}[:=#,]?\s{0,3}[\"']?"
                  r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")
+# a date or the date and hour of a timestamp is no id: `2026-11-08T21` of a CI log line after `sin`, `tax id`
+_ID_DATE_RE = _LazyRx(r"\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])[T ](?:[01]\d|2[0-3])(?::[0-5]\d)?")
+# only a timestamp with its hour: a plain date after an id label can be the id (a licence number written as a
+# date, Nemotron; the 0.9.3 release gate)
 
 # ------------------------------------------------------------------------------------- user in a URL or path --
 _URL_USER_RE = _LazyRx(r"://([^:/?#\s@\[\]]{1,64}):[^@\s/]{1,128}@")
@@ -2662,7 +2666,8 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
         for m in _ID_RE.finditer(text):
             v = m.group(1)
             # 17 digits and more: a snowflake id of a chat platform or a database key, no document number
-            if sum(c.isdigit() for c in v) >= 5 and not (v.isdigit() and len(v) >= 17) and not _placeholder_digits(v):
+            if sum(c.isdigit() for c in v) >= 5 and not (v.isdigit() and len(v) >= 17) and not _placeholder_digits(v) \
+                    and not _ID_DATE_RE.fullmatch(v):
                 # MRN4829173: the label glued to the number is the id's own prefix, masked with it
                 start = m.start() if text[m.start():m.start(1)].isalpha() else m.start(1)
                 out.append((start, m.end(1), "id-number-after-label", ID_NUMBER))
