@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## [0.9.4] - 2026-11-09
+
+### Fixes
+
+- a gateway's display with a hidden character or a clear value is not drawn on the screen (95bfc24)
+- a config or a system locale with a country without rules no longer stops the detector (12ba408)
+- the short password of a URL before a host with a dot is masked again (f78b113)
+- an escaped emoji no longer stops the name service for a whole tool result (d183714)
+- a gateway reference on the screen is labelled with the display the gateway gave, not with the AI's text (3e9e88f)
+- the hint tells the AI to write a gateway reference whole too, so the person can click it (a8e239e)
+- a stored name of two words or more is replaced in any case, so "joachim demo" finds the stored "Joachim Demo" (1ebb171)
+- the name service reads a JSON-escaped text with its escapes as characters, so names after \r\n are found (a634b48)
+- finds an e-mail address as a percent-encoded segment of a URL path, and one with the JSON escape of its @ (a56fe3d)
+- finds an e-mail address with an underscore, hyphens or a phone number glued to its end (c24bd88)
+- the PyPI page names the command line entry point, and the package lists Python 3.9 to 3.15 (0c76b4a)
+- the password of a URL before a host with a dot is a secret, not an e-mail address (7092691)
+- finds an IBAN with no-break spaces between its groups (4b659a0)
+- masks a name after the German label Kontaktperson:, as after contact person: (cb6f9da)
+- masks the whole name after a German salutation with a title (Sehr geehrter Herr Dr. <first name> <surname>) (539cf91)
+- an unknown region, label language or channel raises ValueError with the known codes (6433ffe)
+- findings_with() stops the scan of the rules at its deadline, as findings() does (a68c7b9)
+- a logged hit no longer shows its value: repr() and str() of a Match name its rule, type, offsets and length (a62968b)
+- a refused login names the command that fixes it, and a click's message no longer says "maisecrets:" twice (0128b15)
+
 ## [0.9.3] - 2026-11-09
 
 ### Features
