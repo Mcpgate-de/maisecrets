@@ -45,6 +45,45 @@ def _keys(node, into: set) -> None:
             _keys(x, into)
 
 
+_DISPLAY_BAD = set("[]()<>`\\\n\r\t\u2028\u2029")
+
+
+def _displays(node, into: dict) -> None:
+    """kind:id -> the display part the gateway wrote after the id (the first one seen), when it is plain text."""
+    if isinstance(node, str):
+        if "sref:" in node:
+            for m in sref_client.SREF_RE.finditer(node):
+                d = m.group("display")
+                if d and len(d) <= 64 and not any(c in _DISPLAY_BAD or ord(c) < 32 for c in d):
+                    into.setdefault(f"{m.group('kind')}:{m.group('id')}", d)
+    elif isinstance(node, list):
+        for x in node:
+            _displays(x, into)
+    elif isinstance(node, dict):
+        for x in node.values():
+            _displays(x, into)
+
+
+def displays(refs: list, session: str | None) -> dict:
+    """"sref:kind:id" -> the display the gateway gave with it, for the references noted for this session in the last
+    NOTE_TTL that came with one. The screen labels a reference with it, never with the text the AI wrote (DS21)."""
+    if not isinstance(session, str) or not session:
+        return {}
+    now = time.time()
+    mine = (_read_json(NOTES) or {}).get(profile())
+    if not isinstance(mine, dict):
+        return {}
+    out: dict = {}
+    for ref in refs:
+        k = ref[5:] if isinstance(ref, str) and ref.startswith("sref:") else None
+        for notes in mine.values():
+            note = notes.get(k) if isinstance(notes, dict) and k else None
+            if isinstance(note, dict) and isinstance(note.get("display"), str) and note.get("t", 0) > now - NOTE_TTL \
+                    and session in (note.get("sessions") or []):
+                out[ref] = note["display"]
+    return out
+
+
 def note_result(payload: dict, deadline: float | None = None) -> int:
     """PostToolUse of an MCP tool: note each reference of the result for this session. Returns the number noted."""
     tool = str(payload.get("tool_name") or "")
@@ -54,6 +93,8 @@ def note_result(payload: dict, deadline: float | None = None) -> int:
     found: set = set()
     asked: set = set()
     _keys(payload.get("tool_response"), found)
+    shown: dict = {}
+    _displays(payload.get("tool_response"), shown)
     _keys(payload.get("tool_input"), asked)     # sent now: filtered below by the sent list, as later ones
     session = payload.get("session_id")
     url = user_servers().get(server["name"])
@@ -86,6 +127,8 @@ def note_result(payload: dict, deadline: float | None = None) -> int:
             note = note if isinstance(note, dict) else {}
             sessions = [s for s in (note.get("sessions") or []) if isinstance(s, str) and s != session]
             mine[k] = {"t": now, "sessions": (sessions + [session])[-MAX_SESSIONS_PER_NOTE:], "url": url}
+            if k in shown or isinstance(note.get("display"), str):
+                mine[k]["display"] = shown.get(k) or note["display"]
         for k in [k for k, n in mine.items() if not (isinstance(n, dict) and isinstance(n.get("t"), (int, float))
                                                      and n["t"] > now - NOTE_TTL)]:
             del mine[k]
