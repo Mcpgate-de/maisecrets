@@ -355,8 +355,10 @@ for leaf, m in findings_by_leaf(detector, response):     # layout "lines", the d
 
 ## A deadline: stop a scan in time (since 0.8.24)
 
-`Detector.findings(text, ..., deadline=)` and `leaves.findings_by_leaf(detector, obj, ..., deadline=)` take a
-`time.monotonic()` value, as `findings_with()` does for the remote step. Without it nothing changes.
+`Detector.findings(text, ..., deadline=)`, `Detector.findings_with(text, ..., deadline=)` and
+`leaves.findings_by_leaf(detector, obj, ..., deadline=)` take a `time.monotonic()` value. Without it nothing changes.
+`findings_with()` bounds both its steps by it: the rules as `findings()` does (since 0.9.4; before, only the remote
+step), and the remote request.
 
 Past the deadline the scan stops between rules, between the hits of a rule (since 0.8.25), between its steps (the
 personal data, the cleaned copy, the terms) and between record segments. It raises `maisecrets.detection.ScanIncomplete`:
@@ -420,7 +422,8 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
 - **A failing service changes nothing.** Slow (over `timeout`, or past the `deadline` of `findings_with`, one budget
   for several texts), refused, an HTTP error, or an answer with any item it cannot read: the findings of the rules
   alone, and `result.remote` says `unavailable` and why. A text longer than `max_chars` is not sent (`too_long`).
-  Nothing raises.
+  Nothing of the service raises. A deadline that passes while the rules scan raises `ScanIncomplete`, as in
+  `findings()` (since 0.9.4), and the service is not asked.
 - **No network unless asked.** The URL must be a loopback address (127.0.0.0/8, `::1`, `localhost`) or a Unix socket
   (`unix:/path`), else `RemoteDetector` raises `ValueError`; `allow_network=True` allows any `http` or `https` host.
   A host name is looked up at each request: without `allow_network` every address must be loopback, and the

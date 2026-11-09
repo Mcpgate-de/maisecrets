@@ -24,7 +24,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
-from maisecrets.detection import NO_REFERENCES, NO_SOURCES, Active, Detector, Host, contract  # noqa: E402
+from maisecrets.detection import (  # noqa: E402
+    NO_REFERENCES, NO_SOURCES, Active, Detector, Host, ScanIncomplete, contract)
 from maisecrets.detection import remote as rm  # noqa: E402
 from test_detection_entry_point import problems  # noqa: E402
 
@@ -545,11 +546,20 @@ class RemoteDetectorTests(unittest.TestCase):
         self.assertEqual((r.findings, r.remote.state, svc.received), (self.base, "too_long", []))
 
     def test_a_deadline_that_has_passed_sends_nothing(self):
+        # since 0.9.4 the deadline bounds the rules too: they raise ScanIncomplete, and the service is not asked
         svc = Service("hf")
         self.addCleanup(svc.close)
-        r = self.det.findings_with(TEXT, channel="tool", remote=rm.RemoteDetector(svc.url),
+        with self.assertRaises(ScanIncomplete):
+            self.det.findings_with(TEXT, channel="tool", remote=rm.RemoteDetector(svc.url),
                                    deadline=time.monotonic() - 1)
-        self.assertEqual((r.findings, r.remote.reason, svc.received), (self.base, "timeout", []))
+        self.assertEqual(svc.received, [])
+
+    def test_a_request_that_starts_past_the_deadline_sends_nothing(self):
+        # the rules ended in time and the deadline passed before the request: a timeout, nothing sent
+        svc = Service("hf")
+        self.addCleanup(svc.close)
+        spans, status = rm.RemoteDetector(svc.url).ask(TEXT, [], time.monotonic() - 1)
+        self.assertEqual((spans, status.reason, svc.received), ([], "timeout", []))
 
     def test_only_a_loopback_or_unix_address_without_allow_network(self):
         for url in ("http://127.0.0.1:1/", "http://localhost:1/", "http://[::1]:1/", "unix:/tmp/x.sock"):
