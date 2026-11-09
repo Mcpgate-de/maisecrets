@@ -31,6 +31,7 @@ from test_detection_entry_point import problems  # noqa: E402
 
 NAME = "Anna Kowalczyk"                       # a name no deterministic rule takes
 PHONE = "+49 171 " + "4829173"                # a finding of the rules (the number of docs/DETECTION.md)
+J = "".join
 TEXT = f"Please ask {NAME} about the build; call her at {PHONE} today."
 
 
@@ -629,6 +630,61 @@ class RemoteDetectorTests(unittest.TestCase):
             with self.subTest(reason=reason):
                 r = rm.Result(base.findings, rm.RemoteStatus("hf", "m", "unavailable", reason))
                 self.assertEqual(problems(contract.result_response(self.det, r), schema), [])
+
+
+
+class JsonEscapedTextTests(unittest.TestCase):
+    """The name service reads a JSON-escaped text with its escapes as the characters they stand for, and each span
+    comes back in the offsets of the original text, whole escapes included (#39: a calendar guest list arrived as
+    `\r\nAlexander`, which the service read as the word nAlexander)."""
+    FIRST = "Alexander " + "Demo"
+    SECOND = "Oleg " + "Beispiel"
+    THIRD = "Ren" + "\\u00e9 " + "Musterfrau"      # an escaped letter inside the name
+
+    @staticmethod
+    def tokenizer_names(*names):
+        def answer(text):
+            out = []
+            for name in names:
+                # a name glued to a letter is no word of its own, as a tokenizer reads `nAlexander`
+                for m in re.finditer(r"(?<![A-Za-z])" + re.escape(name) + r"(?![A-Za-z])", text):
+                    out.append({"entity_group": "PER", "start": m.start(), "end": m.end(), "score": 0.97})
+            return out
+        return answer
+
+    def found(self, text, svc):
+        self.addCleanup(svc.close)
+        r = detector().findings_with(text, channel="tool", remote=rm.RemoteDetector(svc.url))
+        return r, [text[m.start:m.end] for m in r.findings if m.kind.startswith("remote:")]
+
+    def test_a_name_after_an_escaped_line_break_is_found_at_its_place_in_the_text(self):
+        plain_third = "René Musterfrau"
+        for crlf in ("\\r\\n", "\\\\r\\\\n", "\\n"):
+            text = J(["Guests", crlf, "- organiser", crlf, self.FIRST, crlf, self.SECOND, crlf, self.THIRD, crlf,
+                      "end"])
+            svc = Service("hf", answer=self.tokenizer_names(self.FIRST, self.SECOND, plain_third))
+            with self.subTest(crlf=crlf):
+                r, names = self.found(text, svc)
+                self.assertEqual(names, [self.FIRST, self.SECOND, self.THIRD])
+                self.assertNotIn("\\", svc.received[-1]["inputs"])     # the service read the characters
+                self.assertEqual(r.remote.state, "ok")
+
+    def test_a_finding_of_the_rules_inside_an_escaped_text_still_goes_out_as_filler(self):
+        text = J(["Call\\n", self.FIRST, "\\nat ", PHONE, "\\n"])
+        svc = Service("hf", answer=self.tokenizer_names(self.FIRST))
+        _r, names = self.found(text, svc)
+        self.assertEqual(names, [self.FIRST])
+        sent = svc.received[-1]["inputs"]
+        self.assertNotIn(PHONE, sent)
+        self.assertIn(rm.FILLER * len(PHONE), sent)
+
+    def test_the_map_covers_whole_escapes_and_a_text_without_one_is_sent_as_it_is(self):
+        text = "a\\u00e9b\\\\nc"
+        plain, starts, ends = rm.unescape_json(text)
+        self.assertEqual(plain, "aéb\nc")
+        self.assertEqual([text[a:b] for a, b in zip(starts, ends)], ["a", "\\u00e9", "b", "\\\\n", "c"])
+        self.assertEqual(rm.unescape_json("no escape here"), ("no escape here", None, None))
+        self.assertEqual(rm.unescape_json("a \\ b")[1], None)     # a backslash before no escape letter stays
 
 
 if __name__ == "__main__":
