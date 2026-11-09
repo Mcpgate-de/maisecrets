@@ -530,9 +530,7 @@ class ScanRuleTests(unittest.TestCase):
                     self.assertEqual(kinds(text, channel="tool"), [("ds-basic-auth", pw)])
         # a placeholder, a password equal to the user and a documented host (the address there was no hit either)
         # stay text, as ds-basic-auth leaves them; a URL with a user and no password keeps its address
-        # and a password of 5 characters or fewer (pass, x), as with a host without a dot
         for text in ("https://user:secret@host.with.dot/", "https://user:changeme@host.with.dot/",
-                     "scheme://user:" + "pa" + "ss@host.with.dot/", "https://reader:x@docs.internal/api",
                      "amqp://guest:guest@mq.shop-test.de/", "https://user:" + "pa" + "ss@example.com/path",
                      "https://app:x@api.example.net/"):
             with self.subTest(text=text):
@@ -540,7 +538,16 @@ class ScanRuleTests(unittest.TestCase):
         mail = "dana.okafor" + "@mailbox-test.net"
         self.assertEqual(kinds("ftp://" + mail + "/pub"), [("email", mail)])
         self.assertEqual(kinds("mail " + mail + " or http://example.org"), [("email", mail)])
-        self.assertEqual(kinds("https://user:" + "pa" + "ss@host.with.dot/", enabled={"email"}), [])
+        # a password under 6 characters, or with ds-basic-auth off, keeps the EMAIL hit it had before 0.9.4 (review of
+        # the branch: the short password of a URL stayed in clear)
+        short = "jx" + "ne"
+        for text, at in (("https://admin:" + short + "@corp.demo-firma.de/", short + "@corp.demo-firma.de"),
+                         ("scheme://user:" + "pa" + "ss@host.with.dot/", "pa" + "ss@host.with.dot")):
+            with self.subTest(text=text):
+                self.assertEqual(kinds(text), [("email", at)])
+        long_pw = "geheim" + "123"
+        self.assertEqual(kinds("https://admin:" + long_pw + "@corp.demo-firma.de/", enabled={"email"}),
+                         [("email", long_pw + "@corp.demo-firma.de")])
 
     def test_an_address_with_a_sign_or_digits_glued_to_its_end_is_found_and_they_stay_outside(self):
         # gateway shadow comparison (#39 follow-up): an underscore, a run of hyphens, a phone number without its space

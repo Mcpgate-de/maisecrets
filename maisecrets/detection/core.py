@@ -102,6 +102,7 @@ from .value_checks import (  # noqa: F401
 )
 from .encoded_mail import (  # noqa: F401
     _ENCODED_MAIL_CONTEXT_RE, _ENCODED_MAIL_TO_RE, _encoded_mail_expected, _MAIL_COLUMN_RE, _OWNER_WORDS, _url_userinfo,
+    _url_password,
     _OWNER_PAIRS, _OWNER_TAILS, _FILE_EXTENSIONS, _names_a_mail_column,
 )
 
@@ -2420,13 +2421,6 @@ def _label_before(text: str, start: int) -> str:
     return m.group(1) if m else ""
 
 
-def _not_a_url_password(text: str, start: int, pw: str, enabled, allow: bool) -> bool:
-    """Short (pass, x), a placeholder, a reference, or ds-basic-auth off: the password of a URL that is no SECRET."""
-    return (len(pw) < 6 or looks_like_placeholder(pw) or _references().hit_is_a_reference(text, start, pw)
-            or (enabled is not None and not {"ds-basic-auth", "detect-secrets:ds-basic-auth"} & set(enabled))
-            or (allow and switched_off("ds-basic-auth", allow_list()[1])))
-
-
 def _pass_equals_user(whole: str, secret: str) -> bool:
     """`postgres:postgres@`, `curl -u admin:admin`: a password equal to the user name is a default."""
     sec = secret.strip("\"' ")
@@ -3046,13 +3040,13 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     end = ext.end()
                     secret = text[start:end]
             if userinfo is not None:
-                start, end = userinfo
-                secret = text[start:end]
-                if (not secret or overlaps(start, end)
-                        or _not_a_url_password(text, start, secret, enabled, rule_list is None)):
+                a, b = userinfo
+                how = _url_password(text, a, text[a:b], enabled, rule_list is None)
+                if how == "drop" or how == "secret" and overlaps(a, b):
                     continue
-                take(Match("ds-basic-auth", "SECRET", secret, start, end), own)
-                continue
+                if how == "secret":
+                    take(Match("ds-basic-auth", "SECRET", text[a:b], a, b), own)
+                    continue
             take(Match(rule.id, rule.type, secret, start, end), own)
     found.sort(key=lambda x: x.start)
     return found

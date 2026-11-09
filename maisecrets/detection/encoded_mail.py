@@ -135,3 +135,15 @@ def _url_userinfo(text: str, at: int) -> tuple[int, int] | None:
     if not m:
         return None
     return (m.start(2), m.end(2) if m.group(1).lower() != m.group(2).lower() else m.start(2))
+
+
+def _url_password(text: str, start: int, pw: str, enabled, allow: bool) -> str:
+    """What the address rule does with the password of a URL it took: "drop" a default (empty), a placeholder or a
+    reference; keep its EMAIL hit, as before 0.9.4, for one under 6 characters or with ds-basic-auth off; else
+    "secret"."""
+    from . import core as c   # at the call: the core is loaded by then
+    if not pw or c.looks_like_placeholder(pw) or c._references().hit_is_a_reference(text, start, pw):
+        return "drop"
+    off = (enabled is not None and not {"ds-basic-auth", "detect-secrets:ds-basic-auth"} & set(enabled)) or (
+        allow and c.switched_off("ds-basic-auth", c.allow_list()[1]))
+    return "email" if len(pw) < 6 or off else "secret"
