@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## [0.9.3] - 2026-11-09
+
+### Features
+
+- /maisecrets:sref status and the login name the masked account of the login (a909319)
+
+### Fixes
+
+- a log timestamp after an id label is no longer masked as an identity number (09d851f)
+- only a reference a gateway gave this session is left alone by detection and replacement (da94300)
+- finds a password in a table column without the Markdown separator row, in a tab table, and under a secret, token or PIN header (6733abf)
+- hides the passcode in a Microsoft Teams join link (12a5be0)
+- the login takes the scope of each sink from the gateway's sinks map (a7e49e8)
+- the note about the name service says why it gave no result (no answer in time, text too long, not running) (b402f10)
+- a secret of your store is never drawn either; its placeholder stays with a lock, and a click copies it (5a80aec)
+- a gateway secret is never drawn on the screen; one click copies it (d7cc054)
+- a value stored from a reference id by 0.9.1 no longer breaks the reference at the next read (379ccb6)
+
 ## [0.9.2] - 2026-11-08
 
 ### Fixes
