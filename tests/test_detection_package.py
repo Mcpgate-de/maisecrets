@@ -194,6 +194,32 @@ class UnknownCodeTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(contract.RequestError):
                 contract.parse(json.dumps(request).encode())
 
+    def test_a_config_and_a_system_locale_without_rules_never_raise_and_their_codes_are_left_out(self):
+        # review of the branch: Detector(regions=resolve(cfg)) raised for is_IS, `eu` or a typo, which the plugin's
+        # config path ignored before; resolve() leaves those codes out and says so in `source`
+        for cfg, locale, want in (({"regions": ["auto"]}, "is_IS", ("generic",)),
+                                  ({"regions": ["auto", "eu", "dee"]}, "de_DE", ("generic", "de")),
+                                  ({"regions": ["generic", "zz", "us"]}, "C", ("generic", "us"))):
+            with self.subTest(cfg=cfg, locale=locale):
+                active = detection.resolve_regions(cfg, locale=locale)
+                self.assertEqual(active.regions, want)
+                d = detection.Detector(regions=active, sources=detection.NO_SOURCES,
+                                       references=detection.NO_REFERENCES, host=detection.Host(user="t", year=2026))
+                self.assertEqual(d.findings("hello"), [])
+        self.assertIn("eu has no rules", detection.resolve_regions({"regions": ["eu"]}, locale="C").source)
+
+    def test_a_function_that_gives_an_unknown_code_raises_at_the_rule_load(self):
+        for regions, languages in ((("generic", "eu"), ("en",)), (("generic",), ("en", "xx"))):
+            d = detection.Detector(regions=lambda r=regions, g=languages: detection.Active(r, g, "f"),
+                                   sources=detection.NO_SOURCES, references=detection.NO_REFERENCES,
+                                   host=detection.Host(user="t", year=2026))
+            with self.subTest(regions=regions, languages=languages), self.assertRaisesRegex(ValueError, "unknown"):
+                d.findings("hello")
+        good = detection.Detector(regions=lambda: detection.Active(("generic", "de"), ("en", "de"), "f"),
+                                  sources=detection.NO_SOURCES, references=detection.NO_REFERENCES,
+                                  host=detection.Host(user="t", year=2026))
+        self.assertEqual(good.findings("hello"), [])
+
     def test_an_unknown_channel_raises_value_error(self):
         d = self.detector()
         for call in (d.scan, d.findings, d.findings_with, detect.scan, detect.findings):

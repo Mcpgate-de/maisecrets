@@ -1597,8 +1597,11 @@ def active_regions():
     gave,
     else the config of this computer."""
     given = _det()._given_regions
+    if callable(given):
+        given = given()
+        _regions.check(given)   # a function's result as an Active given at once: ValueError for an unknown code
     if given is not None:
-        return given() if callable(given) else given
+        return given
     try:
         from ..home import regions_from_config
     except Exception:  # noqa: BLE001 - no home.py (the standalone skill) or one that cannot load: no config, as before

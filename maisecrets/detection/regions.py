@@ -152,18 +152,24 @@ def resolve(cfg: dict, locale: str | None = None) -> Active:
     if raw is None:
         raw, source = list(DEFAULT_REGIONS), "default"
     lang, country = parse_locale(system_locale() if locale is None else locale)
+    known = known_regions()
     regions: list[str] = []
     for r in raw:
         r = str(r).strip().lower()
         r = _COUNTRY_ALIAS.get(r, r)
         if r == "auto":
-            if country:
+            if country in known:
                 regions.append(country)
                 source += f", auto = {country} from the system setting"
+            elif country:
+                # a country without rules of its own (is_IS): the generic rules, as before 0.9.4; never an error
+                source += f", auto = {country} from the system setting, which has no rules of its own"
             else:
                 source += ", auto = none (no system setting)"
-        elif r and r != "generic":
+        elif r in known and r != "generic":
             regions.append(r)
+        elif r and r != "generic":
+            source += f", {r} has no rules and is left out"   # a typo or `eu` in a config: never an error
     regions = list(dict.fromkeys(regions))
     lang = _LANGUAGE_ALIAS.get(lang, lang) if lang else None
     # every label file is on (since 0.8.2): a label word of one language in a text of another is common
