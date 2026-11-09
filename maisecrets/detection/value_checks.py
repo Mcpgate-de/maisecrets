@@ -155,16 +155,6 @@ def _a_version(text: str, start: int, end: int, value: str) -> bool:
                 or re.search(re.escape(value) + "(?i:" + _PACKAGE_EXT + ")", text[end:line_end]))
 
 
-# a dot-number right before an IPv4 shape, or two after it: a longer dotted run, such as a mail server's message id
-# (`id ….48.2026.11.08.11.21.20` in a Received header), a version or an OID. One after it is the port of tcpdump
-_DOTTED_BEFORE_RE = _LazyRx(r"\d\.$")
-_DOTTED_AFTER_RE = _LazyRx(r"\.\d+\.\d")
-
-
-def _in_dotted_run(text: str, start: int, end: int) -> bool:
-    return bool(_DOTTED_BEFORE_RE.search(text[max(0, start - 2):start]) or _DOTTED_AFTER_RE.match(text, end))
-
-
 def _bitlocker_key_ok(v: str) -> bool:
     """Each of the 8 groups is divisible by 11 and below 65536 * 11 (the key is 8 16-bit words, each times 11)."""
     groups = v.split("-")
