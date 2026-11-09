@@ -116,6 +116,12 @@ class Match:
     # the score of a model finding (a remote detector, Detector.findings_with); a deterministic finding has none
     score: float | None = field(default=None, compare=False, repr=False)
 
+    def __repr__(self) -> str:
+        # never the value: a caller that logs a hit must not write the secret (issue #39)
+        score = "" if self.score is None else f", score={self.score!r}"
+        return (f"Match(kind={self.kind!r}, type={self.type!r}, start={self.start!r}, end={self.end!r}, "
+                f"length={len(self.value)}, value=<hidden>{score})")
+
 
 class _Lazy:
     """A regex compiled on first use. Rule loading then costs a dict, not 265 compilations.

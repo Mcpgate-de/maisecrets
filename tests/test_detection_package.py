@@ -130,6 +130,32 @@ class TextTypeTests(unittest.TestCase):
         self.assertEqual([(m.kind, m.start, m.end, m.value) for m in self.d.scan(Text(text))], want)
 
 
+
+class MatchReprTests(unittest.TestCase):
+    """repr() and str() of a hit name its type, rule, offsets and length, never its value: a caller that logs a hit
+    must not write the secret (issue #39). The value stays an attribute."""
+
+    def test_the_repr_and_the_str_of_a_hit_hide_the_value(self):
+        d = detection.Detector(regions=detection.Active(regions=("generic",), languages=("en",), source="t"),
+                               sources=detection.NO_SOURCES, references=detection.NO_REFERENCES,
+                               host=detection.Host(user="t", year=2026))
+        token = "glpat-" + "AbCdEfGhIjKlMnOpQrSt"
+        (m,) = d.findings("token " + token + " done")
+        self.assertEqual(m.value, token, "the premise: the token is found, and the value is still an attribute")
+        for shown in (repr(m), str(m), f"{m}", repr([m])):
+            with self.subTest(shown=shown[:30]):
+                self.assertNotIn(token, shown)
+                self.assertNotIn(token[6:], shown)
+        self.assertEqual(repr(m), f"Match(kind={m.kind!r}, type='SECRET', start=6, end={6 + len(token)}, "
+                                  f"length={len(token)}, value=<hidden>)")
+
+    def test_a_score_shows_and_two_hits_still_compare_by_their_fields(self):
+        a = detection.Match("remote:hf", "NAME", "Dana " + "Okafor", 0, 11, 0.9)
+        self.assertIn("score=0.9", repr(a))
+        self.assertNotIn("Okafor", repr(a))
+        self.assertEqual(a, detection.Match("remote:hf", "NAME", "Dana " + "Okafor", 0, 11))
+
+
 class OldNamesTests(unittest.TestCase):
     def test_each_old_name_is_the_module_of_the_package(self):
         import importlib
