@@ -932,6 +932,10 @@ def presidio_region(rec_id: str) -> str:
 # (danszymkowiak/maisecrets 8c943ee, Apache-2.0); the subfield code is `?` and two digits
 _IBAN_LEFT = "(?<![A-Z0-9])"
 PRESIDIO_LEFT_SUBFIELD = {"iban": "(?:(?<![A-Z0-9])|(?<=\\?[0-9]{2}))"}
+# the groups of an IBAN with a no-break space (U+00A0, U+202F) between them, as a word processor or a bank's web page
+# writes them: Presidio takes only a space or a hyphen, and the IBAN stayed in the clear (issue #39)
+_IBAN_GROUP_SEP_UPSTREAM = "[ -]"
+PRESIDIO_GROUP_SEP = {"iban": "[ \u00a0\u202f-]"}
 
 
 # Presidio's card pattern takes the first digits 1, 3, 4, 5 and 6, so a Mastercard of the 2-series (2221 to 2720,
@@ -979,7 +983,9 @@ def _label_consumed(regex: str) -> tuple[str, int]:
 def _presidio_regex(rec_id: str, regex: str) -> str:
     left = PRESIDIO_LEFT_SUBFIELD.get(rec_id)
     if left and regex.startswith(_IBAN_LEFT):
-        return left + regex[len(_IBAN_LEFT):]
+        regex = left + regex[len(_IBAN_LEFT):]
+        sep = PRESIDIO_GROUP_SEP.get(rec_id)
+        return regex.replace(_IBAN_GROUP_SEP_UPSTREAM, sep) if sep else regex
     first = PRESIDIO_CARD_FIRST.get(rec_id)
     if first and regex.count(_CARD_FIRST_UPSTREAM) == 1:
         # a Visa number of 19 digits (ISO/IEC 7812 allows 13, 16 and 19): Presidio's groups end at 17 digits, and

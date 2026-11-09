@@ -117,7 +117,8 @@ IBAN_LENGTH = {
 
 
 def _iban_ok(raw: str) -> bool:
-    s = raw.replace(" ", "").replace("-", "").upper()   # the vendored pattern takes a space or a hyphen between groups
+    # the vendored pattern takes a space or a hyphen between groups, and the core a no-break space (PRESIDIO_GROUP_SEP)
+    s = re.sub(r"[ \u00a0\u202f-]", "", raw).upper()
     if not 15 <= len(s) <= 34 or not s.isalnum():
         return False
     if raw != raw.upper() and IBAN_LENGTH.get(s[:2]) != len(s):
