@@ -278,7 +278,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             from maisecrets.show_values import mode as show_mode  # noqa: E402
             from maisecrets.vault import load_config  # noqa: E402
             if show_mode(load_config()) != "off":
-                screen = " Claude never saw a value with \U0001F512, only its placeholder."
+                screen = " \U0001F512 marks a value Claude got only as a placeholder."
         except Exception:  # noqa: BLE001 - a line for the person only
             screen = ""
     if v.backend.test_mode or not marker.exists():

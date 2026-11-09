@@ -68,8 +68,8 @@ def intro_line(backend, names: bool = True, codex: bool = False) -> str:
     }.get(type(backend).__name__, "in the local store")
     # what it finds, what the AI then sees, and that plain text is known to the AI (UX research 2026-11-09: a name
     # in clear text read as a miss of maisecrets); without NER a name needs a label or the term list
-    return (f"It keeps passwords, keys and personal data out of the AI: the AI sees a placeholder "
-            f"\u27e6\u2026\u27e7, and the value stays on this computer, {where}. "
+    return (f"It replaces the passwords, keys and personal data it finds with a placeholder \u27e6\u2026\u27e7 "
+            f"before the AI reads them, and the value stays on this computer, {where}. "
             "Text without a placeholder the AI reads as it is."
             + ("" if names else " It finds a name only after a label or on your term list. \U0001F4A1 To find names "
                "too, turn on NER" + (" (a local model, needs Docker; README, \"Names from a service\")." if codex else

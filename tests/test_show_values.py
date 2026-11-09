@@ -68,9 +68,11 @@ class AnswerTests(unittest.TestCase):
 
     def test_off_reads_nothing(self):
         from unittest import mock
+        from maisecrets import ner_setup
         with mock.patch.object(self.vault, "status", side_effect=AssertionError("read under off")):
             self.assertEqual(self.ask([self.key], mode="off"), {"mode": "off", "links": show_values.links(),
-                                                                   "values": {}, "displays": {}, "names": False})
+                                                                   "values": {}, "displays": {}, "names": False,
+                                                                   "docker": bool(ner_setup.container_tool())})
 
     def test_the_answer_says_whether_ner_finds_names(self):
         # the mod's first hint names /maisecrets:ner only while NER is off

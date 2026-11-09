@@ -42,6 +42,7 @@ const wanted = new Set()
 let asking = false
 const open = new Map()    // click: the text's address -> keys shown until CLICK_MS
 let hinted = false
+let docker = false       // docker or podman is there: the NER tip can start it
 let names = true        // NER is on (mod-values answer); off adds the NER tip to the first hint
 const revealed = new Map()  // a gateway reference -> its value, for this session
 // a gateway reference -> the display the gateway gave with it ('' when none): the label of its link, never the text the
@@ -83,6 +84,7 @@ async function ask($, asked) {
   mode = ['always', 'click', 'off'].includes(a.mode) ? a.mode : 'off'
   links = a.links !== false
   names = a.names !== false
+  docker = a.docker === true
   if (mode === 'off') { cache.clear(); absent.clear(); open.clear(); revealed.clear() }
   const values = a.values && typeof a.values === 'object' ? a.values : {}
   const shown = a.displays && typeof a.displays === 'object' ? a.displays : {}
@@ -170,9 +172,9 @@ function hint($) {
       if (n >= HINT_SESSIONS) return
       await $.store.set('show-values-hints', n + 1)
       // the lock says what Claude never saw; plain text next to it Claude knows (UX research 2026-11-09)
-      $.ui.toast('🔒 Claude never saw this value, only a placeholder. Claude knows the rest of this reply. ' +
-        (names ? 'A click copies the value.' : '💡 To find names too, turn on NER: /maisecrets:ner local ' +
-          '(a local model, needs Docker).'), { timeoutMs: 15000 })
+      $.ui.toast('🔒 Claude got only a placeholder for this value. Text without 🔒 Claude knows. ' +
+        (names ? 'A click copies the value.' : docker ? '💡 To find names too: /maisecrets:ner local (a local model).'
+          : '💡 A name it missed? /maisecrets:term add NAME'), { timeoutMs: 15000 })
     } catch { /* a hint only */ }
   })
 }
