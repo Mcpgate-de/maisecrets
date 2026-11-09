@@ -156,6 +156,55 @@ class MatchReprTests(unittest.TestCase):
         self.assertEqual(a, detection.Match("remote:hf", "NAME", "Dana " + "Okafor", 0, 11))
 
 
+
+class UnknownCodeTests(unittest.TestCase):
+    """A region, a label language or a channel the library does not know raises ValueError with the known codes,
+    as the JSON entry point refuses them (issue #39: a language code went into a file path unchecked)."""
+
+    @staticmethod
+    def detector(regions=("generic",), languages=("en",)):
+        return detection.Detector(regions=detection.Active(regions=regions, languages=languages, source="t"),
+                                  sources=detection.NO_SOURCES, references=detection.NO_REFERENCES,
+                                  host=detection.Host(user="t", year=2026))
+
+    def test_an_unknown_label_language_raises_value_error_with_the_known_ones(self):
+        for code in ("xx", "../labels/de", "de.txt", "DE", "", "en/../de"):
+            with self.subTest(code=code), self.assertRaisesRegex(ValueError, "known ones: cs, da, de, en"):
+                self.detector(languages=("en", code))
+            with self.subTest(code=code, call="load_labels"), self.assertRaises(ValueError):
+                detection.regions.load_labels(code)
+
+    def test_an_unknown_region_raises_value_error_with_the_known_ones(self):
+        for code in ("zz", "gb", "DE", "", "../de"):
+            with self.subTest(code=code), self.assertRaisesRegex(ValueError, "unknown region .* known ones: at, "):
+                self.detector(regions=("generic", code))
+
+    def test_the_library_and_the_entry_point_take_the_same_regions_and_languages(self):
+        from maisecrets.detection import contract
+        for code in sorted(contract.known_regions()):
+            with self.subTest(region=code):
+                self.detector(regions=("generic", code))
+        for code in detection.regions.label_languages_available():
+            with self.subTest(language=code):
+                self.detector(languages=("en", code))
+        for field, code in (("regions", "zz"), ("languages", "xx")):
+            request = {"contract": contract.CONTRACT, "text": "x", "channel": "tool", "regions": ["generic"],
+                       "languages": ["en"]}
+            request[field] = request[field] + [code]
+            with self.subTest(field=field), self.assertRaises(contract.RequestError):
+                contract.parse(json.dumps(request).encode())
+
+    def test_an_unknown_channel_raises_value_error(self):
+        d = self.detector()
+        for call in (d.scan, d.findings, d.findings_with, detect.scan, detect.findings):
+            for channel in ("bogus", "Tool", "", None):
+                with self.subTest(call=call.__qualname__, channel=channel):
+                    with self.assertRaisesRegex(ValueError, "unknown channel .* prompt, tool"):
+                        call("hello", channel=channel)
+        for channel in ("prompt", "tool"):
+            self.assertEqual(d.findings("hello", channel=channel), [])
+
+
 class OldNamesTests(unittest.TestCase):
     def test_each_old_name_is_the_module_of_the_package(self):
         import importlib

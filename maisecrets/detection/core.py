@@ -56,6 +56,7 @@ from . import deadline as _deadline
 from .deadline import ScanIncomplete  # noqa: F401  the library's name: maisecrets.detection.ScanIncomplete
 from . import registry as _registry
 from . import fields as _fields
+from . import regions as _regions
 from .label_number import LabelNumbers as _LabelNumbers
 from .prefilter import NONE as _NO_PREFIX, any_keyword as _any_keyword, lacks_prefix as _lacks_prefix  # noqa: F401
 from .prefilter import lacks_required as _lacks_required, response_rules as _response_rules
@@ -104,6 +105,8 @@ from .encoded_mail import (  # noqa: F401
 )
 
 RULES_DIR = Path(__file__).resolve().parent / "rules"
+
+CHANNELS = ("prompt", "tool")   # a person typed it; a tool result or a file
 
 
 @dataclass(frozen=True)
@@ -1745,6 +1748,8 @@ class Detector(_LabelNumbers):
     use_references configure it)."""
 
     def __init__(self, regions=None, sources=None, references=None, host=None):
+        if isinstance(regions, _regions.Active):
+            _regions.check(regions)   # an unknown region or label language raises ValueError, as the entry point
         self.host = THIS_COMPUTER if host is None else host
         self._given_regions = regions
         self._given_sources = sources
@@ -2509,9 +2514,12 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", pa
     a key one
     of them. A text that is not a str (bytes, None) raises TypeError; a subclass of str is a str. `fields`, a list of
     (start, end, name) with a field path as name, adds what each field name says as a label before its value would
-    (maisecrets/detection/fields.py); without it the scan is the one of before."""
+    (maisecrets/detection/fields.py); without it the scan is the one of before. A channel other than "prompt" or
+    "tool" raises ValueError."""
     if not isinstance(text, str):
         raise TypeError(f"text must be a str, not {type(text).__name__}")
+    if channel not in CHANNELS:
+        raise ValueError(f"unknown channel {channel!r}; the known ones: prompt, tool")
     spans = _fields.checked(text, fields)
     # the channel and the path travel as arguments: a nested scan (is_fixture) or a scan in another thread has its own
     hits = _scan(text, enabled, rule_list=rule_list, channel="tool" if channel == "tool" else "prompt", path=path or "")

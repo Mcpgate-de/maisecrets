@@ -49,12 +49,12 @@ for m in d.findings(text, channel="tool", path="notes.txt"):
 
 | Name | What |
 |---|---|
-| `Detector` | A detector with its own configuration: `scan`, `findings`, `rules`, `allow_list`, `explain_allowed`, `regions`, `reset`, `slowest_user_rule`, `activate`, `label_names_a_number` (since 0.8.30, below). `scan` and `findings` take the text as a `str` (a subclass of `str` too) and raise `TypeError` for anything else, `bytes` and `None` included (since 0.8). They take an optional keyword argument `fields` (since 0.8, additive): the field names of values in the text, below |
-| `Match` | One hit: `kind` (the rule id), `type`, `value`, `start`, `end`. `start` and `end` count the Unicode code points of the `str` that was scanned, and `text[start:end] == value` |
+| `Detector` | A detector with its own configuration: `scan`, `findings`, `rules`, `allow_list`, `explain_allowed`, `regions`, `reset`, `slowest_user_rule`, `activate`, `label_names_a_number` (since 0.8.30, below). `scan` and `findings` take the text as a `str` (a subclass of `str` too) and raise `TypeError` for anything else, `bytes` and `None` included (since 0.8). A `channel` other than `prompt` or `tool` raises `ValueError` (since 0.9.4). They take an optional keyword argument `fields` (since 0.8, additive): the field names of values in the text, below |
+| `Match` | One hit: `kind` (the rule id), `type`, `value`, `start`, `end`. Its `repr()` and `str()` show the rule, the type, the offsets and the length, never the value (since 0.9.4). `start` and `end` count the Unicode code points of the `str` that was scanned, and `text[start:end] == value` |
 | `Sources`, `NO_SOURCES` | What a scan takes besides the built-in rules |
 | `References`, `NO_REFERENCES` | The reference form of the caller |
 | `Host`, `THIS_COMPUTER` | What a scan reads of its computer |
-| `Active`, `resolve_regions` | The regions and label languages, and their resolution from a config (`locale=` to give the locale) |
+| `Active`, `resolve_regions` | The regions and label languages, and their resolution from a config (`locale=` to give the locale). A `Detector` given an `Active` with a region or a label language that the JSON entry point does not know raises `ValueError`, which names the known codes (since 0.9.4; before, an unknown region was ignored and an unknown language raised `FileNotFoundError`) |
 | `user_rule` | A rule of your own, for `Sources.user_rules` (returns a `Rule`) |
 | `TYPES` | The type vocabulary: each type a `Match` can carry, with its `family` and `class` (`maisecrets/detection/types.json`) |
 | `ScanIncomplete` | Raised by a scan past its `deadline=` (since 0.8.24): `findings`, `reason`, `read`, below |
