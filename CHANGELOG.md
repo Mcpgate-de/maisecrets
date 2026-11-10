@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.9.5] - 2026-11-10
+
+### Fixes
+
+- the start of a hook compiles the pattern of a gateway login command only when it is used (46cf0c6)
+- the first hint names NER only where docker or podman can start it, and else how to add a missed name (d7aa19a)
+- the lock now says what the AI never saw, and the start line says that plain text is known to the AI and how to find names with NER (66cfbbf)
+- maisecrets.__version__ names the version of the installed package or plugin (d45deb0)
+- the account of a gateway login is shown to you only, not to the AI (d627f7b)
+
 ## [0.9.4] - 2026-11-09
 
 ### Fixes
