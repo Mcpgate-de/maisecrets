@@ -6,6 +6,8 @@ from __future__ import annotations
 import os
 import re
 
+from .lazy_regex import LazyRx as _LazyRx
+
 
 def note(payload: dict) -> str | None:
     """_note, and then the references of this result that a gateway gave this session become trusted (trust): after
@@ -25,7 +27,7 @@ def note(payload: dict) -> str | None:
     return " ".join(x for x in (out, extra) if x) or None
 
 
-_SREF_COMMAND_RE = re.compile(r'/hooks/run\.(?:sh|cmd)" sref --args-stdin')
+_SREF_COMMAND_RE = _LazyRx(r'/hooks/run\.(?:sh|cmd)" sref --args-stdin')
 
 
 def account_notice(payload: dict) -> str | None:
