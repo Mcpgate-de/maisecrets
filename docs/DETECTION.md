@@ -309,6 +309,12 @@ for leaf, m in findings_by_leaf(detector, response):     # layout "lines", the d
     leaf.path, leaf.value[m.start:m.end], m.type          # path: dict keys and list indices, outermost first
 ```
 
+- **numbers=True** (since 0.9.6): an integer of 13 to 19 digits (the length of a card number) is a leaf too, as the
+  string of its digits, found in the same scans; a card stored as a number then comes back with its path. Without it
+  a number is never a leaf. Scan such numbers this way, not each apart: a call has a fixed cost, and a metric series
+  of 2,680 epoch-ms timestamps scanned one by one took 1.7 s, in one call with `numbers=True` 0.09 s (Apple M5, the
+  answer of ai-gateway #1822, 2026-11-11). A short text scanned alone costs less since 0.9.6 too (it walks only the
+  rules its alphabet allows), but the cost per call stays.
 - **layout "lines"** (the default since 0.8.11): one scan per record, each string on a line of its own after its last
   key, as written. A record is an item of the outermost list on a string's path; the strings in no list are one record
   of their own. So the scan of a string sees what a scan of that string after its key sees, plus the other strings
