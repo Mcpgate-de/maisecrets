@@ -423,3 +423,13 @@ coralogix-user-key                          cxup_  [A-Za-z0-9]{30}
 # literal start of 4 characters, are own rules in maisecrets/detection/own_rules.py)
 harbor-robot-account-secret                 robot\$[A-Za-z0-9_.-]+(?:\+[A-Za-z0-9_.-]+)?:[A-Za-z0-9]{32}(?![A-Za-z0-9])
 make-webhook-url                            https://hook\.[a-z0-9]+\.make\.com/[a-z0-9]{32}(?![A-Za-z0-9])
+# 0.9.6, a second survey (self-hosted tools, data platforms, key files): formats that no rule above takes alone.
+# Gitpod's token from its source (gitpod-io/gitpod#14806), dbt Cloud's from its docs, Anyscale's from its SDK, the
+# EC keys from their DER head (an SEC1 and a PKCS#8 key of P-256 as one base64 line, without a PEM header). Each had
+# 0 hits in 570 MB of public code
+gitpod-personal-access-token                gitpod_pat_  [A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{30,}
+dbt-cloud-service-token                     dbtc_  [A-Za-z0-9_-]{40,}
+dbt-cloud-user-token                        dbtu_  [A-Za-z0-9_-]{40,}
+anyscale-api-key                            esecret_  [a-z0-9]{26}
+ec-private-key-der-base64                   MHcCAQEEI  [A-Za-z0-9+/]{140,}={0,2}
+ec-pkcs8-key-der-base64                     MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg  [A-Za-z0-9+/]{120,}={0,2}
