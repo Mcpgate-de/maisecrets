@@ -61,6 +61,7 @@ from .label_number import LabelNumbers as _LabelNumbers
 from .prefilter import NONE as _NO_PREFIX, any_keyword as _any_keyword, lacks_prefix as _lacks_prefix  # noqa: F401
 from .prefilter import lacks_required as _lacks_required, response_rules as _response_rules
 from . import prefilter as _prefilter
+from .prefilter import prefix_line  # noqa: F401  detect.prefix_line
 # The value checks, the own rules and the text index live in modules of their own, so that each file stays readable.
 # The core imports each of their names: `core.<name>` stays the same object. A patch must go to the module that
 # defines it.
@@ -1166,19 +1167,18 @@ class _LabelSubset:
 
 def _load_prefixes() -> list[Rule]:
     """Bare token prefixes newer than the vendored rulesets: maisecrets/detection/rules/prefixes.txt, one
-    per line `id  regex`, extended by pull request. The whole match is the secret. The release tree for the
-    directory ships the same rules as prefixes.json (scripts/build_release_tree.py), which is read when it is there."""
+    per line `id  PREFIX  REST` or `id  regex` (prefix_line), extended by pull request. The whole match is the
+    secret. The release tree for the directory ships the same rules as prefixes.json (scripts/build_release_tree.py),
+    which is read when it is there."""
     shipped = RULES_DIR / "prefixes.json"
     if shipped.is_file():
         return [Rule(id=d["id"], type="SECRET", regex=_Lazy(d["regex"]))
                 for d in json.loads(shipped.read_text(encoding="utf-8"))]
     out: list[Rule] = []
     for line in (RULES_DIR / "prefixes.txt").read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        rule_id, regex = line.split(None, 1)
-        out.append(Rule(id=rule_id, type="SECRET", regex=_Lazy(regex.strip())))
+        rule = prefix_line(line)
+        if rule:
+            out.append(Rule(id=rule[0], type="SECRET", regex=_Lazy(rule[1])))
     return out
 
 

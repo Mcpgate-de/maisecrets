@@ -1703,8 +1703,10 @@ A folder holds three kinds of file, and maisecrets reads nothing else from it
   `IP`) sets the placeholder type. An allowlist with `"condition": "AND"`
   and more than one part is dropped (the stricter side), and
   `/maisecrets:rules` says so.
-- `*.prefixes`, one rule per line, `id  regex`, as in
-  `maisecrets/detection/rules/prefixes.txt`. The whole match is the secret.
+- `*.prefixes`, one rule per line, as in
+  `maisecrets/detection/rules/prefixes.txt`: `id  PREFIX  REST`, where
+  maisecrets adds the edges to the literal prefix, or `id  regex`. The whole
+  match is the secret.
 - `*.terms`, a team term list with a floor against common words (Terms). Not
   in `rules.d`: your own list is `~/.maisecrets/terms.txt`.
 

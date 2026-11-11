@@ -369,3 +369,23 @@ def rules_for(order: tuple, joined: str, low: str) -> tuple:
             continue
         out.append(rule)
     return tuple(out)
+
+
+# ------------------------------------------------------------------------------- the lines of prefixes.txt --
+_PREFIX_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.:/-")
+
+
+def prefix_line(line: str) -> tuple[str, str] | None:
+    """(id, regex) of one line of rules/prefixes.txt, or None for a comment or an empty line. The short form
+    `id  PREFIX  REST` names the literal prefix apart (4 characters or more, no regex syntax): the token starts at
+    the prefix only when no token character stands before it (or an escaped \\n, \\r, \\t of a JSON string), and it
+    ends where no token character follows. The long form `id  regex` writes all of that itself."""
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    parts = line.split(None, 2)
+    if len(parts) == 3 and len(parts[1]) >= 4 and _PREFIX_CHARS.issuperset(parts[1]):
+        p = re.escape(parts[1])
+        return parts[0], f"{p}(?:(?<![A-Za-z0-9_-]{p})|(?<=\\\\[nrt]{p})){parts[2]}(?![A-Za-z0-9_-])"
+    rule_id, regex = line.split(None, 1)
+    return rule_id, regex.strip()
