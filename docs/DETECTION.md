@@ -49,7 +49,7 @@ for m in d.findings(text, channel="tool", path="notes.txt"):
 
 | Name | What |
 |---|---|
-| `Detector` | A detector with its own configuration: `scan`, `findings`, `rules`, `allow_list`, `explain_allowed`, `regions`, `reset`, `slowest_user_rule`, `activate`, `label_names_a_number` (since 0.8.30, below). `scan` and `findings` take the text as a `str` (a subclass of `str` too) and raise `TypeError` for anything else, `bytes` and `None` included (since 0.8). A `channel` other than `prompt` or `tool` raises `ValueError` (since 0.9.4). They take an optional keyword argument `fields` (since 0.8, additive): the field names of values in the text, below |
+| `Detector` | A detector with its own configuration: `scan`, `findings`, `rules`, `allow_list`, `explain_allowed`, `regions`, `reset`, `slowest_user_rule`, `activate`, `label_names_a_number` (since 0.8.30, below), `label_changes_a_number` (since 0.9.6, below). `scan` and `findings` take the text as a `str` (a subclass of `str` too) and raise `TypeError` for anything else, `bytes` and `None` included (since 0.8). A `channel` other than `prompt` or `tool` raises `ValueError` (since 0.9.4). They take an optional keyword argument `fields` (since 0.8, additive): the field names of values in the text, below |
 | `Match` | One hit: `kind` (the rule id), `type`, `value`, `start`, `end`. Its `repr()` and `str()` show the rule, the type, the offsets and the length, never the value (since 0.9.4). `start` and `end` count the Unicode code points of the `str` that was scanned, and `text[start:end] == value` |
 | `Sources`, `NO_SOURCES` | What a scan takes besides the built-in rules |
 | `References`, `NO_REFERENCES` | The reference form of the caller |
@@ -112,6 +112,25 @@ d.label_names_a_number("order_id")                                 # False
   (each rule's regex and check, its context and keywords, the label files and the word tables of `personal.py`), and
   fails on a rule without a recipe, on a recipe its rule does not read, and on a rule of a number type that has
   neither a recipe nor a reason in `NEVER_LABEL_ONLY`.
+
+
+### Both directions: `label_changes_a_number` (since 0.9.6)
+
+`label_names_a_number` answers one direction: whether a label adds a finding. A label can also take one away: a
+16-digit number that passes the Luhn check is a card bare, and no card under `id`, `order_id`, `uuid` or `ref`. A
+caller that takes the findings of a number under one label for the same number under another label needs both
+directions (ai-gateway #1822: a card under `id` stayed in clear). `Detector.label_changes_a_number(label)` is True
+when a digit-only value of 7 to 19 digits under the label gives other findings than bare: one more, one fewer or
+another. False means the findings are the same under the label and bare.
+
+```python
+d.label_changes_a_number("series")      # False: a series of numbers is no label of a number
+d.label_changes_a_number("id")          # True: a card under `id` is no card (label_names_a_number("id") is False)
+```
+
+It asks the same samples in the same forms and channels as `label_names_a_number`, and a Luhn-valid number of each
+card length from 13 to 19 digits (`label_number.bare_samples()`), which rules find bare. A label for which
+`label_names_a_number` is True is True here too. `""` is False, and the answer is cached per label until `reset()`.
 
 ## Field names: `fields` (since 0.8)
 
