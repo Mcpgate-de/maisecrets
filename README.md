@@ -2557,10 +2557,10 @@ a to-do.
   reaches the AI through a prompt, a tool call or a tool result. It does not
   see these channels: the AI's own reply, the instruction and memory files
   that the client loads, an image you paste, and masks of other systems. A name in clear
-  text in a reply can come from any of them. One case: another system masked a
-  sign-off as `*******`, which keeps the length, and the AI derived the name
-  from that and the masked address: the AI can guess a value from context.
-  maisecrets never writes `***`. If maisecrets missed a name, add it with
+  text in a reply can come from any of them, and from an earlier prompt that
+  maisecrets did not mask: when maisecrets stores a value later, it replaces
+  the value in the transcript files on disk with `*` of the same length, but
+  the AI saw it in clear text before. If maisecrets missed a name, add it with
   `/maisecrets:term add NAME`. Without
   NER (`/maisecrets:ner local`) maisecrets finds a name only after a label
   (such as `Kontaktperson:` or a
