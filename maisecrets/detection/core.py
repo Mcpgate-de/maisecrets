@@ -60,6 +60,7 @@ from . import regions as _regions
 from .label_number import LabelNumbers as _LabelNumbers
 from .prefilter import NONE as _NO_PREFIX, any_keyword as _any_keyword, lacks_prefix as _lacks_prefix  # noqa: F401
 from .prefilter import lacks_required as _lacks_required, response_rules as _response_rules
+from . import prefilter as _prefilter
 # The value checks, the own rules and the text index live in modules of their own, so that each file stays readable.
 # The core imports each of their names: `core.<name>` stays the same object. A patch must go to the module that
 # defines it.
@@ -775,7 +776,7 @@ PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "
 # in Gretel), CredData +2 false alarms; docs/BENCHMARKS.md. A typed prompt keeps the card word: a block there costs
 # more than a mask. A documented test card stays text (rules/public_test_values.txt). From a fork
 # (danszymkowiak/maisecrets 795b411, d5807ea, Apache-2.0)
-CARD_ALONE_IN_TOOL = frozenset({"credit-card"})
+CARD_ALONE_IN_TOOL = _prefilter.CARD_ALONE_IN_TOOL
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # the digits of a phone number after its +: a licence or passport pattern took them from the phone rule. A + right
@@ -1767,6 +1768,7 @@ class Detector(_LabelNumbers):
         self._allow = None                  # (exact values, rule ids) of the allow list
         self._shape_ids = None              # the ids of the shape rules of the list (is_fixture)
         self._order = (None, ())            # a rule list and its scan order (_in_scan_order)
+        self._alphabet_orders = (None, {})  # prefilter.alphabet_order
         self._label_class = {}              # the class of each label, under the label words of the languages
         self._pw_last_on = None             # the password label words of the languages (_pw_words)
         self._active = None                 # the regions and languages the rule list was loaded for
@@ -2754,7 +2756,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             take(m)
     keywords_in: dict = {}      # keyword -> whether the text holds it: the 652 keywords of the rules are 519 texts
     until = _deadline.current()
-    for rule in (_response_rules(text) or _in_scan_order(rules()) if rule_list is None else rule_list):
+    order = rule_list if rule_list is not None else (
+        _response_rules(text) or _prefilter.alphabet_order(_det(), _in_scan_order(rules()), text, low))
+    for rule in order:
         if until is not None and time.monotonic() > until:
             raise ScanIncomplete(list(found))     # between rules: what the rules before found, in this text's offsets
         if rule is _PERSONAL:
