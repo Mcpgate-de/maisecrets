@@ -406,3 +406,20 @@ composio-user-api-key                       uak_  [A-Za-z0-9_-]{43}
 # documents no format; the line follows a secret of a new consumer: ATOA, a body of 64, an upper-case hex tail of 8.
 # The consumer key beside it is public (the authorize URL carries it) and has no line.
 bitbucket-oauth-consumer-secret             ATOA  [A-Za-z0-9_-]{60,68}[0-9A-F]{8}
+# 0.9.6, a survey of the services an IT company commonly uses: formats that no vendored catalog takes when the token
+# stands alone. Each regex is written here from the vendor's documentation or from the format a catalog under the
+# Apache or MIT license names (Kingfisher); each had 0 hits in 182 MB of public code.
+aws-sts-session-token                       IQoJb3JpZ2luX2Vj  [A-Za-z0-9+/=]{100,}
+aws-sts-session-token-legacy                FwoGZXIvYXdzE  [A-Za-z0-9+/=]{100,}
+google-oauth-refresh-token                  1//0  [A-Za-z0-9_-]{60,}
+slack-refresh-token                         xoxe-1-  [A-Za-z0-9-]{140,}
+paypal-rest-access-token                    A21AA  [A-Za-z0-9_-]{80,}
+cloudflare-tunnel-token                     eyJhIjoi  [A-Za-z0-9+/]{100,}={0,2}
+honeycomb-ingest-key                        hcaik_  [0-9a-z]{58}
+honeycomb-ingest-key-x                      hcxik_  [0-9a-z]{58}
+coralogix-api-key                           cxtp_  [A-Za-z0-9]{30}
+coralogix-user-key                          cxup_  [A-Za-z0-9]{30}
+# the same survey, two tokens whose literal start has other edges: written in the long form (four more, with no
+# literal start of 4 characters, are own rules in maisecrets/detection/own_rules.py)
+harbor-robot-account-secret                 robot\$[A-Za-z0-9_.-]+(?:\+[A-Za-z0-9_.-]+)?:[A-Za-z0-9]{32}(?![A-Za-z0-9])
+make-webhook-url                            https://hook\.[a-z0-9]+\.make\.com/[a-z0-9]{32}(?![A-Za-z0-9])

@@ -497,10 +497,17 @@ SOURCES = dict([
      '1000\\.[0-9a-f]{32}\\.[0-9a-f]{32}'),
     ('bitbucket-oauth-consumer-secret',
      'ATOA[A-Za-z0-9_\\-]{64}[0-9A-F]{8}'),
+    # 0.9.6: the long-form lines of the survey (a short-form line is tested by tests/test_prefix_lines.py)
+    ('k3s-join-token', 'K10[0-9a-f]{64}::server:[A-Za-z0-9]{24}'),
+    ('salesforce-session-id', '00D[A-Za-z0-9]{15}![A-Za-z0-9._]{96}'),
+    ('microsoft-account-refresh-token', 'M\\.C[0-9]{3}_[A-Z]{3}\\.[0-9A-Za-z!*$-]{300}'),
+    ('asana-personal-access-token', '2/[0-9]{16}/[0-9]{16}:[a-f0-9]{32}'),
+    ('harbor-robot-account-secret', 'robot\\$[a-z]{6}\\+[a-z]{5}:[A-Za-z0-9]{32}'),
+    ('make-webhook-url', 'https://hook\\.eu2\\.make\\.com/[a-z0-9]{32}'),
 ])
 # formats whose body has no upper length and a short lower one: any cut of a token is again one
 OPEN_ENDED = {"aws-bedrock-short-term-api-key"}
-N_RULES = 236
+N_RULES = 242
 
 
 def token(rule_id: str) -> str:
