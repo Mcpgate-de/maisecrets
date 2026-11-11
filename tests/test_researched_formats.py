@@ -495,10 +495,12 @@ SOURCES = dict([
      'hooks\\.zapier\\.com/hooks/catch/[0-9]+/[A-Za-z0-9]+/?'),
     ('zoho-oauth-token',
      '1000\\.[0-9a-f]{32}\\.[0-9a-f]{32}'),
+    ('bitbucket-oauth-consumer-secret',
+     'ATOA[A-Za-z0-9_\\-]{64}[0-9A-F]{8}'),
 ])
 # formats whose body has no upper length and a short lower one: any cut of a token is again one
 OPEN_ENDED = {"aws-bedrock-short-term-api-key"}
-N_RULES = 235
+N_RULES = 236
 
 
 def token(rule_id: str) -> str:
