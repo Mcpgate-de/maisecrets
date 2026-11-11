@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.9.6] - 2026-11-11
+
+### Features
+
+- detects 17 more secrets that stand alone: Infisical, Bitwarden Secrets Manager, Gitpod, dbt Cloud, Convex, DeepSeek and Anyscale tokens, private keys as one base64 line, passwords in ODBC, Go MySQL and Oracle connection strings, and the password of a Wi-Fi QR code (7d9004d)
+- detects 16 more token formats that stand alone, among them AWS STS session tokens, Google OAuth refresh tokens, Slack refresh tokens and k3s join tokens (365845d)
+- a token format is one line `id  PREFIX  REST`; maisecrets adds the edges (cf082f1)
+- Detector.label_changes_a_number(label) says whether a label adds a finding to a number or takes one away (b786778)
+- findings_by_leaf(numbers=True) finds a card stored as a number in the same scans (a207a40)
+- detects a Bitbucket OAuth consumer secret (ATOA…) that stands alone, without a label (299a127)
+
+### Fixes
+
+- a short text walks only the rules its alphabet allows; a metric series of 2,680 numbers scans 4 times faster (818c2fc)
+
 ## [0.9.5] - 2026-11-10
 
 ### Fixes
