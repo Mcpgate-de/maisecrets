@@ -2,7 +2,7 @@
  "betterleaksMinVersion": "v1.8.0",
  "filter": "(matchesAny(finding[\"secret\"], [\n  `(?i)^true|false|null$`,\n  `^(?i:a+|b+|c+|d+|e+|f+|g+|h+|i+|j+|k+|l+|m+|n+|o+|p+|q+|r+|s+|t+|u+|v+|w+|x+|y+|z+|\\*+|\\.+)$`,\n  `^\\$(?:\\d+|{\\d+})$`,\n  `^\\$(?:[A-Z_]+|[a-z_]+)$`,\n  `^\\${(?:[A-Z_]+|[a-z_]+)}$`,\n  `^\\{\\{[ \\t]*[\\w ().|]+[ \\t]*}}$`,\n  `^\\$\\{\\{[ \\t]*(?:(?:env|github|secrets|vars)(?:\\.[A-Za-z]\\w+)+[\\w \"'&./=|]*)[ \\t]*}}$`,\n  `^%(?:[A-Z_]+|[a-z_]+)%$`,\n  `^%[+\\-# 0]?[bcdeEfFgGoOpqstTUvxX]$`,\n  `^\\{\\d{0,2}}$`,\n  `^@(?:[A-Z_]+|[a-z_]+)@$`,\n  `^/Users/(?i)[a-z0-9]+/[\\w .-/]+$`,\n  `^/(?:bin|etc|home|opt|tmp|usr|var)/[\\w ./-]+$`\n]) || containsAny(finding[\"secret\"], [\n  \"abcdefghijklmnopqrstuvwxyz\",\n  \"014df517-39d1-4453-b7b3-9930c563627c\"\n]))\n\n",
  "minVersion": "v8.25.0",
- "prefilter": "matchesAny(attributes[\"path\"], [\n  `gitleaks\\.toml`,\n  `(?i)\\.(?:bmp|gif|jpe?g|png|svg|tiff?)$`,\n  `(?i)\\.(?:eot|[ot]tf|woff2?)$`,\n  `(?i)\\.(?:docx?|xlsx?|pdf|bin|socket|vsidx|v2|suo|wsuo|dll|pdb|exe|gltf)$`,\n  `go\\.(?:mod|sum|work(?:\\.sum)?)$`,\n  `(?:^|/)vendor/modules\\.txt$`,\n  `(?:^|/)vendor/(?:github\\.com|golang\\.org/x|google\\.golang\\.org|gopkg\\.in|istio\\.io|k8s\\.io|sigs\\.k8s\\.io)(?:/.*)?$`,\n  `(?:^|/)gradlew(?:\\.bat)?$`,\n  `(?:^|/)gradle\\.lockfile$`,\n  `(?:^|/)mvnw(?:\\.cmd)?$`,\n  `(?:^|/)\\.mvn/wrapper/MavenWrapperDownloader\\.java$`,\n  `(?:^|/)node_modules(?:/.*)?$`,\n  `(?:^|/)(?:deno\\.lock|npm-shrinkwrap\\.json|package-lock\\.json|pnpm-lock\\.yaml|yarn\\.lock)$`,\n  `(?:^|/)bower_components(?:/.*)?$`,\n  `(?:^|/)(?:angular|bootstrap|jquery(?:-?ui)?|plotly|swagger-?ui)[a-zA-Z0-9.-]*(?:\\.min)?\\.js(?:\\.map)?$`,\n  `(?:^|/)javascript\\.json$`,\n  `(?:^|/)(?:Pipfile|poetry)\\.lock$`,\n  `(?i)(?:^|/)(?:v?env|virtualenv)/lib(?:64)?(?:/.*)?$`,\n  `(?i)(?:^|/)(?:lib(?:64)?/python[23](?:\\.\\d{1,2})+|python/[23](?:\\.\\d{1,2})+/lib(?:64)?)(?:/.*)?$`,\n  `(?i)(?:^|/)[a-z0-9_.]+-[0-9.]+\\.dist-info(?:/.+)?$`,\n  `(?:^|/)vendor/(?:bundle|ruby)(?:/.*?)?$`,\n  `\\.gem$`,\n  `verification-metadata\\.xml`,\n  `Database.refactorlog`,\n  `(?:^|/)\\.git$`\n])\n\n",
+ "prefilter": "matchesAny(attributes[\"path\"], [\n  `gitleaks\\.toml`,\n  `(?i)\\.(?:bmp|gif|jpe?g|png|svg|tiff?)$`,\n  `(?i)\\.(?:eot|[ot]tf|woff2?)$`,\n  `(?i)\\.(?:docx?|xlsx?|pdf|bin|socket|vsidx|v2|suo|wsuo|dll|pdb|exe|gltf)$`,\n  `go\\.(?:mod|sum|work(?:\\.sum)?)$`,\n  `(?:^|/)vendor/modules\\.txt$`,\n  `(?:^|/)vendor/(?:github\\.com|golang\\.org/x|google\\.golang\\.org|gopkg\\.in|istio\\.io|k8s\\.io|sigs\\.k8s\\.io)(?:/.*)?$`,\n  `(?:^|/)gradlew(?:\\.bat)?$`,\n  `(?:^|/)gradle\\.lockfile$`,\n  `(?:^|/)mvnw(?:\\.cmd)?$`,\n  `(?:^|/)\\.mvn/wrapper/MavenWrapperDownloader\\.java$`,\n  `(?:^|/)node_modules(?:/.*)?$`,\n  `(?:^|/)(?:bun\\.lockb?|deno\\.lock|npm-shrinkwrap\\.json|package-lock\\.json|pnpm-lock\\.yaml|yarn\\.lock)$`,\n  `(?:^|/)bower_components(?:/.*)?$`,\n  `(?:^|/)(?:angular|bootstrap|jquery(?:-?ui)?|plotly|swagger-?ui)[a-zA-Z0-9.-]*(?:\\.min)?\\.js(?:\\.map)?$`,\n  `(?:^|/)javascript\\.json$`,\n  `(?:^|/)(?:Pipfile|poetry)\\.lock$`,\n  `(?i)(?:^|/)(?:v?env|virtualenv)/lib(?:64)?(?:/.*)?$`,\n  `(?i)(?:^|/)(?:lib(?:64)?/python[23](?:\\.\\d{1,2})+|python/[23](?:\\.\\d{1,2})+/lib(?:64)?)(?:/.*)?$`,\n  `(?i)(?:^|/)[a-z0-9_.]+-[0-9.]+\\.dist-info(?:/.+)?$`,\n  `(?:^|/)vendor/(?:bundle|ruby)(?:/.*?)?$`,\n  `\\.gem$`,\n  `verification-metadata\\.xml`,\n  `Database.refactorlog`,\n  `(?:^|/)\\.git$`\n])\n\n",
  "title": "betterleaks config",
  "rules": [
   {
@@ -297,7 +297,7 @@
     "apify_api_"
    ],
    "regex": "\\b(apify_api_[A-Za-z0-9]{34,38})\\b",
-   "validate": "let r = http.get(\"https://api.apify.com/v2/users/me\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  });\nr.status == 200 && ((r.body contains \"\\\"data\\\"\") && (r.body contains \"\\\"username\\\"\")) ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n\n"
+   "validate": "let r = http.get(\"https://api.apify.com/v2/users/me\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && type(r.json?.data) == \"map\" && (r.json?.data?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "medium",
@@ -673,7 +673,7 @@
     "bitly"
    ],
    "regex": "(?i)\\bbitly(?:.|[\\n\\r]){0,32}?(?:SECRET|PRIVATE|ACCESS|KEY|TOKEN)(?:.|[\\n\\r]){0,32}?([a-f0-9]{40})\\b",
-   "validate": "let r = http.get(\"https://api-ssl.bitly.com/v4/user\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains \"\\\"login\\\":\") ? {\n    \"result\": \"valid\",\n    \"login\": (r.json?.login ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api-ssl.bitly.com/v4/user\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && (r.json?.login ?? \"\") != \"\" ? {\n  \"result\": \"valid\",\n  \"login\": (r.json?.login ?? \"\")\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -709,7 +709,7 @@
   {
    "confidence": "medium",
    "description": "Detected a Box API access token, which may expose Box files and account data.",
-   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "filter": "let prefix = filter.findMatch(finding[\"fragment_raw\"][finding[\"match_line_start_idx\"]:finding[\"match_start_idx\"]], \"[\\\\w.-]*$\");\nlet identifier = prefix + filter.findMatch(finding[\"match\"], \"^[\\\\w .-]+\");\nlower(identifier) contains \"client\" || entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n\n",
    "id": "box-api-access-token",
    "keywords": [
     "box_",
@@ -719,7 +719,7 @@
     "boxa"
    ],
    "regex": "(?i)(?:box)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.box.com/2.0/users/me\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  });\nr.status == 200 && ((r.body contains \"\\\"id\\\"\")) ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n\n"
+   "validate": "let r = http.get(\"https://api.box.com/2.0/users/me\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && (r.json?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -785,7 +785,7 @@
     "bkua_"
    ],
    "regex": "\\b(bkua_(?:[a-z0-9]{40}|[a-z0-9]{53}))\\b",
-   "validate": "let r = http.get(\"https://api.buildkite.com/v2/access-token\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  });\nr.status == 200 && ((r.body contains \"\\\"scopes\\\"\")) ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n\n"
+   "validate": "let r = http.get(\"https://api.buildkite.com/v2/access-token\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n}); r.status == 200 && r.json?.scopes != nil ? {\n  \"result\": \"valid\"\n} : r.status in [401, 403] ? {\n  \"result\": \"invalid\",\n  \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -866,7 +866,7 @@
     "ccipat_"
    ],
    "regex": "\\b(CCIPAT_[a-zA-Z0-9]{22}_[a-z0-9]{40})",
-   "validate": "let r = http.get(\"https://circleci.com/api/v2/me\", {\n    \"Accept\": \"application/json\",\n    \"Circle-Token\": finding[\"secret\"]\n  }); r.status == 200 && (r.json?.id ?? \"\") != \"\" ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://circleci.com/api/v2/me\", {\n  \"Circle-Token\": finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && (r.json?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -948,7 +948,7 @@
     "clickup"
    ],
    "regex": "(?i)(?:clickup)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pk_[0-9]{8,9}_[a-z0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.clickup.com/api/v2/user\", {\n    \"Accept\": \"application/json\",\n    \"Authorization\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\",\n    \"username\": (r.json?.user?.username ?? \"\"),\n    \"email\": (r.json?.user?.email ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.clickup.com/api/v2/user\", {\n  \"Authorization\": finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && type(r.json?.user) == \"map\" && (r.json?.user?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\",\n  \"username\": (r.json?.user?.username ?? \"\"),\n  \"email\": (r.json?.user?.email ?? \"\")\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -962,13 +962,46 @@
   },
   {
    "confidence": "high",
-   "description": "Detected a Cloudflare API Key, potentially compromising cloud application deployments and operational security.",
+   "description": "Detected a Cloudflare account ID, used as a component of Cloudflare API key validation.",
+   "id": "cloudflare-account-id.1",
+   "keywords": [
+    "account_id",
+    "account-id",
+    "account id",
+    "accountid"
+   ],
+   "regex": "(?i:(?:account[_. -]*id)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Cloudflare API key version 1 (legacy format), potentially compromising cloud application deployments and operational security.",
    "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
    "id": "cloudflare-api-key",
    "keywords": [
     "cloudflare"
    ],
-   "regex": "(?i)(?:cloudflare)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+   "regex": "(?i)(?:cloudflare)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let account_token = finding[\"secret\"] startsWith \"cfat_\";\nlet account_id = components[\"cloudflare-account-id.1\"]?.secret ?? \"\";\naccount_token && account_id == \"\" ? {\n  \"result\": \"needs_validation\",\n  \"reason\": \"Cloudflare account token verification requires an account ID\"\n} : (\n  let r = http.get(\"https://api.cloudflare.com/client/v4\" + (account_token ? \"/accounts/\" + account_id : \"/user\") + \"/tokens/verify\", {\n    \"Accept\": \"application/json\",\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  });\n  let provider_result = r.json?.result ?? {};\n  let token_status = provider_result[\"status\"] ?? \"\";\n  r.status == 200 && (r.json?.success ?? false) && token_status == \"active\" && (provider_result[\"id\"] ?? \"\") != \"\" ? {\n    \"result\": \"valid\",\n    \"token_id\": provider_result[\"id\"],\n    \"token_type\": account_token ? \"account\" : \"user\",\n    \"account_id\": account_id\n  } : r.status == 200 && token_status in [\"disabled\", \"expired\"] ? {\n    \"result\": \"revoked\",\n    \"reason\": token_status == \"expired\" ? \"Token expired\" : \"Token disabled\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n)\n"
+  },
+  {
+   "components": [
+    {
+     "id": "cloudflare-account-id.1",
+     "optional": true,
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Detected a Cloudflare API key version 2 (cfut/cfat format), potentially granting access to Cloudflare account and service resources.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "cloudflare-api-key.2",
+   "keywords": [
+    "cfut_",
+    "cfat_"
+   ],
+   "regex": "\\b(cf[ua]t_[A-Za-z0-9]{40}[a-f0-9]{8})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let account_token = finding[\"secret\"] startsWith \"cfat_\";\nlet account_id = components[\"cloudflare-account-id.1\"]?.secret ?? \"\";\naccount_token && account_id == \"\" ? {\n  \"result\": \"needs_validation\",\n  \"reason\": \"Cloudflare account token verification requires an account ID\"\n} : (\n  let r = http.get(\"https://api.cloudflare.com/client/v4\" + (account_token ? \"/accounts/\" + account_id : \"/user\") + \"/tokens/verify\", {\n    \"Accept\": \"application/json\",\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  });\n  let provider_result = r.json?.result ?? {};\n  let token_status = provider_result[\"status\"] ?? \"\";\n  r.status == 200 && (r.json?.success ?? false) && token_status == \"active\" && (provider_result[\"id\"] ?? \"\") != \"\" ? {\n    \"result\": \"valid\",\n    \"token_id\": provider_result[\"id\"],\n    \"token_type\": account_token ? \"account\" : \"user\",\n    \"account_id\": account_id\n  } : r.status == 200 && token_status in [\"disabled\", \"expired\"] ? {\n    \"result\": \"revoked\",\n    \"reason\": token_status == \"expired\" ? \"Token expired\" : \"Token disabled\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n)\n"
   },
   {
    "confidence": "high",
@@ -1600,6 +1633,7 @@
   {
    "confidence": "high",
    "description": "Identified an Elastic Cloud Serverless API key, which may expose Elasticsearch and Kibana resources to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
    "id": "elastic-cloud-api-key",
    "keywords": [
     "essu_"
@@ -1658,6 +1692,7 @@
    ],
    "confidence": "high",
    "description": "Identified an Exoscale API key paired with a secret, which together grant programmatic access to Exoscale cloud resources.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
    "id": "exoscale-api-key",
    "keywords": [
     "exo"
@@ -1668,6 +1703,7 @@
   {
    "confidence": "high",
    "description": "Identified an Exoscale API secret, used as a component of the exoscale-api-key composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 4.0\n",
    "id": "exoscale-api-secret",
    "keywords": [
     "exoscale"
@@ -1733,7 +1769,7 @@
     "fastly"
    ],
    "regex": "(?i)(?:fastly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.fastly.com/current_user\", {\n    \"Fastly-Key\": finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\",\n    \"login\": (r.json?.login ?? \"\"),\n    \"name\": (r.json?.name ?? \"\"),\n    \"customer_id\": (r.json?.customer_id ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.fastly.com/tokens/self\", {\n    \"Accept\": \"application/json\",\n    \"Fastly-Key\": finding[\"secret\"]\n  }); r.status == 200 && (r.json?.id ?? \"\") != \"\" ? {\n    \"result\": \"valid\",\n    \"login\": (r.json?.login ?? \"\"),\n    \"name\": (r.json?.name ?? \"\"),\n    \"customer_id\": (r.json?.customer_id ?? \"\")\n  } : r.status == 401 ? {\n    \"result\": \"revoked\",\n    \"reason\": \"Token expired\"\n  } : r.status == 403 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -1745,7 +1781,7 @@
     "x_figma_token"
    ],
    "regex": "(?i)(?:x-figma-token|xfigmatoken|x_figma_token)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9A-F]{4}-[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.figma.com/v1/me\", {\n    \"X-Figma-Token\": finding[\"secret\"]\n  }); r.status == 200 && !(r.body contains \"Invalid token\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.email ?? \"\"),\n    \"handle\": (r.json?.handle ?? \"\"),\n    \"id\": (r.json?.id ?? \"\")\n  } : r.status in [401, 403] || (r.body contains \"Invalid token\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.figma.com/v1/me\", {\n  \"X-Figma-Token\": finding[\"secret\"]\n});\nr.status == 200 && type(r.json) == \"map\" && (r.json?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\",\n  \"email\": (r.json?.email ?? \"\"),\n  \"handle\": (r.json?.handle ?? \"\"),\n  \"id\": (r.json?.id ?? \"\")\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -1756,7 +1792,7 @@
     "figd_"
    ],
    "regex": "(?i)\\b(figd_[A-Z0-9_-]{38,42})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.figma.com/v1/me\", {\n    \"X-Figma-Token\": finding[\"secret\"]\n  }); r.status == 200 && !(r.body contains \"Invalid token\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.email ?? \"\"),\n    \"handle\": (r.json?.handle ?? \"\"),\n    \"id\": (r.json?.id ?? \"\")\n  } : r.status in [401, 403] || (r.body contains \"Invalid token\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.figma.com/v1/me\", {\n  \"X-Figma-Token\": finding[\"secret\"]\n});\nr.status == 200 && type(r.json) == \"map\" && (r.json?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\",\n  \"email\": (r.json?.email ?? \"\"),\n  \"handle\": (r.json?.handle ?? \"\"),\n  \"id\": (r.json?.id ?? \"\")\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -1881,7 +1917,7 @@
     "fs_api"
    ],
    "regex": "(?i)(?:(?:fullstory|fs_api|fullstory_api))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:na1|eu1)\\.[A-Za-z0-9]{20,})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.fullstory.com/me\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes(finding[\"secret\"] + \":\")),\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.fullstory.com/me\", {\n  \"Authorization\": \"Basic \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && type(r.json?.role) == \"string\" && r.json.role != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\"result\": \"invalid\", \"reason\": \"Unauthorized\"} : validate.unknown(r)\n\n"
   },
   {
    "confidence": "high",
