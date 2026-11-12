@@ -935,7 +935,9 @@ logged as a loosened protection.
   when others can see your screen.
 - **Other plugins** get the tool output before maisecrets masks it for the
   model, because Claude Code gives every hook the same payload. A plugin that
-  logs tool output can store a value in clear text (#29).
+  logs tool output can store a value in clear text (#29). Measured on
+  2026-11-08: a memory plugin wrote the search text of its recall, built from
+  tool output, into its own event log. Check what your other plugins log.
 
 **Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
 it is, without the clipboard. A plugin cannot register a command without its
