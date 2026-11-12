@@ -1526,5 +1526,9 @@
  {
   "id": "ec-pkcs8-key-der-base64",
   "regex": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg(?:(?<![A-Za-z0-9_-]MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg)|(?<=\\\\[nrt]MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg))[A-Za-z0-9+/]{120,}={0,2}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "serval-secret-key",
+  "regex": "svl_secret_(?:(?<![A-Za-z0-9_-]svl_secret_)|(?<=\\\\[nrt]svl_secret_))(?:pk|wk|mk)_[0-9A-Za-z]{49}(?![A-Za-z0-9_-])"
  }
 ]
