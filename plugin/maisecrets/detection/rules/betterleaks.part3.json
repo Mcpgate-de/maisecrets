@@ -1,6 +1,42 @@
 {
  "rules": [
   {
+   "confidence": "high",
+   "description": "Pinterest access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "pinterest-access-token",
+   "keywords": [
+    "pina_"
+   ],
+   "regex": "\\b(pina_[A-Za-z0-9_-]{20,200})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.pinterest.com/v5/user_account\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"username\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but user-account access is restricted\"\n  } : r.status == 401 && (r.json?.code ?? 0) == 2 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Authentication failed\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a PKCS #12 file, which commonly contain bundled private keys.",
+   "id": "pkcs12-file",
+   "path": "(?i)(?:^|\\/)[^\\/]+\\.p(?:12|fx)$"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Plaid API Token, potentially compromising financial data aggregation and banking services.",
+   "id": "plaid-api-token",
+   "keywords": [
+    "plaid"
+   ],
+   "regex": "(?i)(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(access-(?:sandbox|development|production)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Uncovered a Plaid Client ID, which could lead to unauthorized financial service integrations and data breaches.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "plaid-client-id",
+   "keywords": [
+    "plaid"
+   ],
+   "regex": "(?i)(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
    "confidence": "medium",
    "description": "Detected a Plaid Secret key, risking unauthorized access to financial accounts and sensitive transaction data.",
    "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
@@ -402,7 +438,7 @@
     "r8_"
    ],
    "regex": "(?i)\\b(r8_[A-Za-z0-9]{37})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.replicate.com/v1/account\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains '\"type\"') && (r.body contains '\"username\"') && (r.body contains '\"name\"') ? {\n    \"result\": \"valid\",\n    \"username\": (r.json?.username ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.replicate.com/v1/account\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && (r.json?.username ?? \"\") != \"\" && (r.json?.type ?? \"\") in [\"user\", \"organization\"] ? {\n  \"result\": \"valid\",\n  \"username\": (r.json?.username ?? \"\")\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -445,7 +481,8 @@
    "keywords": [
     "rubygems_"
    ],
-   "regex": "\\b(rubygems_[a-f0-9]{48})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+   "regex": "\\b(rubygems_[a-f0-9]{48})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://rubygems.org/api/v1/gems.json\", {\n    \"Authorization\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 403 && (r.body contains \"invalid API key\") ? {\n    \"result\": \"revoked\",\n    \"reason\": \"API key was deleted\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"API key lacks the index scope\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -499,6 +536,7 @@
   {
    "confidence": "high",
    "description": "Identified a standalone Scaleway Secret Key. This can be used to authenticate API requests.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
    "id": "scaleway-secret-key",
    "keywords": [
     "scaleway",
@@ -567,7 +605,8 @@
    "keywords": [
     "sg."
    ],
-   "regex": "\\b(SG\\.(?i)[a-z0-9=_\\-\\.]{66})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+   "regex": "\\b(SG\\.(?i)[a-z0-9=_\\-\\.]{66})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.sendgrid.com/v3/scopes\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && type(r.json?.scopes) == \"array\" && all(r.json.scopes, {type(#) == \"string\"}) ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\"result\": \"invalid\", \"reason\": \"Unauthorized\"} : validate.unknown(r)\n\n"
   },
   {
    "confidence": "high",
@@ -578,7 +617,7 @@
     "xkeysib-"
    ],
    "regex": "\\b(xkeysib-[a-fA-F0-9]{64}-[a-zA-Z0-9]{16})\\b",
-   "validate": "let r = http.get(\"https://api.brevo.com/v3/account\", {\n    \"api-key\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.brevo.com/v3/account\", {\n  \"api-key\": finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && (r.json?.email ?? \"\") != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "medium",
@@ -728,7 +767,8 @@
    "keywords": [
     "xoxb"
    ],
-   "regex": "xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*"
+   "regex": "xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*",
+   "validate": "let r = http.post(\"https://slack.com/api/auth.test\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Content-Type\": \"application/x-www-form-urlencoded; charset=utf-8\"\n}, \"\");\nlet provider_error = r.json?.error ?? \"\";\nr.status == 200 && (r.json?.ok ?? false) ? {\n  \"result\": \"valid\"\n} : provider_error in [\"token_revoked\", \"token_expired\", \"account_inactive\"] ? {\n  \"result\": \"revoked\",\n  \"reason\": provider_error\n} : provider_error in [\"invalid_auth\", \"not_authed\"] || r.status in [401, 403] ? {\n  \"result\": \"invalid\",\n  \"reason\": provider_error == \"\" ? \"Unauthorized\" : provider_error\n} : {\n  \"result\": \"unknown\",\n  \"reason\": provider_error == \"\" ? \"Unexpected provider response\" : provider_error\n}\n\n"
   },
   {
    "confidence": "high",
@@ -759,7 +799,8 @@
    "keywords": [
     "xoxb"
    ],
-   "regex": "xoxb-[0-9]{8,14}-[a-zA-Z0-9]{18,26}"
+   "regex": "xoxb-[0-9]{8,14}-[a-zA-Z0-9]{18,26}",
+   "validate": "let r = http.post(\"https://slack.com/api/auth.test\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Content-Type\": \"application/x-www-form-urlencoded; charset=utf-8\"\n}, \"\");\nlet provider_error = r.json?.error ?? \"\";\nr.status == 200 && (r.json?.ok ?? false) ? {\n  \"result\": \"valid\"\n} : provider_error in [\"token_revoked\", \"token_expired\", \"account_inactive\"] ? {\n  \"result\": \"revoked\",\n  \"reason\": provider_error\n} : provider_error in [\"invalid_auth\", \"not_authed\"] || r.status in [401, 403] ? {\n  \"result\": \"invalid\",\n  \"reason\": provider_error == \"\" ? \"Unauthorized\" : provider_error\n} : {\n  \"result\": \"unknown\",\n  \"reason\": provider_error == \"\" ? \"Unexpected provider response\" : provider_error\n}\n\n"
   },
   {
    "confidence": "high",
@@ -812,7 +853,8 @@
     "xoxp-",
     "xoxe-"
    ],
-   "regex": "xox[pe](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}"
+   "regex": "xox[pe](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}",
+   "validate": "let r = http.post(\"https://slack.com/api/auth.test\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Content-Type\": \"application/x-www-form-urlencoded; charset=utf-8\"\n}, \"\");\nlet provider_error = r.json?.error ?? \"\";\nr.status == 200 && (r.json?.ok ?? false) ? {\n  \"result\": \"valid\"\n} : provider_error in [\"token_revoked\", \"token_expired\", \"account_inactive\"] ? {\n  \"result\": \"revoked\",\n  \"reason\": provider_error\n} : provider_error in [\"invalid_auth\", \"not_authed\"] || r.status in [401, 403] ? {\n  \"result\": \"invalid\",\n  \"reason\": provider_error == \"\" ? \"Unauthorized\" : provider_error\n} : {\n  \"result\": \"unknown\",\n  \"reason\": provider_error == \"\" ? \"Unexpected provider response\" : provider_error\n}\n\n"
   },
   {
    "confidence": "high",
@@ -1024,7 +1066,7 @@
    "keywords": [
     "tableau"
    ],
-   "regex": "\\b([A-Za-z0-9+/]{22}==:[A-Za-z0-9]{32})\\b",
+   "regex": "(?:^|[^A-Za-z0-9+/])([A-Za-z0-9+/]{22}==:[A-Za-z0-9]{32})\\b",
    "validate": "let r = http.post(\"https://\" + (components[\"tableau-server-host.1\"]?.secret ?? \"\") + \"/api/3.26/auth/signin\", {\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{\\\"credentials\\\":{\\\"personalAccessTokenName\\\":\\\"\" + (components[\"tableau-personal-access-token-name.1\"]?.secret ?? \"\")\n    + \"\\\",\\\"personalAccessTokenSecret\\\":\\\"\" + finding[\"secret\"] + \"\\\",\\\"site\\\":{}}}\");\n  r.status == 200 && (r.json?.credentials?.token ?? \"\") != \"\" ? {\n    \"result\": \"valid\"\n  } : r.status in [400, 401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid Tableau credentials\"\n  } : validate.unknown(r)\n"
   },
   {
@@ -1129,7 +1171,8 @@
    "keywords": [
     "twitch"
    ],
-   "regex": "(?i)(?:twitch)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+   "regex": "(?i)(?:twitch)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://id.twitch.tv/oauth2/validate\", {\n  \"Authorization\": \"OAuth \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && type(r.json?.client_id) == \"string\" && r.json.client_id != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\"result\": \"invalid\", \"reason\": \"Unauthorized\"} : validate.unknown(r)\n\n"
   },
   {
    "confidence": "high",
@@ -1204,6 +1247,7 @@
   {
    "confidence": "high",
    "description": "Identified an UpCloud API token, which may expose cloud infrastructure resources to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
    "id": "upcloud-api-token",
    "keywords": [
     "ucat_"
@@ -1301,7 +1345,7 @@
     "vercel"
    ],
    "regex": "(?i)(?:vercel)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Z0-9]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.vercel.com/v2/user\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains \"\\\"user\\\"\") && (r.body contains \"\\\"email\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.user?.email ?? \"\"),\n    \"username\": (r.json?.user?.username ?? \"\"),\n    \"user_id\": (r.json?.user?.id ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.vercel.com/v2/user\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"]\n}); r.status == 200 && (r.json?.user?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\",\n  \"email\": (r.json?.user?.email ?? \"\"),\n  \"username\": (r.json?.user?.username ?? \"\"),\n  \"user_id\": (r.json?.user?.id ?? \"\")\n} : r.status in [401, 403] ? {\n  \"result\": \"invalid\",\n  \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -1345,7 +1389,7 @@
     "vcp_"
    ],
    "regex": "(?i)\\b(vcp_[A-Za-z0-9_-]{56})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.vercel.com/v2/user\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains \"\\\"user\\\"\") && (r.body contains \"\\\"email\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.user?.email ?? \"\"),\n    \"username\": (r.json?.user?.username ?? \"\"),\n    \"user_id\": (r.json?.user?.id ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.vercel.com/v2/user\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"]\n}); r.status == 200 && (r.json?.user?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\",\n  \"email\": (r.json?.user?.email ?? \"\"),\n  \"username\": (r.json?.user?.username ?? \"\"),\n  \"user_id\": (r.json?.user?.id ?? \"\")\n} : r.status in [401, 403] ? {\n  \"result\": \"invalid\",\n  \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -1393,7 +1437,7 @@
     "waka.time"
    ],
    "regex": "(?i:(?:waka[_. -]?time(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.wakatime.com/api/v1/users/current?api_key=\" + finding[\"secret\"], {\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.wakatime.com/api/v1/users/current?api_key=\" + finding[\"secret\"], {\"Accept\": \"application/json\"});\nr.status == 200 && type(r.json) == \"map\" && type(r.json?.data) == \"map\" && (r.json?.data?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "high",
@@ -1404,7 +1448,7 @@
     "waka_"
    ],
    "regex": "(?i)\\b(waka_[a-z0-9]{36,64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
-   "validate": "let r = http.get(\"https://api.wakatime.com/api/v1/users/current?api_key=\" + finding[\"secret\"], {\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+   "validate": "let r = http.get(\"https://api.wakatime.com/api/v1/users/current?api_key=\" + finding[\"secret\"], {\"Accept\": \"application/json\"});\nr.status == 200 && type(r.json) == \"map\" && type(r.json?.data) == \"map\" && (r.json?.data?.id ?? \"\") != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\n  \"result\": \"invalid\", \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
   },
   {
    "confidence": "medium",
@@ -1511,7 +1555,8 @@
    "keywords": [
     "xai-"
    ],
-   "regex": "(?i)\\b(xai-[A-Za-z0-9_-]{70,120})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+   "regex": "(?i)\\b(xai-[A-Za-z0-9_-]{70,120})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.x.ai/v1/api-key\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n});\nr.status == 200 && type(r.json) == \"map\" && type(r.json?.api_key_id) == \"string\" && r.json.api_key_id != \"\" &&\n  (r.json?.api_key_disabled == true || r.json?.api_key_blocked == true || r.json?.team_blocked == true) ? {\n  \"result\": \"invalid\",\n  \"reason\": \"xAI API key or owning team is disabled/blocked\"\n} : r.status == 200 && type(r.json) == \"map\" && type(r.json?.api_key_id) == \"string\" && r.json.api_key_id != \"\" ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\"result\": \"invalid\", \"reason\": \"Unauthorized\"} : validate.unknown(r)\n\n"
   },
   {
    "confidence": "high",

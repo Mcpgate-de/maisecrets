@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [0.9.7] - 2026-11-12
+
+### Features
+
+- detects a Serval secret key that stands alone (e58cdd8)
+
+### Fixes
+
+- the PyPI package installs the command maisecrets-detect and ships the rules once (ed7b99f)
+- a date and time with dots in a mail message id is no longer masked as an IP address (dd2e885)
+- a stored product name or English word no longer masks that word in every later tool result (2b4cee0)
+- with betterleaks 1.10.0 the Box token rule stays on, and its new NuGet rule does not run twice (49fbc90)
+
+### Dependencies
+
+- update dependency betterleaks/betterleaks to v1.10.0 (fcf239f)
+
 ## [0.9.6] - 2026-11-11
 
 ### Features
