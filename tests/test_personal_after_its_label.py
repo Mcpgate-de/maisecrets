@@ -1043,32 +1043,44 @@ class RoleKeyTests(Base):
 
 class NameAboveBankBlockTests(Base):
     # #40 part 3: a Slack message or a mail writes the account holder on the line above Bank:/IBAN:. A heading, a
-    # sentence, a company or a team there stays text
+    # sentence, a company or a team there stays text. Each negative fits the shape of the rule (two to four capital
+    # words on the line right above a block with an IBAN), so only the exclusion under test keeps it text
     IBAN = "DE89" + "370400440532013000"
+    PARTICLE = "Lisa van " + "Berg"
+
+    def names(self, text: str, channel: str = "tool") -> list:
+        return [(text[m.start:m.end], m.kind) for m in scan(text, channel) if m.type == "NAME"]
 
     def test_a_name_line_above_a_bank_block_is_masked(self):
-        for text in (NAME + "\nBank: Musterbank\nIBAN: " + self.IBAN + "\n\nHier einmal bitte 35.99 ueberweisen",
-                     "Bitte ueberweise an:\n" + NAME + "\nIBAN: " + self.IBAN + "\nBIC: COBADEFFXXX",
-                     NAME + "\nBank: Example Bank\nAccount number: 12345678\nSort code: 12-34-56",
-                     "Okafor\nIBAN: " + self.IBAN, "Tyra Banks\nIBAN: " + self.IBAN):
-            value = text.split("\n")[1 if text.startswith("Bitte") else 0]
+        for text, value in (
+                (NAME + "\nBank: Musterbank\nIBAN: " + self.IBAN + "\n\nHier einmal bitte 35.99 ueberweisen", NAME),
+                ("Bitte ueberweise an:\n" + NAME + "\nIBAN: " + self.IBAN + "\nBIC: COBADEFFXXX", NAME),
+                (NAME + "\nBank: Example Bank\nAccount   number: 12345678\nSort code: 12-34-56", NAME),
+                (NAME + "\r\nBank: Musterbank\r\nIBAN: " + self.IBAN + "\r\n", NAME),
+                (NAME + ",\nIBAN: " + self.IBAN, NAME),
+                (self.PARTICLE + "\nIBAN: " + self.IBAN, self.PARTICLE),
+                ("Tyra Banks\nIBAN: " + self.IBAN, "Tyra Banks")):
             with self.subTest(n=len(text)):
-                self.assertMasked(text, value)
+                self.assertIn((value, "name-after-label"), self.names(text))
 
-    def test_a_heading_a_company_or_a_sentence_above_a_bank_block_stays_text(self):
-        for line in ("Bankverbindung", "Zahlungsdaten", "Bank Details", "Payment Details", "Monthly Invoice",
-                     "Empfänger", "Bankdaten", "Musterfirma GmbH", "Platform Team", "Hallo zusammen",
-                     "Bitte an folgendes Konto", "Stripe"):
+    def test_a_heading_a_company_or_a_brand_above_a_bank_block_stays_text(self):
+        for line in ("Bank Details", "Payment Details", "Monthly Invoice", "Spendenkonto Kinderhilfe",
+                     "Projekt Abrechnung", "Bankdaten Mieter", "Platform Team", "Musterbau Schmidt GmbH",
+                     "Hallo Zusammen", "Okafor"):
             with self.subTest(line=line):
-                self.assertEqual(line, masked(line + "\nIBAN: " + self.IBAN).split("\n")[0])
+                self.assertEqual([], self.names(line + "\nIBAN: " + self.IBAN))
 
     def test_a_name_without_an_account_line_or_after_a_blank_line_stays_text(self):
-        self.assertText(NAME + "\nBank: Musterbank\n")
-        self.assertEqual(NAME, masked(NAME + "\n\nIBAN: " + self.IBAN).split("\n")[0])
+        self.assertEqual([], self.names(NAME + "\nBank: Musterbank\n"))
+        self.assertEqual([], self.names(NAME + "\n\nIBAN: " + self.IBAN))
 
     def test_a_typed_prompt_keeps_its_rules(self):
-        self.assertEqual(NAME, masked(NAME + "\nIBAN: " + self.IBAN, channel="prompt").split("\n")[0])
+        self.assertEqual([], self.names(NAME + "\nIBAN: " + self.IBAN, channel="prompt"))
 
-    def test_kontoinhaber_is_a_person_label(self):
+    def test_kontoinhaber_is_a_person_label_and_a_legal_form_after_the_name_is_a_company(self):
         self.assertMasked("Kontoinhaber: " + NAME + "\n", NAME)
         self.assertMasked("Kontoinhaberin: " + NAME + "\n", NAME)
+        for label in ("Kontoinhaber", "Account holder"):
+            for company in ("Musterbau Schmidt GmbH", "Blue Harbor Ltd", "Schmidt & Co. KG"):
+                with self.subTest(label=label, company=company):
+                    self.assertEqual([], self.names(f"{label}: {company}\n"))
