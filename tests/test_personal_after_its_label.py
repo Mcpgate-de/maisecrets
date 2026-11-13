@@ -1091,3 +1091,12 @@ class NameAboveBankBlockTests(Base):
             with self.subTest(after=after):
                 self.assertIn((long_name, "name-after-label"), self.names(f"Kontoinhaber: {long_name} {after}\n"))
         self.assertIn((NAME, "name-after-label"), self.names(f"Full name: {NAME} GmbH\n"))
+        # JSON and XML: a company holder stays text, a person holder stays a name
+        for company in ('{"accountHolder": "Musterbau Schmidt GmbH", "iban": "x"}',
+                        '{"account_holder": "Musterbau Schmidt GmbH"}',
+                        '<accountHolder>Musterbau Schmidt GmbH</accountHolder>'):
+            with self.subTest(n=len(company)):
+                self.assertEqual([], self.names(company))
+        for person in ('{"accountHolder": "%s", "iban": "x"}' % NAME, '<accountHolder>%s</accountHolder>' % NAME):
+            with self.subTest(n=len(person)):
+                self.assertIn((NAME, "name-after-label"), self.names(person))

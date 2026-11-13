@@ -21,12 +21,12 @@ _HEADING_WORD_RE = re.compile(
     r"|hallo|hello|hey|moin|servus|zusammen|danke|thanks|gr(?:ü|ue)(?:ß|ss)e"
     r"|(?:bank|konto|zahlungs?|payment|(?:ü|ue)berweisung|spenden)\w{3,}"
     r"|\w{3,}(?:daten|details?|angaben|verbindung|info|konto|kasse|verein|stiftung))")
-# a legal form that ends the line right after the name, in its usual spelling (GmbH, KG, Ltd, & Co. KG): after an
-# account holder label it marks a company as the holder (Kontoinhaber: Musterbau Schmidt GmbH). Case-sensitive, so a
-# surname such as Sa or Se stays a name
+# a legal form that ends the line or the JSON value right after the name, in its usual spelling (GmbH, KG, Ltd,
+# & Co. KG): after an account holder label it marks a company as the holder (Kontoinhaber: Musterbau Schmidt GmbH).
+# Case-sensitive, so a surname such as Sa or Se stays a name
 _COMPANY_AFTER_RE = re.compile(r"[ \t]+(?:&[ \t]*Co\.?[ \t]+)?(?:GmbH|mbH|AG|UG|KG|OHG|GbR|SE|e\.[ \t]?V\.|SAS|SARL"
                                r"|S\.A\.|S\.r\.l\.|B\.V\.|N\.V\.|Inc\.?|Corp\.?|LLC|Ltd\.?|Limited|PLC|plc)"
-                               r"[ \t]*[,;.]?[\"']?[ \t]*(?:\r?\n|$)")
+                               r"[ \t]*[,;.]?[\"']?[ \t]*(?:[,}\]]|\r?\n|$)")   # a line end or a JSON value end
 _HOLDER_LABEL_RE = re.compile(r"(?i)(?:kontoinhaber(?:in)?|account[ _-]?holder|card[ _-]?holder|cardholder)"
                               r"[\"']?[ \t]*[:=][ \t\"']*$")
 _RX: list = []
