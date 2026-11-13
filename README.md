@@ -17,6 +17,8 @@ model sees it, and goes back in on your machine only where a command or a file n
 - **Masks tool output** (files, commands, MCP results) before the model reads it.
 - **Puts the value back locally** when the agent uses the placeholder in a command or a file.
 - **Checks a value first:** `ms:(your value)` tells you whether it would be caught, without sending it.
+- **Finds what leaked before:** maisecrets protects from the moment it runs. `/maisecrets:secret-hygiene` checks a
+  repository, its git history and your earlier sessions for secrets that got out before; rotate what it finds.
 - **Your own rules, terms and imports:** team rule folders, `/maisecrets:term add Jan Kowalski`, values from your
   own NER.
 - **PDFs and images:** a PDF goes to the model as masked text only, or you are asked first.
@@ -34,6 +36,7 @@ claude plugin install maisecrets@maisecrets     # then start a new session
 /maisecrets:status        what runs, which version
 ms:(your value)           would this value be caught?
 /maisecrets:settings      the choices you make
+/maisecrets:secret-hygiene   secrets that leaked before you installed it
 ```
 
 Codex and other installs: [Install](#install). More: [How it works](#how-it-works) ·
