@@ -1039,3 +1039,36 @@ class RoleKeyTests(Base):
         for phrase in ("Guest User", "Ghost User", "Test User"):
             with self.subTest(phrase=phrase):
                 self.assertText(f"author_name: {phrase}\n")
+
+
+class NameAboveBankBlockTests(Base):
+    # #40 part 3: a Slack message or a mail writes the account holder on the line above Bank:/IBAN:. A heading, a
+    # sentence, a company or a team there stays text
+    IBAN = "DE89" + "370400440532013000"
+
+    def test_a_name_line_above_a_bank_block_is_masked(self):
+        for text in (NAME + "\nBank: Musterbank\nIBAN: " + self.IBAN + "\n\nHier einmal bitte 35.99 ueberweisen",
+                     "Bitte ueberweise an:\n" + NAME + "\nIBAN: " + self.IBAN + "\nBIC: COBADEFFXXX",
+                     NAME + "\nBank: Example Bank\nAccount number: 12345678\nSort code: 12-34-56",
+                     "Okafor\nIBAN: " + self.IBAN, "Tyra Banks\nIBAN: " + self.IBAN):
+            value = text.split("\n")[1 if text.startswith("Bitte") else 0]
+            with self.subTest(n=len(text)):
+                self.assertMasked(text, value)
+
+    def test_a_heading_a_company_or_a_sentence_above_a_bank_block_stays_text(self):
+        for line in ("Bankverbindung", "Zahlungsdaten", "Bank Details", "Payment Details", "Monthly Invoice",
+                     "Empfänger", "Bankdaten", "Musterfirma GmbH", "Platform Team", "Hallo zusammen",
+                     "Bitte an folgendes Konto", "Stripe"):
+            with self.subTest(line=line):
+                self.assertEqual(line, masked(line + "\nIBAN: " + self.IBAN).split("\n")[0])
+
+    def test_a_name_without_an_account_line_or_after_a_blank_line_stays_text(self):
+        self.assertText(NAME + "\nBank: Musterbank\n")
+        self.assertEqual(NAME, masked(NAME + "\n\nIBAN: " + self.IBAN).split("\n")[0])
+
+    def test_a_typed_prompt_keeps_its_rules(self):
+        self.assertEqual(NAME, masked(NAME + "\nIBAN: " + self.IBAN, channel="prompt").split("\n")[0])
+
+    def test_kontoinhaber_is_a_person_label(self):
+        self.assertMasked("Kontoinhaber: " + NAME + "\n", NAME)
+        self.assertMasked("Kontoinhaberin: " + NAME + "\n", NAME)
