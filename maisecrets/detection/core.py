@@ -3101,7 +3101,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         value = text[start:end]
         if value in allowed or (off and kind in off):
             continue   # the allow list holds for these rules too: an exact value, or `rule: <id>`
-        if kind == "name-after-label" and company_follows(text, end):
+        if kind == "name-after-label" and company_follows(text, start, end):
             continue   # Kontoinhaber: Musterbau Schmidt GmbH: a legal form after the words names a company (#40)
         low = value.lower()
         if _references().has_marks(value) or "example" in low or low in personal.PLACEHOLDER_NAMES \

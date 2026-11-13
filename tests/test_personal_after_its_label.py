@@ -1084,3 +1084,10 @@ class NameAboveBankBlockTests(Base):
             for company in ("Musterbau Schmidt GmbH", "Blue Harbor Ltd", "Schmidt & Co. KG"):
                 with self.subTest(label=label, company=company):
                     self.assertEqual([], self.names(f"{label}: {company}\n"))
+        # a four-word name whose next word looks like a legal form in another spelling stays a name, and a legal
+        # form after a name under another label does not drop it
+        long_name = "Ana Maria " + "Lopes Duarte"
+        for after in ("Sa", "Se", "Ag", "Kg", "Ltda"):
+            with self.subTest(after=after):
+                self.assertIn((long_name, "name-after-label"), self.names(f"Kontoinhaber: {long_name} {after}\n"))
+        self.assertIn((NAME, "name-after-label"), self.names(f"Full name: {NAME} GmbH\n"))

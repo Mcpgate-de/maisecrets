@@ -1,6 +1,6 @@
 """A name on the line directly above a bank block names the account holder (#40, part 3), apart from personal.py,
 which the plugin directory reads only up to 200,000 bytes per file. core._personal_hits calls names_above_bank for
-the name-after-label check of a tool result, and company_follows for every name after a label."""
+the name-after-label check of a tool result, and company_follows for a name after an account holder label."""
 from __future__ import annotations
 
 import re
@@ -21,9 +21,14 @@ _HEADING_WORD_RE = re.compile(
     r"|hallo|hello|hey|moin|servus|zusammen|danke|thanks|gr(?:ü|ue)(?:ß|ss)e"
     r"|(?:bank|konto|zahlungs?|payment|(?:ü|ue)berweisung|spenden)\w{3,}"
     r"|\w{3,}(?:daten|details?|angaben|verbindung|info|konto|kasse|verein|stiftung))")
-# a legal form right after a name on its line: the holder is a company (Kontoinhaber: Musterbau Schmidt GmbH)
-_COMPANY_AFTER_RE = re.compile(r"[ \t]+(?:&[ \t]*co\.?[ \t]*)?(?i:gmbh|mbh|ag|ug|kg|ohg|gbr|se|e\.[ \t]?v\.|sas|sa"
-                               r"|srl|bv|nv|inc|corp|corporation|llc|ltd|limited|plc|s\.a\.|sarl|s\.r\.l\.)(?![\w.])")
+# a legal form that ends the line right after the name, in its usual spelling (GmbH, KG, Ltd, & Co. KG): after an
+# account holder label it marks a company as the holder (Kontoinhaber: Musterbau Schmidt GmbH). Case-sensitive, so a
+# surname such as Sa or Se stays a name
+_COMPANY_AFTER_RE = re.compile(r"[ \t]+(?:&[ \t]*Co\.?[ \t]+)?(?:GmbH|mbH|AG|UG|KG|OHG|GbR|SE|e\.[ \t]?V\.|SAS|SARL"
+                               r"|S\.A\.|S\.r\.l\.|B\.V\.|N\.V\.|Inc\.?|Corp\.?|LLC|Ltd\.?|Limited|PLC|plc)"
+                               r"[ \t]*[,;.]?[\"']?[ \t]*(?:\r?\n|$)")
+_HOLDER_LABEL_RE = re.compile(r"(?i)(?:kontoinhaber(?:in)?|account[ _-]?holder|card[ _-]?holder|cardholder)"
+                              r"[\"']?[ \t]*[:=][ \t\"']*$")
 _RX: list = []
 
 
@@ -38,17 +43,19 @@ def _above_bank_re():
     return _RX[0]
 
 
-def company_follows(text: str, end: int) -> bool:
-    """A legal form follows the name on its line: the words before it are a company's name."""
-    return bool(_COMPANY_AFTER_RE.match(text, end))
+def company_follows(text: str, start: int, end: int) -> bool:
+    """After an account holder label, a legal form ends the line right after the name: the holder is likely a
+    company, not a person."""
+    line = text.rfind("\n", 0, start) + 1
+    return bool(_HOLDER_LABEL_RE.search(text, line, start) and _COMPANY_AFTER_RE.match(text, end))
 
 
 def names_above_bank(text: str) -> list:
     """The spans of a person's name on the line directly above a bank block that holds an account: the line names the
     account holder, as a Slack message or a mail writes it. Not a word of a heading (Bankverbindung, Bank Details),
     not words that read as English words, not a value that _name_ok refuses, not a block of a bank name alone. One
-    word alone is no name here: a brand reads the same. A company with a legal form after it is dropped by
-    core._personal_hits (company_follows). Two words of an unknown brand stay a limit, as after any name label."""
+    word alone is no name here: a brand reads the same. Two words of an unknown brand stay a limit, as after any
+    name label."""
     from .personal import _name_ok, _reads_as_words
     out = []
     for m in _above_bank_re().finditer(text):
