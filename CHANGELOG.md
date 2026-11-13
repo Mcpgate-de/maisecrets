@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.9.9] - 2026-11-13
+
+### Features
+
+- the first start and a daily tip name /maisecrets:secret-hygiene for secrets that leaked before maisecrets ran (b828d3e)
+
+### Fixes
+
+- a company after an account holder key in JSON is no person name (c33374b)
+- a legal form drops a name only after an account holder label and in its usual spelling (cda4db6)
+- a name followed by a legal form after a holder label is a company, and the bank-block rule reads Windows line ends and name particles (213a750)
+- a name on the line above a bank block, and a name after Kontoinhaber:, is masked in tool results (4ddf55f)
+- the plugin directory reads the mod: one file, and a sent prompt hides values a click opened (23078f9)
+
 ## [0.9.8] - 2026-11-13
 
 ### Fixes
