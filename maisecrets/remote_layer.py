@@ -45,7 +45,10 @@ def from_config(cfg: dict, fallback: bool = False) -> tuple:
         conf = {**{k: v for k, v in conf.items() if k not in ("url", "allow_network", "format", "mask", "fallback")},
                 **fb}
     url = str(conf["url"])
-    ms = conf.get("timeout_ms", 300)
+    gateway = bool(conf.get("gateway")) and not fallback
+    if gateway and conf.get("allow_network") is not True:
+        return None, "a prompt goes only to a service on this computer (C30)"
+    ms = conf.get("timeout_ms", 2000 if gateway else 300)
     try:
         ms = float(ms) if isinstance(ms, (int, float)) and not isinstance(ms, bool) else math.nan
     except OverflowError:
@@ -57,6 +60,20 @@ def from_config(cfg: dict, fallback: bool = False) -> tuple:
     mask = conf.get("mask") is not False or not remote.is_local(url)
     # the container maisecrets started proves its secret before each text (#1699); only `run.sh ner start` records one
     secret = _stored_secret(cfg, url) if remote.is_local(url) else ""
+    if gateway:
+        from . import ner_gateway
+
+        def make(endpoint: str, token: str, max_chars: int):
+            return remote.RemoteDetector(
+                endpoint, format="hf", classes=conf.get("classes"), min_score=conf.get("min_score"),
+                timeout=min(ms, 5000) / 1000, max_chars=min(int(conf.get("max_chars", max_chars)), max_chars),
+                language=str(conf.get("language", "en")), allow_network=True, mask=True,
+                ask_labels=conf.get("ask_labels") is True, private_http_only=True, token=token,
+                cafile=str(cfg.get("client_vault_cafile") or ""))
+        try:
+            return ner_gateway.detector(cfg, conf, make)
+        except (ValueError, TypeError, AttributeError, OSError) as exc:
+            return None, str(exc)
     try:
         return remote.RemoteDetector(
             url, format=str(conf.get("format", "hf")), model=str(conf.get("model", "")),

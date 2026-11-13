@@ -41,12 +41,13 @@ FIRST_SECRET_IMAGE = IMAGE + ":v2.0.3584"
 SECRET_IMAGE = IMAGE + ":v2.0.3798@sha256:38c0442e10f75e2b41bdcf5a66c6aee02961f9609bf7ebb7d1ce64c1f9c907cf"
 START = f"docker run -d --name ner --restart unless-stopped -p 127.0.0.1:8765:8765 {IMAGE}"
 # the keys a source sets; any other key of the setting is the person's tuning and stays
-SOURCE_KEYS = ("url", "format", "model", "allow_network", "mask", "ask_labels")
+SOURCE_KEYS = ("url", "format", "model", "allow_network", "mask", "ask_labels", "gateway", "gateway_url")
 
 _NER_RE = re.compile(r"\A\s*(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:(off|local|on)|url\s+(\S+)|"
+                     r"gateway\s+(\S+)|"
                      r"fallback\s+(?:(off)|url\s+(\S+))|prompts\s+(on|off)|updates\s+(on|off))\s*\Z", re.I)
 # the same sentence anywhere in a tool call (settings.IN_A_COMMAND_RE)
-IN_A_COMMAND = r"(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:off|local|on|url|fallback|prompts|updates)\b"
+IN_A_COMMAND = r"(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:off|local|on|url|gateway|fallback|prompts|updates)\b"
 
 
 def parse(prompt) -> str | None:
@@ -59,11 +60,13 @@ def parse(prompt) -> str | None:
         return "off" if m.group(1).lower() == "off" else "local"
     if m.group(2):
         return "url:" + m.group(2)
-    if m.group(5):
-        return "prompts:" + m.group(5).lower()
+    if m.group(3):
+        return "gateway:" + m.group(3)
     if m.group(6):
-        return "updates:" + m.group(6).lower()
-    return "fallback:off" if m.group(3) else "fallback:url:" + m.group(4)
+        return "prompts:" + m.group(6).lower()
+    if m.group(7):
+        return "updates:" + m.group(7).lower()
+    return "fallback:off" if m.group(4) else "fallback:url:" + m.group(5)
 
 
 def check_url(url: str) -> str:
@@ -124,6 +127,13 @@ def updated(current, word: str) -> dict:
     if word == "off":
         keep.pop("fallback", None)          # off is off: no fallback answers either
         return keep
+    if word.startswith("gateway:"):
+        # the gateway of /maisecrets:sref login (#33): its name endpoint and a token come at each tool result
+        from .vault_refs import origin_of
+        given = word[len("gateway:"):]
+        origin = origin_of(given) or given
+        return {**keep, "gateway": origin, "gateway_url": given, "url": origin, "format": "hf",
+                "allow_network": True}
     url = LOCAL_URL if word == "local" else word[4:]
     # the service of this command is mcpgate/ner (examples/ner_service.py): it takes `labels` for classes in `classes`
     new = {**keep, "url": url, "format": "hf", "ask_labels": True}
@@ -137,6 +147,9 @@ def describe(conf) -> str:
     url = conf.get("url") if isinstance(conf, dict) else None
     if not url:
         return "names from a service: off (the rules alone)"
+    if conf.get("gateway"):
+        return (f"names from a service: the gateway {conf['gateway']} (its login; tool results only, the findings of "
+                "the rules go there as filler)")
     where = ("on this computer" if remote.is_local(str(url))
              else "on the network; the findings of the rules go there as filler")
     fb = conf.get("fallback") if isinstance(conf.get("fallback"), dict) else {}

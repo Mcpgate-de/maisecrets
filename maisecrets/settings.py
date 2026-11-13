@@ -520,6 +520,13 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
         elif not ner_setup.remote.is_local(word_url):
             note = (" The text of each tool result goes to that service, the findings of the rules as filler. The "
                     "service has no sign-in: use one on a private network only.")
+    if ner_change and word.startswith("ner:gateway:"):
+        gw = word[len("ner:gateway:"):]
+        why = ner_setup.check_url(gw) or ("" if gw.lower().startswith("https://") else "a gateway is https only")
+        if why:
+            return False, f"maisecrets: the address is not used ({why}). Nothing was changed."
+        note = (" The text of each tool result goes to this gateway, the findings of the rules as filler; a prompt you"
+                " type does not. Log in once more with /maisecrets:sref login: it asks for the name scope.")
     if key == "read_pdf" and word == "convert":
         from .file_reads import INSTALL, pdftotext
         if not pdftotext():
