@@ -850,7 +850,7 @@ the plugin points into that folder.
 - **The events it handles:** `prompt.submit`, which fires when a prompt is about
   to be sent, and for the values on your screen (below) `ui.render` of a reply
   (`AssistantMessage`), of your own prompt (`UserMessage`), of a tool call and its
-  result (`ToolUse`, `ToolResult`), `session.start` and `prompt.change`. The mod handles the event; it never calls `$.prompt.submit` itself,
+  result (`ToolUse`, `ToolResult`) and `session.start`. The mod handles the event; it never calls `$.prompt.submit` itself,
   so it submits no prompt and changes no prompt of other code. It acts on a
   person's own prompt only (typed or queued at the terminal, sent through Remote
   Control, or the turn of `claude -p`). A subagent's report, another session's or
@@ -899,7 +899,7 @@ changes, and it reaches no model request, no transcript, no debug log and no
 | `show_values` | What you see |
 |---|---|
 | `always` (default) | Each value stands in the text. A click copies it, and a toast says that Claude knows only the placeholder. |
-| `click` | Placeholders. A click on one shows every value of that reply for 10 seconds; typing in the prompt hides them. |
+| `click` | Placeholders. A click on one shows every value of that reply for 10 seconds; a sent prompt hides them. |
 | `off` | Placeholders only, as before. |
 
 A secret (a password, a key, a token: `⟦SECRET_c1⟧`, `⟦sref:secret:…⟧`) never
