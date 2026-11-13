@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.9.8] - 2026-11-13
+
+### Fixes
+
+- button words such as "Allow" and "Deny" are no longer masked as person names, and callers get the whole no-person rule (2bcad91)
+- a person name under assignee, reporter or another role key of API data is masked, also a one-word name (616c114)
+- one ordinary word in a sentence after "the secret:" or "le secret:" is no longer masked (a5da45b)
+
 ## [0.9.7] - 2026-11-12
 
 ### Features
