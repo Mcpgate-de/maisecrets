@@ -1576,6 +1576,11 @@ _ADDRESS_LABEL_RE = _lazy(
 # longer value the filters refused (a template with `[City]` after `Apt. 999`, a sentence going on after the unit)
 _ADDRESS_LABEL_SHORT_RE = _lazy(_ADDRESS_LABEL_RE._args[0].replace(
     r"(?=[\"\n|]|\s{2}|\.\s(?!\d)|" + _UNIT_BEFORE_DOT + r"\.\s|$)", r"(?=[\"\n|]|\s{2}|\.\s|$)"))
+# a label that names an address of a place to live or to send to (#49); `Address:` alone keeps the stricter value
+_STRONG_ADDRESS_LABEL_RE = _lazy(r"(?i)(?<![a-z])(?:street|home|residential|mailing|billing|postal|property)[ _-]?"
+                                 r"address")
+_STREET_NUMBER_LAST_RE = _lazy(r"(?:[a-z]{1,4}\.\s)?[A-ZÀ-Þ][\w'’-]{1,30}(?:\s[A-ZÀ-Þ][\w'’-]{1,30}){0,3},?\s"
+                               r"\d{1,5}[A-Za-z]?(?:/\d{1,4})?")
 _UNIT_NUMBER_AFTER_RE = _lazy(r"\.\s\d{1,6}[A-Za-z]?(?![\w.-])")
 # a house number and a street word, in either order: 12 Harbour Lane, Rua das Flores 12,
 _HOUSE_RE = _lazy(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b(?! \d)"
@@ -2009,6 +2014,19 @@ def _address_value_ok(v: str) -> bool:
     return (any(c.isdigit() for c in v) and "," in v and bool(_HOUSE_RE.search(v)) and "://" not in v
             and not re.search(r"\d+\.\d+\.\d+|:\d{2,5}\b|[{}<>$()=_\[\]#@]", v)
             and not _NOT_AN_ADDRESS_RE.search(v))
+
+
+def _street_number_last_ok(v: str) -> bool:
+    """The street before its number, as Eastern and Central Europe write it, after a strong address label (#49):
+    `Kalinova Ulica 17`, `Rivne Prospekt, 42`, `ul. Kalinova 17`; one to four street words, no URL, version, port,
+    markup or word of a thing."""
+    from .core import _word_set
+    known = _word_set()
+    # Plan Basic 2, See Section 4: words of the word list name a thing; a street has a name of its own
+    own = any(len(w) >= 4 and w.lower() not in known
+              for w in re.findall(r"[^\W\d_]+", re.sub(r"^[a-z]{1,4}\.\s|,?\s\d.*$", "", v)))
+    return (bool(_STREET_NUMBER_LAST_RE.fullmatch(v)) and own and "://" not in v
+            and not re.search(r"\d+\.\d+\.\d+|:\d{2,5}\b|[{}<>$()=_\[\]#@]", v) and not _NOT_AN_ADDRESS_RE.search(v))
 
 
 def _block_back(text: str, line: int, lines: int = 2, most: int = 200) -> int:
@@ -2451,7 +2469,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     if u and re.search(r"(?i)\b(?:ste|apt|rm|fl|bldg|no|nr)$", v) and _address_value_ok(
                             v + text[s0 + len(v):u.end()]):
                         v = text[s0:u.end()]
-                if not _address_value_ok(v):
+                if not (_address_value_ok(v) or (_STRONG_ADDRESS_LABEL_RE.search(text, max(0, m.start() - 14),
+                                                                         m.end(1)) and _street_number_last_ok(v))):
                     continue
                 done.add(m.start())
                 # the check for a company or a public place reads at most 120 characters of the line before the
