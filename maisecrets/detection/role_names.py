@@ -45,3 +45,78 @@ def one_word_names(text: str) -> list:
         if (_ROLE_KEY_RE.search(key) or key.endswith("full_name")) and one_word_name(m.group(2)):
             out.append((m.start(2), m.end(2)))
     return out
+
+
+# ------------------------------------------------------------------------- a person-name key in structured data (#43)
+# first_name, family-name-female, "given name", `last name`, full__name__male: the key, folded (lower case, no space,
+# _ or -, no gender word at the end), names one person's name. Not user_name, file_name or app_name: no person
+_PERSON_NAME_KEYS = frozenset({"firstname", "lastname", "givenname", "familyname", "middlename", "fullname",
+                               "surname", "maidenname", "forename"})
+_KEY_NAME_RX: list = []
+# one word in a name field that is the state of the field in a form or a schema, not a name; the word list knows the
+# stem (require, mask) but not every form of it
+_FIELD_STATE_WORDS = frozenset({"required", "mandatory", "optional", "missing", "invalid", "redacted", "masked",
+                                "hidden", "null", "nil", "empty", "blank", "anonymous", "anonymized", "anonymised",
+                                "withheld", "unspecified", "undisclosed", "tbd", "todo", "placeholder", "sample",
+                                # a verb or a function word that starts a message after the key (first_name: Was
+                                # …), which the word list leaves out
+                                "was", "were", "is", "are", "am", "be", "been", "may", "might", "can", "could",
+                                "will", "would", "shall", "should", "must", "has", "have", "had", "does", "did",
+                                "not", "and", "or", "but", "if", "then", "see", "use"})
+
+
+def person_name_key(key: str) -> bool:
+    """The key of a field, a column or an element names a person's name (#43)."""
+    k = re.sub(r"[\s_-]+", "", key.split(":")[-1].lower())
+    return re.sub(r"(?:male|female|nonbinary)$", "", k) in _PERSON_NAME_KEYS
+
+
+def _key_name_res() -> list:
+    """The forms of structured data: a quoted key or a bare key before : = or =>, an HTML table row, an XML element.
+    The value: one to four name words, the whole value of its field."""
+    if not _KEY_NAME_RX:
+        from .personal import _NAME_PARTICLE, _NAME_STEM
+        value = r"(" + _NAME_STEM + r"(?:[ ](?:" + _NAME_STEM + "|" + _NAME_PARTICLE + r")){0,3})"
+        # the end of the field: a closing quote (also before a space: `last name`='…' LIMIT 3), or the end of the
+        # line or a separator of the format
+        end = r"(?=[\"'`](?:[ \t]|$)|[\"'`]?[ \t]*(?:$|[\n,;&)}\]<]))"
+        _KEY_NAME_RX.extend([
+            re.compile(r"(?:([\"'`])([A-Za-z][A-Za-z0-9 _-]{2,40})\1|(?<![\w.-])([A-Za-z][A-Za-z0-9_-]{2,40}))"
+                       r"[ \t]{0,3}(?:=>|[:=])[ \t]{0,3}[\"'`]?" + value + end, re.M),
+            re.compile(r"<th(?:\s[^<>]{0,80})?>[ \t]*()([A-Za-z][A-Za-z0-9 _-]{2,40})()[ \t]*</th>\s*"
+                       r"<td(?:\s[^<>]{0,80})?>[ \t]*" + value + r"[ \t]*</td>"),
+            re.compile(r"<()([A-Za-z_][\w.:-]{2,64})()(?:\s[^<>]{0,200})?>[ \t]*" + value + r"[ \t]*</\2>"),
+        ])
+    return _KEY_NAME_RX
+
+
+def key_names(text: str) -> list:
+    """The spans of a person's name after a person-name key in JSON, XML, an HTML table, SQL or key=value (#43): the
+    names of API answers and logs, often one word without a sentence around it, that neither a label rule nor the
+    name service read. One word passes the checks of one_word_name, more words the checks of a name after a label."""
+    from .personal import _NOT_A_NAME_PART, PLACEHOLDER_NAMES, _name_ok, _reads_as_words
+    out, first, last = [], [], []
+    for rx in _key_name_res():
+        for m in rx.finditer(text):
+            key = m.group(2) or m.group(3) or ""
+            if not person_name_key(key):
+                continue
+            v = m.group(4).rstrip("'’")
+            plain = re.sub(r"-[^\s]*", "", v)
+            if v.lower() in _FIELD_STATE_WORDS or v.lower() in _NOT_A_NAME_PART:
+                continue
+            if " " in v:
+                ok = _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True))
+            else:
+                ok = one_word_name(v)
+            if ok:
+                span = (m.start(4), m.start(4) + len(v))
+                out.append(span)
+                folded = re.sub(r"[\s_-]+", "", key.lower())
+                (first if folded.startswith(("first", "given", "fore")) else last if folded.startswith(
+                    ("last", "family", "sur")) else []).append(span)
+    # a first and a last name that together make a placeholder (first_name John, last_name Doe) are a fixture, as in
+    # a table of name parts (personal.py)
+    fixture = {sp for a in first for b in last
+               for sp in (a, b) if (text[a[0]:a[1]] + " " + text[b[0]:b[1]]).lower() in PLACEHOLDER_NAMES}
+    return sorted(set(out) - fixture)

@@ -1100,3 +1100,52 @@ class NameAboveBankBlockTests(Base):
         for person in ('{"accountHolder": "%s", "iban": "x"}' % NAME, '<accountHolder>%s</accountHolder>' % NAME):
             with self.subTest(n=len(person)):
                 self.assertIn((NAME, "name-after-label"), self.names(person))
+
+
+class PersonNameKeyTests(unittest.TestCase):
+    """#43: a person's name after a person-name key in JSON, XML, an HTML table, SQL or key=value (Privy: 463 of 796
+    names stood there, and the rules found 5 %). Synthetic names."""
+    ONE = "Probe" + "wski"
+    TWO = "Testa " + "Probe" + "wski"
+
+    def names(self, text):
+        return [text[m.start:m.end] for m in scan(text, channel="tool") if m.type == "NAME"]
+
+    def test_each_form_of_a_person_name_key_masks_the_name(self):
+        one, two = self.ONE, self.TWO
+        for text, want in (
+                ('{"id": 4, "first_name_nonbinary": "' + one + '", "age": "37"}', one),
+                ('{"family-name-female": "' + one + '", "nationality": "x"}', one),
+                ('{"age": "37", "family name male": "' + one + '"}', one),
+                ('{"familynamefemale": "' + one + '"}', one),
+                ('{"full__name__male": "' + two + '"}', two),
+                ('<table border="1"><tr><th>given_name_male</th><td>' + one + '</td></tr></table>', one),
+                ('<table><tr><th>first_name</th><td>' + one + '</td></tr></table>', one),
+                ('<root><first_name_nonbinary type="str">' + one + '</first_name_nonbinary></root>', one),
+                ('<root><middle_name>' + one + '</middle_name></root>', one),
+                ("SELECT * FROM t WHERE `last name`='" + one + "' LIMIT 3", one),
+                ("last_name=" + one + "&age=37", one),
+                ("surname => '" + one + "',", one)):
+            with self.subTest(text=text[:40]):
+                self.assertIn(want, self.names(text))
+
+    def test_a_key_of_no_person_a_state_a_function_word_and_a_fixture_stay_text(self):
+        for text in ('{"user_name": "' + self.ONE + '"}', '{"file_name": "Report"}', '{"app_name": "' + self.ONE
+                     + '"}', '{"first_name": "String", "last_name": "Required"}', '{"middle_name": "Mandatory"}',
+                     '{"last_name": "Redacted"}', "first_name: Was", '<th>first_name</th><td>Text</td>',
+                     '{"middle_name": "Qux"}',
+                     '{"first_name": "Jo' + 'hn", "last_name": "Do' + 'e"}', 'first_name = "Ja' + 'ne"\nlast_name: Do'
+                     + 'e', '{"given_name": "Foo", "family_name": "Bar"}'):
+            with self.subTest(text=text[:40]):
+                self.assertEqual(self.names(text), [])
+
+    def test_only_a_person_name_key_counts(self):
+        from maisecrets.detection.role_names import person_name_key
+        for key in ("first_name", "First Name", "family-name-female", "full__name__male", "familynamefemale",
+                    "ns:given_name", "surname", "middleName", "maiden_name"):
+            with self.subTest(key=key):
+                self.assertTrue(person_name_key(key))
+        for key in ("user_name", "username", "file_name", "host_name", "app_name", "name", "display_name",
+                    "company_name", "first_name_id"):
+            with self.subTest(key=key):
+                self.assertFalse(person_name_key(key))
