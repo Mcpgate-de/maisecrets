@@ -328,10 +328,12 @@ class GatewaySourceTests(unittest.TestCase):
 
     def test_the_gateways_refusals_have_their_names(self):
         self.login(self.cfg)
-        for code, reason in ((403, "forbidden"), (413, "too_long"), (429, "rate_limited"), (503, "busy"),
-                             (500, "http")):
-            with self.subTest(code=code):
-                self.srv.ner_answer = (code, {"error": "x"})
+        cases = ((403, "x", "forbidden"), (413, "x", "too_long"), (429, "rate_limited", "rate_limited"),
+                 (503, "x", "busy"), (429, "busy", "busy"), (503, "busy", "busy"), (500, "x", "http"))
+        for code, body, reason in cases:
+            # 429 {"error": "busy"}: the gateway's one client slot since it stopped answering busy with 503
+            with self.subTest(code=code, error=body):
+                self.srv.ner_answer = (code, {"error": body, "retry_after": 1})
                 spans, status = self.ask()
                 self.assertEqual((spans, status.state, status.reason), ([], "unavailable", reason))
 
