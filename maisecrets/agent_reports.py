@@ -16,7 +16,9 @@ from .lazy_regex import LazyRx as _LazyRx
 # every value in it was in a model's context already, and blocking it protects nothing. The hook payload
 # has no origin field (Claude Code 2.1.284), so the report proves itself: one notification block, a tool
 # use id that this session's transcript gives to an Agent or SendMessage call, an output file in this
-# session's subagents folder, and a result equal to that subagent's last answer. A background command reports
+# session's subagents folder, and a result equal to that subagent's last answer. A report with no tool use id
+# proves itself by its task id: the file subagents/agent-<task id>.jsonl of this session, and a result equal to
+# its last answer (Claude Code 2.1.322, 2026-11-14). A background command reports
 # the same way, and its summary is the command (or its description) as the model wrote it: a block lost the
 # notice, and the session waited for a command that had ended (2026-10-26). It passes when the summary equals
 # that Bash call of this transcript and the output file is in this session's tasks folder. A typed or pasted
@@ -114,23 +116,43 @@ def _tool_input(transcript: str, tool_use_id: str, names: tuple) -> dict | None:
     return None
 
 
+def _subagent_by_task_id(body: str, subagents: str) -> str | None:
+    """The subagent's own transcript that the task id names, in this session's subagents folder only."""
+    task_id = _notification_tag(body, "task-id") or ""
+    if not re.fullmatch(r"[A-Za-z0-9]{6,64}", task_id):
+        return None
+    path = subagents + f"agent-{task_id}.jsonl"
+    # a link that points out of the folder is no proof
+    if not os.path.isfile(path) or not os.path.realpath(path).startswith(subagents):
+        return None
+    return path
+
+
 def _one_report_proves_itself(body: str, transcript: str) -> bool:
     span = _result_span(body)
     tool_use_id = _notification_tag(body, "tool-use-id")
-    out = _notification_tag(body, "output-file")
-    if span is None or not tool_use_id or not out or _notification_tag(body, "status") != "completed":
+    if span is None or _notification_tag(body, "status") != "completed":
         return False
     subagents = os.path.realpath(transcript[: -len(".jsonl")]) + os.sep + "subagents" + os.sep
+    if not tool_use_id:
+        # Claude Code 2.1.322 sends a report with no tool use id each time a resumable agent stops (108 of 316
+        # reports in one session, 2026-11-14), and its output file is in the tasks folder. The report proves
+        # itself by its task id: the subagent's own transcript in this session's folder, and its last answer
+        real = _subagent_by_task_id(body, subagents)
+        if real is None:
+            return False
+        answer = _last_answer(real)
+        return answer is not None and _same_text(body[span[0]:span[1]], answer)
+    out = _notification_tag(body, "output-file")
+    if not out:
+        return False
     real = os.path.realpath(out)
     if not real.startswith(subagents) or not real.endswith(".jsonl"):
         # on Windows the output file under the temp folder is no link into the session (a link needs a right
         # there), so the report named a file outside it and was blocked (Windows e2e, 2026-09-30). The subagent's
         # own transcript is found by its task id, in this session's folder only
-        task_id = _notification_tag(body, "task-id") or ""
-        if not re.fullmatch(r"[A-Za-z0-9]{6,64}", task_id):
-            return False
-        real = subagents + f"agent-{task_id}.jsonl"
-        if not os.path.isfile(real):
+        real = _subagent_by_task_id(body, subagents)
+        if real is None:
             return False
     answer = _last_answer(real)
     if answer is None or not _same_text(body[span[0]:span[1]], answer):
