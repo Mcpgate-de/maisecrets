@@ -1139,6 +1139,39 @@ class PersonNameKeyTests(unittest.TestCase):
             with self.subTest(text=text[:40]):
                 self.assertEqual(self.names(text), [])
 
+    def test_the_forms_of_the_gate_a_review_mask_the_name(self):
+        one, two = self.ONE, self.TWO
+        dbl = "Probe" + "wski-" + "Testa" + "rowa"
+        for text, want in (
+                ('{"customer_first_name": "' + one + '"}', one),
+                ('{"billingLastName": "' + one + '"}', one),
+                ('{"last_name": "' + dbl + '"}', dbl),
+                ("person:\n  first_name: " + one + "  # from the form\n", one),
+                ("<table>\n  <tr>\n    <th>\n      first_name\n    </th>\n    <td>\n      " + one
+                 + "\n    </td>\n  </tr>\n</table>", one),
+                ('{"emergency_contact_full_name": "' + two + '"}', two)):
+            with self.subTest(text=text[:40]):
+                self.assertIn(want, self.names(text))
+                # the new rule itself, not an older one that takes the same value (double surname, YAML)
+                from maisecrets.detection.role_names import key_names
+                self.assertIn(want, [text[a:b] for a, b in key_names(text)])
+
+    def test_a_translated_label_a_validation_message_and_a_key_of_a_login_stay_text(self):
+        for text in ('{"first_name": "Pr' + 'énom", "last_name": "N' + 'om"}', '{"first_name": "Nom' + 'bre"}',
+                     '{"first_name": "Vor' + 'name", "last_name": "Nach' + 'name"}',
+                     '{"first_name": "Too Short"}', '{"last_name": "Can\'t Be Blank"}',
+                     '{"user_first_name": "' + self.ONE + '"}', '{"company_full_name": "Acme"}'):
+            # the new rule alone: an older rule (json-personal-field, name-after-label) takes some of these on next
+            # too; that is a finding of its own, not of #43
+            with self.subTest(text=text[:40]):
+                from maisecrets.detection.role_names import key_names
+                self.assertEqual(key_names(text), [])
+
+    def test_a_span_another_rule_found_keeps_that_rules_kind(self):
+        text = '{"first_name": "' + "Da" + "na" + '", "age": 41}'
+        self.assertEqual([(text[m.start:m.end], m.kind) for m in scan(text, channel="tool") if m.type == "NAME"],
+                         [("Da" + "na", "name-single-after-label")])
+
     def test_only_a_person_name_key_counts(self):
         from maisecrets.detection.role_names import person_name_key
         for key in ("first_name", "First Name", "family-name-female", "full__name__male", "familynamefemale",

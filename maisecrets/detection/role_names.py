@@ -62,13 +62,32 @@ _FIELD_STATE_WORDS = frozenset({"required", "mandatory", "optional", "missing", 
                                 # …), which the word list leaves out
                                 "was", "were", "is", "are", "am", "be", "been", "may", "might", "can", "could",
                                 "will", "would", "shall", "should", "must", "has", "have", "had", "does", "did",
-                                "not", "and", "or", "but", "if", "then", "see", "use"})
+                                "not", "and", "or", "but", "if", "then", "see", "use",
+                                # a validation message in words (Too Short, Can't Be Blank)
+                                "too", "short", "long", "blank", "can't",
+                                # the label itself, translated: an i18n catalog under a name key
+                                "prénom", "prenom", "nom", "nombre", "apellido", "apellidos", "vorname",
+                                "nachname", "cognome", "sobrenome", "voornaam", "achternaam", "imię", "nazwisko",
+                                "förnamn", "efternavn", "fornavn", "efternamn"})
+
+
+# a role before a person-name key (customer_first_name, billingLastName): the name is still a person's. Not user,
+# company, account, app or file: their name is a login or a thing
+_PERSON_KEY_ROLES = frozenset({"customer", "client", "contact", "employee", "patient", "member", "student", "buyer",
+                               "seller", "recipient", "sender", "applicant", "owner", "holder", "cardholder",
+                               "passenger", "tenant", "guarantor", "beneficiary", "borrower", "parent", "guardian",
+                               "spouse", "child", "emergencycontact", "billing", "shipping", "legal", "preferred",
+                               "primary", "secondary", "patient", "physician", "doctor", "author", "reviewer"})
 
 
 def person_name_key(key: str) -> bool:
-    """The key of a field, a column or an element names a person's name (#43)."""
+    """The key of a field, a column or an element names a person's name (#43), also after a role
+    (customer_first_name)."""
     k = re.sub(r"[\s_-]+", "", key.split(":")[-1].lower())
-    return re.sub(r"(?:male|female|nonbinary)$", "", k) in _PERSON_NAME_KEYS
+    k = re.sub(r"(?:male|female|nonbinary)$", "", k)
+    if k in _PERSON_NAME_KEYS:
+        return True
+    return any(k.endswith(n) and k[:-len(n)] in _PERSON_KEY_ROLES for n in _PERSON_NAME_KEYS)
 
 
 def _key_name_res() -> list:
@@ -79,12 +98,12 @@ def _key_name_res() -> list:
         value = r"(" + _NAME_STEM + r"(?:[ ](?:" + _NAME_STEM + "|" + _NAME_PARTICLE + r")){0,3})"
         # the end of the field: a closing quote (also before a space: `last name`='…' LIMIT 3), or the end of the
         # line or a separator of the format
-        end = r"(?=[\"'`](?:[ \t]|$)|[\"'`]?[ \t]*(?:$|[\n,;&)}\]<]))"
+        end = r"(?=[\"'`](?:[ \t]|$)|[\"'`]?[ \t]*(?:$|[\n,;&)}\]<]|#))"
         _KEY_NAME_RX.extend([
             re.compile(r"(?:([\"'`])([A-Za-z][A-Za-z0-9 _-]{2,40})\1|(?<![\w.-])([A-Za-z][A-Za-z0-9_-]{2,40}))"
                        r"[ \t]{0,3}(?:=>|[:=])[ \t]{0,3}[\"'`]?" + value + end, re.M),
-            re.compile(r"<th(?:\s[^<>]{0,80})?>[ \t]*()([A-Za-z][A-Za-z0-9 _-]{2,40})()[ \t]*</th>\s*"
-                       r"<td(?:\s[^<>]{0,80})?>[ \t]*" + value + r"[ \t]*</td>"),
+            re.compile(r"<th(?:\s[^<>]{0,80})?>\s{0,32}()([A-Za-z][A-Za-z0-9 _-]{2,40})()\s{0,32}</th>\s{0,64}"
+                       r"<td(?:\s[^<>]{0,80})?>\s{0,32}" + value + r"\s{0,32}</td>"),
             re.compile(r"<()([A-Za-z_][\w.:-]{2,64})()(?:\s[^<>]{0,200})?>[ \t]*" + value + r"[ \t]*</\2>"),
         ])
     return _KEY_NAME_RX
@@ -103,12 +122,14 @@ def key_names(text: str) -> list:
                 continue
             v = m.group(4).rstrip("'’")
             plain = re.sub(r"-[^\s]*", "", v)
-            if v.lower() in _FIELD_STATE_WORDS or v.lower() in _NOT_A_NAME_PART:
+            words = [w.lower() for w in v.split()]
+            if any(w in _FIELD_STATE_WORDS for w in words) or v.lower() in _NOT_A_NAME_PART:
                 continue
             if " " in v:
                 ok = _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True))
             else:
-                ok = one_word_name(v)
+                # a double surname is one word: each part passes alone (one_word_name refuses a hyphen)
+                ok = all(p and one_word_name(p) for p in v.split("-"))
             if ok:
                 span = (m.start(4), m.start(4) + len(v))
                 out.append(span)
