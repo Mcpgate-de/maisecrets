@@ -225,9 +225,21 @@ class GatewaySourceTests(unittest.TestCase):
         self.srv.ner_status = {"service": None, "client_path": {"free": False}, "quota": {}}
         ner_gateway.CACHE.unlink(missing_ok=True)
         load = [x for x in ner_setup.report(self.cfg["remote_detector"])[1] if x.startswith("load:")]
-        self.assertEqual(load, ["load: the client slot is busy now (a text gets 503 busy)"])
+        self.assertEqual(load, ["load: the client slot is busy now (a text is answered busy)"])
         self.assertEqual(ner_gateway.status_line({"service": {"workers": 4, "in_use_share": None}}), "load: 4 workers")
         self.assertEqual(ner_gateway.status_line("x"), "load: no load data")
+        # Infinity and 1e999 are JSON numbers; they must not stop the status (Gate A)
+        self.assertEqual(ner_gateway.status_line({"service": {"workers": float("inf")},
+                                                  "quota": {"requests_left": 1e999, "requests_per_minute": 60}}),
+                         "load: no load data")
+        # a cache from before the status endpoint: one discovery more, not an hour without load data
+        import json as _j
+        ner_gateway.CACHE.write_text(_j.dumps({self.origin: {"at": __import__("time").time(), "found": {
+            **S.discover(self.cfg, self.srv.url + "/mcp"), "ner": {k: v for k, v in S.discover(
+                self.cfg, self.srv.url + "/mcp")["ner"].items() if k != "status"}}}}), encoding="utf-8")
+        self.srv.ner_status = {"service": {"workers": 4, "in_use_share": 0.5}}
+        self.assertEqual(ner_gateway.status_line(ner_gateway.status(self.cfg, self.cfg["remote_detector"])[0]),
+                         "load: 4 workers, 50 % in use")
 
     def test_no_login_and_a_switched_off_gateway_give_reasons(self):
         det, why = remote_layer.from_config(self.cfg)

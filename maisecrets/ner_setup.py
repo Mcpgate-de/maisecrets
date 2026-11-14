@@ -457,8 +457,21 @@ def restart_local(conf) -> bool:
 MEMORY_LIMIT = "1536m"
 
 
-def cpu_limit() -> int:
-    return max(2, min(4, (os.cpu_count() or 2) // 2))
+def cpu_limit(engine_cpus: int = 0) -> int:
+    """Half the cores, 2 to 4, and never more than the container engine has: a docker VM, colima or a podman
+    machine often has fewer CPUs than the host, and a --cpus above them stops the start (Gate A)."""
+    want = max(2, min(4, (os.cpu_count() or 2) // 2))
+    return min(want, engine_cpus) if engine_cpus > 0 else want
+
+
+def _engine_cpus(tool: str) -> int:
+    """The CPUs of the container engine (docker info NCPU, podman info Host.CPUs), or 0 when it does not say."""
+    fmt = "{{.Host.CPUs}}" if os.path.basename(tool).startswith("podman") else "{{.NCPU}}"
+    try:
+        r = _docker(tool, "info", "--format", fmt, timeout=30)
+        return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else 0
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return 0
 
 
 def _run_container(tool: str, secret: str, image: str) -> tuple[int, str, str]:
@@ -466,7 +479,7 @@ def _run_container(tool: str, secret: str, image: str) -> tuple[int, str, str]:
     to docker in the environment, never on the command line, where `ps` shows it."""
     env = dict(os.environ, NER_CLIENT_SECRET=secret)
     r = _docker(tool, "run", "-d", "--name", "ner", "--restart", "unless-stopped", "-e", "NER_CLIENT_SECRET",
-                "--cpus", str(cpu_limit()), "--memory", MEMORY_LIMIT,
+                "--cpus", str(cpu_limit(_engine_cpus(tool))), "--memory", MEMORY_LIMIT,
                 "-p", "127.0.0.1:8765:8765", image, timeout=900, env=env)
     cid = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
     return r.returncode, cid, (r.stderr.strip().splitlines() or ["no reason given"])[-1][:200]

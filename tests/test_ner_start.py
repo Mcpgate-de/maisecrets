@@ -36,8 +36,8 @@ def setUpModule():
 class FakeDocker:
     """`container inspect`, `start`, `run`, `rm` as docker answers them; every call is kept."""
 
-    def __init__(self, existing: str = "", image: str = "mcpgate/ner", run_rc: int = 0):
-        self.existing, self.image, self.run_rc, self.calls = existing, image, run_rc, []
+    def __init__(self, existing: str = "", image: str = "mcpgate/ner", run_rc: int = 0, ncpu: str = ""):
+        self.existing, self.image, self.run_rc, self.calls, self.ncpu = existing, image, run_rc, [], ncpu
 
     def __call__(self, argv, **kw):
         self.calls.append((list(argv), kw.get("env")))
@@ -46,6 +46,8 @@ class FakeDocker:
             ok = bool(self.existing)
             return subprocess.CompletedProcess(argv, 0 if ok else 1, f"{self.existing} {self.image}\n" if ok else "",
                                                "" if ok else "no such container")
+        if verb == "info":
+            return subprocess.CompletedProcess(argv, 0 if self.ncpu else 1, self.ncpu + "\n", "")
         if verb == "run":
             self.existing = CID
             return subprocess.CompletedProcess(argv, self.run_rc, CID + "\n" if self.run_rc == 0 else "", "boom")
@@ -92,6 +94,14 @@ class StartTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--memory") + 1], "1536m")
         with mock.patch.object(ner_setup.os, "cpu_count", side_effect=[1, 6, 10, 32]):
             self.assertEqual([ner_setup.cpu_limit() for _ in range(4)], [2, 3, 4, 4])
+        # never more than the engine has (a docker VM, colima, a podman machine): docker refuses the start above it
+        with mock.patch.object(ner_setup.os, "cpu_count", return_value=10):
+            self.assertEqual([ner_setup.cpu_limit(n) for n in (0, 1, 2, 8)], [4, 1, 2, 4])
+        small = FakeDocker(ncpu="1")
+        with mock.patch.object(ner_setup.subprocess, "run", small):
+            ner_setup._run_container("docker", "s" * 43, "mcpgate/ner:x")
+        small_argv = next(c[0] for c in small.calls if c[0][1] == "run")
+        self.assertEqual(small_argv[small_argv.index("--cpus") + 1], "1")
         self.assertEqual(argv[-1], ner_setup.SECRET_IMAGE, "a fixed tag that proves: an old latest would not")
         self.assertNotIn(secret, " ".join(argv), "never on the command line, where ps shows it")
         self.assertNotIn(secret, "\n".join(lines))
@@ -273,7 +283,7 @@ class FollowPinTests(unittest.TestCase):
     def test_an_old_image_gets_the_pinned_one_with_the_same_secret(self):
         docker = FollowDocker()
         self.assertEqual(self.follow(docker), "updated")
-        self.assertEqual(docker.verbs(), ["container", "pull", "stop", "rename", "run", "rm", "image", "rmi"])
+        self.assertEqual(docker.verbs(), ["container", "pull", "stop", "rename", "info", "run", "rm", "image", "rmi"])
         calls = {c[0][1]: c for c in docker.calls}
         self.assertEqual(calls["pull"][0][-1], ner_setup.SECRET_IMAGE)
         self.assertEqual(calls["rename"][0][2:], [CID, ner_setup.PREV])

@@ -27,7 +27,17 @@ def bearer_of(secret: str) -> str:
 
 
 def sample(url: str, timeout: float = 1.0, bearer: str = "") -> tuple[dict | None, str]:
-    """(the counters, "") or (None, why there are none)."""
+    """(the counters, "") or (None, why there are none), within `timeout` for the whole request: a socket timeout
+    counts per read, and a server that sends a byte now and then would hold the status command (Gate A)."""
+    import threading
+    box: dict = {}
+    t = threading.Thread(target=lambda: box.update(r=_sample(url, timeout, bearer)), daemon=True)
+    t.start()
+    t.join(timeout + 0.5)
+    return box.get("r") or (None, "/metrics gives no answer in time")
+
+
+def _sample(url: str, timeout: float, bearer: str) -> tuple[dict | None, str]:
     headers = {"Accept": "application/json", **({"Authorization": "Bearer " + bearer} if bearer else {})}
     req = urllib.request.Request(url.rstrip("/") + "/metrics", headers=headers)
     try:

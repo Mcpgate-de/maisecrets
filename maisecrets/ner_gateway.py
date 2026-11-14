@@ -72,6 +72,10 @@ def status(cfg: dict, conf: dict) -> tuple:
     origin = origin_of(conf)
     deadline = time.monotonic() + 3.0
     found = found_for(cfg, origin, str(conf.get("gateway_url") or origin), deadline)
+    if found and found.get("ner") and "status" not in found["ner"]:
+        # a cache of a version before the status endpoint: ask the gateway again, not in an hour
+        CACHE.unlink(missing_ok=True)
+        found = found_for(cfg, origin, str(conf.get("gateway_url") or origin), deadline)
     url = ((found or {}).get("ner") or {}).get("status")
     if not url:
         return None, "the gateway names no status endpoint"
@@ -93,7 +97,10 @@ def status(cfg: dict, conf: dict) -> tuple:
 
 
 def _int(v):
-    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else None
+    # Infinity and 1e999 parse as JSON numbers; int() of them raises (Gate A)
+    import math
+    ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+    return int(v) if ok else None
 
 
 def status_line(doc) -> str:
@@ -111,7 +118,7 @@ def status_line(doc) -> str:
             parts.append(f"{_int(svc['waiting_requests'])} waiting")
     path = doc.get("client_path") if isinstance(doc.get("client_path"), dict) else {}
     if path.get("free") is False:
-        parts.append("the client slot is busy now (a text gets 503 busy)")
+        parts.append("the client slot is busy now (a text is answered busy)")
     q = doc.get("quota") if isinstance(doc.get("quota"), dict) else {}
     left, per = _int(q.get("requests_left")), _int(q.get("requests_per_minute"))
     cleft, cper = _int(q.get("chars_left")), _int(q.get("chars_per_minute"))

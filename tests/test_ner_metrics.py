@@ -113,6 +113,32 @@ class LoadLineTests(unittest.TestCase):
         self.assertNotEqual(ner_metrics.bearer_of(secret), text_bearer)
         self.assertIn("wants a metrics token", ner_metrics.load_line(s.url, gap=0.1, bearer=text_bearer))
 
+    def test_a_server_that_dribbles_ends_at_the_deadline(self):
+        import socket
+        import time as _t
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        self.addCleanup(srv.close)
+
+        def dribble():
+            c, _ = srv.accept()
+            c.recv(4096)
+            c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n")
+            for _ in range(40):
+                try:
+                    c.sendall(b"{")
+                except OSError:
+                    return
+                _t.sleep(0.3)
+            c.close()
+        threading.Thread(target=dribble, daemon=True).start()
+        t0 = _t.monotonic()
+        doc, why = ner_metrics.sample(f"http://127.0.0.1:{srv.getsockname()[1]}", timeout=1.0)
+        self.assertLess(_t.monotonic() - t0, 3.0)
+        self.assertIsNone(doc)
+        self.assertIn("in time", why)
+
     def test_a_counter_that_falls_or_is_no_number_is_left_out(self):
         before = {"ner": {"workers": 4, "worker_busy_seconds_total": 9.0}, "cgroup": {"cpu_limit_cores": "4"}}
         after = {"ner": {"workers": 4, "worker_busy_seconds_total": 1.0, "waiting_requests": True}}
