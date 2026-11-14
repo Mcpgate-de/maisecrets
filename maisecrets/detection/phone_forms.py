@@ -5,14 +5,13 @@ from __future__ import annotations
 from .lazy_regex import LazyRx as _LazyRx
 
 # a call cue before a number in any country's grouping (#50, the gap to Cloakroom 1.4.0 on the V3 samples): `contact
-# us at 0412 873 516`, `by phone at 06 47 83 92 15`, `fax us at 977-639211`, `call 61-3412-7788`. The North American
-# form of phone-after-phone-word's loose regex stays its own; this one takes the groups of every other plan, and
-# personal._national_phone_ok judges the value (dates, years, counts, placeholders)
+# us at 0412 873 516`, `by phone at 06 47 83 92 15`, `fax us at 977-639211`, `call 61-3412-7788`. The tool channel
+# only; personal._intl_after_cue judges the value (an IP, a date, a list of numbers stay text)
 _PHONE_CUE_INTL_RE = _LazyRx(
     r"(?i)(?<![\w-])(?:call(?:ed|ing)?|dial(?:ed|ing)?|text(?:ed)?|fax(?:ed)?(?: \w{1,12}){0,2} (?:at|on|to)"
     r"|reach(?:ed)?(?: \w{1,12}){0,2} (?:at|on)|contact(?:ed)?(?: \w{1,15}){0,4} (?:at|on)"
-    r"|(?:by|via) (?:phone|telephone|fax|mobile) (?:at|on)|the (?:phone |telephone |contact )?number)"
-    r"[ \t]{0,3}:?[ \t]{1,3}\(?(\+?\(?\d{1,5}\)?(?:[ .\-]\d{1,8}){1,5})(?![\w+]|[.,/:-]\d)")
+    r"|(?:by|via) (?:phone|telephone|fax|mobile) (?:at|on)|the (?:phone|telephone|contact) number)"
+    r"[ \t]{0,3}:?[ \t]{1,3}(\+?\(?\d{1,5}\)?(?:[ .\-]\d{1,8}){1,5})(?![\w+]|[.,/:-]\d)")
 
 # a German call cue around `unter <number>`: erreichbar ab Montag unter 030 …, erreichbar Mo-Fr 9-17 Uhr unter …,
 # rufen Sie uns an unter …, Rückrufe unter …, and the verb at the end: Sie können uns unter 030 … erreichen (ai-gateway

@@ -1934,9 +1934,11 @@ _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
 _ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
+# an IP and a year-first date after a call cue are no phone number (#50)
+_IPV4_SHAPE_RE = _lazy(r"\d{1,3}(?:\.\d{1,3}){3}")
+_YMD_SPACED_RE = _lazy(r"(?:19|20)\d\d[ .\-/](?:0?[1-9]|1[0-2])[ .\-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
+_DMY_SPACED_RE = _lazy(r"(?:0?[1-9]|[12]\d|3[01])[ .\-/](?:0?[1-9]|1[0-2])[ .\-/](?:19|20)\d\d(?!\d)")
 # a North American number (3-3-4); it needs region us or ca, as phone-us-national (0.6.24)
-_YMD_SPACED_RE = _lazy(r"(?:19|20)\d\d[ .\-/]\d{1,2}[ .\-/]\d{1,2}")
-_LABEL_ONLY_PHONE_RE = _lazy(r"\d{4}[ -]\d{4}|\([01]\d{2}\) ?\d{3}-\d{4}")
 _NANP_SHAPE_RE = _lazy(r"(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4}")
 # a count with a space between thousands (3 412 908 users, 1 000 000) and a list of small numbers (4 8 15 16 23 42)
 # fullmatch on a value of _PHONE_TIGHT_RE only (6 groups at most): the last branch is quadratic on a long text
@@ -2252,7 +2254,7 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
                 m = _PHONE_DE_NEXT_RE.match(text, m.end(1))
     us = bool(_US_PHONE_REGIONS.intersection(regions))
-    if not any(w in low for w in _PHONE_WORDS):   # every cue of _PHONE_CUE_INTL_RE is one of these words
+    if not any(w in low for w in _PHONE_WORDS):   # each cue of _PHONE_CUE_INTL_RE holds one of these words
         return out
     for rx in (_PHONE_TIGHT_RE,) if prompt else (_PHONE_TIGHT_RE, _PHONE_LOOSE_RE):
         for m in rx.finditer(text):
@@ -2278,32 +2280,45 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
                 if not (rest and rest.start(1) == m.start(1)
                         and not _GAP_SEP_RE.search(text[rest.start():rest.start(1)])):
                     continue
-            if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)) or (
-                    # after a phone label: a local number of 4 and 4 digits, and (187) 642-9035, whose area code no
-                    # plan has (synthetic data writes them; #50)
-                    rx is _PHONE_TIGHT_RE and _LABEL_ONLY_PHONE_RE.fullmatch(v) and not _placeholder_digits(v)
-                    and not re.search(r"\)\s?555[-. ]01", v)):
+            if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)):
                 out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
             elif rx is _PHONE_TIGHT_RE and len(_SERIES_GROUP_RE.findall(v)) >= 3:
                 out.extend((a, b, "phone-after-phone-word", PHONE) for a, b in _numbers_in_series(text, m.start(1)))
-    return out if prompt else _intl_after_cue(text, out, us)
+    return out if prompt else _intl_after_cue(text, out)
 
 
-def _intl_after_cue(text: str, out: list, us: bool) -> list:
-    """Any country's grouping after a call cue, in the tool channel (#50)."""
-    taken = [(a, b) for a, b, _, _ in out]
+def _intl_after_cue(text: str, out: list) -> list:
+    """Any country's grouping after a call cue, in the tool channel (#50). The core drops a span that overlaps an
+    earlier hit; a span already found is skipped here."""
+    taken = {(a, b) for a, b, _, _ in out}
     for m in _PHONE_CUE_INTL_RE.finditer(text):
         v = m.group(1).rstrip(" .-/")
         span = (m.start(1), m.start(1) + len(v))
-        if any(a < span[1] and span[0] < b for a, b in taken) or not _national_phone_ok(v):
+        if span in taken or not _national_phone_ok(v) or _not_a_number_after_cue(v):
             continue
-        if _NANP_SHAPE_RE.fullmatch(v) and not us:
-            continue   # a North American number needs us or ca (555-01xx: _national_phone_ok)
+        if _NANP_SHAPE_RE.fullmatch(v):
+            continue   # a North American number is phone-us-national's and the loose cue's, with their region
         if _YMD_SPACED_RE.fullmatch(v) or _SPACED_DATE_RE.fullmatch(v) or all(
                 g.endswith("00") for g in re.findall(r"\d+", v)):
             continue   # call 2024 08 15, contact us at 100 200 300: a date and round numbers
         out.append((span[0], span[1], "phone-after-phone-word", PHONE))
     return out
+
+
+def _not_a_number_after_cue(v: str) -> bool:
+    """An IP, a date with more groups (a time), and a list of numbers after `call` or `contact … at` (Gate A of #50).
+    Without a trunk 0, + or ( a number has at most four groups, no group of one digit and no pairs alone, and two
+    groups differ in length; a run of pairs needs its trunk 0, three distinct pairs and no counting run."""
+    groups = re.findall(r"\d+", v)
+    if _IPV4_SHAPE_RE.fullmatch(v) or _YMD_SPACED_RE.match(v) or _DMY_SPACED_RE.match(v):
+        return True
+    if all(len(g) == 2 for g in groups):
+        steps = {int(b) - int(a) for a, b in zip(groups, groups[1:])}
+        return not v.startswith("0") or groups[0] == "00" or len(set(groups)) < 3 or steps <= {1, -1}
+    if v.startswith(("+", "0", "(")):
+        return False
+    return len(groups) > 4 or any(len(g) == 1 for g in groups) or (len(groups) == 2 and
+                                                                    len(groups[0]) == len(groups[1]))
 
 
 def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> list:

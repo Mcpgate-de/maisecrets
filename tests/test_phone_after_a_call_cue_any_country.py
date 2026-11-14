@@ -40,21 +40,30 @@ class PhoneAfterACallCueTests(unittest.TestCase):
         for text, value in ((f"contact us at {UK} or email", UK), (f"or by phone at {FR}.", FR),
                             (f"can be reached at {AU}. Timely", AU), (f"please contact us at {GROUPS}.", GROUPS),
                             (f"fax us at {FAX}.", FAX), (f"call {AU} today", AU),
-                            (f"contact our team on {AU}.", AU), (f"the phone number: {LOCAL}.", LOCAL)):
+                            (f"contact our team on {AU}.", AU),
+                            ("contact us at (02) 9374 " + "4518.", "(02) 9374 4518")):
             with self.subTest(text=text):
                 self.assertNotIn(value, masked(text))
 
-    def test_after_a_phone_label_a_local_number_and_a_number_of_no_plan(self):
-        for value in (LOCAL, NO_PLAN):
-            with self.subTest(value=value):
-                self.assertNotIn(value, masked(f"- Phone Number: {value}\n"))
+    def test_a_label_alone_keeps_its_rules(self):
+        # Gate A of #50: 4 and 4 digits after a phone word are years, screen sizes, hours and ports too
+        for text in ("Mobile: 2023-2024", "mobile 1920 1080 layout", "Phone 0900-1700", "Tel 8080 8443",
+                     "- Phone Number: " + LOCAL + "\n", "- Phone Number: " + NO_PLAN + "\n"):
+            with self.subTest(text=text):
+                self.assertEqual(text, masked(text))
+                self.assertEqual(text, masked(text, "prompt"))
 
     def test_a_date_a_time_round_numbers_a_series_and_an_example_stay_text(self):
         for text in ("call 2024 08 15 the release", "contact us at 10:30 tomorrow", "call the function at line 1234",
                      "dial 1-2-3", "call 1234 5678 9012 3456", "Order Number: " + LOCAL + "\n",
                      "contact us at 555-0142", "contact us at 312 555 " + "0142", "reach us at 2023-07-15",
                      "contact us at 100 200 300 400",
-                     "Phone Number: 1111-" + "1111\n", "fax us at 12345678", "call 15 08 2024 the release"):
+                     "Phone Number: 1111-" + "1111\n", "fax us at 12345678", "call 15 08 2024 the release",
+                     # Gate A: an IP, a date with a time, lists of numbers, a bare `the number`
+                     "contact the API at 10.20.30." + "40", "reach the host at 172.16.10." + "20",
+                     "call 31 12 2024 23 59", "contacted at 2024 11 14 09 30", "call 64 128 256 512 1024",
+                     "call 65535 65536", "call 33 44 55 66", "text 42 17 13 99 88", "call 01 02 03 04 05",
+                     "call 00 11 22 33 44", "contact us at 06 06 06 06 06", "telemetry: the number 0123 4567 8901"):
             with self.subTest(text=text):
                 self.assertEqual(text, masked(text))
 
