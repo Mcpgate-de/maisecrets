@@ -2410,7 +2410,7 @@ a source, with one command typed as your own prompt:
 | `/maisecrets:ner prompts on` | with a service on the network (`url`, `gateway`): your prompts go there too, with the rules' findings as filler; a new source takes this back |
 | `/maisecrets:ner unavailable withhold` | while the service gives no answer, a tool result is kept from the AI; by default (`unavailable rules`) the rules alone mask it |
 | `/maisecrets:ner updates off` | the image of the local service stays as it is; by default it follows the plugin (`updates on` turns that back on) |
-| `/maisecrets:ner` | which source is set, and whether it answers |
+| `/maisecrets:ner` | which source is set, whether it answers, and its load from `GET /metrics` when the service offers it (workers in use, requests that wait, CPU and memory of its container; numbers only) |
 
 In Codex, send `maisecrets: ner local` (or `url URL`, `off`) alone as your
 prompt. One source at a time: a new one replaces the old one. A fallback only

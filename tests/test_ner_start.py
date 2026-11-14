@@ -24,6 +24,15 @@ EP = "127.0.0.1:8765"
 CID = "c0ffee" * 10
 
 
+def setUpModule():
+    # report() reads the load from GET /metrics of the source; the source here is 127.0.0.1:8765, where a real
+    # container of the person may listen: no test asks it
+    from maisecrets import ner_metrics
+    patcher = mock.patch.object(ner_metrics, "load_line", return_value="load: (test)")
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
+
 class FakeDocker:
     """`container inspect`, `start`, `run`, `rm` as docker answers them; every call is kept."""
 
@@ -145,7 +154,8 @@ class StoredSecretTests(unittest.TestCase):
                 with mock.patch.object(ner_setup, "_proves", return_value=True), \
                         mock.patch.object(ner_setup, "container_tool", return_value=""):
                     code, lines = ner_setup.report(conf)
-                self.assertEqual((code, lines[-1][:8]), (0, "checked:"))
+                self.assertEqual(code, 0)
+                self.assertEqual(lines[-2:], [next(x for x in lines if x.startswith("checked:")), "load: (test)"])
                 with mock.patch.object(ner_setup, "_proves", return_value=False):
                     code, lines = ner_setup.report(conf)
                 self.assertEqual(code, 1)

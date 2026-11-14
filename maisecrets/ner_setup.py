@@ -671,6 +671,9 @@ def report(conf, wait: float = 0.0) -> tuple[int, list]:
             lines.append(line)
             lines.append(updates_line(conf))
     if ok:
+        # the load from GET /metrics (ai-gateway #1869): numbers only; a service without it says so, never fails
+        from .ner_metrics import load_line
+        lines.append(load_line(str(url)))
         return 0, lines
     lines.append("Until it answers, the rules mask tool results alone, as without the service.")
     if str(url).rstrip("/") == LOCAL_URL.rstrip("/"):
