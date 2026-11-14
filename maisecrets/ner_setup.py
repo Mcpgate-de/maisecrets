@@ -623,16 +623,19 @@ def _start_local(cfg: dict, tool: str) -> tuple[int, list]:
 def report(conf, wait: float = 0.0) -> tuple[int, list]:
     """(exit code, lines) for /maisecrets:ner: the source, whether it answers (waiting up to `wait` seconds), and for
     the local source that does not answer the command that starts it. The exit code is 0 when the source answers or
-    is off, 3 when the local service needs a start, 1 otherwise."""
+    is off, 3 when the local service needs a start, 4 when the gateway source needs a login with the name scope
+    (commands/ner.md runs it after the person's /maisecrets:ner gateway URL), 1 otherwise."""
     lines = [describe(conf)]
     url = conf.get("url") if isinstance(conf, dict) else None
     if not url:
-        lines.append("To turn it on: /maisecrets:ner local (the service on this computer) or "
-                     "/maisecrets:ner url URL (a service of your team), as your own prompt.")
+        lines.append("To turn it on: /maisecrets:ner local (the service on this computer), url URL (a service of your "
+                     "team) or gateway URL (the gateway of your login), as your own prompt.")
         return 0, lines
     lines.append(scope(conf))
     lines.append(unavailable_line(conf))
     lines.append(counts_line())
+    if conf.get("gateway"):
+        return _gateway_report(conf, lines)
     deadline = time.monotonic() + wait
     ok, line = probe(conf)
     while not ok and time.monotonic() < deadline:
@@ -682,6 +685,41 @@ def report(conf, wait: float = 0.0) -> tuple[int, list]:
     elif not remote.is_local(str(url)):
         lines.append("Check the address with the team that runs the service.")
     return 1, lines
+
+
+def _gateway_report(conf: dict, lines: list) -> tuple[int, list]:
+    """The gateway source as a tool result meets it: its discovery, the login with the name scope, one short request.
+    /health of the gateway says nothing about the login, so it is not asked."""
+    from . import remote_layer
+    from .home import load_config
+    det, why = remote_layer.from_config({**load_config(), "remote_detector": conf})
+    if det is None:
+        lines.append(f"the gateway: not asked; {why}")
+        if "login" in why:
+            name = gateway_server(conf)
+            lines.append(f"login: run.sh sref login{(' ' + name) if name else ''}")
+            return 4, lines
+        return 1, lines
+    _spans, st = det.ask("A check of the name service.", [])
+    if st.available:
+        lines.append(f"the gateway: answers ({st.ms:.0f} ms) with your login")
+        return 0, lines
+    lines.append(f"the gateway: gives no result ({st.reason or st.state}); the rules mask tool results alone until it "
+                 "does")
+    return 1, lines
+
+
+def gateway_server(conf: dict) -> str:
+    """The name of the MCP server of the user configuration whose origin is the gateway of this source, or ""."""
+    from . import vault_refs
+    from .vault_refs import origin_of
+    want = str(conf.get("gateway") or "")
+    try:
+        servers = vault_refs.user_servers()
+    except Exception:  # noqa: BLE001 - no name: `sref login` alone then works for one server
+        return ""
+    names = [k for k, v in servers.items() if origin_of(str(v)) == want]
+    return names[0] if len(names) == 1 and re.fullmatch(r"[\w.-]{1,64}", names[0]) else ""
 
 
 # --------------------------------------------------------- the down note --

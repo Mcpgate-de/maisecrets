@@ -166,6 +166,26 @@ class GatewaySourceTests(unittest.TestCase):
                                       "cwd": tempfile.gettempdir()})
                 self.assertEqual(len(self.srv.ner_texts), sent)
 
+    def test_the_status_asks_for_a_login_only_when_one_is_needed(self):
+        import json as _json
+        from maisecrets.home import CONFIG
+        old = CONFIG.read_text(encoding="utf-8") if CONFIG.exists() else None
+        self.addCleanup(lambda: CONFIG.write_text(old, encoding="utf-8") if old is not None
+                        else CONFIG.unlink(missing_ok=True))
+        CONFIG.write_text(_json.dumps(self.cfg), encoding="utf-8")
+        conf = self.cfg["remote_detector"]
+        code, lines = ner_setup.report(conf)
+        self.assertEqual(code, 4, lines)
+        self.assertTrue(any(x.startswith("login: run.sh sref login") for x in lines), lines)
+        self.login({"client_vault_cafile": self.srv.cert})        # a login without the name scope
+        self.assertEqual(ner_setup.report(conf)[0], 4)
+        self.login(self.cfg)
+        code, lines = ner_setup.report(conf)
+        self.assertEqual(code, 0, lines)
+        self.assertFalse(any(x.startswith("login:") for x in lines))
+        self.srv.ner_answer = (503, {"error": "busy"})
+        self.assertEqual(ner_setup.report(conf)[0], 1, "a busy gateway needs no login")
+
     def test_no_login_and_a_switched_off_gateway_give_reasons(self):
         det, why = remote_layer.from_config(self.cfg)
         self.assertIsNone(det)
