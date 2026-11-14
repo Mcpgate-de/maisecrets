@@ -70,6 +70,29 @@ class CommandTests(unittest.TestCase):
         self.assertFalse(settings.loosens("remote_detector", gw, held))
         self.assertTrue(settings.loosens("remote_detector", held, ner_setup.updated(held, "unavailable:rules")))
 
+    def test_sref_without_a_name_takes_the_server_of_the_ner_gateway(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from maisecrets import cli, vault_refs
+        servers = {"team-gw": "https://gw.example.com/mcp", "other-gw": "https://other.example.com/mcp"}
+        found = {"team-gw": {"origin": "https://gw.example.com"}, "other-gw": {"origin": "https://other.example.com"}}
+        conf = ner_setup.updated({}, "gateway:https://gw.example.com/mcp")
+        with mock.patch.object(vault_refs, "user_servers", return_value=servers), \
+                mock.patch.object(S, "discover", side_effect=lambda cfg, url, *a: found[
+                    next(k for k, v in servers.items() if v == url)]), \
+                mock.patch.object(S, "forget") as forget:
+            self.assertEqual(ner_setup.gateway_server(conf), "team-gw")
+            for setting, code in (({"remote_detector": conf}, 0), ({}, 2)):
+                with self.subTest(gateway=bool(setting)), \
+                        mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
+                                                                            "allow_plaintext_store": True,
+                                                                            **setting}), \
+                        redirect_stdout(io.StringIO()):
+                    self.assertEqual(cli.cmd_sref(["logout"]), code)
+            forget.assert_called_once()
+            self.assertEqual(forget.call_args[0][1], "https://gw.example.com")
+
     def test_a_tool_call_that_carries_the_sentence_is_refused_like_the_others(self):
         import re
         self.assertTrue(re.search(ner_setup.IN_A_COMMAND, "echo '/maisecrets:ner gateway https://gw.example.com'"))
@@ -252,8 +275,11 @@ class GatewaySourceTests(unittest.TestCase):
             out = self.post_tool(conf)
             self.assertIn("⚠ names not checked: the name service was busy", out.get("systemMessage", ""))
             self.assertNotIn("updatedToolOutput", out.get("hookSpecificOutput") or {}, "the output stays as it is")
+        self.assertIn("did not check the names", out["hookSpecificOutput"]["additionalContext"], "the AI knows too")
         self.srv.ner_answer = None
-        self.assertNotIn("names not checked", self.post_tool(conf).get("systemMessage", ""))
+        out = self.post_tool(conf)
+        self.assertNotIn("names not checked", out.get("systemMessage", ""))
+        self.assertNotIn("did not check the names", json.dumps(out))
 
     def test_withhold_keeps_an_unchecked_result_from_the_ai(self):
         self.login(self.cfg)

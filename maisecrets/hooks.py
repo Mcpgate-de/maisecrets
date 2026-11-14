@@ -2988,6 +2988,11 @@ def _with_unchecked_names(payload: dict, result: dict) -> dict:
     if withhold:
         _rl.NER_DOWN["v"] = False      # the note for the AI says the rules masked the result; none did here
     out = _withheld(payload, _rl.withhold_text(why)) if withhold else dict(result or {})
+    if not withhold and client_of(payload) != "codex":
+        hso = dict(out.get("hookSpecificOutput") or {"hookEventName": "PostToolUse"})
+        note = _rl.unchecked_context(why)
+        hso["additionalContext"] = f"{hso['additionalContext']}\n\n{note}" if hso.get("additionalContext") else note
+        out["hookSpecificOutput"] = hso
     line = _rl.screen_line(why, withhold)
     out["systemMessage"] = f"{out['systemMessage']} {line}" if out.get("systemMessage") else line
     return out

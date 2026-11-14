@@ -339,16 +339,25 @@ _SCREEN_WHY = {"timeout": "did not answer in time", "too_long": "does not take a
                "refused": "is not running", "network": "could not be reached", "busy": "was busy",
                "rate_limited": "reached its limit per minute", "forbidden": "refused the login",
                "not_ours": "is not the container maisecrets started", "policy": "is at an address it may not use",
-               "setup": "cannot be asked (/maisecrets:ner names the reason)"}
+               "setup": "cannot be asked; /maisecrets:ner names the reason"}
 
 
 def screen_line(why: str, withheld: bool) -> str:
     """The line on the person's screen for a tool result whose names the service did not check."""
     said = _SCREEN_WHY.get(why, "gave no usable answer")
     if withheld:
-        return (f"⚠ maisecrets withheld this result from the AI: names not checked, the name service {said} "
-                "(/maisecrets:ner unavailable rules lets the rules alone mask it).")
+        return (f"⚠ maisecrets withheld this result from the AI: names not checked, the name service {said}. "
+                "/maisecrets:ner unavailable rules lets the rules alone mask it.")
     return f"⚠ names not checked: the name service {said}; the rules masked this result."
+
+
+def unchecked_context(why: str) -> str:
+    """The note for the AI at each tool result whose names the service did not check: the person sees a line about
+    it, the AI does not, and told the person that no warning came (live test of #33)."""
+    said = _TOOL_WHY.get(why, "no usable answer")
+    return (f"maisecrets: the name service did not check the names in this tool result ({said}); the rules alone "
+            "masked it, so a person's name in it may stand in clear text. The person's screen shows this for each "
+            "such result; do not say that names were masked or that no warning came.")
 
 
 def withhold_text(why: str) -> str:
