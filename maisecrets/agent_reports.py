@@ -34,9 +34,12 @@ _COMMAND_START = 'Background command "'
 
 
 def _notification_tag(body: str, name: str) -> str | None:
-    # the short fields (id, path, status) never hold a tag of their own
-    m = re.search(rf"<{name}>([^<]*)</{name}>", body)
-    return m.group(1) if m else None
+    """A short field (id, path, status) of the notice, read outside the result only and present once: a result that
+    quotes `<tool-use-id>` changed how the report was read (codex review, 2026-11-14)."""
+    span = _result_span(body)
+    envelope = body[: span[0] - len("<result>")] + body[span[1]:] if span else body
+    found = re.findall(rf"<{name}>([^<]*)</{name}>", envelope)
+    return found[0] if len(found) == 1 else None
 
 
 def _result_span(body: str) -> tuple[int, int] | None:
@@ -116,6 +119,32 @@ def _tool_input(transcript: str, tool_use_id: str, names: tuple) -> dict | None:
     return None
 
 
+def _launched_task(transcript: str, task_id: str) -> bool:
+    """Whether this transcript started or resumed the agent of this task id: the result of an Agent, Task or
+    SendMessage call that names it (`agentId`, `resumedAgentId`). A file in the subagents folder alone is no proof:
+    the session can write one (codex review, 2026-11-14)."""
+    try:
+        with open(transcript, encoding="utf-8") as f:
+            for line in f:
+                if task_id not in line or '"tool_result"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                res = rec.get("toolUseResult")
+                if rec.get("type") != "user" or not isinstance(res, dict) or \
+                        task_id not in (res.get("agentId"), res.get("resumedAgentId")):
+                    continue
+                for b in (rec.get("message") or {}).get("content") or []:
+                    if isinstance(b, dict) and b.get("type") == "tool_result" and \
+                            _called_an_agent(transcript, str(b.get("tool_use_id") or "")):
+                        return True
+    except OSError:
+        return False
+    return False
+
+
 def _subagent_by_task_id(body: str, subagents: str) -> str | None:
     """The subagent's own transcript that the task id names, in this session's subagents folder only."""
     task_id = _notification_tag(body, "task-id") or ""
@@ -139,7 +168,7 @@ def _one_report_proves_itself(body: str, transcript: str) -> bool:
         # reports in one session, 2026-11-14), and its output file is in the tasks folder. The report proves
         # itself by its task id: the subagent's own transcript in this session's folder, and its last answer
         real = _subagent_by_task_id(body, subagents)
-        if real is None:
+        if real is None or not _launched_task(transcript, _notification_tag(body, "task-id") or ""):
             return False
         answer = _last_answer(real)
         return answer is not None and _same_text(body[span[0]:span[1]], answer)
