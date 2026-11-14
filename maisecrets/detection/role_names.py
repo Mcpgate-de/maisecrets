@@ -98,18 +98,10 @@ def _key_name_res() -> list:
     """The forms of structured data: a quoted key or a bare key before : = or =>, an HTML table row, an XML element.
     The value: one to four name words, the whole value of its field."""
     if not _KEY_NAME_RX:
+        from .key_values import forms
         from .personal import _NAME_PARTICLE, _NAME_STEM
         value = r"(" + _NAME_STEM + r"(?:[ ](?:" + _NAME_STEM + "|" + _NAME_PARTICLE + r")){0,3})"
-        # the end of the field: a closing quote (also before a space: `last name`='…' LIMIT 3), or the end of the
-        # line or a separator of the format
-        end = r"(?=[\"'`](?:[ \t]|$)|[\"'`]?[ \t]*(?:$|[\n,;&)}\]<]|#))"
-        _KEY_NAME_RX.extend([
-            re.compile(r"(?:([\"'`])([A-Za-z][A-Za-z0-9 _-]{2,40})\1|(?<![\w.-])([A-Za-z][A-Za-z0-9_-]{2,40}))"
-                       r"[ \t]{0,3}(?:=>|[:=])[ \t]{0,3}[\"'`]?" + value + end, re.M),
-            re.compile(r"<th(?:\s[^<>]{0,80})?>\s{0,32}()([A-Za-z][A-Za-z0-9 _-]{2,40})()\s{0,32}</th>\s{0,64}"
-                       r"<td(?:\s[^<>]{0,80})?>\s{0,32}" + value + r"\s{0,32}</td>"),
-            re.compile(r"<()([A-Za-z_][\w.:-]{2,64})()(?:\s[^<>]{0,200})?>[ \t]*" + value + r"[ \t]*</\2>"),
-        ])
+        _KEY_NAME_RX.extend(forms(value))
     return _KEY_NAME_RX
 
 
