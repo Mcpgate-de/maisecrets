@@ -290,7 +290,8 @@ test("a slash command's line goes on unchanged, without a launcher call: the set
   })
   // Claude Code throws away a prompt.submit change of a slash command's line and sends the line as typed: a rewrite
   // here made the hook see a placeholder while the value went to the model
-  for (const text of ['/plugin:skill TOKENWORD', '/review TOKENWORD', '  /x', '/a.b-c:d-e TOKENWORD']) {
+  for (const text of ['/plugin:skill TOKENWORD', '/review TOKENWORD', '  /x', '/a.b-c:d-e TOKENWORD',
+                      '/plugin:dir:cmd TOKENWORD', '/übersetzen TOKENWORD', '\n/x TOKENWORD']) {
     expect((await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })).text).toBe(text)
   }
   expect(calls).toBe(0)

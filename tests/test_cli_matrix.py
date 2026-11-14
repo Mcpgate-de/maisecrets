@@ -845,7 +845,7 @@ class StateMatrixTests(unittest.TestCase):
 
     def test_forget_takes_keys_as_a_person_types_them(self):
         # #44: a full stop after a key, a comma between keys and a key twice were taken as part of a key
-        sb, r = self._run("live", "forget", "SECRET_c1.", "EMAIL_c1,SECRET_c1;", "SECRET_c1")
+        sb, r = self._run("live", "forget", "⟦SECRET_c1⟧.", "EMAIL_c1,SECRET_c1;", "SECRET_c1")
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertEqual(r.stdout.count("Deleted "), 2, r.stdout)
         self.assertNotIn("There is no", r.stdout)
