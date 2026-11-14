@@ -303,8 +303,7 @@ class AgentReportTests(unittest.TestCase):
             f.write(_line({"type": "assistant", "message": {"content": [{"type": "text", "text": quoted}]}}))
         self.assertEqual(self.prompt(self.resumable(quoted).replace(html.escape(quoted), quoted)), {})
         # a field twice in the envelope is no field
-        twice = self.resumable(self.answer).replace("<status>completed</status>",
-                                                     "<status>completed</status>\n<status>completed</status>")
+        twice = self.resumable(self.answer).replace("</task-id>\n", "</task-id>\n<task-id>b8e4d0f3c2e51679</task-id>\n")
         self.assertBlocked(self.prompt(twice))
 
     def test_a_report_without_a_tool_use_id_passes_by_its_task_id(self):
