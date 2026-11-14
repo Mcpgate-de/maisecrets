@@ -2018,15 +2018,14 @@ def _address_value_ok(v: str) -> bool:
 
 def _street_number_last_ok(v: str) -> bool:
     """The street before its number, as Eastern and Central Europe write it, after a strong address label (#49):
-    `Kalinova Ulica 17`, `Rivne Prospekt, 42`, `ul. Kalinova 17`; one to four street words, no URL, version, port,
-    markup or word of a thing."""
+    `Kalinova Ulica 17`, `Rivne Prospekt, 42`, `ul. Kalinova 17`: one to four words of letters (no URL, version or
+    markup fits the form), one of them a name of its own, and no word of a thing."""
     from .core import _word_set
     known = _word_set()
     # Plan Basic 2, See Section 4: words of the word list name a thing; a street has a name of its own
     own = any(len(w) >= 4 and w.lower() not in known
               for w in re.findall(r"[^\W\d_]+", re.sub(r"^[a-z]{1,4}\.\s|,?\s\d.*$", "", v)))
-    return (bool(_STREET_NUMBER_LAST_RE.fullmatch(v)) and own and "://" not in v
-            and not re.search(r"\d+\.\d+\.\d+|:\d{2,5}\b|[{}<>$()=_\[\]#@]", v) and not _NOT_AN_ADDRESS_RE.search(v))
+    return bool(_STREET_NUMBER_LAST_RE.fullmatch(v)) and own and not _NOT_AN_ADDRESS_RE.search(v)
 
 
 def _block_back(text: str, line: int, lines: int = 2, most: int = 200) -> int:
