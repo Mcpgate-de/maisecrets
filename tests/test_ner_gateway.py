@@ -62,6 +62,14 @@ class CommandTests(unittest.TestCase):
         # another source takes the gateway keys away
         self.assertNotIn("gateway", ner_setup.updated(new, "local"))
 
+    def test_prompts_on_for_a_network_source_and_withhold_off_are_weakenings(self):
+        from maisecrets import settings
+        gw = ner_setup.updated({}, "gateway:https://gw.example.com/mcp")
+        self.assertTrue(settings.loosens("remote_detector", gw, ner_setup.updated(gw, "prompts:on")))
+        held = ner_setup.updated(gw, "unavailable:withhold")
+        self.assertFalse(settings.loosens("remote_detector", gw, held))
+        self.assertTrue(settings.loosens("remote_detector", held, ner_setup.updated(held, "unavailable:rules")))
+
     def test_a_tool_call_that_carries_the_sentence_is_refused_like_the_others(self):
         import re
         self.assertTrue(re.search(ner_setup.IN_A_COMMAND, "echo '/maisecrets:ner gateway https://gw.example.com'"))
