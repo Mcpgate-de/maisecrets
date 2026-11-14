@@ -54,14 +54,14 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}")
 
 def password_key(key: str) -> bool:
     k = fold(key)
-    return k.endswith(_PASSWORD_ENDS) and "hash" not in k and "salt" not in k
+    return k.endswith(_PASSWORD_ENDS)
 
 
 def _password_ok(v: str) -> bool:
     """A value under a password key: three characters and more with a digit or a sign, no reference, no URL or
     path, no word of a state."""
     from .core import _ds_value_ok
-    if v.lower() in _NOT_A_PASSWORD or v.startswith(("/", "$", "%", "{", "http")) or "://" in v:
+    if v.lower() in _NOT_A_PASSWORD or v.startswith(("/", "$", "%", "{")) or "://" in v:
         return False
     return any(not c.isalpha() for c in v) and not v.isdigit() and _ds_value_ok(v, 3)
 

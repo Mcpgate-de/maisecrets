@@ -34,7 +34,9 @@ class PasswordAfterAKeyTests(unittest.TestCase):
         for text in ('{"password": "required"}', '{"password": "${DB_PASSWORD}"}', '{"password_policy": "min8"}',
                      '{"passwordHash": "x7Fq2"}', '{"reset_password": "/reset/4kq"}', '{"password": "abcdef"}',
                      '<tr><th>password</th><td>***</td></tr>', '{"show_password": "false"}',
-                     '{"password": "1234"}'):
+                     '{"password": "1234"}', '{"password": "4711"}', '{"password": "hidden"}',
+                     '{"password": "/tmp/pw1"}', '{"password": "%PW1%"}', '{"password": "{pw1}"}',
+                     '{"password": "x://y1"}'):
             with self.subTest(text=text):
                 self.assertNotIn("password-after-key", [k for k, _ in kinds(text)])
 
