@@ -1034,6 +1034,20 @@ class TypedSettings(_Work):
         out = self._prompt("/maisecrets:settings clean_dirs add relative/dir")
         self.assertIn("not added", said(out))
 
+    def test_a_settings_command_with_a_value_changes_nothing_and_is_not_sent(self):
+        # a slash command that succeeds runs on, and its expansion holds the arguments (codex review of #44)
+        token = "glpat-" + "Q7w8E9r0T1y2U3i4O5p6"          # a fake token of the GitLab shape, built at run time
+        for line in (f"/maisecrets:settings clean_dirs add {self.dir / token}",
+                     f"/maisecrets:settings value_files add {self.dir / token}"):
+            with self.subTest(line=line[:40]):
+                before = load_config()
+                out = self._prompt(line)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertTrue(out["hookSpecificOutput"].get("suppressOriginalPrompt"))
+                self.assertIn("Nothing was changed", out["reason"])
+                self.assertNotIn(token, json.dumps(out))
+                self.assertEqual(load_config(), before)
+
     def test_a_tool_call_cannot_set_them(self):
         for cmd in ("echo '/maisecrets:settings read_pdf allow'", "echo 'maisecrets: set clean_dirs add /tmp'"):
             with self.subTest(cmd):

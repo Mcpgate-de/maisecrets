@@ -139,6 +139,23 @@ SCENARIOS = {
         "expect_blocked": True,
         "with_mod": {"expect_requests": 0, "expect_blocked": True},
     },
+    # a slash after an invisible or a full-width character (codex review of #44): Claude Code runs no command for it,
+    # so the mod's rewrite counts, and the value goes as a placeholder. If a client ever runs it as a command, the
+    # value would reach the model in the command's arguments: expect_requests 1 with a placeholder catches that
+    "slash_after_zero_width": {
+        "prompt": f"\u200b/maisecrets:status {MARK}",
+        "turns": [{"text": "done"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"]},
+    },
+    "slash_full_width": {
+        "prompt": f"\uff0fmaisecrets:status {MARK}",
+        "turns": [{"text": "done"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"]},
+    },
     # ms:(…), a check of a value: blocked on every client, with the mod too (the mod passes it to the settings hook
     # without a rewrite), and the verdict goes to the person only. The value is in no request and, as typed, not in the
     # transcript (maisecrets/check_value.py, C29)

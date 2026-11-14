@@ -540,6 +540,17 @@ def _prompt_hits(prompt: str) -> list:
     return detect.findings(prompt)
 
 
+def _carries_value(prompt: str, cfg: dict, session: str | None) -> bool:
+    """Whether the prompt holds a detected value or one the store holds; a dry run, nothing is stored."""
+    if _prompt_hits(prompt):
+        return True
+    if not _has_live(cfg):
+        return False
+    vault = Vault(cfg)
+    resolved = [(v, r) for v, r in _resolved_values(vault, session, prompt=True) if len(v) >= _EXACT_MIN_LEN]
+    return bool(_exact_spans(prompt, vault, session, resolved, prompt=True))
+
+
 def _exact_spans(text: str, vault, session: str | None, resolved: list | None, prompt: bool = False) -> list:
     """The spans of `text` that the exact redaction replaces (stored and resolved values), longest first, no
     overlap. A dry run: its count, entries and values are thrown away. prompt: as _exact_redact (a typed prompt does
@@ -1033,6 +1044,12 @@ def user_prompt(payload: dict) -> dict:
     if change:
         slash = prompt.lstrip().lower().startswith(("/maisecrets:settings", "/maisecrets:ner"))
         route = "slash command" if slash else "typed prompt"
+        if slash and client_of(payload) != "codex" and _carries_value(prompt, cfg, session):
+            # a slash command that succeeds runs on, and its expansion holds the arguments: a value in them would
+            # reach the model (codex review of #44). Nothing changes, and the prompt is not sent
+            return {"decision": "block", "reason": "maisecrets: this settings command carries a value that "
+                    "maisecrets masks (a secret or personal data). Nothing was changed; this prompt was not sent.",
+                    "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
         changed, reason = settings_mod.apply_typed(*change, route=route, cwd=str(payload.get("cwd") or "")) if typed \
             else (False, settings_mod.not_typed_reason(payload))
         if changed and change[0] == "clean_dirs" and change[1].startswith("add:"):

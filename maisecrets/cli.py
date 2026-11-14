@@ -109,7 +109,12 @@ def cmd_forget(args: list[str]) -> int:
         return 2
     v, rc = Vault(), 0
     # keys as a person types them: a comma or a semicolon between them, a full stop after the last, a key twice (#44)
-    keys = [k.strip("⟦⟧.").split(":", 1)[0].strip("⟦⟧.") for k in re.split(r"[\s,;]+", " ".join(args))]
+    # a placeholder in brackets is one key, also when its shown form holds a space or a comma: only the part before
+    # its first colon counts (codex review of #44)
+    text = " ".join(args)
+    keys = [m.group(1) for m in re.finditer(r"⟦([^⟦⟧:\s]+)(?::[^⟦⟧]*)?⟧", text)]
+    rest = re.sub(r"⟦[^⟦⟧]*⟧", " ", text)
+    keys += [k.strip("⟦⟧.").split(":", 1)[0].strip("⟦⟧.") for k in re.split(r"[\s,;]+", rest)]
     for key in dict.fromkeys(k for k in keys if k):
         status = v.forget(key, route=_ROUTE["v"])
         if getattr(v, "destinations_kept", False):
