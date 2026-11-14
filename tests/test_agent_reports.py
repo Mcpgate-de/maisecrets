@@ -334,7 +334,7 @@ class AgentReportTests(unittest.TestCase):
         self.assertBlocked(self.prompt(self.resumable(self.answer, note=f"{self.NOTE} {other}")))
 
 
-COMMAND_USE ="toolu_01BackgroundCommand"
+COMMAND_USE = "toolu_01BackgroundCommand"
 
 
 class CommandNoticeTests(unittest.TestCase):
