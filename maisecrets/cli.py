@@ -108,8 +108,9 @@ def cmd_forget(args: list[str]) -> int:
         print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
         return 2
     v, rc = Vault(), 0
-    for raw in args:
-        key = raw.strip("⟦⟧").split(":", 1)[0]
+    # keys as a person types them: a comma or a semicolon between them, a full stop after the last, a key twice (#44)
+    keys = [k.strip("⟦⟧").split(":", 1)[0].strip("⟦⟧") for k in re.split(r"[\s,;]+", " ".join(args))]
+    for key in dict.fromkeys(k.rstrip(".") for k in keys if k.rstrip(".")):
         status = v.forget(key, route=_ROUTE["v"])
         if getattr(v, "destinations_kept", False):
             print(f"The destination record of {key} could not be deleted now; send /maisecrets:forget {key} later.")

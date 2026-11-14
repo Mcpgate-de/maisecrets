@@ -130,6 +130,15 @@ SCENARIOS = {
         "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
                      "expect_hook_prompt": "\u27e6SECRET_c1\u27e7"},
     },
+    # #44: a token in the arguments of a slash command. Claude Code throws away a prompt.submit change of a slash
+    # command's line, so the mod's rewrite does not count there; the value must still never reach the model
+    "slash_command_secret": {
+        "prompt": f"/maisecrets:status {MARK}",
+        "turns": [{"text": "done"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "with_mod": {"expect_requests": 0, "expect_blocked": True},
+    },
     # ms:(…), a check of a value: blocked on every client, with the mod too (the mod passes it to the settings hook
     # without a rewrite), and the verdict goes to the person only. The value is in no request and, as typed, not in the
     # transcript (maisecrets/check_value.py, C29)
