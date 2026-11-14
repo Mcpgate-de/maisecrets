@@ -287,7 +287,8 @@ class AgentReportTests(unittest.TestCase):
     def test_a_launch_by_another_tool_proves_nothing(self):
         with self.s.transcript.open("a", encoding="utf-8") as f:
             f.write(_line({"type": "assistant", "message": {"content": [
-                {"type": "tool_use", "id": "toolu_01Bash", "name": "Bash", "input": {"command": "true"}}]}}))
+                {"type": "tool_use", "id": "toolu_01Bash", "name": "Bash",
+                 "input": {"command": "true", "description": "Agent"}}]}}))   # the word passes the line filter
         self.by_task_id(tool_use="toolu_01Bash")
         self.assertBlocked(self.prompt(self.resumable(self.answer)))
 
