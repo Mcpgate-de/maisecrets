@@ -285,10 +285,9 @@ class TokenTests(unittest.TestCase):
         det = remote.RemoteDetector("https://gw.example.com/x", allow_network=True, token=good)
         self.assertNotIn(good, repr(det))
         self.assertNotIn(good, str(det.status("unavailable", "http")))
-        try:
+        with self.assertRaises(ValueError) as caught:
             remote.RemoteDetector("https://gw.example.com/x", allow_network=True, token=good + "\n")
-        except ValueError as exc:
-            self.assertNotIn(good, str(exc))
+        self.assertNotIn(good, str(caught.exception))
 
 
 if __name__ == "__main__":
