@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+## [0.9.10] - 2026-11-14
+
+### Features
+
+- finds a password and an id number after a key in JSON, XML, HTML tables and SQL, also short ones (eff0c79)
+- finds an id after a health, tax or policy label in prose, bold labels and table cells, also a short id with a letter prefix (599136d)
+- finds a person's name after a name key in JSON, XML, HTML tables and SQL, also with a gender suffix (16d2948)
+- /maisecrets:ner shows the load of the gateway's name service and your quota this minute (7fa5b8f)
+- the local name service gets a share of the computer, not all of it (3055d5b)
+- the load of the container maisecrets started is read with its own metrics bearer (58ae3e5)
+- /maisecrets:ner shows the load of the name service from its /metrics (6480192)
+- /maisecrets:ner gateway URL starts the login itself when the login lacks the name scope (a3296dd)
+- your prompts can go to the gateway's name service too, and each unchecked tool result says so on your screen (479cfa3)
+- the gateway of your login can find the names in tool results (/maisecrets:ner gateway URL) (1249b18)
+
+### Fixes
+
+- an insurance policy number is no longer read as a personal id; the release gate counted 207 false alarms in insurance documents (b92d357)
+- a generic document or id number counts in a person's element or next to the type of a person's document, not near any word; a label and its id in parentheses in prose (Gate A round 2) (90783fb)
+- a document or id number of an invoice or an order stays text, a password in any element is a password, and sin (31415), a firewall policy and a year stay text (Gate A) (b72a500)
+- a password after a key passes the checks of a password literal, and a joined expression, a reference of your sources and a fixture stay text; one prefilter per family (dbac1e9)
+- the launch of a subagent is found in one pass over the transcript (b772db6)
+- a subagent report without a tool use id passes only when this session started or resumed that agent (a36ffbd)
+- a subagent's report without a tool use id is no longer blocked as a typed prompt (c1da0e2)
+- a settings command with a name marked with {{…}} or a name the name service finds is not sent either (3429a0c)
+- a settings command that carries a value changes nothing and is not sent, and forget takes a placeholder in brackets whole (0a00526)
+- every line that starts with a slash goes to the settings hook unchanged, also /plugin:dir:cmd and non-ASCII names (72c7ebd)
+- a person-name key inside the element of a thing, such as a security's fullName, stays text (0a44021)
+- the name-key rule leaves a placeholder last name alone, and a sort order or the key word as the value (36170ea)
+- a word like Long or Short inside a name no longer stops the name-key rule; legal_full_name is no person key (e0605c5)
+- the name-key rule also takes a role before the key, a double surname, YAML comments and HTML cells on their own lines (771b03d)
+- the local container never asks for more CPUs than the container engine has, and the load lines end in time (f50e677)
+- a busy gateway that answers 429 with error busy counts as busy, not as the quota (06a0d9b)
+- the AI knows at each result that its names were not checked, and sref login takes the server of the name gateway (6c27409)
+- a name source that cannot be asked says so on your screen too, and a program's prompt never goes to the network (1d80c9f)
+
+### Security
+
+- a value in the arguments of a slash command is blocked again, not passed to the model (f6a520d)
+
+### Dependencies
+
+- the local name service follows mcpgate/ner v2.0.3916, which has /metrics and names its release (02e5abf)
+
 ## [0.9.9] - 2026-11-13
 
 ### Features
