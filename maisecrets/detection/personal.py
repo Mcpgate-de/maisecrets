@@ -2643,7 +2643,10 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
         for m in _ID_RE.finditer(text):
             v = m.group(1)
             # 17 digits and more: a snowflake id of a chat platform or a database key, no document number
-            if sum(c.isdigit() for c in v) >= 5 and not (v.isdigit() and len(v) >= 17) and not _placeholder_digits(v) \
+            # four digits with a letter prefix are an id too (A-4817, a medical record number); four alone a year
+            digits = sum(c.isdigit() for c in v)
+            if (digits >= 5 or digits == 4 and v[0].isalpha()) and not (v.isdigit() and len(v) >= 17) \
+                    and not _placeholder_digits(v) \
                     and not _ID_DATE_RE.fullmatch(v):
                 # MRN4829173: the label glued to the number is the id's own prefix, masked with it
                 start = m.start() if text[m.start():m.start(1)].isalpha() else m.start(1)
