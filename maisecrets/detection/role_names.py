@@ -117,12 +117,15 @@ def key_names(text: str) -> list:
     """The spans of a person's name after a person-name key in JSON, XML, an HTML table, SQL or key=value (#43): the
     names of API answers and logs, often one word without a sentence around it, that neither a label rule nor the
     name service read. One word passes the checks of one_word_name, more words the checks of a name after a label."""
-    from .personal import _NOT_A_NAME_PART, PLACEHOLDER_NAMES, _name_ok, _reads_as_words
+    from .personal import _NOT_A_NAME_PART, _THING_PARENTS, PLACEHOLDER_NAMES, _name_ok, _reads_as_words, _xml_parent
     out, first, last = [], [], []
     for rx in _key_name_res():
         for m in rx.finditer(text):
             key = m.group(2) or m.group(3) or ""
             if not person_name_key(key):
+                continue
+            # the element of a thing (a security's fullName, a product's name) names no person, as in the XML rule
+            if text.startswith("<", m.start()) and _xml_parent(text, m.start()) in _THING_PARENTS:
                 continue
             v = m.group(4).rstrip("'’")
             plain = re.sub(r"-[^\s]*", "", v)
