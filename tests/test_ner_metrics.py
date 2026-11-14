@@ -26,6 +26,7 @@ class Sidecar:
 
     def __init__(self, mode: str = "json"):
         self.mode, self.calls, self.accept = mode, 0, []
+        self.want = ner_metrics.bearer_of("testsecret-" + "m" * 24)
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -37,6 +38,8 @@ class Sidecar:
                 if self.path != "/metrics" or outer.mode == "old":
                     return self._send(404, b"not found")
                 if outer.mode == "token":
+                    return self._send(401, b"{}")
+                if outer.mode == "secret" and self.headers.get("Authorization") != "Bearer " + outer.want:
                     return self._send(401, b"{}")
                 outer.calls += 1
                 n = outer.calls
@@ -99,6 +102,16 @@ class LoadLineTests(unittest.TestCase):
                 self.assertTrue(line.startswith("load: no load data ("), line)
                 self.assertIn(why, line)
         self.assertIn("no load data", ner_metrics.load_line("http://127.0.0.1:9", gap=0.1))
+
+    def test_a_container_with_a_secret_gets_the_metrics_bearer_not_the_text_bearer(self):
+        import hashlib
+        import hmac
+        secret = "testsecret-" + "m" * 24
+        s = self.side("secret")
+        self.assertIn("4 workers", ner_metrics.load_line(s.url, gap=0.1, bearer=ner_metrics.bearer_of(secret)))
+        text_bearer = hmac.new(secret.encode(), b"bearer", hashlib.sha256).hexdigest()
+        self.assertNotEqual(ner_metrics.bearer_of(secret), text_bearer)
+        self.assertIn("wants a metrics token", ner_metrics.load_line(s.url, gap=0.1, bearer=text_bearer))
 
     def test_a_counter_that_falls_or_is_no_number_is_left_out(self):
         before = {"ner": {"workers": 4, "worker_busy_seconds_total": 9.0}, "cgroup": {"cpu_limit_cores": "4"}}

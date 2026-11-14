@@ -18,9 +18,18 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 MAX_BYTES = 65536
 
 
-def sample(url: str, timeout: float = 1.0) -> tuple[dict | None, str]:
+def bearer_of(secret: str) -> str:
+    """The bearer of /metrics for a container with NER_CLIENT_SECRET: HMAC-SHA256(secret, "metrics") in hex. It is
+    not the bearer of a text (HMAC(secret, "bearer")), so a token that reads the load cannot send a text."""
+    import hashlib
+    import hmac
+    return hmac.new(secret.encode("utf-8"), b"metrics", hashlib.sha256).hexdigest()
+
+
+def sample(url: str, timeout: float = 1.0, bearer: str = "") -> tuple[dict | None, str]:
     """(the counters, "") or (None, why there are none)."""
-    req = urllib.request.Request(url.rstrip("/") + "/metrics", headers={"Accept": "application/json"})
+    headers = {"Accept": "application/json", **({"Authorization": "Bearer " + bearer} if bearer else {})}
+    req = urllib.request.Request(url.rstrip("/") + "/metrics", headers=headers)
     try:
         with _OPENER.open(req, timeout=timeout) as r:
             doc = json.loads(r.read(MAX_BYTES).decode("utf-8"))
@@ -82,14 +91,15 @@ def load(before: dict, after: dict, seconds: float) -> dict:
     return out
 
 
-def load_line(url: str, gap: float = 1.0, timeout: float = 1.0) -> str:
-    """One line for /maisecrets:ner: the load of the service at `url`, or why there is none."""
-    first, why = sample(url, timeout)
+def load_line(url: str, gap: float = 1.0, timeout: float = 1.0, bearer: str = "") -> str:
+    """One line for /maisecrets:ner: the load of the service at `url`, or why there is none. `bearer`: the metrics
+    bearer of a container with a secret (bearer_of)."""
+    first, why = sample(url, timeout, bearer)
     if first is None:
         return f"load: no load data ({why})"
     t0 = time.monotonic()
     time.sleep(gap)
-    second, why = sample(url, timeout)
+    second, why = sample(url, timeout, bearer)
     if second is None:
         return f"load: no load data ({why})"
     got = load(first, second, time.monotonic() - t0)

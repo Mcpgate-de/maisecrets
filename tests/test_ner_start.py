@@ -151,9 +151,13 @@ class StoredSecretTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("older than " + ner_setup.FIRST_SECRET_IMAGE, lines[-1])
             with mock.patch.object(ner_setup, "_info", return_value={"client_secret": True}):
+                from maisecrets import ner_metrics
                 with mock.patch.object(ner_setup, "_proves", return_value=True), \
-                        mock.patch.object(ner_setup, "container_tool", return_value=""):
+                        mock.patch.object(ner_setup, "container_tool", return_value=""), \
+                        mock.patch.object(ner_metrics, "load_line", return_value="load: (test)") as load:
                     code, lines = ner_setup.report(conf)
+                # the load of the container maisecrets started is read with the metrics bearer of its secret
+                self.assertEqual(load.call_args.kwargs.get("bearer"), ner_metrics.bearer_of("s" * 43))
                 self.assertEqual(code, 0)
                 self.assertEqual(lines[-2:], [next(x for x in lines if x.startswith("checked:")), "load: (test)"])
                 with mock.patch.object(ner_setup, "_proves", return_value=False):
