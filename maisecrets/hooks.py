@@ -540,15 +540,20 @@ def _prompt_hits(prompt: str) -> list:
     return detect.findings(prompt)
 
 
-def _carries_value(prompt: str, cfg: dict, session: str | None) -> bool:
-    """Whether the prompt holds a detected value or one the store holds; a dry run, nothing is stored."""
-    if _prompt_hits(prompt):
+def _carries_value(prompt: str, cfg: dict, session: str | None, typed: bool = False) -> bool:
+    """Whether the prompt holds what a rewrite would take out: a detected value, a name marked with {{…}}, a value
+    the store holds, or a name the name service finds (codex review of #44). A dry run: nothing is stored or
+    recorded."""
+    from . import terms
+    hits = _prompt_hits(prompt)
+    if hits or terms.markers(prompt):
         return True
-    if not _has_live(cfg):
-        return False
-    vault = Vault(cfg)
-    resolved = [(v, r) for v, r in _resolved_values(vault, session, prompt=True) if len(v) >= _EXACT_MIN_LEN]
-    return bool(_exact_spans(prompt, vault, session, resolved, prompt=True))
+    if _has_live(cfg):
+        vault = Vault(cfg)
+        resolved = [(v, r) for v, r in _resolved_values(vault, session, prompt=True) if len(v) >= _EXACT_MIN_LEN]
+        if _exact_spans(prompt, vault, session, resolved, prompt=True):
+            return True
+    return bool(_prompt_names(cfg, prompt, hits, session, typed)[0])
 
 
 def _exact_spans(text: str, vault, session: str | None, resolved: list | None, prompt: bool = False) -> list:
@@ -1044,7 +1049,8 @@ def user_prompt(payload: dict) -> dict:
     if change:
         slash = prompt.lstrip().lower().startswith(("/maisecrets:settings", "/maisecrets:ner"))
         route = "slash command" if slash else "typed prompt"
-        if slash and client_of(payload) != "codex" and _carries_value(prompt, cfg, session):
+        if slash and client_of(payload) != "codex" and _carries_value(
+                prompt, cfg, session, payload.get("origin") in ("composer", "bridge")):
             # a slash command that succeeds runs on, and its expansion holds the arguments: a value in them would
             # reach the model (codex review of #44). Nothing changes, and the prompt is not sent
             return {"decision": "block", "reason": "maisecrets: this settings command carries a value that "
