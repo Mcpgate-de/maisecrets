@@ -123,26 +123,31 @@ def _launched_task(transcript: str, task_id: str) -> bool:
     """Whether this transcript started or resumed the agent of this task id: the result of an Agent, Task or
     SendMessage call that names it (`agentId`, `resumedAgentId`). A file in the subagents folder alone is no proof:
     the session can write one (codex review, 2026-11-14)."""
+    # one pass: the ids of the agent calls and the ids the results with this task id answer (codex review: a scan per
+    # result read the transcript again for each one)
+    calls, answered = set(), set()
     try:
         with open(transcript, encoding="utf-8") as f:
             for line in f:
-                if task_id not in line or '"tool_result"' not in line:
+                is_call = '"tool_use"' in line and any(f'"{n}"' in line for n in _AGENT_TOOLS)
+                is_result = task_id in line and '"tool_result"' in line
+                if not (is_call or is_result):
                     continue
                 try:
                     rec = json.loads(line)
                 except ValueError:
                     continue
+                blocks = [b for b in (rec.get("message") or {}).get("content") or [] if isinstance(b, dict)]
+                if rec.get("type") == "assistant":
+                    calls.update(str(b.get("id")) for b in blocks
+                                 if b.get("type") == "tool_use" and b.get("name") in _AGENT_TOOLS)
                 res = rec.get("toolUseResult")
-                if rec.get("type") != "user" or not isinstance(res, dict) or \
-                        task_id not in (res.get("agentId"), res.get("resumedAgentId")):
-                    continue
-                for b in (rec.get("message") or {}).get("content") or []:
-                    if isinstance(b, dict) and b.get("type") == "tool_result" and \
-                            _called_an_agent(transcript, str(b.get("tool_use_id") or "")):
-                        return True
+                if rec.get("type") == "user" and isinstance(res, dict) and \
+                        task_id in (res.get("agentId"), res.get("resumedAgentId")):
+                    answered.update(str(b.get("tool_use_id")) for b in blocks if b.get("type") == "tool_result")
     except OSError:
         return False
-    return False
+    return bool(calls & answered)
 
 
 def _subagent_by_task_id(body: str, subagents: str) -> str | None:
