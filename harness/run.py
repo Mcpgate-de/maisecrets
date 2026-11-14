@@ -140,21 +140,32 @@ SCENARIOS = {
         "with_mod": {"expect_requests": 0, "expect_blocked": True},
     },
     # a slash after an invisible or a full-width character (codex review of #44): Claude Code runs no command for it,
-    # so the mod's rewrite counts, and the value goes as a placeholder. If a client ever runs it as a command, the
-    # value would reach the model in the command's arguments: expect_requests 1 with a placeholder catches that
+    # so the mod's rewrite counts, and the value goes as a placeholder. A command's request carries <command-name>
+    # (measured on 2.1.325); if a client ever runs these lines as commands, the scenario fails
     "slash_after_zero_width": {
         "prompt": f"\u200b/maisecrets:status {MARK}",
         "turns": [{"text": "done"}],
         "expect_requests": 0,
         "expect_blocked": True,
-        "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"]},
+        "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
+                     "expect_not_in_requests": ["<command-name>/maisecrets:status"]},
+    },
+    # the control of the two scenarios below: a real command's request names it. If a client changes that form, this
+    # fails, and the check of the two below would prove nothing
+    "slash_command_carries_its_name": {
+        "prompt": "/maisecrets:status",
+        "turns": [{"text": "done"}],
+        "expect_requests": 1,
+        "expect_in_requests": ["<command-name>/maisecrets:status"],
+        "with_mod": {"expect_requests": 1},
     },
     "slash_full_width": {
         "prompt": f"\uff0fmaisecrets:status {MARK}",
         "turns": [{"text": "done"}],
         "expect_requests": 0,
         "expect_blocked": True,
-        "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"]},
+        "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
+                     "expect_not_in_requests": ["<command-name>/maisecrets:status"]},
     },
     # ms:(…), a check of a value: blocked on every client, with the mod too (the mod passes it to the settings hook
     # without a rewrite), and the verdict goes to the person only. The value is in no request and, as typed, not in the
