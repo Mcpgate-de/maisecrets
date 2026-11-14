@@ -2554,17 +2554,18 @@ _BIRTH_WORDS = ("dob", "d.o.b", "birth", "born", "bday", "geb", "n\u00e9", "ne l
                 "na\u0219ter", "na\u015fter", "naster", "γέννησης", "ميلاد", "生年月日", "出生日期", "생년월일")
 RULE_IDS = ("phone-one-digit-groups", "phone-us-national", "birth-date-after-label", "id-number-after-label",
             "user-in-url", "user-in-home-path", "street-address", "name-after-label", "name-before-email",
-            "csv-personal-column") + tuple(FORMS)
+            "csv-personal-column", "password-after-key") + tuple(FORMS)
 # the rules a typed prompt also takes: a fix of the phone rule that both channels have
 PROMPT_RULES = frozenset({"phone-one-digit-groups"} | {k for k, v in FORMS.items() if v[1] == "both"})
 # the type and the region of each rule, for the registry (detect.pass_specs)
 TYPES = {"phone-one-digit-groups": PHONE, "phone-us-national": PHONE, "birth-date-after-label": BIRTH_DATE,
          "id-number-after-label": ID_NUMBER, "user-in-url": USERNAME, "user-in-home-path": USERNAME,
          "street-address": ADDRESS, "name-after-label": NAME, "name-before-email": NAME,
-         "csv-personal-column": "COLUMN", **{k: v[0] for k, v in FORMS.items()}}
+         "csv-personal-column": "COLUMN", "password-after-key": "SECRET", **{k: v[0] for k, v in FORMS.items()}}
 REGIONS = {k: v[2] for k, v in FORMS.items()}
 NEEDS = {"birth-date-after-label": "label", "id-number-after-label": "label", "name-after-label": "label",
          "name-before-email": "form", "street-address": "form", "csv-personal-column": "label",
+         "password-after-key": "label",
          **{k: v[3] for k, v in FORMS.items()}}
 _US_PHONE_REGIONS = frozenset({"us", "ca"})
 
