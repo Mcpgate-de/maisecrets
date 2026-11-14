@@ -42,13 +42,20 @@ _ID_KEYS = frozenset({
     "identitydocumentnumber", "documentnumber", "passport", "passportnumber", "passportno", "idnumber",
     "taxid", "taxidentificationnumber", "taxpayeridentificationnumber", "taxpayerid", "itin",
     "medicalrecordnumber", "healthplanbeneficiarynumber"})
-_KEY_WORDS = ("pass", "pwd", "licen", "identit", "passport", "number", "tax", "itin", "national", "medical")
+# the words one of the keys of a family holds: a text without any of them is not scanned for that family
+_PASSWORD_WORDS = ("pass", "pwd")
+_ID_WORDS = ("licen", "identit", "passport", "documentnumber", "document_number", "document-number",
+             "document number", "document__number", "idnumber", "id_number", "id-number", "id number", "id__number",
+             "taxid", "tax_id", "tax-id", "tax id", "tax__id", "taxpayer", "taxidentification", "tax_identification",
+             "itin", "medical", "beneficiary", "national")
 _ID_KEY_CHARS = r"[A-Za-z0-9 _'’&#;-]"            # driver's-license, driver&#x27;s-license in a table head
 _COMPARE = r"(?:=>|<>|!=|[:=])"                   # WHEN "keypassword"<>'…' in SQL
 _PASSWORD_VALUE = r"([^\s\"'`<>,;|&]{3,64})"
 _ID_VALUE = r"([A-Za-z0-9](?:[A-Za-z0-9]|[ -](?=[A-Za-z0-9])){3,24})"
 _NOT_A_PASSWORD = frozenset({"true", "false", "null", "none", "nil", "undefined", "required", "optional", "hidden",
                              "redacted", "masked", "secret", "password", "changeme", "string", "text", "empty"})
+# a literal that an expression joins with more: password = "…" + os.environ["PW_SUFFIX"] is a part of the value
+_JOINED_RE = re.compile(r"[\"'`][ \t]*(?:\+|\|\||\.[ \t]|~)")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}")
 
 
@@ -58,12 +65,12 @@ def password_key(key: str) -> bool:
 
 
 def _password_ok(v: str) -> bool:
-    """A value under a password key: three characters and more with a digit or a sign, no reference, no URL or
-    path, no word of a state."""
-    from .core import _ds_value_ok
+    """A value under a password key: the checks of a password literal (core._pw_literal_ok: 4 to 64 characters, no
+    fixture word, placeholder, path, reference, version or word), no word of a state, no URL."""
+    from .core import _pw_literal_ok
     if v.lower() in _NOT_A_PASSWORD or v.startswith(("/", "$", "%", "{")) or "://" in v:
         return False
-    return any(not c.isalpha() for c in v) and not v.isdigit() and _ds_value_ok(v, 3)
+    return _pw_literal_ok(v, "tool")
 
 
 def _id_ok(v: str) -> bool:
@@ -75,20 +82,22 @@ def _id_ok(v: str) -> bool:
 def hits(text: str) -> list:
     """(start, end, kind, type) of a name (#43), a password and an id number (#45) after a key."""
     from .personal import ID_NUMBER, NAME, _THING_PARENTS, _xml_parent
+    from .core import _references
     from .role_names import key_names
+    refs = _references()
     low = text.lower()
     out = [(s, e, "name-after-label", NAME) for s, e in key_names(text)] if "name" in low else []
-    if not any(w in low for w in _KEY_WORDS):
-        return out
-    for value, is_key, ok, kind, typ in ((_PASSWORD_VALUE, password_key, _password_ok, "password-after-key",
-                                          "SECRET"),
-                                         (_ID_VALUE, lambda k: fold(k) in _ID_KEYS, _id_ok, "id-number-after-label",
-                                          ID_NUMBER)):
+    for words, value, is_key, ok, kind, typ in (
+            (_PASSWORD_WORDS, _PASSWORD_VALUE, password_key, _password_ok, "password-after-key", "SECRET"),
+            (_ID_WORDS, _ID_VALUE, lambda k: fold(k) in _ID_KEYS, _id_ok, "id-number-after-label", ID_NUMBER)):
+        if not any(w in low for w in words):
+            continue
         for rx in forms(value, _ID_KEY_CHARS, _COMPARE):
             for m in rx.finditer(text):
                 key = m.group(2) or m.group(3) or ""
-                if not is_key(key) or not ok(m.group(4)):
-                    continue
+                if not is_key(key) or not ok(m.group(4)) or _JOINED_RE.match(text, m.end(4)) \
+                        or refs.hit_is_a_reference(text, m.start(4), m.group(4)):
+                    continue   # a reference in a form of the detector's sources is no value
                 # the element of a thing (a product's passport, a project's document number) is no person's
                 if text.startswith("<", m.start()) and _xml_parent(text, m.start()) in _THING_PARENTS:
                     continue
