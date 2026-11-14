@@ -64,7 +64,7 @@ _FIELD_STATE_WORDS = frozenset({"required", "mandatory", "optional", "missing", 
                                 "will", "would", "shall", "should", "must", "has", "have", "had", "does", "did",
                                 "not", "and", "or", "but", "if", "then", "see", "use",
                                 # a validation message in words (Too Short, Can't Be Blank)
-                                "too", "short", "long", "blank", "can't",
+                                "too", "can't",
                                 # the label itself, translated: an i18n catalog under a name key
                                 "prénom", "prenom", "nom", "nombre", "apellido", "apellidos", "vorname",
                                 "nachname", "cognome", "sobrenome", "voornaam", "achternaam", "imię", "nazwisko",
@@ -76,7 +76,7 @@ _FIELD_STATE_WORDS = frozenset({"required", "mandatory", "optional", "missing", 
 _PERSON_KEY_ROLES = frozenset({"customer", "client", "contact", "employee", "patient", "member", "student", "buyer",
                                "seller", "recipient", "sender", "applicant", "owner", "holder", "cardholder",
                                "passenger", "tenant", "guarantor", "beneficiary", "borrower", "parent", "guardian",
-                               "spouse", "child", "emergencycontact", "billing", "shipping", "legal", "preferred",
+                               "spouse", "child", "emergencycontact", "billing", "shipping", "preferred",
                                "primary", "secondary", "patient", "physician", "doctor", "author", "reviewer"})
 
 
@@ -122,8 +122,9 @@ def key_names(text: str) -> list:
                 continue
             v = m.group(4).rstrip("'’")
             plain = re.sub(r"-[^\s]*", "", v)
-            words = [w.lower() for w in v.split()]
-            if any(w in _FIELD_STATE_WORDS for w in words) or v.lower() in _NOT_A_NAME_PART:
+            # a state or a message starts the value (Too Short, Can't Be Blank); a word inside a name does not count
+            # (a surname Long or Short)
+            if v.split()[0].lower() in _FIELD_STATE_WORDS or v.lower() in _NOT_A_NAME_PART:
                 continue
             if " " in v:
                 ok = _name_ok(v) and not (_reads_as_words(v, every=True) and _reads_as_words(plain, every=True))
