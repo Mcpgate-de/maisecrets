@@ -53,6 +53,8 @@ def one_word_names(text: str) -> list:
 _PERSON_NAME_KEYS = frozenset({"firstname", "lastname", "givenname", "familyname", "middlename", "fullname",
                                "surname", "maidenname", "forename"})
 _KEY_NAME_RX: list = []
+# the last names of the placeholder names of documentation (personal.PLACEHOLDER_NAMES)
+_PLACEHOLDER_SURNAMES = frozenset({"doe", "mustermann", "musterfrau", "roe", "bloggs", "normalverbraucher"})
 # one word in a name field that is the state of the field in a form or a schema, not a name; the word list knows the
 # stem (require, mask) but not every form of it
 _FIELD_STATE_WORDS = frozenset({"required", "mandatory", "optional", "missing", "invalid", "redacted", "masked",
@@ -65,6 +67,8 @@ _FIELD_STATE_WORDS = frozenset({"required", "mandatory", "optional", "missing", 
                                 "not", "and", "or", "but", "if", "then", "see", "use",
                                 # a validation message in words (Too Short, Can't Be Blank)
                                 "too", "can't",
+                                # a sort order or the key itself as the value (ORDER BY last_name DESC)
+                                "asc", "desc", "firstname", "lastname", "surname", "givenname", "familyname",
                                 # the label itself, translated: an i18n catalog under a name key
                                 "prénom", "prenom", "nom", "nombre", "apellido", "apellidos", "vorname",
                                 "nachname", "cognome", "sobrenome", "voornaam", "achternaam", "imię", "nazwisko",
@@ -141,4 +145,6 @@ def key_names(text: str) -> list:
     # a table of name parts (personal.py)
     fixture = {sp for a in first for b in last
                for sp in (a, b) if (text[a[0]:a[1]] + " " + text[b[0]:b[1]]).lower() in PLACEHOLDER_NAMES}
+    # the last name of a placeholder alone (Mustermann, Doe): its first name may fail the checks of a name (Max)
+    fixture |= {sp for sp in last if text[sp[0]:sp[1]].lower() in _PLACEHOLDER_SURNAMES}
     return sorted(set(out) - fixture)

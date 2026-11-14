@@ -1151,7 +1151,9 @@ class PersonNameKeyTests(unittest.TestCase):
                  + "\n    </td>\n  </tr>\n</table>", one),
                 ('{"emergency_contact_full_name": "' + two + '"}', two),
                 # a word of a state inside a name is no state (Gate A round 2)
-                ('{"full_name": "Testa Long"}', "Testa Long")):
+                ('{"full_name": "Testa Long"}', "Testa Long"),
+                # a state word as the second word of a name: only the first word decides (Gate A, Opus)
+                ('{"full_name": "Testa May"}', "Testa May")):
             with self.subTest(text=text[:40]):
                 self.assertIn(want, self.names(text))
                 # the new rule itself, not an older one that takes the same value (double surname, YAML)
@@ -1163,7 +1165,9 @@ class PersonNameKeyTests(unittest.TestCase):
                      '{"first_name": "Vor' + 'name", "last_name": "Nach' + 'name"}',
                      '{"first_name": "Too Short"}', '{"last_name": "Can\'t Be Blank"}',
                      '{"user_first_name": "' + self.ONE + '"}', '{"company_full_name": "Acme"}',
-                     '{"legal_full_name": "Testa Probe Holdings"}'):
+                     '{"legal_full_name": "Testa Probe Holdings"}',
+                     '{"first_name": "Max", "last_name": "Muster' + 'mann"}', '<th>Surname</th><td>Do' + 'e</td>',
+                     "WHERE last_name = 'Lastname'", '{"surname": "Desc"}', "last_name = Asc"):
             # the new rule alone: an older rule (json-personal-field, name-after-label) takes some of these on next
             # too; that is a finding of its own, not of #43
             with self.subTest(text=text[:40]):
