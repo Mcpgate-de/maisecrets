@@ -2030,20 +2030,20 @@ def _address_value_ok(v: str) -> bool:
 def _street_number_last_ok(v: str) -> bool:
     """The street before its number, as Eastern and Central Europe write it, after a strong address label (#49):
     `Kalinova ulica 17`, `Rivne Prospekt, 42`, `ul. Łąkowa 5`. Words of letters; one word of four letters and more
-    that is no word of the word list, no product or filler name and not in capitals alone (Plan Basic 2, Kubernetes
-    Ingress 2, Invoice INV 20481); no year as the number (Windows Server 2019); none of the words of
-    _NOT_AN_ADDRESS_RE. Without the word list the form is refused."""
+    that is no word of the word list, no product or filler name (Plan Basic 2, Kubernetes
+    Ingress 2, Windows Server 2019, ABCD EFGH 12); none of the words of _NOT_AN_ADDRESS_RE. Without the word list the
+    form is refused."""
     from .core import _word_set
     from .value_checks import _WORDS_OK
     from .remote import PRODUCT_WORDS
     m = _STREET_NUMBER_LAST_RE.fullmatch(v)
-    if not m or not _WORDS_OK[0] or re.fullmatch(r"(?:19|20)\d\d", m.group(1)) or _NOT_AN_ADDRESS_RE.search(v):
+    if not m or not _WORDS_OK[0] or _NOT_AN_ADDRESS_RE.search(v):
         return False
     known = _word_set()
     words = re.findall(r"[^\W\d_]+", v[:m.start(1)])
     if any(w.lower() in _NOT_A_STREET_NAME or w.lower() in PRODUCT_WORDS for w in words):
         return False
-    return any(len(w) >= 4 and w.lower() not in known and not w.isupper() for w in words)
+    return any(len(w) >= 4 and w.lower() not in known for w in words)   # the form takes no word in capitals alone
 
 
 def _block_back(text: str, line: int, lines: int = 2, most: int = 200) -> int:

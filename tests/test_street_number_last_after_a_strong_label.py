@@ -51,9 +51,16 @@ class StreetNumberLastTests(unittest.TestCase):
                      "IP address: Kalinova Ulica 17\n", "Home Address\nAddress: Kalinova Ulica 17\n",
                      "Mailing address: Kubernetes Ingress 2\n", "Street Address: Windows Server 2019\n",
                      "Billing address: Invoice INV 20481\n", "Mailing Address: Firefox Nightly 128\n",
-                     "Street Address: Grafana_Dash 12\n", "Street Address: https://x.example/a 17\n"):
+                     "Street Address: Grafana_Dash 12\n", "Street Address: https://x.example/a 17\n",
+                     "Billing Address: ABCD EFGH 12\n"):
             with self.subTest(text=text):
                 self.assertEqual(text, masked(text))
+
+    def test_without_the_word_list_the_form_is_refused(self):
+        from unittest import mock
+        from maisecrets.detection import value_checks
+        with mock.patch.object(value_checks, "_WORDS_OK", [False]):
+            self.assertEqual("Street Address: Kalinova Ulica 17\n", masked("Street Address: Kalinova Ulica 17\n"))
 
 
 if __name__ == "__main__":
