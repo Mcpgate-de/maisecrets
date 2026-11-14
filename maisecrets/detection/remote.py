@@ -318,7 +318,16 @@ class RemoteDetector:
             if resp.status == 401:
                 raise _Unauthorized
             if resp.status != 200:
-                raise _HttpStatus(resp.status)
+                # the gateway names a busy client slot in the body: 503 before ai-gateway v2.0.39xx, 429 with
+                # {"error": "busy"} after (a 503 took a gateway container out of the load balancer)
+                error = ""
+                if resp.status in (429, 503):
+                    try:
+                        doc = json.loads(resp.read(4096).decode("utf-8"))
+                        error = str(doc.get("error") or "") if isinstance(doc, dict) else ""
+                    except (OSError, ValueError, UnicodeError):
+                        error = ""
+                raise _HttpStatus(resp.status, error)
             chunks, size = [], 0
             while True:
                 if time.monotonic() > deadline:
@@ -430,6 +439,8 @@ class RemoteDetector:
             # long, 429 a limit per person, 503 the gateway's own name lookups run first
             code = exc.args[0] if exc.args else 0
             reason = {403: "forbidden", 413: "too_long", 429: "rate_limited", 503: "busy"}.get(code, "http")
+            if len(exc.args) > 1 and exc.args[1] == "busy":
+                reason = "busy"                  # 429 {"error": "busy"}: the one client slot, not the quota
             return [], self.status("unavailable", reason, ms=_ms(t0))
         if isinstance(exc, (ConnectionRefusedError, FileNotFoundError)):
             # nothing listens there (no service, no socket file): the one reason a caller may take for "not running"

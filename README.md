@@ -2410,7 +2410,7 @@ a source, with one command typed as your own prompt:
 | `/maisecrets:ner prompts on` | with a service on the network (`url`, `gateway`): your prompts go there too, with the rules' findings as filler; a new source takes this back |
 | `/maisecrets:ner unavailable withhold` | while the service gives no answer, a tool result is kept from the AI; by default (`unavailable rules`) the rules alone mask it |
 | `/maisecrets:ner updates off` | the image of the local service stays as it is; by default it follows the plugin (`updates on` turns that back on) |
-| `/maisecrets:ner` | which source is set, and whether it answers |
+| `/maisecrets:ner` | which source is set, whether it answers, and its load from `GET /metrics` when the service offers it (workers in use, requests that wait, CPU and memory of its container; numbers only) |
 
 In Codex, send `maisecrets: ner local` (or `url URL`, `off`) alone as your
 prompt. One source at a time: a new one replaces the old one. A fallback only
@@ -2422,7 +2422,7 @@ maisecrets does not verify that it is `mcpgate/ner`.
   NER experiment as ONNX; AFL-3.0 and Apache-2.0, its notices are in the
   image). If it does not answer, `/maisecrets:ner` gives the command that
   starts it with docker or podman; the AI asks you first (about 690 MB to download, about 250 MB of memory
-  while it runs) and then runs it:
+  while it runs, at most 1.5 GB and half the cores, 2 to 4) and then runs it:
   `run.sh ner start`, which runs the container `ner` with a secret of its own
   (in its environment, never on a command line) and keeps that secret in your
   store. Before each text the container must prove the secret (a fresh

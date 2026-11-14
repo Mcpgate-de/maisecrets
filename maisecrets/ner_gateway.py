@@ -62,6 +62,72 @@ def found_for(cfg: dict, origin: str, url: str, deadline: float) -> dict | None:
     return got
 
 
+def status(cfg: dict, conf: dict) -> tuple:
+    """(the status document of the gateway's name service, "") or (None, why there is none): GET ner_status_endpoint
+    with the token of the login. Numbers only: the load of the service, whether the one client slot is free, and the
+    person's quota in the current minute."""
+    import json
+    from . import sref_client
+    from .vault import make_backend
+    origin = origin_of(conf)
+    deadline = time.monotonic() + 3.0
+    found = found_for(cfg, origin, str(conf.get("gateway_url") or origin), deadline)
+    if found and found.get("ner") and "status" not in found["ner"]:
+        # a cache of a version before the status endpoint: ask the gateway again, not in an hour
+        CACHE.unlink(missing_ok=True)
+        found = found_for(cfg, origin, str(conf.get("gateway_url") or origin), deadline)
+    url = ((found or {}).get("ner") or {}).get("status")
+    if not url:
+        return None, "the gateway names no status endpoint"
+    try:
+        token = sref_client._access(cfg, make_backend(cfg), found, deadline)
+        code, headers, body = sref_client._request(cfg, "GET", url, {"Accept": "application/json",
+                                                                    "Authorization": "Bearer " + token}, None, deadline)
+    except sref_client.Refused as exc:
+        return None, str(exc)
+    except Exception as exc:  # noqa: BLE001 - the status is a help, never an error of the source
+        return None, type(exc).__name__
+    if code != 200:
+        return None, f"the status endpoint answers HTTP {code}"
+    try:
+        doc = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeError):
+        return None, "the status endpoint gives no answer it can read"
+    return (doc, "") if isinstance(doc, dict) else (None, "the status endpoint gives no answer it can read")
+
+
+def _int(v):
+    # Infinity and 1e999 parse as JSON numbers; int() of them raises (Gate A)
+    import math
+    ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+    return int(v) if ok else None
+
+
+def status_line(doc) -> str:
+    """One line for /maisecrets:ner from the status document."""
+    if not isinstance(doc, dict):
+        return "load: no load data"
+    parts = []
+    svc = doc.get("service") if isinstance(doc.get("service"), dict) else None
+    if svc and _int(svc.get("workers")):
+        share = svc.get("in_use_share")
+        used = (f", {share * 100:.0f} % in use" if isinstance(share, (int, float)) and not isinstance(share, bool)
+                and 0 <= share <= 1 else "")
+        parts.append(f"{_int(svc['workers'])} workers{used}")
+        if _int(svc.get("waiting_requests")) is not None:
+            parts.append(f"{_int(svc['waiting_requests'])} waiting")
+    path = doc.get("client_path") if isinstance(doc.get("client_path"), dict) else {}
+    if path.get("free") is False:
+        parts.append("the client slot is busy now (a text is answered busy)")
+    q = doc.get("quota") if isinstance(doc.get("quota"), dict) else {}
+    left, per = _int(q.get("requests_left")), _int(q.get("requests_per_minute"))
+    cleft, cper = _int(q.get("chars_left")), _int(q.get("chars_per_minute"))
+    if left is not None and per:
+        parts.append(f"your quota this minute: {left} of {per} requests"
+                     + (f", {cleft:,} of {cper:,} characters" if cleft is not None and cper else ""))
+    return ("load: " + "; ".join(parts)) if parts else "load: no load data"
+
+
 def detector(cfg: dict, conf: dict, make) -> tuple:
     """(RemoteDetector or None, why not). `make(url, token, max_chars)` builds the detector with the person's tuning.
     No login, no name endpoint or a login without the name scope: no detector, and the rules alone, with the reason."""

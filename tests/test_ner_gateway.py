@@ -209,6 +209,38 @@ class GatewaySourceTests(unittest.TestCase):
         self.srv.ner_answer = (503, {"error": "busy"})
         self.assertEqual(ner_setup.report(conf)[0], 1, "a busy gateway needs no login")
 
+    def test_the_status_shows_the_gateways_load_and_the_quota(self):
+        import json as _json
+        from maisecrets.home import CONFIG
+        old = CONFIG.read_text(encoding="utf-8") if CONFIG.exists() else None
+        self.addCleanup(lambda: CONFIG.write_text(old, encoding="utf-8") if old is not None
+                        else CONFIG.unlink(missing_ok=True))
+        CONFIG.write_text(_json.dumps(self.cfg), encoding="utf-8")
+        self.login(self.cfg)
+        code, lines = ner_setup.report(self.cfg["remote_detector"])
+        self.assertEqual(code, 0, lines)
+        load = [x for x in lines if x.startswith("load:")]
+        self.assertEqual(load, ["load: 4 workers, 25 % in use; 0 waiting; your quota this minute: 59 of 60 "
+                                "requests, 199,951 of 200,000 characters"])
+        self.srv.ner_status = {"service": None, "client_path": {"free": False}, "quota": {}}
+        ner_gateway.CACHE.unlink(missing_ok=True)
+        load = [x for x in ner_setup.report(self.cfg["remote_detector"])[1] if x.startswith("load:")]
+        self.assertEqual(load, ["load: the client slot is busy now (a text is answered busy)"])
+        self.assertEqual(ner_gateway.status_line({"service": {"workers": 4, "in_use_share": None}}), "load: 4 workers")
+        self.assertEqual(ner_gateway.status_line("x"), "load: no load data")
+        # Infinity and 1e999 are JSON numbers; they must not stop the status (Gate A)
+        self.assertEqual(ner_gateway.status_line({"service": {"workers": float("inf")},
+                                                  "quota": {"requests_left": 1e999, "requests_per_minute": 60}}),
+                         "load: no load data")
+        # a cache from before the status endpoint: one discovery more, not an hour without load data
+        import json as _j
+        ner_gateway.CACHE.write_text(_j.dumps({self.origin: {"at": __import__("time").time(), "found": {
+            **S.discover(self.cfg, self.srv.url + "/mcp"), "ner": {k: v for k, v in S.discover(
+                self.cfg, self.srv.url + "/mcp")["ner"].items() if k != "status"}}}}), encoding="utf-8")
+        self.srv.ner_status = {"service": {"workers": 4, "in_use_share": 0.5}}
+        self.assertEqual(ner_gateway.status_line(ner_gateway.status(self.cfg, self.cfg["remote_detector"])[0]),
+                         "load: 4 workers, 50 % in use")
+
     def test_no_login_and_a_switched_off_gateway_give_reasons(self):
         det, why = remote_layer.from_config(self.cfg)
         self.assertIsNone(det)
@@ -308,10 +340,12 @@ class GatewaySourceTests(unittest.TestCase):
 
     def test_the_gateways_refusals_have_their_names(self):
         self.login(self.cfg)
-        for code, reason in ((403, "forbidden"), (413, "too_long"), (429, "rate_limited"), (503, "busy"),
-                             (500, "http")):
-            with self.subTest(code=code):
-                self.srv.ner_answer = (code, {"error": "x"})
+        cases = ((403, "x", "forbidden"), (413, "x", "too_long"), (429, "rate_limited", "rate_limited"),
+                 (503, "x", "busy"), (429, "busy", "busy"), (503, "busy", "busy"), (500, "x", "http"))
+        for code, body, reason in cases:
+            # 429 {"error": "busy"}: the gateway's one client slot since it stopped answering busy with 503
+            with self.subTest(code=code, error=body):
+                self.srv.ner_answer = (code, {"error": body, "retry_after": 1})
                 spans, status = self.ask()
                 self.assertEqual((spans, status.state, status.reason), ([], "unavailable", reason))
 

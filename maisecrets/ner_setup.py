@@ -39,7 +39,7 @@ FIRST_SECRET_IMAGE = IMAGE + ":v2.0.3584"
 # what `run.sh ner start` runs: a fixed tag, pinned by its digest (multi-arch index on Docker Hub, 2026-11-07), never
 # `latest`, which docker does not pull again when an old one is on the machine
 SECRET_IMAGE = IMAGE + ":v2.0.3798@sha256:38c0442e10f75e2b41bdcf5a66c6aee02961f9609bf7ebb7d1ce64c1f9c907cf"
-START = f"docker run -d --name ner --restart unless-stopped -p 127.0.0.1:8765:8765 {IMAGE}"
+START = f"docker run -d --name ner --restart unless-stopped --cpus 2 --memory 1536m -p 127.0.0.1:8765:8765 {IMAGE}"
 # the keys a source sets; any other key of the setting is the person's tuning and stays
 SOURCE_KEYS = ("url", "format", "model", "allow_network", "mask", "ask_labels", "gateway", "gateway_url")
 
@@ -451,11 +451,35 @@ def restart_local(conf) -> bool:
     return True
 
 
+# the container's share of this computer: without a limit the service starts one worker per core and can take the
+# whole laptop. Half the cores, at least 2 and at most 4 (the production sidecar runs with 4), and the memory of the
+# production limit (ai-gateway #1869: the sidecar sizes itself by its container limit)
+MEMORY_LIMIT = "1536m"
+
+
+def cpu_limit(engine_cpus: int = 0) -> int:
+    """Half the cores, 2 to 4, and never more than the container engine has: a docker VM, colima or a podman
+    machine often has fewer CPUs than the host, and a --cpus above them stops the start (Gate A)."""
+    want = max(2, min(4, (os.cpu_count() or 2) // 2))
+    return min(want, engine_cpus) if engine_cpus > 0 else want
+
+
+def _engine_cpus(tool: str) -> int:
+    """The CPUs of the container engine (docker info NCPU, podman info Host.CPUs), or 0 when it does not say."""
+    fmt = "{{.Host.CPUs}}" if os.path.basename(tool).startswith("podman") else "{{.NCPU}}"
+    try:
+        r = _docker(tool, "info", "--format", fmt, timeout=30)
+        return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else 0
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return 0
+
+
 def _run_container(tool: str, secret: str, image: str) -> tuple[int, str, str]:
     """(exit code, container id, last error line) of a new container `ner` from `image` with `secret`. The secret goes
     to docker in the environment, never on the command line, where `ps` shows it."""
     env = dict(os.environ, NER_CLIENT_SECRET=secret)
     r = _docker(tool, "run", "-d", "--name", "ner", "--restart", "unless-stopped", "-e", "NER_CLIENT_SECRET",
+                "--cpus", str(cpu_limit(_engine_cpus(tool))), "--memory", MEMORY_LIMIT,
                 "-p", "127.0.0.1:8765:8765", image, timeout=900, env=env)
     cid = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
     return r.returncode, cid, (r.stderr.strip().splitlines() or ["no reason given"])[-1][:200]
@@ -671,6 +695,15 @@ def report(conf, wait: float = 0.0) -> tuple[int, list]:
             lines.append(line)
             lines.append(updates_line(conf))
     if ok:
+        # the load from GET /metrics (ai-gateway #1869): numbers only; a service without it says so, never fails
+        from .ner_metrics import bearer_of, load_line
+        bearer = ""
+        if str(url).rstrip("/") == LOCAL_URL.rstrip("/"):
+            from . import ner_secret
+            ep = ner_secret.endpoint(LOCAL_URL)
+            secret = ner_secret.secret_of(make_backend_for(conf), ep) if ner_secret.container_of(ep) else ""
+            bearer = bearer_of(secret) if secret else ""
+        lines.append(load_line(str(url), bearer=bearer))
         return 0, lines
     lines.append("Until it answers, the rules mask tool results alone, as without the service.")
     if str(url).rstrip("/") == LOCAL_URL.rstrip("/"):
@@ -701,9 +734,14 @@ def _gateway_report(conf: dict, lines: list) -> tuple[int, list]:
             return 4, lines
         return 1, lines
     _spans, st = det.ask("A check of the name service.", [])
+    from . import ner_gateway
+    doc, why_none = ner_gateway.status({**load_config(), "remote_detector": conf}, conf)
+    load = ner_gateway.status_line(doc) if doc is not None else f"load: no load data ({why_none})"
     if st.available:
         lines.append(f"the gateway: answers ({st.ms:.0f} ms) with your login")
+        lines.append(load)
         return 0, lines
+    lines.append(load)
     lines.append(f"the gateway: gives no result ({st.reason or st.state}); the rules mask tool results alone until it "
                  "does")
     return 1, lines
