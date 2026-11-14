@@ -1934,9 +1934,10 @@ _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
 _ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
-# an IP and a year-first date after a call cue are no phone number (#50)
+# an IP and a date (year, day or month first) after a call cue are no phone number (#50)
 _IPV4_SHAPE_RE = _lazy(r"\d{1,3}(?:\.\d{1,3}){3}")
 _YMD_SPACED_RE = _lazy(r"(?:19|20)\d\d[ .\-/](?:0?[1-9]|1[0-2])[ .\-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
+_MDY_SPACED_RE = _lazy(r"(?:0?[1-9]|1[0-2])[ .\-/](?:0?[1-9]|[12]\d|3[01])[ .\-/](?:19|20)\d\d(?!\d)")
 _DMY_SPACED_RE = _lazy(r"(?:0?[1-9]|[12]\d|3[01])[ .\-/](?:0?[1-9]|1[0-2])[ .\-/](?:19|20)\d\d(?!\d)")
 # a North American number (3-3-4); it needs region us or ca, as phone-us-national (0.6.24)
 _NANP_SHAPE_RE = _lazy(r"(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4}")
@@ -2298,27 +2299,35 @@ def _intl_after_cue(text: str, out: list) -> list:
             continue
         if _NANP_SHAPE_RE.fullmatch(v):
             continue   # a North American number is phone-us-national's and the loose cue's, with their region
-        if _YMD_SPACED_RE.fullmatch(v) or _SPACED_DATE_RE.fullmatch(v) or all(
-                g.endswith("00") for g in re.findall(r"\d+", v)):
-            continue   # call 2024 08 15, contact us at 100 200 300: a date and round numbers
         out.append((span[0], span[1], "phone-after-phone-word", PHONE))
     return out
 
 
 def _not_a_number_after_cue(v: str) -> bool:
-    """An IP, a date with more groups (a time), and a list of numbers after `call` or `contact … at` (Gate A of #50).
-    Without a trunk 0, + or ( a number has at most four groups, no group of one digit and no pairs alone, and two
-    groups differ in length; a run of pairs needs its trunk 0, three distinct pairs and no counting run."""
+    """An IP, a date at the start (a time may follow), round numbers and a list of numbers after `call` or `contact …
+    at` (Gate A of #50): an arithmetic run or doublings (05 10 15 20, 128 256 512), a one-digit group unless after +,
+    pairs without their trunk 0 or with fewer than three distinct pairs, and without a trunk 0, + or ( more than
+    four groups, four equal ones, or two of one length (but the Indian mobile 98765 43219)."""
     groups = re.findall(r"\d+", v)
-    if _IPV4_SHAPE_RE.fullmatch(v) or _YMD_SPACED_RE.match(v) or _DMY_SPACED_RE.match(v):
+    nums = [int(g) for g in groups]
+    if _IPV4_SHAPE_RE.fullmatch(v) or any(rx.match(v) for rx in (_YMD_SPACED_RE, _DMY_SPACED_RE, _MDY_SPACED_RE)):
+        return True
+    if all(g.endswith("00") for g in groups) or (len(nums) >= 3 and (
+            len({b - a for a, b in zip(nums, nums[1:])}) == 1 or all(b == 2 * a > 0 for a, b in zip(nums, nums[1:])))):
         return True
     if all(len(g) == 2 for g in groups):
-        steps = {int(b) - int(a) for a, b in zip(groups, groups[1:])}
-        return not v.startswith("0") or groups[0] == "00" or len(set(groups)) < 3 or steps <= {1, -1}
+        steps = {b - a for a, b in zip(nums, nums[1:])}
+        return not v.startswith("0") or groups[0] == "00" or len(set(groups)) < 3 or steps <= {0, 1, -1}
+    if not v.startswith("+") and any(len(g) == 1 for g in groups):
+        return True
     if v.startswith(("+", "0", "(")):
         return False
-    return len(groups) > 4 or any(len(g) == 1 for g in groups) or (len(groups) == 2 and
-                                                                    len(groups[0]) == len(groups[1]))
+    if len(groups) > 4 or (len(groups) == 4 and len({len(g) for g in groups}) == 1):
+        return True
+    if len(groups) == 2 and len(groups[0]) == len(groups[1]):
+        a, b = groups
+        return not (len(a) == 5 and a[0] in "6789" and abs(nums[0] - nums[1]) > 10)
+    return False
 
 
 def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> list:

@@ -41,9 +41,11 @@ class PhoneAfterACallCueTests(unittest.TestCase):
                             (f"can be reached at {AU}. Timely", AU), (f"please contact us at {GROUPS}.", GROUPS),
                             (f"fax us at {FAX}.", FAX), (f"call {AU} today", AU),
                             (f"contact our team on {AU}.", AU),
-                            ("contact us at (02) 9374 " + "4518.", "(02) 9374 4518")):
+                            ("reach me at 98765 " + "43219 today", "98765 43219")):
             with self.subTest(text=text):
                 self.assertNotIn(value, masked(text))
+        # the area code's parenthesis is a part of the value
+        self.assertEqual("contact us at \u2022.", masked("contact us at (02) 9374 " + "4518."))
 
     def test_a_label_alone_keeps_its_rules(self):
         # Gate A of #50: 4 and 4 digits after a phone word are years, screen sizes, hours and ports too
@@ -63,7 +65,12 @@ class PhoneAfterACallCueTests(unittest.TestCase):
                      "contact the API at 10.20.30." + "40", "reach the host at 172.16.10." + "20",
                      "call 31 12 2024 23 59", "contacted at 2024 11 14 09 30", "call 64 128 256 512 1024",
                      "call 65535 65536", "call 33 44 55 66", "text 42 17 13 99 88", "call 01 02 03 04 05",
-                     "call 00 11 22 33 44", "contact us at 06 06 06 06 06", "telemetry: the number 0123 4567 8901"):
+                     "call 00 11 22 33 44", "contact us at 06 06 06 06 06", "telemetry: the number 0123 4567 8901",
+                     # round 2: four equal groups, runs and doublings, one-digit groups, a date and a time
+                     "call 404 500 502 503", "call 128 256 512 1024", "dial 250 500 750 1000",
+                     "contact redis at 6379 16379 26379", "call 05 10 15 20 25", "call 02 04 08 16 32",
+                     "contact us at 06 06 07 07 08", "call 0 4 8 15 16 23 42", "call 31 12 2024 2359",
+                     "call 11 14 2024 0930", "call 65535 65536", "contact us at 0300 1200 4500"):
             with self.subTest(text=text):
                 self.assertEqual(text, masked(text))
 
