@@ -1,6 +1,6 @@
 ---
-description: Names in tool results from a named-entity service - local (a container on this computer), url URL (a service of your team) or off. Without an argument it shows the source and whether it answers.
-argument-hint: "[on | local | url URL | fallback url URL | fallback off | prompts on | prompts off | updates on | updates off | off]"
+description: Names in tool results from a named-entity service - local (a container on this computer), url URL (a service of your team), gateway URL (the gateway of your login) or off. Without an argument it shows the source and whether it answers.
+argument-hint: "[on | local | url URL | gateway URL | fallback url URL | fallback off | prompts on | prompts off | unavailable rules | unavailable withhold | updates on | updates off | off]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" ner *), Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" ner), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" ner *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" ner)
 ---
 

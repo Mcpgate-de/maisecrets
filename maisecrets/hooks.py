@@ -2587,6 +2587,7 @@ def _remote_layer(cfg: dict, response, binary, strip: bool, scan_tool, session: 
 def post_tool(payload: dict) -> dict:
     from . import remote_layer as _rl
     _rl.NER_DOWN["v"] = False
+    _rl.NER_DOWN["unchecked"] = False
     cfg = load_config()
     response = payload.get("tool_response")
     if response is None:
@@ -2964,10 +2965,32 @@ def _post_tool_guarded_rest(payload: dict) -> dict:
         _record(functools.partial(_queue_failure, exc, "post-tool", _tool_class(payload), client_of(payload)))
         return out
     try:
+        result = _with_unchecked_names(payload, result)
+    except Exception as exc:  # noqa: BLE001 - a line that fails must not change the output
+        _debug(f"post-tool unchecked names: {type(exc).__name__}")
+    try:
         return _with_hint(payload, result)
     except Exception as exc:  # noqa: BLE001 - a hint that fails must not withhold the output
         _debug(f"post-tool hint: {type(exc).__name__}")
         return result
+
+
+def _with_unchecked_names(payload: dict, result: dict) -> dict:
+    """A tool result whose names the service of /maisecrets:ner did not check: a line on the person's screen each
+    time (#33), and with `unavailable: withhold` the result kept from the AI. A text over the service's max_chars is
+    named on the screen but not withheld: each long file would be."""
+    from . import remote_layer as _rl
+    if not _rl.NER_DOWN.get("unchecked"):
+        return result
+    why = str(_rl.NER_DOWN.get("why") or "")
+    conf = _rl.conf_of(load_config())
+    withhold = conf.get("unavailable") == "withhold" and _rl.NER_DOWN.get("state") == "unavailable"
+    if withhold:
+        _rl.NER_DOWN["v"] = False      # the note for the AI says the rules masked the result; none did here
+    out = _withheld(payload, _rl.withhold_text(why)) if withhold else dict(result or {})
+    line = _rl.screen_line(why, withhold)
+    out["systemMessage"] = f"{out['systemMessage']} {line}" if out.get("systemMessage") else line
+    return out
 
 
 def post_tool_failure(payload: dict) -> dict:
@@ -3145,22 +3168,27 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
         return _deny(reason + tail)
     tail = (" The tool ran and finished; its output is withheld because the masking did not finish. "
             "Do NOT run it again to see the output; tell the user to check the result in their terminal.")
-    if codex:
-        return {"decision": "block", "reason": reason + tail}
+    return _withheld(payload, f"[{reason}{tail}]")
+
+
+def _withheld(payload: dict, text: str) -> dict:
+    """The PostToolUse answer that puts `text` in place of the tool output, in the shape each tool needs."""
+    if client_of(payload) == "codex":
+        return {"decision": "block", "reason": text.strip("[]")}
     response = payload.get("tool_response")
     if payload.get("tool_name") == "Bash" and isinstance(response, dict) and response.get("isImage") is True:
         # an image of a Bash result: a string fails open here too; the client's Bash shape with isImage off removes
         # the image (measured live, review of block 4)
         return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": {
-            **response, "stdout": f"[{reason}{tail}]", "stderr": "", "isImage": False}}}
+            **response, "stdout": text, "stderr": "", "isImage": False}}}
     if payload.get("tool_name") == "Read":
         # a string fails the shape check of Read and the client sends the original, a PDF or an image too (measured,
         # harness/probe_file_reads.py): only a text Read withholds it
         from .file_reads import text_result
         path = (payload.get("tool_input") or {}).get("file_path") if isinstance(payload.get("tool_input"), dict) else ""
         return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
-                                       "updatedToolOutput": text_result(str(path or ""), f"[{reason}{tail}]")}}
-    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": f"[{reason}{tail}]"}}
+                                       "updatedToolOutput": text_result(str(path or ""), text)}}
+    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}
 
 
 def _incident_line(codex: bool) -> str:

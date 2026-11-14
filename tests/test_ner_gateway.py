@@ -1,12 +1,14 @@
 """The gateway of /maisecrets:sref login as the source of names (#33) against a fake gateway (harness/sref_server.py
 with the name endpoint of ai-gateway #1819): the command, discovery, the login that asks for the name scope only while
-the source is set, the token at each tool result, the gateway's refusals by name, and no prompt to this source (C30).
-Synthetic values only.
+the source is set, the token at each tool result, the gateway's refusals by name, its own wait, and a prompt only
+after `/maisecrets:ner prompts on` for this source, with the rules' findings as filler (C30a). Synthetic values
+only.
 
 Run: python3 -m unittest tests.test_ner_gateway -v
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import ssl
@@ -133,12 +135,89 @@ class GatewaySourceTests(unittest.TestCase):
         self.assertIsNone(det)
         self.assertIn("names no name detection", why)
 
-    def test_a_prompt_never_goes_to_the_gateway(self):
+    def prompt(self, conf: dict) -> tuple:
+        from maisecrets.detection.core import Match
+        text = "deploy with " + "testpass-" + "x" * 12 + " for Dana " + "Okafor"
+        start = text.index("testpass")
+        secret = Match("rule", "SECRET", text[start:start + 21], start, start + 21, 1.0)
+        names, why = remote_layer.prompt_names({**self.cfg, "remote_detector": conf}, text, [secret], lambda: None)
+        return text, start, [text[m.start:m.end] for m in names], why
+
+    def test_a_prompt_goes_to_the_gateway_only_after_prompts_on_for_this_source(self):
         self.login(self.cfg)
-        det, why = self.ask(prompt=True)
-        self.assertIsNone(det)
-        self.assertIn("C30", why)
-        self.assertEqual(self.srv.ner_texts, [])
+        conf = self.cfg["remote_detector"]
+        _text, _start, names, why = self.prompt(conf)
+        self.assertEqual((names, why, self.srv.ner_texts), ([], "", []), "no prompts on: the rules alone")
+        on = ner_setup.updated(conf, "prompts:on")
+        self.assertIs(on["prompts"], True)
+        text, start, names, why = self.prompt(on)
+        self.assertEqual((names, why), (["Okafor"], ""))
+        self.assertEqual(len(self.srv.ner_texts), 1)
+        sent = self.srv.ner_texts[0]
+        self.assertNotIn("testpass", sent, "the rules' finding goes out as filler")
+        self.assertEqual(sent[:start], text[:start])
+        # the choice belongs to this source: another source and back, and the prompt stays here again
+        again = ner_setup.updated(ner_setup.updated(on, "local"), "gateway:" + self.srv.url + "/mcp")
+        self.assertNotIn("prompts", again)
+        self.assertEqual(self.prompt(again)[2], [])
+        self.assertEqual(len(self.srv.ner_texts), 1)
+        # off stays off across a change of the source
+        off = ner_setup.updated(ner_setup.updated(on, "prompts:off"), "gateway:" + self.srv.url + "/mcp")
+        self.assertIs(off["prompts"], False)
+
+    def test_a_prompt_to_a_local_service_needs_no_switch_and_never_opens_the_network(self):
+        on = ner_setup.updated(ner_setup.updated({}, "local"), "prompts:on")
+        self.assertNotIn("prompts", on, "on this computer prompts are on by default; nothing to record")
+
+    def post_tool(self, conf: dict, tool: str = "Bash") -> dict:
+        import json
+        from maisecrets import hooks
+        from maisecrets.home import CONFIG
+        old = CONFIG.read_text(encoding="utf-8") if CONFIG.exists() else None
+        self.addCleanup(lambda: CONFIG.write_text(old, encoding="utf-8") if old is not None
+                        else CONFIG.unlink(missing_ok=True))
+        CONFIG.write_text(json.dumps({**self.cfg, "remote_detector": conf}), encoding="utf-8")
+        response = ({"stdout": TEXT, "stderr": "", "interrupted": False, "isImage": False} if tool == "Bash"
+                    else {"type": "text", "file": {"filePath": "/w/notes.txt", "content": TEXT}})
+        return hooks._post_tool_guarded_rest({"hook_event_name": "PostToolUse", "session_id": "s-ner-gw",
+                                               "tool_name": tool, "tool_input": {"command": "cat notes.txt"},
+                                               "tool_response": response})
+
+    def test_each_result_whose_names_were_not_checked_says_so_on_the_screen(self):
+        self.login(self.cfg)
+        self.srv.ner_answer = (503, {"error": "busy"})
+        conf = self.cfg["remote_detector"]
+        for _ in range(2):                   # each time, not once per session
+            out = self.post_tool(conf)
+            self.assertIn("⚠ names not checked: the name service was busy", out.get("systemMessage", ""))
+            self.assertNotIn("updatedToolOutput", out.get("hookSpecificOutput") or {}, "the output stays as it is")
+        self.srv.ner_answer = None
+        self.assertNotIn("names not checked", self.post_tool(conf).get("systemMessage", ""))
+
+    def test_withhold_keeps_an_unchecked_result_from_the_ai(self):
+        self.login(self.cfg)
+        conf = ner_setup.updated(self.cfg["remote_detector"], "unavailable:withhold")
+        self.assertEqual(conf["unavailable"], "withhold")
+        self.srv.ner_answer = (503, {"error": "busy"})
+        for tool in ("Bash", "Read"):
+            with self.subTest(tool=tool):
+                out = self.post_tool(conf, tool)
+                given = json.dumps(out["hookSpecificOutput"]["updatedToolOutput"])
+                self.assertNotIn("Okafor", given)
+                self.assertIn("withheld this tool result", given)
+                self.assertIn("withheld this result from the AI", out["systemMessage"])
+                self.assertNotIn("the rules alone masked", out["hookSpecificOutput"].get("additionalContext", ""))
+        self.srv.ner_answer = None
+        out = self.post_tool(conf)
+        self.assertNotIn("withheld", json.dumps(out), "an answered result passes")
+        self.assertNotIn("unavailable", ner_setup.updated(conf, "unavailable:rules"))
+
+    def test_a_tool_result_waits_the_gateways_own_time_not_the_rate_of_this_computer(self):
+        self.login(self.cfg)
+        self.srv.ner_delay = 0.9           # well under 3 s, well over the 300 ms base of a service on this computer
+        layer = remote_layer.prepare(self.cfg, [TEXT], lambda s: [])
+        self.assertEqual(layer.status.state, "ok", layer.status)
+        self.assertEqual([m.value for m in layer.found[TEXT]], ["Okafor"])
 
     def test_the_gateways_refusals_have_their_names(self):
         self.login(self.cfg)

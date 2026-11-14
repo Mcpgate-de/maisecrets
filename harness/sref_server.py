@@ -63,6 +63,7 @@ class SrefServer:
         self.ner_answer = None           # (status, body): the name endpoint answers this instead
         self.ner_texts: list = []        # every text the name endpoint got
         self.ner_word = "Okafor"         # the endpoint finds this word as a person
+        self.ner_delay = 0.0             # seconds the endpoint waits before it answers
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -178,6 +179,7 @@ class SrefServer:
                     return self._send(*server.ner_answer)
                 text = json.loads(raw or b"{}").get("inputs", "")
                 server.ner_texts.append(text)
+                time.sleep(server.ner_delay)
                 at = text.find(server.ner_word)
                 spans = [] if at < 0 else [{"entity_group": "PER", "word": server.ner_word, "start": at,
                                             "end": at + len(server.ner_word), "score": 0.99}]

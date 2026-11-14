@@ -5,8 +5,8 @@
 resource metadata names `ner_endpoint`, `ner_scope` and `ner_max_chars`; kept for an hour in ner-gateway.json, never
 a token) and for an access token of the login (sref_client, refreshed under its lock). The login must hold the name
 scope: a login asks for it only while this source is set (sref_client.discover), so the person logs in once more
-after the switch. Prompts never go to this source (C30): remote_layer.prompt_names sends a prompt only to a service on
-this computer.
+after the switch. A prompt goes to this source only after `/maisecrets:ner prompts on`, typed while this source is set
+(C30a: remote_layer.prompt_names); the rules' findings and the stored values go there as filler, as for a tool result.
 """
 from __future__ import annotations
 
@@ -18,8 +18,9 @@ from .vault import HOME
 CACHE = HOME / "ner-gateway.json"
 CACHE_S = 3600
 # a request waits this long by default: the gateway's round trip and its own lookups (#1819: 5 s deadline there);
-# the person's timeout_ms of this source wins. Measured values go in README "Names from a service"
-DEFAULT_TIMEOUT_MS = 2000
+# the person's timeout_ms of this source wins. Measured: p95 600 ms with 8 sessions at once, and 2 of 45 requests
+# over 2 s (README "Names from a service")
+DEFAULT_TIMEOUT_MS = 3000
 
 
 def origin_of(conf) -> str:

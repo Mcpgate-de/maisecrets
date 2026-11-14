@@ -45,9 +45,11 @@ SOURCE_KEYS = ("url", "format", "model", "allow_network", "mask", "ask_labels", 
 
 _NER_RE = re.compile(r"\A\s*(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:(off|local|on)|url\s+(\S+)|"
                      r"gateway\s+(\S+)|"
-                     r"fallback\s+(?:(off)|url\s+(\S+))|prompts\s+(on|off)|updates\s+(on|off))\s*\Z", re.I)
+                     r"fallback\s+(?:(off)|url\s+(\S+))|prompts\s+(on|off)|updates\s+(on|off)|"
+                     r"unavailable\s+(rules|withhold))\s*\Z", re.I)
 # the same sentence anywhere in a tool call (settings.IN_A_COMMAND_RE)
-IN_A_COMMAND = r"(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:off|local|on|url|gateway|fallback|prompts|updates)\b"
+IN_A_COMMAND = (r"(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:off|local|on|url|gateway|fallback|prompts|updates|"
+                r"unavailable)\b")
 
 
 def parse(prompt) -> str | None:
@@ -66,6 +68,8 @@ def parse(prompt) -> str | None:
         return "prompts:" + m.group(6).lower()
     if m.group(7):
         return "updates:" + m.group(7).lower()
+    if m.group(8):
+        return "unavailable:" + m.group(8).lower()
     return "fallback:off" if m.group(4) else "fallback:url:" + m.group(5)
 
 
@@ -102,11 +106,21 @@ def updated(current, word: str) -> dict:
     """The new value of the setting for `word` (from parse), the tuning keys of `current` kept."""
     current = dict(current) if isinstance(current, dict) else {}
     if word.startswith("prompts:"):
-        # not a source key: it stays when the source changes
+        # off is not a source key: it stays when the source changes. On for a service on the network is a choice for
+        # that source alone (C30a): a change of the source takes it away below
         if word == "prompts:off":
             current["prompts"] = False
+        elif current.get("url") and (current.get("gateway") or not remote.is_local(str(current["url"]))):
+            current["prompts"] = True
         else:
             current.pop("prompts", None)
+        return current
+    if word.startswith("unavailable:"):
+        # what a tool result gets while the service gives no answer: the rules alone (the default) or nothing
+        if word == "unavailable:withhold":
+            current["unavailable"] = "withhold"
+        else:
+            current.pop("unavailable", None)
         return current
     if word.startswith("updates:"):
         # not a source key either: the image of the local service follows the plugin unless this is false
@@ -124,6 +138,8 @@ def updated(current, word: str) -> dict:
                                **({} if remote.is_local(url) else {"allow_network": True})}
         return current
     keep = {k: v for k, v in current.items() if k not in SOURCE_KEYS}
+    if keep.get("prompts") is True:
+        del keep["prompts"]                 # prompts on was a choice for the old source (C30a)
     if word == "off":
         keep.pop("fallback", None)          # off is off: no fallback answers either
         return keep
@@ -147,11 +163,12 @@ def describe(conf) -> str:
     url = conf.get("url") if isinstance(conf, dict) else None
     if not url:
         return "names from a service: off (the rules alone)"
+    prompts = "tool results and your prompts" if conf.get("prompts") is True else "tool results only"
     if conf.get("gateway"):
-        return (f"names from a service: the gateway {conf['gateway']} (its login; tool results only, the findings of "
+        return (f"names from a service: the gateway {conf['gateway']} (its login; {prompts}; the findings of "
                 "the rules go there as filler)")
     where = ("on this computer" if remote.is_local(str(url))
-             else "on the network; the findings of the rules go there as filler")
+             else f"on the network; {prompts}; the findings of the rules go there as filler")
     fb = conf.get("fallback") if isinstance(conf.get("fallback"), dict) else {}
     tail = (f"; fallback {fb['url']} while it does not answer, tool results only" if fb.get("url") else "")
     return f"names from a service: {url} ({where}){tail}"
@@ -169,11 +186,26 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedire
 def scope(conf) -> str:
     """One line: what the service reads. A prompt only on this computer and only where the client rewrites it."""
     url = str(conf.get("url") or "") if isinstance(conf, dict) else ""
-    if remote.is_local(url) and conf.get("prompts") is not False:
+    network = bool(url) and (bool(conf.get("gateway")) or not remote.is_local(url))
+    if url and conf.get("prompts") is not False and (not network or conf.get("prompts") is True):
+        where = (f" Your prompts go to {conf.get('gateway') or url} for this, with the rules' findings as filler."
+                 if network else "")
         return ("It masks person names in what the AI reads (files, command output, tool results) and in your prompts "
-                "in Claude Code. In Codex it covers what the AI reads only. It may mask a few extra words.")
+                f"in Claude Code.{where} In Codex it covers what the AI reads only. It may mask a few extra words.")
+    more = (" /maisecrets:ner prompts on sends your prompts there too, with the rules' findings as filler."
+            if network and conf.get("prompts") is not False else "")
     return ("It masks person names in what the AI reads (files, command output, tool results). Your prompts keep the "
-            "rules alone. It may mask a few extra words.")
+            f"rules alone.{more} It may mask a few extra words.")
+
+
+def unavailable_line(conf) -> str:
+    """One line: what a tool result gets while the service gives no answer."""
+    if isinstance(conf, dict) and conf.get("unavailable") == "withhold":
+        return ("While the name service gives no answer, maisecrets withholds the tool result from the AI, and your "
+                "screen names the reason. /maisecrets:ner unavailable rules lets the rules alone mask it.")
+    return ("While the name service gives no answer, the rules alone mask a tool result, and your screen shows "
+            "'names not checked' with the reason. /maisecrets:ner unavailable withhold keeps such a result from "
+            "the AI.")
 
 
 def updates_line(conf) -> str:
@@ -599,6 +631,7 @@ def report(conf, wait: float = 0.0) -> tuple[int, list]:
                      "/maisecrets:ner url URL (a service of your team), as your own prompt.")
         return 0, lines
     lines.append(scope(conf))
+    lines.append(unavailable_line(conf))
     lines.append(counts_line())
     deadline = time.monotonic() + wait
     ok, line = probe(conf)
