@@ -2523,16 +2523,7 @@ and keeps its other keys. Written by hand, the setting looks like this:
   name in a prompt becomes a placeholder and never blocks it. `/maisecrets:ner prompts off` turns the prompt part off (the setting `"prompts": false`). A
   service on the network gets a prompt only after `/maisecrets:ner prompts on`, typed while that source is set; a
   new source takes it back (threat model, C30a). Codex prompts keep the rules alone (Codex cannot rewrite a
-  prompt).
-- Each tool result whose names the service did not check shows a line on your screen, for example
-  `⚠ names not checked: the name service did not answer in time; the rules masked this result.` A name the AI then
-  writes in clear text came through that result; it is not made up. With `/maisecrets:ner unavailable withhold`
-  such a result does not reach the AI at all (a text longer than the service takes is named, not withheld).
-- **gateway**: the gateway of your `/maisecrets:sref login` finds the names, when its protected resource metadata
-  names `ner_endpoint` and `ner_scope`. The login asks for that scope only while this source is set, so you log in
-  once more after the switch. The text goes over https with your access token, the rules' findings as filler.
-  A tool result waits 3,000 ms by default (`timeout_ms`); measured from a laptop against the reference gateway:
-  p50 160 ms for 200 characters and 740 ms for 10,000; with 8 sessions at once p95 600 ms. One request per tool call or prompt. A tool result waits `timeout_ms`
+  prompt). One request per tool call or prompt. A tool result waits `timeout_ms`
   (300 by default, at most 5000; the name lookup and a slow answer count too), plus a share
   that grows with its length: 1.5 times the rate of this computer (ms per 1,000 characters,
   from its last answers; 60 until it has five, the rate of the reference setup) per 1,000
@@ -2551,6 +2542,20 @@ and keeps its other keys. Written by hand, the setting looks like this:
   `"mask": false`; any other host always gets the filler. A slow, dead or
   confused service changes nothing: the rules' result stays as it is. A result
   longer than `max_chars` is not sent.
+- Each tool result whose names the service did not check shows a line on your screen, for example
+  `⚠ names not checked: the name service did not answer in time; the rules masked this result.` A name the AI then
+  writes in clear text came through that result; it is not made up. With `/maisecrets:ner unavailable withhold`
+  such a result does not reach the AI at all (a text longer than the service takes is named, not withheld). The
+  output of a failed command (Bash with an exit code other than 0) is neither checked by the service nor
+  withheld: Claude Code does not let a hook replace it (threat model, PostToolUseFailure).
+- **gateway**: the gateway of your `/maisecrets:sref login` finds the names, when its protected resource metadata
+  names `ner_endpoint` and `ner_scope`. The login asks for that scope only while this source is set, so you log in
+  once more after the switch. The text goes over https with your access token, the rules' findings as filler.
+  A tool result waits 3,000 ms by default (`timeout_ms`); measured from a laptop against the reference gateway:
+  p50 160 ms for 200 characters and 740 ms for 10,000; with 8 sessions at once p95 600 ms. The gateway's wait
+  does not grow with the length of the text, and its answers do not change the rate of this computer
+  (`ner-rate.json`). A prompt waits 2,000 ms by default; only a prompt you type goes there, never one of
+  `claude -p` or the Agent SDK.
 - A name the service finds is masked and stored, so its placeholder resolves,
   but it is never searched for in other texts: a wrong name such as `Build`
   costs one mask, where the service saw it. If a rule finds the same value

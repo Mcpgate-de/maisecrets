@@ -856,7 +856,7 @@ def rewrite_prompt(payload: dict) -> dict:
         except OSError:
             return {}           # the hook answers it, and blocks when it cannot record the name either
     matches = _prompt_hits(prompt)
-    names, why = _prompt_names(cfg, prompt, matches, session)
+    names, why = _prompt_names(cfg, prompt, matches, session, payload.get("origin") in ("composer", "bridge"))
     if names:
         matches = sorted(matches + names, key=lambda m: (m.start, m.end))
     # the name check did not run: the person learns it once per session (a silent miss looked like a clean prompt)
@@ -895,11 +895,11 @@ def _unchecked_note(session: str | None, why: str) -> str | None:
     return remote_layer.unchecked_note(session, why)
 
 
-def _prompt_names(cfg: dict, prompt: str, matches: list, session: str | None) -> tuple:
+def _prompt_names(cfg: dict, prompt: str, matches: list, session: str | None, typed: bool = False) -> tuple:
     """(names, why not checked or "") for a prompt the mod rewrites (remote_layer.prompt_names)."""
     try:
         from . import remote_layer
-        return remote_layer.prompt_names(cfg, prompt, matches, lambda: _protect(cfg, session))
+        return remote_layer.prompt_names(cfg, prompt, matches, lambda: _protect(cfg, session), typed)
     except Exception as exc:  # noqa: BLE001 - the rules' rewrite runs as without the service
         _debug(f"prompt names: {type(exc).__name__}")
         return [], "error"

@@ -133,6 +133,39 @@ class GatewaySourceTests(unittest.TestCase):
         self.assertIn("/maisecrets:sref login", why)
         self.assertEqual(self.srv.ner_texts, [])
 
+    def test_a_source_that_cannot_be_asked_leaves_its_results_unchecked_on_the_screen_and_withheld(self):
+        conf = self.cfg["remote_detector"]           # no login: from_config gives a reason, no detector
+        out = self.post_tool(conf)
+        self.assertIn("names not checked: the name service cannot be asked", out.get("systemMessage", ""))
+        out = self.post_tool(ner_setup.updated(conf, "unavailable:withhold"))
+        self.assertNotIn("Okafor", json.dumps(out["hookSpecificOutput"]["updatedToolOutput"]))
+        self.assertEqual(self.srv.ner_texts, [])
+        # no source at all: nothing to say
+        self.assertNotIn("names not checked", self.post_tool({}).get("systemMessage", ""))
+
+    def test_a_prompt_of_a_program_never_goes_to_a_service_on_the_network(self):
+        self.login(self.cfg)
+        on = ner_setup.updated(self.cfg["remote_detector"], "prompts:on")
+        names, why = remote_layer.prompt_names({**self.cfg, "remote_detector": on}, TEXT, [], lambda: None,
+                                               typed=False)
+        self.assertEqual((names, why, self.srv.ner_texts), ([], "", []))
+
+    def test_the_mod_sends_only_a_typed_prompt_to_the_gateway(self):
+        import json as _json
+        from maisecrets import hooks
+        from maisecrets.home import CONFIG
+        self.login(self.cfg)
+        old = CONFIG.read_text(encoding="utf-8") if CONFIG.exists() else None
+        self.addCleanup(lambda: CONFIG.write_text(old, encoding="utf-8") if old is not None
+                        else CONFIG.unlink(missing_ok=True))
+        on = ner_setup.updated(self.cfg["remote_detector"], "prompts:on")
+        CONFIG.write_text(_json.dumps({**self.cfg, "remote_detector": on}), encoding="utf-8")
+        for origin, sent in (("sdk", 0), ("composer", 1)):
+            with self.subTest(origin=origin):
+                hooks.rewrite_prompt({"prompt": TEXT, "origin": origin, "session_id": "s-ner-gw",
+                                      "cwd": tempfile.gettempdir()})
+                self.assertEqual(len(self.srv.ner_texts), sent)
+
     def test_no_login_and_a_switched_off_gateway_give_reasons(self):
         det, why = remote_layer.from_config(self.cfg)
         self.assertIsNone(det)
@@ -249,8 +282,13 @@ class TokenTests(unittest.TestCase):
                     remote.RemoteDetector(url, allow_network=True, token=tok)
         with self.assertRaises(ValueError):
             remote.RemoteDetector("https://gw.example.com/x", allow_network=True, token=good, bearer="a" * 64)
-        self.assertNotIn(good, repr(remote.RemoteDetector("https://gw.example.com/x", allow_network=True,
-                                                          token=good).__dict__.get("url")))
+        det = remote.RemoteDetector("https://gw.example.com/x", allow_network=True, token=good)
+        self.assertNotIn(good, repr(det))
+        self.assertNotIn(good, str(det.status("unavailable", "http")))
+        try:
+            remote.RemoteDetector("https://gw.example.com/x", allow_network=True, token=good + "\n")
+        except ValueError as exc:
+            self.assertNotIn(good, str(exc))
 
 
 if __name__ == "__main__":

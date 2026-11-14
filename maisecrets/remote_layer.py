@@ -183,9 +183,16 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
     timeout, an HTTP error or a broken answer never switches (a busy laptop must not send text over the network).
     A prompt never goes to the fallback (use_fallback False). Each call adds a line to the NER log (ner_setup.log):
     time, source, kind, characters, names; never text."""
-    ner, _why = from_config(cfg)
+    ner, why = from_config(cfg)
     if ner is None:
-        return None
+        if not why:
+            return None                    # no source set: the rules alone, nothing to say
+        # a source is set and cannot be asked (no login, no name scope, a discovery or a token that failed, a setting
+        # it cannot use): the names are unchecked, as when the service gives no answer (Gate A of #33)
+        from . import ner_setup
+        found = {s: list(scan(s)) for s in dict.fromkeys(strings)}
+        ner_setup.log("rules", kind, sum(len(s) for s in found), 0, why="setup", ms=0.0)
+        return Layer(found, remote.RemoteStatus(state="unavailable", reason="setup"))
     from .detection.core import Match
     found: dict = {}
     pieces: list = []          # (text, offset in the joined text)
@@ -240,7 +247,7 @@ PROMPT_TIMEOUT_MS = 1000    # a person waits for a prompt anyway; 300 ms left a 
 NETWORK_PROMPT_TIMEOUT_MS = 2000
 
 
-def prompt_names(cfg: dict, prompt: str, matches: list, protect_of) -> tuple:
+def prompt_names(cfg: dict, prompt: str, matches: list, protect_of, typed: bool = True) -> tuple:
     """(names, why) for a prompt the mod rewrites (Claude Code): the names the service of /maisecrets:ner finds
     become placeholders like the rules' findings (`matches`), and nothing is blocked for a name. `why` is "" when the
     service answered or was not asked, else why it did not check the prompt (the reason or the state of its status:
@@ -251,12 +258,13 @@ def prompt_names(cfg: dict, prompt: str, matches: list, protect_of) -> tuple:
     change of the source takes away (C30a, ner_setup.updated). A fallback never reads one, and `"prompts": false`
     leaves every prompt to the rules. The rules' findings and the stored values (`protect_of()`) go out as filler.
     A prompt waits up to `prompt_timeout_ms` (1,000 by default, 2,000 for a service on the network, at most 5,000),
-    never less than `timeout_ms`."""
+    never less than `timeout_ms`. `typed`: the person typed the prompt (the mod's origin composer or bridge); a
+    prompt of a program (claude -p, the Agent SDK) never goes to a service on the network (Gate A of #33)."""
     conf = cfg.get("remote_detector")
     if not (isinstance(conf, dict) and conf.get("url")) or conf.get("prompts") is False:
         return [], ""
     local = remote.is_local(str(conf["url"])) and not conf.get("gateway")
-    if not local and conf.get("prompts") is not True:
+    if not local and (conf.get("prompts") is not True or not typed):
         return [], ""
     default = PROMPT_TIMEOUT_MS if local else NETWORK_PROMPT_TIMEOUT_MS
     wait = conf.get("prompt_timeout_ms", default)
@@ -322,14 +330,16 @@ _TOOL_WHY = {"timeout": "no answer in time", "too_long": "the text is longer tha
              "policy": "the address is not on this computer", "network": "the network failed",
              "http": "the service answered with an error", "busy": "the gateway was busy",
              "rate_limited": "the gateway's limit per minute was reached",
-             "forbidden": "the login lacks the name scope"}
+             "forbidden": "the login lacks the name scope",
+             "setup": "the source cannot be asked; /maisecrets:ner names the reason"}
 
 # the person's screen, one line per tool result: the same words for every source (a missed name must not look like a
 # clean result, and a name the AI writes must not look like one the AI made up)
 _SCREEN_WHY = {"timeout": "did not answer in time", "too_long": "does not take a text this long",
                "refused": "is not running", "network": "could not be reached", "busy": "was busy",
                "rate_limited": "reached its limit per minute", "forbidden": "refused the login",
-               "not_ours": "is not the container maisecrets started", "policy": "is at an address it may not use"}
+               "not_ours": "is not the container maisecrets started", "policy": "is at an address it may not use",
+               "setup": "cannot be asked (/maisecrets:ner names the reason)"}
 
 
 def screen_line(why: str, withheld: bool) -> str:
