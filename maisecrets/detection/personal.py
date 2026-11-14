@@ -1576,11 +1576,22 @@ _ADDRESS_LABEL_RE = _lazy(
 # longer value the filters refused (a template with `[City]` after `Apt. 999`, a sentence going on after the unit)
 _ADDRESS_LABEL_SHORT_RE = _lazy(_ADDRESS_LABEL_RE._args[0].replace(
     r"(?=[\"\n|]|\s{2}|\.\s(?!\d)|" + _UNIT_BEFORE_DOT + r"\.\s|$)", r"(?=[\"\n|]|\s{2}|\.\s|$)"))
-# a label that names an address of a place to live or to send to (#49); `Address:` alone keeps the stricter value
+# a label that names an address of a place to live or to send to, on the line of the address label (#49): `Street
+# Address:`, `home_address:`; `Address:` alone keeps the stricter value. A key the address label does not read
+# (billing_address, mailingAddress) is not covered
 _STRONG_ADDRESS_LABEL_RE = _lazy(r"(?i)(?<![a-z])(?:street|home|residential|mailing|billing|postal|property)[ _-]?"
                                  r"address")
-_STREET_NUMBER_LAST_RE = _lazy(r"(?:[a-z]{1,4}\.\s)?[A-ZÀ-Þ][\w'’-]{1,30}(?:\s[A-ZÀ-Þ][\w'’-]{1,30}){0,3},?\s"
-                               r"\d{1,5}[A-Za-z]?(?:/\d{1,4})?")
+# the street before its number: an optional short form (ul.) or street word (ulica), a capitalised name, up to three
+# more words (a lower-case street word too: Kalinova ulica, Prešernova cesta), a comma, the number
+_STREET_NUMBER_LAST_RE = _lazy(
+    r"(?:[a-z]{1,4}\.\s|(?i:ulica|ulice|ulitsa|cesta|trg|utca|n[áa]m[ěe]st[íi]|prospekt|aleja|ul)\s)?"
+    + _NAME_STEM + r"(?:\s(?:" + _NAME_STEM + r"|[" + _LO + r"]{2,15})){0,3}"
+    r",?\s(\d{1,5})[A-Za-z]?(?:/\d{1,4})?")
+# the names of products, tools and fillers that a test or a seed writes after an address label (Gate A of #49)
+_NOT_A_STREET_NAME = frozenset({"windows", "ubuntu", "debian", "firefox", "chrome", "safari", "terraform",
+                                "ansible", "docker", "gitlab", "github", "gmail", "outlook", "dashboard", "ingress",
+                                "nightly", "invoice", "ticket", "lorem", "ipsum", "holdings", "cluster", "module",
+                                "inbox", "server", "agent", "jira", "slack"})
 _UNIT_NUMBER_AFTER_RE = _lazy(r"\.\s\d{1,6}[A-Za-z]?(?![\w.-])")
 # a house number and a street word, in either order: 12 Harbour Lane, Rua das Flores 12,
 _HOUSE_RE = _lazy(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b(?! \d)"
@@ -2018,14 +2029,21 @@ def _address_value_ok(v: str) -> bool:
 
 def _street_number_last_ok(v: str) -> bool:
     """The street before its number, as Eastern and Central Europe write it, after a strong address label (#49):
-    `Kalinova Ulica 17`, `Rivne Prospekt, 42`, `ul. Kalinova 17`: one to four words of letters (no URL, version or
-    markup fits the form), one of them a name of its own, and no word of a thing."""
+    `Kalinova ulica 17`, `Rivne Prospekt, 42`, `ul. Łąkowa 5`. Words of letters; one word of four letters and more
+    that is no word of the word list, no product or filler name and not in capitals alone (Plan Basic 2, Kubernetes
+    Ingress 2, Invoice INV 20481); no year as the number (Windows Server 2019); none of the words of
+    _NOT_AN_ADDRESS_RE. Without the word list the form is refused."""
     from .core import _word_set
+    from .value_checks import _WORDS_OK
+    from .remote import PRODUCT_WORDS
+    m = _STREET_NUMBER_LAST_RE.fullmatch(v)
+    if not m or not _WORDS_OK[0] or re.fullmatch(r"(?:19|20)\d\d", m.group(1)) or _NOT_AN_ADDRESS_RE.search(v):
+        return False
     known = _word_set()
-    # Plan Basic 2, See Section 4: words of the word list name a thing; a street has a name of its own
-    own = any(len(w) >= 4 and w.lower() not in known
-              for w in re.findall(r"[^\W\d_]+", re.sub(r"^[a-z]{1,4}\.\s|,?\s\d.*$", "", v)))
-    return bool(_STREET_NUMBER_LAST_RE.fullmatch(v)) and own and not _NOT_AN_ADDRESS_RE.search(v)
+    words = re.findall(r"[^\W\d_]+", v[:m.start(1)])
+    if any(w.lower() in _NOT_A_STREET_NAME or w.lower() in PRODUCT_WORDS for w in words):
+        return False
+    return any(len(w) >= 4 and w.lower() not in known and not w.isupper() for w in words)
 
 
 def _block_back(text: str, line: int, lines: int = 2, most: int = 200) -> int:
@@ -2468,8 +2486,9 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     if u and re.search(r"(?i)\b(?:ste|apt|rm|fl|bldg|no|nr)$", v) and _address_value_ok(
                             v + text[s0 + len(v):u.end()]):
                         v = text[s0:u.end()]
-                if not (_address_value_ok(v) or (_STRONG_ADDRESS_LABEL_RE.search(text, max(0, m.start() - 14),
-                                                                         m.end(1)) and _street_number_last_ok(v))):
+                strong = _STRONG_ADDRESS_LABEL_RE.search(text, max(0, m.start() - 14, _line_back(text, m.start())),
+                                                         m.end(1))
+                if not (_address_value_ok(v) or (strong and _street_number_last_ok(v))):
                     continue
                 done.add(m.start())
                 # the check for a company or a public place reads at most 120 characters of the line before the
