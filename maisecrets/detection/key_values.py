@@ -42,10 +42,14 @@ _ID_KEYS = frozenset({
     "passport", "passportnumber", "passportno", "taxid", "taxidentificationnumber", "taxpayeridentificationnumber",
     "taxpayerid", "itin", "medicalrecordnumber", "healthplanbeneficiarynumber"})
 # a key that an invoice, an order or a journal uses too (DocumentNumber INV-2024-0042, idNumber ORD-1234): an id of a
-# person only in a record that also names a person (Gate A)
+# person only in a person's element or next to the type of a person's document. A word near it is no evidence: an
+# invoice has a customerName and an address too (Gate A, round 2)
 _GENERIC_ID_KEYS = frozenset({"documentnumber", "idnumber", "identitydocument"})
-_PERSON_NEAR_RE = re.compile(r"(?i)name|birth|gender|e-?mail|phone|address|nationality|\bsex\b")
-_NEAR = 300
+_PERSON_PARENTS = frozenset({"person", "holder", "applicant", "passenger", "traveler", "traveller", "citizen",
+                             "patient", "employee", "guest", "member", "student", "identity", "identification"})
+_DOCUMENT_TYPE_RE = re.compile(r"(?i)[\"'`<]?document[_ -]?type[\"'`>]?\s{0,3}[:=>]?\s{0,3}[\"'`]?"
+                               r"(?:passport|id[ _-]?card|identity[ _-]?card|national[ _-]?id|driv(?:er|ing))")
+_NEAR = 200
 # the words one of the keys of a family holds: a text without any of them is not scanned for that family
 _PASSWORD_WORDS = ("pass", "pwd")
 _ID_WORDS = ("licen", "identit", "passport", "documentnumber", "document_number", "document-number",
@@ -68,9 +72,9 @@ def password_key(key: str) -> bool:
 
 def _password_ok(v: str) -> bool:
     """A value under a password key: the checks of a password literal (core._pw_literal_ok: 4 to 64 characters, no
-    fixture word, placeholder, path, reference, version or word), no URL."""
+    fixture word, placeholder, path, URL, reference, version or word)."""
     from .core import _pw_literal_ok
-    return "://" not in v and _pw_literal_ok(v, "tool")
+    return _pw_literal_ok(v, "tool")
 
 
 def _id_ok(v: str) -> bool:
@@ -83,13 +87,15 @@ def _id_ok(v: str) -> bool:
 
 def _a_persons_id(text: str, m, key: str, things, parent) -> bool:
     """Whether an id after a key is a person's: not the element of a thing (a product's passport, a project's
-    document number), and a generic key only with a word of a person near it. A password stays a password in any
-    element (Gate A: <profile><key_store_password> was dropped)."""
-    if text.startswith("<", m.start()) and parent(text, m.start()) in things:
+    document number), and a generic key only in a person's element or next to the type of a person's document. A
+    password stays a password in any element (Gate A: <profile><key_store_password> was dropped)."""
+    element = text.startswith("<", m.start())
+    if element and parent(text, m.start()) in things:
         return False
     if fold(key) in _GENERIC_ID_KEYS:
-        lo, hi = max(0, m.start() - _NEAR), m.end() + _NEAR
-        return bool(_PERSON_NEAR_RE.search(text[lo:m.start()] + " " + text[m.end():hi]))
+        if element and parent(text, m.start()) in _PERSON_PARENTS:
+            return True
+        return bool(_DOCUMENT_TYPE_RE.search(text, max(0, m.start() - _NEAR), m.end() + _NEAR))
     return True
 
 

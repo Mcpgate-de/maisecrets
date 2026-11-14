@@ -6,5 +6,5 @@ runner = ["tests/test_personal_after_its_label.py::HealthIdLabelTests::test_an_i
 
 [proof]
 file = "maisecrets/detection/id_labels.py"
-find = '''r"|(?<!firewall )(?:insurance[ _-]?)?policy[ _-]?(?:number|no\.?)" + _HEALTH_ID_LABELS'''
-replace = '''r"|(?<!firewall )(?:insurance[ _-]?)?policy[ _-]?(?:number|no\.?)"'''
+find = '''r"|(?<!firewall[ _-])(?:insurance[ _-]?)?policy[ _-]?(?:number|no\.?)" + _HEALTH_ID_LABELS'''
+replace = '''r"|(?<!firewall[ _-])(?:insurance[ _-]?)?policy[ _-]?(?:number|no\.?)"'''

@@ -154,6 +154,8 @@ class IdNumberTests(unittest.TestCase):
         for text, v in (("the medical record number " + a + ". The", a),
                         ("provide the **medical record number** " + b + ".", b),
                         ("including the **medical record number** (" + b + ").", b),
+                        ("the medical record number (" + a + "9) of the patient", a + "9"),
+                        ("member id (M4817" + "2930)", "M48172930"),
                         ("Health Plan Beneficiary Number: A" + "4817\n", "A4817"),
                         ("whose health plan beneficiary number was " + a + ". Participants", a),
                         ("| Policy Number        | " + a + "-29     |", a + "-29"),
@@ -166,8 +168,8 @@ class IdNumberTests(unittest.TestCase):
         for text in ("the policy number 2024 of the firewall", "Medical record number: unknown",
                      "| Policy Number | Status |", "the policy number was 4 and the rule", "his tax id was 2024.",
                      "(see the medical record number field) 1234 rows", "SELECT SIN(31415);",
-                     "y = sin (31415)", "SELECT SIN (31415) FROM dual;",
-                     "fw: matched firewall policy number 10023 action=deny"):
+                     "y = sin (31415)", "SELECT SIN (31415) FROM dual;", "y = sin**(48172)",
+                     "fw: matched firewall policy number 10023 action=deny", "firewall_policy_number: 10023"):
             with self.subTest(text=text):
                 self.assertEqual(values(text), [])
 

@@ -89,9 +89,19 @@ class BusinessNumberTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertNotIn("id-number-after-label", [k for k, _ in kinds(text)])
 
-    def test_in_a_persons_record_the_generic_key_is_an_id(self):
-        for text in (f'{{"gender": "female", "document_number": "{ID}"}}',
-                     f"<tr><th>birth_date</th><td>x</td></tr><tr><th>identitydocument</th><td>{ID}</td></tr>"):
+    def test_an_invoice_with_a_customer_name_and_an_address_stays_text(self):
+        # a word of a person near the key is no evidence (Gate A, round 2)
+        for text in ('{"customerName": "ACME GmbH", "billToAddressLine1": "x", "documentNumber": "INV-2024-0042"}',
+                     "<Invoice><Name>ACME</Name><DocumentNumber>INV-2024-0042</DocumentNumber></Invoice>",
+                     '{"hostname": "web1", "username": "ci", "idNumber": "ORD-1234-55"}'):
+            with self.subTest(text=text):
+                self.assertNotIn("id-number-after-label", [k for k, _ in kinds(text)])
+
+    def test_in_a_persons_element_or_next_to_a_persons_document_type_the_generic_key_is_an_id(self):
+        for text in (f"<person><documentNumber>{ID}</documentNumber></person>",
+                     f"<passenger><idNumber>{ID}</idNumber></passenger>",
+                     f'{{"documentType": "passport", "documentNumber": "{ID}"}}',
+                     f'{{"documentNumber": "{ID}", "document_type": "ID card"}}'):
             with self.subTest(text=text):
                 self.assertIn(("id-number-after-label", ID), kinds(text))
 
