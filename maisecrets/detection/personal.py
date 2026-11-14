@@ -2252,8 +2252,8 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
                 m = _PHONE_DE_NEXT_RE.match(text, m.end(1))
     us = bool(_US_PHONE_REGIONS.intersection(regions))
-    if not any(w in low for w in _PHONE_WORDS):
-        return out if prompt else _intl_after_cue(text, out, us)
+    if not any(w in low for w in _PHONE_WORDS):   # every cue of _PHONE_CUE_INTL_RE is one of these words
+        return out
     for rx in (_PHONE_TIGHT_RE,) if prompt else (_PHONE_TIGHT_RE, _PHONE_LOOSE_RE):
         for m in rx.finditer(text):
             v = m.group(1).rstrip(" .-/")
@@ -2297,8 +2297,8 @@ def _intl_after_cue(text: str, out: list, us: bool) -> list:
         span = (m.start(1), m.start(1) + len(v))
         if any(a < span[1] and span[0] < b for a, b in taken) or not _national_phone_ok(v):
             continue
-        if (_NANP_SHAPE_RE.fullmatch(v) and not us) or re.search(r"555[-. ]01\d\d", v):
-            continue   # a North American number needs us or ca; 555-01xx is the fictional range
+        if _NANP_SHAPE_RE.fullmatch(v) and not us:
+            continue   # a North American number needs us or ca (555-01xx: _national_phone_ok)
         if _YMD_SPACED_RE.fullmatch(v) or _SPACED_DATE_RE.fullmatch(v) or all(
                 g.endswith("00") for g in re.findall(r"\d+", v)):
             continue   # call 2024 08 15, contact us at 100 200 300: a date and round numbers

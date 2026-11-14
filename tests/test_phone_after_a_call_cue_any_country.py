@@ -23,8 +23,8 @@ LOCAL = "7182-" + "4630"
 NO_PLAN = "(187) 642-" + "9035"
 
 
-def scan(text: str, channel: str = "tool") -> list:
-    active = regions.Active(regions=("generic", "de", "us"), languages=("en", "de"), source="test")
+def scan(text: str, channel: str = "tool", where: tuple = ("de", "us")) -> list:
+    active = regions.Active(regions=("generic", *where), languages=("en", "de"), source="test")
     with detect.Detector(regions=active).activate():
         return detect.scan(text, channel=channel)
 
@@ -52,10 +52,15 @@ class PhoneAfterACallCueTests(unittest.TestCase):
     def test_a_date_a_time_round_numbers_a_series_and_an_example_stay_text(self):
         for text in ("call 2024 08 15 the release", "contact us at 10:30 tomorrow", "call the function at line 1234",
                      "dial 1-2-3", "call 1234 5678 9012 3456", "Order Number: " + LOCAL + "\n",
-                     "contact us at 555-0142", "reach us at 2023-07-15", "contact us at 100 200 300 400",
+                     "contact us at 555-0142", "contact us at 312 555 " + "0142", "reach us at 2023-07-15",
+                     "contact us at 100 200 300 400",
                      "Phone Number: 1111-" + "1111\n", "fax us at 12345678", "call 15 08 2024 the release"):
             with self.subTest(text=text):
                 self.assertEqual(text, masked(text))
+
+    def test_a_north_american_number_needs_us_or_ca(self):
+        text = "contact us at 312-846-" + "2291 today"
+        self.assertEqual([], [m.kind for m in scan(text, where=("de",))])
 
     def test_a_typed_prompt_keeps_its_rules(self):
         # a call cue in a prompt blocked developer prompts (review, 2026-11-02): the prompt channel takes labels only
