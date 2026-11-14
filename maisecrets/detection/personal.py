@@ -27,7 +27,7 @@ from . import deadline as _deadline
 from .lazy_regex import LazyRx as _LazyRx
 from .id_labels import _ID_DATE_RE, _ID_RE, _ID_WORDS
 from .text_index import field_end, field_start
-from .phone_forms import _DE_CALL_REGIONS, _PHONE_DE_CUE_RE, _PHONE_DE_NEXT_RE, _e164_without_plus
+from .phone_forms import _DE_CALL_REGIONS, _PHONE_CUE_INTL_RE, _PHONE_DE_CUE_RE, _PHONE_DE_NEXT_RE, _e164_without_plus
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
@@ -1935,6 +1935,8 @@ _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
 _ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
 # a North American number (3-3-4); it needs region us or ca, as phone-us-national (0.6.24)
+_YMD_SPACED_RE = _lazy(r"(?:19|20)\d\d[ .\-/]\d{1,2}[ .\-/]\d{1,2}")
+_LABEL_ONLY_PHONE_RE = _lazy(r"\d{4}[ -]\d{4}|\([01]\d{2}\) ?\d{3}-\d{4}")
 _NANP_SHAPE_RE = _lazy(r"(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4}")
 # a count with a space between thousands (3 412 908 users, 1 000 000) and a list of small numbers (4 8 15 16 23 42)
 # fullmatch on a value of _PHONE_TIGHT_RE only (6 groups at most): the last branch is quadratic on a long text
@@ -2249,9 +2251,9 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
                 if _national_phone_ok(v):
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
                 m = _PHONE_DE_NEXT_RE.match(text, m.end(1))
-    if not any(w in low for w in _PHONE_WORDS):
-        return out
     us = bool(_US_PHONE_REGIONS.intersection(regions))
+    if not any(w in low for w in _PHONE_WORDS):
+        return out if prompt else _intl_after_cue(text, out, us)
     for rx in (_PHONE_TIGHT_RE,) if prompt else (_PHONE_TIGHT_RE, _PHONE_LOOSE_RE):
         for m in rx.finditer(text):
             v = m.group(1).rstrip(" .-/")
@@ -2276,10 +2278,31 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
                 if not (rest and rest.start(1) == m.start(1)
                         and not _GAP_SEP_RE.search(text[rest.start():rest.start(1)])):
                     continue
-            if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)):
+            if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)) or (
+                    # after a phone label: a local number of 4 and 4 digits, and (187) 642-9035, whose area code no
+                    # plan has (synthetic data writes them; #50)
+                    rx is _PHONE_TIGHT_RE and _LABEL_ONLY_PHONE_RE.fullmatch(v) and not _placeholder_digits(v)
+                    and not re.search(r"\)\s?555[-. ]01", v)):
                 out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
             elif rx is _PHONE_TIGHT_RE and len(_SERIES_GROUP_RE.findall(v)) >= 3:
                 out.extend((a, b, "phone-after-phone-word", PHONE) for a, b in _numbers_in_series(text, m.start(1)))
+    return out if prompt else _intl_after_cue(text, out, us)
+
+
+def _intl_after_cue(text: str, out: list, us: bool) -> list:
+    """Any country's grouping after a call cue, in the tool channel (#50)."""
+    taken = [(a, b) for a, b, _, _ in out]
+    for m in _PHONE_CUE_INTL_RE.finditer(text):
+        v = m.group(1).rstrip(" .-/")
+        span = (m.start(1), m.start(1) + len(v))
+        if any(a < span[1] and span[0] < b for a, b in taken) or not _national_phone_ok(v):
+            continue
+        if (_NANP_SHAPE_RE.fullmatch(v) and not us) or re.search(r"555[-. ]01\d\d", v):
+            continue   # a North American number needs us or ca; 555-01xx is the fictional range
+        if _YMD_SPACED_RE.fullmatch(v) or _SPACED_DATE_RE.fullmatch(v) or all(
+                g.endswith("00") for g in re.findall(r"\d+", v)):
+            continue   # call 2024 08 15, contact us at 100 200 300: a date and round numbers
+        out.append((span[0], span[1], "phone-after-phone-word", PHONE))
     return out
 
 
