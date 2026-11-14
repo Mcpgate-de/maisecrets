@@ -29,6 +29,11 @@ client's sandbox, another user) stops it (C22).
 | A4 another user or a copy of the disk | reads files it can reach | read values |
 | A5 the person | everything | none; needs to see and control |
 
+Under a company policy (the machine policy of C15, a plugin and the guard forced by the managed settings of the
+client), A5 has no administrator rights and the company decides the settings. maisecrets then also defends against
+a person who loosens a setting for convenience. It does not defend against a person who goes around it on purpose
+(see the last item of "What is knowingly not defended").
+
 ## Core protection and rehydration policy
 
 Two layers, kept apart on purpose (`maisecrets/rehydration.py`).
@@ -155,6 +160,11 @@ Four goals hold over every path, each with its own tests and a mutation per path
   over Slack goes to Slack. `secret_destinations: protect` (C23) asks before a
   secret goes to a host it was never sent to; a policy by the kind of host (a
   public sink) is a later layer on top of C16, not part of the core.
+- **A person who goes around maisecrets on purpose, also under a company policy.** maisecrets defends against a
+  mistake (a token in a prompt, a `cat .env`), against an agent under injection (A2) and, with the machine
+  policy (C15), against a loosened setting. A person who wants a value in the model can copy it into a browser
+  chat, type it again or rewrite a file of their own that a control trusts (the subagent transcript of C19). That
+  is the job of data loss prevention and access rights, not of a hook in the agent.
 
 ## Decisions
 
