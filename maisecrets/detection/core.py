@@ -3079,10 +3079,14 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
     allowed, off = allow_list()
     by_start, gone = None, set()
     company: list = []
+    from . import role_names
     from .holder_line import company_follows, names_above_bank   # a name line above a bank block (#40)
     every = personal.hits(text, channel, _pii_regions_cached(), company)
     if channel == "tool" and ":" in text and "\n" in text:
         every += [(s, e, "name-after-label", personal.NAME) for s, e in names_above_bank(text)]
+    if channel == "tool" and "name" in text.lower():   # a person-name key in structured data (#43)
+        old = {h[:2] for h in every}
+        every += [(s, e, "name-after-label", personal.NAME) for s, e in role_names.key_names(text) if (s, e) not in old]
     every = sorted(every)
     # the decision belongs to an address rule that runs: a rule that `enabled` or the allow list turns off decides
     # nothing (Gate B of this change)
