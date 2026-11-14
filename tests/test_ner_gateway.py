@@ -209,6 +209,26 @@ class GatewaySourceTests(unittest.TestCase):
         self.srv.ner_answer = (503, {"error": "busy"})
         self.assertEqual(ner_setup.report(conf)[0], 1, "a busy gateway needs no login")
 
+    def test_the_status_shows_the_gateways_load_and_the_quota(self):
+        import json as _json
+        from maisecrets.home import CONFIG
+        old = CONFIG.read_text(encoding="utf-8") if CONFIG.exists() else None
+        self.addCleanup(lambda: CONFIG.write_text(old, encoding="utf-8") if old is not None
+                        else CONFIG.unlink(missing_ok=True))
+        CONFIG.write_text(_json.dumps(self.cfg), encoding="utf-8")
+        self.login(self.cfg)
+        code, lines = ner_setup.report(self.cfg["remote_detector"])
+        self.assertEqual(code, 0, lines)
+        load = [x for x in lines if x.startswith("load:")]
+        self.assertEqual(load, ["load: 4 workers, 25 % in use; 0 waiting; your quota this minute: 59 of 60 "
+                                "requests, 199,951 of 200,000 characters"])
+        self.srv.ner_status = {"service": None, "client_path": {"free": False}, "quota": {}}
+        ner_gateway.CACHE.unlink(missing_ok=True)
+        load = [x for x in ner_setup.report(self.cfg["remote_detector"])[1] if x.startswith("load:")]
+        self.assertEqual(load, ["load: the client slot is busy now (a text gets 503 busy)"])
+        self.assertEqual(ner_gateway.status_line({"service": {"workers": 4, "in_use_share": None}}), "load: 4 workers")
+        self.assertEqual(ner_gateway.status_line("x"), "load: no load data")
+
     def test_no_login_and_a_switched_off_gateway_give_reasons(self):
         det, why = remote_layer.from_config(self.cfg)
         self.assertIsNone(det)

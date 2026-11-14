@@ -721,9 +721,14 @@ def _gateway_report(conf: dict, lines: list) -> tuple[int, list]:
             return 4, lines
         return 1, lines
     _spans, st = det.ask("A check of the name service.", [])
+    from . import ner_gateway
+    doc, why_none = ner_gateway.status({**load_config(), "remote_detector": conf}, conf)
+    load = ner_gateway.status_line(doc) if doc is not None else f"load: no load data ({why_none})"
     if st.available:
         lines.append(f"the gateway: answers ({st.ms:.0f} ms) with your login")
+        lines.append(load)
         return 0, lines
+    lines.append(load)
     lines.append(f"the gateway: gives no result ({st.reason or st.state}); the rules mask tool results alone until it "
                  "does")
     return 1, lines

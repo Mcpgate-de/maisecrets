@@ -133,6 +133,9 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None) -> dict | N
         size = block.get("ner_max_chars")
         ner = {"endpoint": block["ner_endpoint"], "scope": ner_scope,
                "max_chars": size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else 20000}
+        # its load and the person's quota, read with the same token (counts no quota)
+        if origin_of(block.get("ner_status_endpoint")) == origin:
+            ner["status"] = block["ner_status_endpoint"]
     conf = cfg.get("remote_detector") if isinstance(cfg, dict) else None
     wants_ner = bool(ner) and isinstance(conf, dict) and conf.get("gateway") == origin
     scope = login_scope(resolve_scope, process_scope, display_scope=display_scope)

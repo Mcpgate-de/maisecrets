@@ -64,6 +64,11 @@ class SrefServer:
         self.ner_texts: list = []        # every text the name endpoint got
         self.ner_word = "Okafor"         # the endpoint finds this word as a person
         self.ner_delay = 0.0             # seconds the endpoint waits before it answers
+        # GET /sensitive-references/ner/status (ai-gateway v2.0.3913): the load, the client slot and the quota
+        self.ner_status = {"service": {"workers": 4, "busy_workers": 1, "waiting_requests": 0, "in_use_share": 0.25},
+                           "client_path": {"free": True, "gateway_lookups_running": False},
+                           "quota": {"requests_per_minute": 60, "requests_left": 59, "chars_per_minute": 200000,
+                                     "chars_left": 199951, "resets_in_s": 59}, "max_chars": 20000}
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -83,6 +88,14 @@ class SrefServer:
 
             def do_GET(self) -> None:
                 parts = urlsplit(self.path)
+                if parts.path == "/sensitive-references/ner/status" and server.ner:
+                    auth = self.headers.get("Authorization", "")
+                    token = auth[7:] if auth.startswith("Bearer ") else ""
+                    if float(server.access.get(token, 0)) < time.time():
+                        return self._send(401, {"error": "invalid_token"})
+                    if NER_SCOPE not in server.scopes.get(token, "").split():
+                        return self._send(403, {"error": "insufficient_scope"})
+                    return self._send(200, server.ner_status)
                 if parts.path == "/.well-known/oauth-protected-resource/mcp":
                     return self._send(200, {
                         "resource": server.url + "/mcp", "authorization_servers": [server.url],
@@ -96,7 +109,9 @@ class SrefServer:
                                                            if p in server.sinks},
                                                  **({"ner_endpoint": server.url + "/sensitive-references/ner",
                                                      "ner_scope": NER_SCOPE, "ner_format": "hf",
-                                                     "ner_max_chars": 20000, "ner_labels": ["PER", "ORG", "LOC"]}
+                                                     "ner_max_chars": 20000, "ner_labels": ["PER", "ORG", "LOC"],
+                                                     "ner_status_endpoint":
+                                                         server.url + "/sensitive-references/ner/status"}
                                                     if server.ner else {}),
                                                  "status": "experimental"}})
                 if parts.path == "/.well-known/oauth-authorization-server":
