@@ -38,7 +38,7 @@ IMAGE = "mcpgate/ner"
 FIRST_SECRET_IMAGE = IMAGE + ":v2.0.3584"
 # what `run.sh ner start` runs: a fixed tag, pinned by its digest (multi-arch index on Docker Hub, 2026-11-07), never
 # `latest`, which docker does not pull again when an old one is on the machine
-SECRET_IMAGE = IMAGE + ":v2.0.3798@sha256:38c0442e10f75e2b41bdcf5a66c6aee02961f9609bf7ebb7d1ce64c1f9c907cf"
+SECRET_IMAGE = IMAGE + ":v2.0.3916@sha256:cde7bdb1d2dc753f41fbf6dd5179af56a570f62804bdc8d0da1021b83ae18a4b"
 START = f"docker run -d --name ner --restart unless-stopped --cpus 2 --memory 1536m -p 127.0.0.1:8765:8765 {IMAGE}"
 # the keys a source sets; any other key of the setting is the person's tuning and stays
 SOURCE_KEYS = ("url", "format", "model", "allow_network", "mask", "ask_labels", "gateway", "gateway_url")
