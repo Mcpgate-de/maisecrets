@@ -87,6 +87,11 @@ class StartTests(unittest.TestCase):
         self.assertEqual(len(secret), 43)
         self.assertEqual(env["NER_CLIENT_SECRET"], secret)
         self.assertIn("NER_CLIENT_SECRET", argv)
+        # a share of the computer, not all of it: one worker per core of the limit
+        self.assertEqual(argv[argv.index("--cpus") + 1], str(ner_setup.cpu_limit()))
+        self.assertEqual(argv[argv.index("--memory") + 1], "1536m")
+        with mock.patch.object(ner_setup.os, "cpu_count", side_effect=[1, 6, 10, 32]):
+            self.assertEqual([ner_setup.cpu_limit() for _ in range(4)], [2, 3, 4, 4])
         self.assertEqual(argv[-1], ner_setup.SECRET_IMAGE, "a fixed tag that proves: an old latest would not")
         self.assertNotIn(secret, " ".join(argv), "never on the command line, where ps shows it")
         self.assertNotIn(secret, "\n".join(lines))

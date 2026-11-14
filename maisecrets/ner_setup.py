@@ -39,7 +39,7 @@ FIRST_SECRET_IMAGE = IMAGE + ":v2.0.3584"
 # what `run.sh ner start` runs: a fixed tag, pinned by its digest (multi-arch index on Docker Hub, 2026-11-07), never
 # `latest`, which docker does not pull again when an old one is on the machine
 SECRET_IMAGE = IMAGE + ":v2.0.3798@sha256:38c0442e10f75e2b41bdcf5a66c6aee02961f9609bf7ebb7d1ce64c1f9c907cf"
-START = f"docker run -d --name ner --restart unless-stopped -p 127.0.0.1:8765:8765 {IMAGE}"
+START = f"docker run -d --name ner --restart unless-stopped --cpus 2 --memory 1536m -p 127.0.0.1:8765:8765 {IMAGE}"
 # the keys a source sets; any other key of the setting is the person's tuning and stays
 SOURCE_KEYS = ("url", "format", "model", "allow_network", "mask", "ask_labels", "gateway", "gateway_url")
 
@@ -451,11 +451,22 @@ def restart_local(conf) -> bool:
     return True
 
 
+# the container's share of this computer: without a limit the service starts one worker per core and can take the
+# whole laptop. Half the cores, at least 2 and at most 4 (the production sidecar runs with 4), and the memory of the
+# production limit (ai-gateway #1869: the sidecar sizes itself by its container limit)
+MEMORY_LIMIT = "1536m"
+
+
+def cpu_limit() -> int:
+    return max(2, min(4, (os.cpu_count() or 2) // 2))
+
+
 def _run_container(tool: str, secret: str, image: str) -> tuple[int, str, str]:
     """(exit code, container id, last error line) of a new container `ner` from `image` with `secret`. The secret goes
     to docker in the environment, never on the command line, where `ps` shows it."""
     env = dict(os.environ, NER_CLIENT_SECRET=secret)
     r = _docker(tool, "run", "-d", "--name", "ner", "--restart", "unless-stopped", "-e", "NER_CLIENT_SECRET",
+                "--cpus", str(cpu_limit()), "--memory", MEMORY_LIMIT,
                 "-p", "127.0.0.1:8765:8765", image, timeout=900, env=env)
     cid = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
     return r.returncode, cid, (r.stderr.strip().splitlines() or ["no reason given"])[-1][:200]

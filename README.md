@@ -2422,7 +2422,7 @@ maisecrets does not verify that it is `mcpgate/ner`.
   NER experiment as ONNX; AFL-3.0 and Apache-2.0, its notices are in the
   image). If it does not answer, `/maisecrets:ner` gives the command that
   starts it with docker or podman; the AI asks you first (about 690 MB to download, about 250 MB of memory
-  while it runs) and then runs it:
+  while it runs, at most 1.5 GB and half the cores, 2 to 4) and then runs it:
   `run.sh ner start`, which runs the container `ner` with a secret of its own
   (in its environment, never on a command line) and keeps that secret in your
   store. Before each text the container must prove the secret (a fresh
