@@ -165,7 +165,9 @@ class IdNumberTests(unittest.TestCase):
     def test_a_short_number_a_header_and_a_function_after_an_id_label_stay_text(self):
         for text in ("the policy number 2024 of the firewall", "Medical record number: unknown",
                      "| Policy Number | Status |", "the policy number was 4 and the rule", "his tax id was 2024.",
-                     "(see the medical record number field) 1234 rows", "SELECT SIN(31415);"):
+                     "(see the medical record number field) 1234 rows", "SELECT SIN(31415);",
+                     "y = sin (31415)", "SELECT SIN (31415) FROM dual;",
+                     "fw: matched firewall policy number 10023 action=deny"):
             with self.subTest(text=text):
                 self.assertEqual(values(text), [])
 

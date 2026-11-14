@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import _isolate  # noqa: E402,F401
 
 from maisecrets.detection import core, key_values  # noqa: E402
@@ -40,6 +41,18 @@ class PasswordAfterAKeyTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertNotIn("password-after-key", [k for k, _ in kinds(text)])
 
+    def test_a_password_in_the_element_of_a_thing_is_a_password(self):
+        # the parent filter is for ids: <profile> and <service> hold passwords too (Gate A)
+        for parent in ("profile", "service", "application"):
+            with self.subTest(parent=parent):
+                text = f"<{parent}><key_store_password>{PW}9</key_store_password></{parent}>"
+                self.assertIn(("password-after-key", PW + "9"), kinds(text))
+
+    def test_a_literal_joined_into_an_expression_stays_text(self):
+        for text in (f'key_store_password = "{PW}#q" + suffix', f"key_store_password = '{PW}#q' || :tail"):
+            with self.subTest(text=text):
+                self.assertNotIn("password-after-key", [k for k, _ in kinds(text)])
+
     def test_the_prompt_channel_is_unchanged(self):
         text = f"<tr><th>key_store_password</th><td>{PW}</td></tr>"
         self.assertNotIn("password-after-key", [m.kind for m in core.scan(text, channel="prompt")])
@@ -51,18 +64,36 @@ class IdNumberAfterAKeyTests(unittest.TestCase):
                      f"<tr><th>driver&#x27;s-license</th><td>{ID}</td></tr>",
                      f'{{"driver_license": "{ID}", "contact-email": "x"}}',
                      f"WHEN \"national-identity\"='{ID}' OR",
-                     f"<tr><th>identitydocument</th><td>{ID}</td></tr>",
+                     f"<tr><th>identity_document_number</th><td>{ID}</td></tr>",
                      f'<national__identity type="str">{ID}</national__identity>',
-                     f'{{"document-number": "{ID}"}}',
+                     f'{{"passport-number": "{ID}"}}',
                      f'<taxpayeridentificationnumber type="str">{ID}</taxpayeridentificationnumber>'):
             with self.subTest(text=text):
                 self.assertIn(("id-number-after-label", ID), kinds(text))
 
     def test_a_date_a_specimen_a_word_and_a_thing_stay_text(self):
-        for text in ('{"driver_license": "true"}', '{"document_number": "0000"}', '{"idnumber": "12-03-2024"}',
-                     f"<product><passport>{ID}</passport></product>", '{"tax_id": "none"}'):
+        for text in ('{"driver_license": "true"}', '{"passport": "0000"}', '{"passport": "' + "12-03-" + '2024"}',
+                     f"<product><passport>{ID}</passport></product>", '{"tax_id": "none"}', '{"passport": "2024"}'):
             with self.subTest(text=text):
                 self.assertNotIn("id-number-after-label", [k for k, _ in kinds(text)])
+
+
+class BusinessNumberTests(unittest.TestCase):
+    """A document or id number of an invoice, an order or a journal is no person's id (Gate A); in a record that
+    names a person it is."""
+
+    def test_an_invoice_an_order_and_a_journal_stay_text(self):
+        for text in ("<Invoice><DocumentNumber>INV-2024-0042</DocumentNumber></Invoice>",
+                     '{"documentNumber": "GJ-10023"}', "<tr><th>ID Number</th><td>ORD-1234-55</td></tr>",
+                     "<identityDocument>ID-PROC-0042</identityDocument>"):
+            with self.subTest(text=text):
+                self.assertNotIn("id-number-after-label", [k for k, _ in kinds(text)])
+
+    def test_in_a_persons_record_the_generic_key_is_an_id(self):
+        for text in (f'{{"gender": "female", "document_number": "{ID}"}}',
+                     f"<tr><th>birth_date</th><td>x</td></tr><tr><th>identitydocument</th><td>{ID}</td></tr>"):
+            with self.subTest(text=text):
+                self.assertIn(("id-number-after-label", ID), kinds(text))
 
 
 class KeyFoldingTests(unittest.TestCase):

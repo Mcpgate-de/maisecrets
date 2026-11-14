@@ -30,14 +30,15 @@ _ID_RE = _LazyRx(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|num
                  r"(?:[ _-]?(?:no|number))?|dl[ _-]?(?:no|number|#)|(?-i:DL)(?=\s{0,3}[:#])|sin|tfn|nir|tax[ _-]?id"
                  r"|insurance (?:member )?id"
                  r"|account[ _-]?(?:number|no\.?)|(?:certificate[ _-]?)?licen[cs]e[ _-]?(?:number|no\.?)"
-                 r"|patient[ -]?id|id on file|(?:insurance[ _-]?)?policy[ _-]?(?:number|no\.?)" + _HEALTH_ID_LABELS
+                 r"|patient[ -]?id|id on file"
+                 r"|(?<!firewall )(?:insurance[ _-]?)?policy[ _-]?(?:number|no\.?)" + _HEALTH_ID_LABELS
                  + _TRAVEL_ID_LABELS + r")(?![a-z])[\"']?"
                  r"(?:\s{0,3}(?:on file as|on file|is|was|of|number|no\.?|#|n\.?[º°o]\.?|nr\.?|num[ée]ro|n[úu]mero"
                  r"|numero|nummer|numer))?"
                  # a comma too: `your health plan beneficiary number, <id>, to medical professionals` (Nemotron-PII);
-                 # markdown bold, a table cell, a parenthesis after a space (SIN(31415) is a function):
+                 # markdown bold, a table cell, a parenthesis after bold (sin (31415) is a function call):
                  # `**medical record number** (<id>)`, `| Policy Number | <id>`
-                 r"\s{0,3}\*{0,2}\s{0,3}(?:[:=#,|]|(?<=\s)\()?\s{0,3}\*{0,2}\s{0,3}[\"']?"
+                 r"\s{0,3}\*{0,2}\s{0,3}(?:[:=#,|]|(?<=\*\*)\(|(?<=\*\*\s)\()?\s{0,3}\*{0,2}\s{0,3}[\"']?"
                  r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")
 # a date or the date and hour of a timestamp is no id: `2026-11-08T21` of a CI log line after `sin`, `tax id`
 _ID_DATE_RE = _LazyRx(r"\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])[T ](?:[01]\d|2[0-3])(?::[0-5]\d)?")

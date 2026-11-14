@@ -38,10 +38,14 @@ _PASSWORD_ENDS = ("password", "passwd", "passphrase", "pwd")
 # a key whose value is an id number of a person (Privy, the Benchmark V3 sample, 2026-11-14)
 _ID_KEYS = frozenset({
     "driverlicense", "driverslicense", "drivinglicense", "driverlicensenumber", "driverslicensenumber",
-    "nationalidentity", "nationalid", "nationalidentitynumber", "nationalidnumber", "identitydocument",
-    "identitydocumentnumber", "documentnumber", "passport", "passportnumber", "passportno", "idnumber",
-    "taxid", "taxidentificationnumber", "taxpayeridentificationnumber", "taxpayerid", "itin",
-    "medicalrecordnumber", "healthplanbeneficiarynumber"})
+    "nationalidentity", "nationalid", "nationalidentitynumber", "nationalidnumber", "identitydocumentnumber",
+    "passport", "passportnumber", "passportno", "taxid", "taxidentificationnumber", "taxpayeridentificationnumber",
+    "taxpayerid", "itin", "medicalrecordnumber", "healthplanbeneficiarynumber"})
+# a key that an invoice, an order or a journal uses too (DocumentNumber INV-2024-0042, idNumber ORD-1234): an id of a
+# person only in a record that also names a person (Gate A)
+_GENERIC_ID_KEYS = frozenset({"documentnumber", "idnumber", "identitydocument"})
+_PERSON_NEAR_RE = re.compile(r"(?i)name|birth|gender|e-?mail|phone|address|nationality|\bsex\b")
+_NEAR = 300
 # the words one of the keys of a family holds: a text without any of them is not scanned for that family
 _PASSWORD_WORDS = ("pass", "pwd")
 _ID_WORDS = ("licen", "identit", "passport", "documentnumber", "document_number", "document-number",
@@ -52,8 +56,6 @@ _ID_KEY_CHARS = r"[A-Za-z0-9 _'’&#;-]"            # driver's-license, driver&#
 _COMPARE = r"(?:=>|<>|!=|[:=])"                   # WHEN "keypassword"<>'…' in SQL
 _PASSWORD_VALUE = r"([^\s\"'`<>,;|&]{3,64})"
 _ID_VALUE = r"([A-Za-z0-9](?:[A-Za-z0-9]|[ -](?=[A-Za-z0-9])){3,24})"
-_NOT_A_PASSWORD = frozenset({"true", "false", "null", "none", "nil", "undefined", "required", "optional", "hidden",
-                             "redacted", "masked", "secret", "password", "changeme", "string", "text", "empty"})
 # a literal that an expression joins with more: password = "…" + os.environ["PW_SUFFIX"] is a part of the value
 _JOINED_RE = re.compile(r"[\"'`][ \t]*(?:\+|\|\||\.[ \t]|~)")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}")
@@ -66,17 +68,29 @@ def password_key(key: str) -> bool:
 
 def _password_ok(v: str) -> bool:
     """A value under a password key: the checks of a password literal (core._pw_literal_ok: 4 to 64 characters, no
-    fixture word, placeholder, path, reference, version or word), no word of a state, no URL."""
+    fixture word, placeholder, path, reference, version or word), no URL."""
     from .core import _pw_literal_ok
-    if v.lower() in _NOT_A_PASSWORD or v.startswith(("/", "$", "%", "{")) or "://" in v:
-        return False
-    return _pw_literal_ok(v, "tool")
+    return "://" not in v and _pw_literal_ok(v, "tool")
 
 
 def _id_ok(v: str) -> bool:
     from .personal import _placeholder_digits
     digits = sum(c.isdigit() for c in v)
-    return digits >= 4 and not _DATE_RE.fullmatch(v) and not _placeholder_digits(v) and len(v) <= 24
+    # four digits alone are a year (personal.py, id-number-after-label)
+    return (digits >= 5 or digits == 4 and v[0].isalpha()) and not _DATE_RE.fullmatch(v) \
+        and not _placeholder_digits(v) and len(v) <= 24
+
+
+def _a_persons_id(text: str, m, key: str, things, parent) -> bool:
+    """Whether an id after a key is a person's: not the element of a thing (a product's passport, a project's
+    document number), and a generic key only with a word of a person near it. A password stays a password in any
+    element (Gate A: <profile><key_store_password> was dropped)."""
+    if text.startswith("<", m.start()) and parent(text, m.start()) in things:
+        return False
+    if fold(key) in _GENERIC_ID_KEYS:
+        lo, hi = max(0, m.start() - _NEAR), m.end() + _NEAR
+        return bool(_PERSON_NEAR_RE.search(text[lo:m.start()] + " " + text[m.end():hi]))
+    return True
 
 
 def hits(text: str) -> list:
@@ -89,7 +103,8 @@ def hits(text: str) -> list:
     out = [(s, e, "name-after-label", NAME) for s, e in key_names(text)] if "name" in low else []
     for words, value, is_key, ok, kind, typ in (
             (_PASSWORD_WORDS, _PASSWORD_VALUE, password_key, _password_ok, "password-after-key", "SECRET"),
-            (_ID_WORDS, _ID_VALUE, lambda k: fold(k) in _ID_KEYS, _id_ok, "id-number-after-label", ID_NUMBER)):
+            (_ID_WORDS, _ID_VALUE, lambda k: fold(k) in _ID_KEYS or fold(k) in _GENERIC_ID_KEYS, _id_ok,
+             "id-number-after-label", ID_NUMBER)):
         if not any(w in low for w in words):
             continue
         for rx in forms(value, _ID_KEY_CHARS, _COMPARE):
@@ -98,8 +113,7 @@ def hits(text: str) -> list:
                 if not is_key(key) or not ok(m.group(4)) or _JOINED_RE.match(text, m.end(4)) \
                         or refs.hit_is_a_reference(text, m.start(4), m.group(4)):
                     continue   # a reference in a form of the detector's sources is no value
-                # the element of a thing (a product's passport, a project's document number) is no person's
-                if text.startswith("<", m.start()) and _xml_parent(text, m.start()) in _THING_PARENTS:
+                if typ == ID_NUMBER and not _a_persons_id(text, m, key, _THING_PARENTS, _xml_parent):
                     continue
                 out.append((m.start(4), m.end(4), kind, typ))
     return out
