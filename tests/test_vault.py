@@ -978,7 +978,8 @@ class LifeCycleTests(unittest.TestCase):
         own = vault.OWN_NAME
         manual = self.v().put(own, "SECRET", "manual", session="A")
         self.assertTrue(vault.is_weak("manual", own.capitalize()))
-        self.assertTrue(vault.is_weak("term:list", own.upper()))
+        self.assertTrue(vault.is_weak("manual", own.upper()))
+        self.assertTrue(vault.is_weak("manual", f" {own} "), "with blanks around it")
         self.assertFalse(vault.is_weak("manual", own + "x"), "a longer value is a value")
         self.assertEqual(self.v().live_fingerprints(), {}, "a new entry with the own name is weak at once")
         self.assertEqual(self.v().get(manual.key, "A")[1], "ok", "its placeholder still resolves")
@@ -986,9 +987,11 @@ class LifeCycleTests(unittest.TestCase):
     def test_an_old_entry_with_the_own_name_is_marked_weak_by_fingerprint(self):
         own = vault.OWN_NAME
         old = self.v().put(own.capitalize(), "SECRET", "manual", session="A")
+        upper = self.v().put(own.upper(), "SECRET", "manual", session="A")
         other = self.v().put("Sommerwiese7", "SECRET", "manual", session="A")
         v = self.v()
-        v._index["entries"][old.key].pop("weak", None)        # as a version before #53 stored it
+        for e in (old, upper):
+            v._index["entries"][e.key].pop("weak", None)      # as a version before #53 stored it
         v._save_index()
         real_get = JsonFileBackend.get
 
@@ -998,9 +1001,14 @@ class LifeCycleTests(unittest.TestCase):
             return real_get(backend, key)
         with mock.patch.object(JsonFileBackend, "get", only_the_fingerprint_key):
             marked = self.v().weaken_own_name()
-        self.assertEqual(marked, [old.key])
+        self.assertEqual(sorted(marked), sorted([old.key, upper.key]))
         self.assertEqual(list(self.v().live_fingerprints().values()), [other.key])
-        self.assertEqual(self.v().weaken_own_name(), [], "a second run finds nothing")
+        with mock.patch.object(JsonFileBackend, "get", side_effect=AssertionError("the store was read again")):
+            self.assertEqual(self.v().weaken_own_name(), [], "a second session start reads nothing")
+
+    def test_the_own_name_pass_makes_no_fingerprint_key_in_an_empty_store(self):
+        self.assertEqual(self.v().weaken_own_name(), [])
+        self.assertIsNone(self.v().backend.get(FP_KEY_ENTRY))
 
     def test_the_code_word_cleanup_makes_no_fingerprint_key_in_an_empty_store(self):
         self.assertEqual(self.v().quiet_code_words(), [])

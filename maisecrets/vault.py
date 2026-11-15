@@ -226,7 +226,7 @@ def code_word_spellings() -> list[str]:
 CHOSEN_KINDS = ("manual", "term:", "import:")
 
 
-# the plugin's own name: never hunted, whoever stored it. Stored as a value (by hand, a term, a label rule), it masked
+# the plugin's own name: never hunted, whoever stored it. Stored as a value (by hand, a label rule), it masked
 # the plugin's own commands, paths and output in every session, and blocked the prompt that types the forget command
 # to delete it (#53)
 OWN_NAME = __name__.split(".")[0].lower()
@@ -240,7 +240,8 @@ def is_weak(kind: str, value: str, tool: bool = False) -> bool:
     """A value that only a label rule found and that is a known default word (DEFAULT_WORDS), or, in a tool result or
     a file (tool), an English word (is_dictionary_word); or a name or shape rule's hit that is an English word:
     replaced where it was found, never hunted in other texts. A word the person gives in a prompt after a label is a
-    chosen password and stays hunted (is_quiet)."""
+    chosen password and stays hunted (is_quiet). The plugin's own name
+    (OWN_NAME, any case) is weak before every other rule, whoever stored it (#53)."""
     from .registry import is_label
     if value.strip().lower() == OWN_NAME:
         return True    # the plugin's own name, even a chosen one (#53)
@@ -1244,9 +1245,13 @@ class Vault:
 
     @_mutating
     def weaken_own_name(self) -> list[str]:
-        """Mark weak a live entry whose value is the plugin's own name (#53), whatever its kind. Found by fingerprint:
-        no value is read, and nothing is deleted (its placeholder still resolves). Returns the keys marked."""
+        """Mark weak a live entry whose value is the plugin's own name (#53), whatever its kind, in three spellings
+        (lower case, Capitalized, UPPER; a new entry in any spelling is weak through is_weak). Found by fingerprint:
+        no value is read, and nothing is deleted (its placeholder still resolves). Runs once per store: a later
+        entry is weak when it is stored. Returns the keys marked."""
         entries = self._index["entries"]
+        if self._index.get("own_name_checked"):
+            return []
         if not any(not m.get("purged") and not m.get("weak") for m in entries.values()):
             return []   # no fingerprint key is made for a store with no live entry
         marked = []
@@ -1257,6 +1262,7 @@ class Vault:
                 continue
             meta["weak"] = True
             marked.append(key)
+        self._index["own_name_checked"] = True
         return marked
 
     def repair(self) -> dict:
