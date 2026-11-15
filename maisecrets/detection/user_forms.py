@@ -11,38 +11,52 @@ _HANDLE = r"(?:[A-Za-z][A-Za-z0-9]{0,20}(?:[._-][A-Za-z0-9]{1,20}){1,3}|[A-Za-z]
 _CAMEL = r"[A-Z][a-z]{1,15}[A-Z][a-z0-9]{1,15}"
 # the cues: `for user kalin.orbek`, `for invalid user k.orbek` (sshd), `User kalin.orbek successfully logged in` (also
 # after a log prefix), `Welcome, kalin_orb_42.` and `Welcome back, ...`
-_CUE_RE = re.compile(
-    r"(?:(?i:\b(?:for|by|from|the|a|invalid) user)|(?i:\buser)|(?i:\bwelcome(?: back)?),)[ \t]+(" + _HANDLE + "|"
-    + _CAMEL + r")(?=[.,;:!?)\s]|$)")
+# matched only where str.find saw `user` or `welcome`: one regex pass over a megabyte cost 0.09 s (#51)
+_AT_RE = re.compile(r"(?i:user|welcome(?: back)?,)[ \t]+(" + _HANDLE + "|" + _CAMEL + r")(?=[.,;:!?)\s]|$)")
+_STRONG = ("for", "by", "from", "the", "a", "invalid")       # `for user x` needs no verb of a login after it
 _LOGIN_VERB_RE = re.compile(r"[ \t]+(?:successfully|logged|signed|accessed|failed|was|has|reported|attempted)\b")
-_IS_RE = re.compile(r"(?i)\bmy user ?name is[ \t]+([A-Za-z][A-Za-z0-9._-]{1,30}?)(?=[.,;:!?)\s]|$)")
-_WORDS = ("user", "welcome")
+_IS_RE = re.compile(r"(?i)user ?name is[ \t]+([A-Za-z][A-Za-z0-9._-]{1,30}?)(?=[.,;:!?)\s]|$)")
 
 
 def user_names(text: str) -> list:
     """(start, end) of a user name after a cue in prose."""
     low = text.lower()
-    if not any(w in low for w in _WORDS):
+    starts = _at(low, "user") + _at(low, "welcome")
+    if not starts:
         return []
     from .core import _word_set
     from .personal import _username_value_ok
     out = []
-    for m in _CUE_RE.finditer(text):
-        v = m.group(1)
-        cue = m.group(0)[:m.start(1) - m.start()].strip().lower()
-        login = bool(_LOGIN_VERB_RE.match(text, m.end(1)))
-        # `user x` alone names an account only before a verb of a login (`User kalin.orbek logged in`)
-        if cue == "user" and not login:
+    for pos in sorted(starts):
+        before = low[max(0, pos - 9):pos].split()
+        m = _AT_RE.match(text, pos)
+        if m is not None:
+            v = m.group(1)
+            login = bool(_LOGIN_VERB_RE.match(text, m.end(1)))
+            # `user x` alone names an account only before a verb of a login (`User k.orbek logged in`)
+            weak = low.startswith("user", pos) and not (before and before[-1] in _STRONG and low[pos - 1] == " ")
+            if (weak or re.fullmatch(_CAMEL, v)) and not login:
+                continue
+            if _username_value_ok(v, False, " ") and _handle_ok(v, _word_set()):
+                out.append((m.start(1), m.end(1)))
             continue
-        if re.fullmatch(_CAMEL, v) and not login:
-            continue
-        if _username_value_ok(v, False, " ") and _handle_ok(v, _word_set()):
-            out.append((m.start(1), m.end(1)))
-    for m in _IS_RE.finditer(text):
-        v = m.group(1).rstrip("._-")
-        # _username_value_ok refuses a word of the word list of 3 letters or more (`my username is visible`)
-        if len(v) > 2 and _username_value_ok(v, False, " "):
-            out.append((m.start(1), m.start(1) + len(v)))
+        if before and before[-1] == "my":
+            m = _IS_RE.match(text, pos)
+            if m is not None:
+                v = m.group(1).rstrip("._-")
+                # _username_value_ok refuses a word of the word list of 3 letters or more (`my username is visible`)
+                if len(v) > 2 and _username_value_ok(v, False, " "):
+                    out.append((m.start(1), m.start(1) + len(v)))
+    return out
+
+
+def _at(low: str, word: str) -> list:
+    """The starts of `word` at the start of a word in the lowercased text (str.find, no regex pass)."""
+    out, i = [], low.find(word)
+    while i >= 0:
+        if i == 0 or not (low[i - 1].isalnum() or low[i - 1] == "_"):
+            out.append(i)
+        i = low.find(word, i + 1)
     return out
 
 
