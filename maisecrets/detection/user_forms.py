@@ -105,7 +105,7 @@ def _at(low: str, word: str) -> list:
 
 
 # a part that names a daemon, a tool or a bot, not a person: `user kibana8`, `codecov-commenter`, `jira-integration2`
-_TOOL_PARTS = _words("tool_parts")
+_TOOL_PARTS = _words("usernames/tool-and-bot-parts")
 
 
 def _handle_ok(v: str, known) -> bool:
@@ -127,7 +127,7 @@ def _handle_ok(v: str, known) -> bool:
 
 # a key whose value is a user name and that personal.py's username label does not read (#51); not `handle` or
 # `screenName`, which name product slugs and app screens as often
-USER_ID_KEYS = _words("user_id_keys")
+USER_ID_KEYS = _words("usernames/user-name-keys")
 
 
 _USER_ID_KEY = r"(?i:user[_-]?(?:id|login)|login[_-]?(?:name|id))"

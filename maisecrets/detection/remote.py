@@ -483,7 +483,7 @@ class RemoteDetector:
 # product and model words that the cased model takes for a person when they stand alone (ghissues dev, 2026-11-01:
 # 141 of 1,670 name spans; Claude and Jenkins most often). Never a word that is also a first name in the data: two
 # such words are real names in DialogPII. A full name that holds one of them as a surname is not touched
-PRODUCT_WORDS = _words("product_words")
+PRODUCT_WORDS = _words("name-service/product-words")
 
 
 # greetings that the model takes for a person when they stand alone before a name (`Hallo` in "Hallo Lena, …": 88 of
@@ -493,19 +493,19 @@ PRODUCT_WORDS = _words("product_words")
 # part of a name among the 20,671 person spans of DialogPII dev (2026-11-13, also hoi and hej); "lieben" came back
 # alone as a name from the reference service for "Hallo Ihr Lieben," (#41). Lieben is also a rare surname: alone,
 # without a given name, it is dropped; a full name with it stays
-GREETING_WORDS = _words("greeting_words")
+GREETING_WORDS = _words("name-service/greetings")
 # the words of buttons and links that the model takes for a person when two of them stand next to "and" or "or"
 # before a noun ("the Allow and Deny buttons": scores of 0.91 to 0.999 on int8 and fp32, reported in #41). A score
 # threshold does not tell them from a real one-word name, which scored down to 0.40 there. Never a word that is also
 # a given name or a surname: not edit (a Hungarian given name), not ok (a Korean surname). None of these is a name or a
 # part of a name among the 20,671 person spans of DialogPII dev
-UI_LABEL_WORDS = _words("ui_label_words")
+UI_LABEL_WORDS = _words("name-service/ui-labels")
 # words of a test runner's or a build's summary line that the model takes for a person at the start of a line
 # ("Ran 3561 tests in 606 s", "Passed 12, Skipped 3"); "Ok" stays out: it is a Korean surname
-RUNNER_WORDS = _words("runner_words")
+RUNNER_WORDS = _words("name-service/test-runner-words")
 # the words after a product word in a product name ("Claude Code", "GitHub Actions", "Docker Desktop"): the model
 # takes the whole name for a person. Never a word that is also a first name (no "max", no "pro")
-PRODUCT_TAILS = _words("product_tails")
+PRODUCT_TAILS = _words("name-service/product-name-tails")
 
 
 # a JSON escape, also escaped again (`\\n` in a JSON text inside a JSON string): the backslashes and what they stand for

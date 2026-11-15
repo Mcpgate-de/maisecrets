@@ -1,6 +1,0 @@
-# keys whose value is a user name, folded: lower case, without separators.
-# One entry per line. Read by maisecrets/detection/wordlists.py (#54).
-loginid
-loginname
-userid
-userlogin
