@@ -36,7 +36,8 @@ class UserNameAfterACueTests(unittest.TestCase):
                             ("[INFO] User plind88 logged in", "plind88"),
                             ("2026-11-15 10:00 user plind88 logged in", "plind88"),
                             ("Failed password for invalid user plind88 from", "plind88"),
-                            ("Welcome back, kalin_orb_42!", "kalin_orb_42")):
+                            ("Welcome back, kalin_orb_42!", "kalin_orb_42"),
+                            ("Failed password for invalid user k.orbek from", "k.orbek")):
             with self.subTest(text=text):
                 self.assertIn(value, users(text))
 
@@ -55,7 +56,11 @@ class UserNameAfterACueTests(unittest.TestCase):
                      "Permission denied for user django_app", "the user utf-8 data", "for user sda1",
                      "the user eth0 interface", "by user pod-7f9c", "Welcome, JetBrains.",
                      "login for user SAML2 provider",
-                     "My user name is in the config.", "the user eslint-plugin-react"):
+                     "My user name is in the config.", "the user eslint-plugin-react", '{"userId": "jenkins2"}',
+                     "session closed for user postgres2", "User ConfigManager failed", '{"userId": "kalinorbek"}',
+                     '{"branch": "fix-orbek7"}', '{"handle": "kalin_orb_42"}', "for user e.g", "the user a.out",
+                     "for user x.y", "session closed for user kibana8", "Requested by user codecov-commenter",
+                     '{"userLogin": "jira-integration2"}', "user pgbouncer2 failed to authenticate"):
             with self.subTest(text=text):
                 self.assertEqual([], users(text))
 

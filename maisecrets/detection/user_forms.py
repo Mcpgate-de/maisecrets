@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 
 # a handle: parts joined by . _ or -, or letters with digits at the end; a word alone is no handle
-_HANDLE = r"(?:[A-Za-z][A-Za-z0-9]{1,20}(?:[._-][A-Za-z0-9]{1,20}){1,3}|[A-Za-z]{2,20}\d{1,6})"
+_HANDLE = r"(?:[A-Za-z][A-Za-z0-9]{0,20}(?:[._-][A-Za-z0-9]{1,20}){1,3}|[A-Za-z]{2,20}\d{1,6})"
 # a CamelCase pair (KalinOrbek) names a person only before a login verb; else it is a class or a product name
 _CAMEL = r"[A-Z][a-z]{1,15}[A-Z][a-z0-9]{1,15}"
 # the cues: `for user kalin.orbek`, `for invalid user k.orbek` (sshd), `User kalin.orbek successfully logged in` (also
@@ -46,18 +46,31 @@ def user_names(text: str) -> list:
     return out
 
 
+# a part that names a daemon, a tool or a bot, not a person: `user kibana8`, `codecov-commenter`, `jira-integration2`
+_TOOL_PARTS = frozenset(
+    "bot bots svc service daemon cron cronjob runner deploy deployer integration commenter webhook kibana zabbix "
+    "nagios pgbouncer grafana prometheus elastic elasticsearch logstash redis mongo mongodb mariadb postgres mysql jenkins "
+    "gitlab github bitbucket jira confluence sonar sonarqube nexus artifactory ansible terraform docker podman "
+    "kube kubernetes helm vault consul nomad airflow celery rabbitmq kafka zookeeper hadoop spark nginx apache httpd "
+    "tomcat jetty ubuntu debian centos fedora alpine admin root guest webmaster postmaster backup monitor monitoring "
+    "codecov dependabot renovate travis circleci".split())
+
+
 def _handle_ok(v: str, known) -> bool:
     """A person's handle, not a device, a hex id or words of the word list: each part is letters with digits at the
     end at most, a part of letters is not all capitals, longer than two letters and no word of the list, and one
     has four letters or more (x86_64, v1.2.3, my_app, django_app, john.doe, eth0, SAML2, utf-8 and
-    pod-7f9c stay text)."""
+    pod-7f9c stay text). An initial may lead (k.orbek, a corporate login)."""
     parts = [p for p in re.split(r"[._-]|(?<=[a-z])(?=[A-Z])", v) if p]
     if any(not re.fullmatch(r"[A-Za-z]+\d*|\d+", p) for p in parts):
         return False
     letters = [re.sub(r"\d+$", "", p) for p in parts if not p.isdigit()]
     if not letters or max(len(w) for w in letters) < 4:
         return False
-    return all(len(w) > 2 and not w.isupper() and w.lower() not in known for w in letters)
+    if len(letters) > 1 and len(letters[0]) == 1 and letters[0].islower():
+        letters = letters[1:]                       # k.orbek: the initial of a given name
+    return all(len(w) > 2 and not w.isupper() and w.lower() not in known and w.lower() not in _TOOL_PARTS
+               for w in letters)
 
 
 # a key whose value is a user name and that personal.py's username label does not read (#51); not `handle` or
@@ -67,4 +80,6 @@ USER_ID_KEYS = frozenset({"userid", "userlogin", "loginname", "loginid"})
 
 def user_id_ok(v: str) -> bool:
     from .core import _word_set
-    return bool(re.fullmatch(_HANDLE, v)) and _handle_ok(v, _word_set())
+    from .personal import _username_value_ok
+    # _username_value_ok refuses a service user (jenkins2, ubuntu2), as on the cue path
+    return bool(re.fullmatch(_HANDLE, v)) and _username_value_ok(v, False, " ") and _handle_ok(v, _word_set())
