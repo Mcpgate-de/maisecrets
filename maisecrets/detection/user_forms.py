@@ -26,7 +26,8 @@ _SSHD_RE = re.compile(r"(?:(?:Accepted|Failed) (?:password|publickey|keyboard-in
 _SUDO_RE = re.compile(r"sudo:[ \t]+(" + _HANDLE + "|" + _LOGIN + r")[ \t]+:[ \t]+(?:TTY=|\d+ incorrect password)")
 _UID_RE = re.compile(r"\bby[ \t]+(" + _HANDLE + r")$")
 _LOGIN_VERB_RE = re.compile(r"[ \t]+(?:successfully|logged|signed|accessed|failed|was|has|reported|attempted)\b")
-_IS_RE = re.compile(r"(?i)user ?name is[ \t]+([A-Za-z][A-Za-z0-9._-]{1,30}?)(?=[.,;:!?)\s]|$)")
+# greedy to the next blank or comma: `my user name is anna.smith.` is the whole handle, the end dot comes off after
+_IS_RE = re.compile(r"(?i)user ?name is[ \t]+([A-Za-z][A-Za-z0-9._-]{1,30})(?=[,;:!?)\s]|$)")
 
 
 def user_names(text: str) -> list:

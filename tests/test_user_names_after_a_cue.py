@@ -29,6 +29,8 @@ class UserNameAfterACueTests(unittest.TestCase):
                             ("Login successful. Welcome, kalin_orb_42.\n", "kalin_orb_42"),
                             ("Details: User kalin.orbek successfully logged in from", "kalin.orbek"),
                             ("My username is korbek. I am", "korbek"),
+                            ("My user name is kalin.orbek. I am", "kalin.orbek"),
+                            ("my username is k.orbek_dev, and", "k.orbek_dev"),
                             ("including the user KOrbek7.\n", "KOrbek7"),
                             ("the user KalinOrbek has reported", "KalinOrbek"),
                             ("<userID>korbek7</userID>", "korbek7"),
