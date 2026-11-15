@@ -59,6 +59,10 @@ _ID_WORDS = ("licen", "identit", "passport", "documentnumber", "document_number"
 _ID_KEY_CHARS = r"[A-Za-z0-9 _'’&#;-]"            # driver's-license, driver&#x27;s-license in a table head
 _COMPARE = r"(?:=>|<>|!=|[:=])"                   # WHEN "keypassword"<>'…' in SQL
 _PASSWORD_VALUE = r"([^\s\"'`<>,;|&]{3,64})"
+# a key that holds a user name (#51): userID, login_name, screen_name, handle
+_USER_ID_WORDS = ("userid", "user_id", "user-id", "userlogin", "loginname", "login_name", "loginid", "login_id",
+                  "accountname", "account_name", "screenname", "screen_name", "handle")
+_USER_VALUE = r"([A-Za-z][A-Za-z0-9._-]{1,30}[A-Za-z0-9])"
 _ID_VALUE = r"([A-Za-z0-9](?:[A-Za-z0-9]|[ -](?=[A-Za-z0-9])){3,24})"
 # a literal that an expression joins with more: password = "…" + os.environ["PW_SUFFIX"] is a part of the value
 _JOINED_RE = re.compile(r"[\"'`][ \t]*(?:\+|\|\||\.[ \t]|~)")
@@ -100,17 +104,22 @@ def _a_persons_id(text: str, m, key: str, things, parent) -> bool:
 
 
 def hits(text: str) -> list:
-    """(start, end, kind, type) of a name (#43), a password and an id number (#45) after a key."""
-    from .personal import ID_NUMBER, NAME, _THING_PARENTS, _xml_parent
+    """(start, end, kind, type) of a name (#43), a password and an id number (#45) after a key, and a user name after
+    a user-id key or a cue in prose (#51)."""
+    from .personal import ID_NUMBER, NAME, USERNAME, _THING_PARENTS, _xml_parent
     from .core import _references
     from .role_names import key_names
+    from .user_forms import USER_ID_KEYS, user_id_ok, user_names
     refs = _references()
     low = text.lower()
     out = [(s, e, "name-after-label", NAME) for s, e in key_names(text)] if "name" in low else []
+    out += [(s, e, "username-after-label", USERNAME) for s, e in user_names(text)]
     for words, value, is_key, ok, kind, typ in (
             (_PASSWORD_WORDS, _PASSWORD_VALUE, password_key, _password_ok, "password-after-key", "SECRET"),
             (_ID_WORDS, _ID_VALUE, lambda k: fold(k) in _ID_KEYS or fold(k) in _GENERIC_ID_KEYS, _id_ok,
-             "id-number-after-label", ID_NUMBER)):
+             "id-number-after-label", ID_NUMBER),
+            (_USER_ID_WORDS, _USER_VALUE, lambda k: fold(k) in USER_ID_KEYS, user_id_ok, "username-after-label",
+             USERNAME)):
         if not any(w in low for w in words):
             continue
         for rx in forms(value, _ID_KEY_CHARS, _COMPARE):
