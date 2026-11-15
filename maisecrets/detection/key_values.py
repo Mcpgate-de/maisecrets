@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 
+from .lazy_regex import LazyRx as _LazyRx
+
 # the end of a field: a closing quote (also before a space: `last name`='…' LIMIT 3), or the end of the line or a
 # separator of the format
 _END = r"(?=[\"'`](?:[ \t]|$)|[\"'`]?[ \t]*(?:$|[\n,;&)}\]<]|#))"
@@ -114,12 +116,12 @@ def _street_ok(v: str) -> bool:
 
 
 # a test or placeholder record (Musterstraße, Anytown, a fixture) and a well-known public address are no person's
-_PLACEHOLDER_RE = re.compile(
+_PLACEHOLDER_RE = _LazyRx(
     r"(?i)(?<![a-z])(?:muster\w*|anytown|springfield|test\w*|sample|example|fake|fixture|dummy|lorem|placeholder"
     r"|1600 amphitheatre|1 infinite loop|one apple park|1 microsoft way|1 hacker way|410 terry ave|10 downing street"
     r"|1600 pennsylvania|742 evergreen|suite|ste\.?(?= ?\d)|floor)(?![a-z])")
 # a place as the parent of the street: a venue, a store, a location of a business
-_PLACE_PARENT_RE = re.compile(r"(?i)[\"']?(?:venue|store|location|place|merchant|branch|site|facility)[\"']?\s*[:=]")
+_PLACE_PARENT_RE = _LazyRx(r"(?i)[\"']?(?:venue|store|location|place|merchant|branch|site|facility)[\"']?\s*[:=]")
 
 
 def _a_business_near(text: str, a: int, b: int) -> bool:
@@ -156,7 +158,7 @@ def hits(text: str) -> list:
         if not any(w in low for w in words):
             continue
         found = user_id_matches(text, low, value, _COMPARE, _END) if typ == USERNAME else \
-            (m for rx in forms(value, _ID_KEY_CHARS, _COMPARE) for m in rx.finditer(text))
+            (m for rx in forms(value, _ID_KEY_CHARS, _COMPARE)[:1 if typ == ADDRESS else 3] for m in rx.finditer(text))
         for m in found:
             key = m.group(2) or m.group(3) or ""
             if not is_key(key) or not ok(m.group(4)) or _JOINED_RE.match(text, m.end(4)) \

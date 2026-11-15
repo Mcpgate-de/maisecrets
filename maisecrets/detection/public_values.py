@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import re
 
+from .lazy_regex import LazyRx
+
 # NANP toll-free area codes in the NANP form (3-3-4, (8xx), a leading 1): business lines. Indian mobile numbers start
 # with 8 too (88823 45671): a number in another grouping, or with region in active, stays a hit (Gate A)
 _AREA = r"8(?:00|33|44|55|66|77|88)"
-_TOLL_FREE_RE = re.compile(r"(?:\+?1[ .-]?)?(?:\(" + _AREA + r"\) ?|" + _AREA + r"[ .-])\d{3}[ .-]\d{4}")
+_TOLL_FREE_RE = LazyRx(r"(?:\+?1[ .-]?)?(?:\(" + _AREA + r"\) ?|" + _AREA + r"[ .-])\d{3}[ .-]\d{4}")
 _NUMBER_TYPES = ("US_BANK_NUMBER",)
 
 
