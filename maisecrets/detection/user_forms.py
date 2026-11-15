@@ -105,7 +105,9 @@ _TOOL_PARTS = frozenset(
     "mysql jenkins gitlab github bitbucket jira confluence sonar sonarqube nexus artifactory ansible terraform "
     "docker podman kube kubernetes helm vault consul nomad airflow celery rabbitmq kafka zookeeper hadoop spark "
     "nginx apache httpd tomcat jetty ubuntu debian centos fedora alpine admin root guest webmaster postmaster "
-    "backup monitor monitoring codecov dependabot renovate travis circleci".split())
+    "backup monitor monitoring codecov dependabot renovate travis circleci magento drupal moodle nextcloud minikube "
+    "kubelet traefik telegraf caddy jellyfin pihole polkitd lightdm restic borg rhel linux wordpress joomla "
+    "keycloak".split())
 
 
 def _handle_ok(v: str, known) -> bool:

@@ -50,6 +50,7 @@ class UserNameAfterACueTests(unittest.TestCase):
                             ("Failed publickey for k.morgan from 192.0.2.4 port 22", "k.morgan"),
                             ("sudo: kmorgan42 : TTY=pts/0 ; PWD=/home", "kmorgan42"),
                             ("GET /api?user=kmorgan42&page=2", "kmorgan42"),
+                            ("session opened for user kmorgan42(uid=1001) by (uid=0)", "kmorgan42"),
                             ("session opened for user root(uid=0) by kmorgan42(uid=1001)", "kmorgan42")):
             with self.subTest(text=text):
                 self.assertIn(value, users(text))
@@ -84,7 +85,10 @@ class UserNameAfterACueTests(unittest.TestCase):
                      "User=caddy", "GET /admin?user=dashboard HTTP/1.1", "Set the user 'profile' field",
                      "Access denied for user 'magento'@'localhost'", "Reset the password for profile42 from the page",
                      "Accepted publickey for kmorganx from 192.0.2.4", "sudo: kmorgan42 : command not found",
-                     "owned by polkitd(uid=998)", "nearby kmorgan42(uid=1)"):
+                     "owned by polkitd(uid=998)", "nearby kmorgan42(uid=1)",
+                     "sudo: kmorganx : TTY=pts/0", "for user 'magento2'@'localhost'",
+                     "session closed for user telegraf1",
+                     "by kmorgan42 for sshd(uid=0)"):
             with self.subTest(text=text):
                 self.assertEqual([], users(text))
 
