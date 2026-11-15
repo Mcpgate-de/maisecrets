@@ -50,14 +50,15 @@ def _version_tuple(v) -> tuple | None:
 
 def last_runs(log: Path, session: str | None) -> dict:
     """{event: the time of its last row in hooks.log}, of this session's rows when a session is known. hooks.log keeps
-    the first 8 characters of the session id."""
+    the first 40 characters of the session id; a row of an older version (8 characters) does not count, because Codex
+    thread ids share their first characters for about a minute."""
     out: dict = {}
     try:
         with open(log, encoding="utf-8", errors="replace") as f:
             rows = f.read().splitlines()
     except OSError:
         return out
-    tag = session[:8] if session else None
+    tag = session[:40] if session else None
     for row in rows:
         cols = row.split("\t")
         if len(cols) < 4 or (tag and cols[3] != tag):
@@ -70,8 +71,20 @@ def last_runs(log: Path, session: str | None) -> dict:
     return out
 
 
-def hooks_verdict(log: Path, session: str | None, now: float | None = None) -> tuple[str, str]:
+def this_session(log: Path, sessions: list) -> str | None:
+    """Of the session ids the command got (one client can run inside the other and pass its variable on), the one
+    whose tool-call hook ran last: the hook of this very command ran a moment ago."""
+    if len(sessions) < 2:
+        return sessions[0] if sessions else None
+    return max(sessions, key=lambda s: last_runs(log, s).get("pre-tool", 0))
+
+
+def hooks_verdict(log: Path, session, now: float | None = None) -> tuple[str, str]:
+    """`ok` only when, in this session, the tool-call hook ran in the last 2 minutes (this command is a tool call) and
+    the prompt hook ran at all (every session starts with a prompt)."""
     now = time.time() if now is None else now
+    if isinstance(session, list):
+        session = this_session(log, session)
     runs = last_runs(log, session)
     seen = ", ".join(f"{name} {ago(now - runs[ev])}" if ev in runs else f"{name} not yet"
                      for ev, name in HOOK_NAMES)
@@ -82,12 +95,15 @@ def hooks_verdict(log: Path, session: str | None, now: float | None = None) -> t
         return "warn", (f"hooks: this command runs outside a client session, so it cannot check one. Last runs in any "
                         f"session: {seen}. Next: run /maisecrets:status inside Claude Code or Codex")
     if not runs:
-        return "FAIL", ("hooks: no maisecrets hook ran in this session, not even for this command. Next: in "
-                        "Claude Code run /reload-plugins or start a new session; in Codex trust the maisecrets hooks "
-                        "in /hooks")
+        return "FAIL", ("hooks: no maisecrets hook ran in this session. Next: in Claude Code run /reload-plugins or "
+                        "start a new session; in Codex trust the maisecrets hooks in /hooks")
+    if "user-prompt" not in runs:
+        return "FAIL", (f"hooks: the prompt hook did not run in this session ({seen}). Next: in Claude Code run "
+                        "/reload-plugins or start a new session; in Codex trust the maisecrets hooks in /hooks")
     if now - runs.get("pre-tool", 0) > RECENT:
-        return "warn", (f"hooks: the tool-call hook did not record this command. In this session: {seen}. Next: "
-                        "start a new session (Claude Code: /reload-plugins first)")
+        return "warn", (f"hooks: the tool-call hook did not run in the last {RECENT // 60} minutes, although this "
+                        f"command is a tool call. In this session: {seen}. Next: start a new session (Claude Code: "
+                        "/reload-plugins first)")
     return "ok", f"hooks: in this session {seen}"
 
 
@@ -207,7 +223,10 @@ def version_verdict(info: dict) -> tuple[str, str]:
         return "warn", f"version: {inst}; newest unknown ({why}). Next: {nxt}, then /maisecrets:status"
     fetched = f", fetched {info['fetched'][:16].replace('T', ' ')}" if info.get("fetched") else ""
     a, b = _version_tuple(inst), _version_tuple(new)
-    if a and b and b > a:
+    if not a:
+        return "warn", (f"version: the installed version {inst!r} cannot be compared with {new} in the marketplace "
+                        f"copy of {info['where']}{fetched}. Next: {update_command(info)}")
+    if not b or b > a:
         return "warn", (f"version: {inst} is installed; {new} is in the marketplace copy of {info['where']}{fetched}. "
                         f"Next: {update_command(info)}")
     return "ok", (f"version: {inst}, the newest in the marketplace copy of {info['where']}{fetched} (that copy is "
@@ -305,10 +324,11 @@ def lines(root: Path, claude_dir: Path | None = None, codex_home: Path | None = 
     if codex_home is None:
         from .codex_vault import codex_home as _codex_home
         codex_home = _codex_home()
-    checks = [_guarded(hooks_verdict, HOME / "hooks.log", selftest.session_of_this_command()),
+    sessions = selftest.sessions_of_this_command()
+    checks = [_guarded(hooks_verdict, HOME / "hooks.log", sessions),
               _guarded(lambda: version_verdict(newest(root, claude_dir, codex_home))),
               _guarded(codex_verdict, root, codex_home),
               _guarded(store_verdict),
               _guarded(incidents_verdict),
-              _guarded(selftest.verdict)]
+              _guarded(lambda: selftest.verdict(None, sessions, installed_version(root)))]
     return [f"  {state:<5} {text}" for state, text in checks]

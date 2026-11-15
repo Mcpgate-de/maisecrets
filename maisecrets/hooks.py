@@ -3187,7 +3187,7 @@ def _run_log(event: str, payload: dict, how: str, decision: str, ms: int) -> Non
         path = HOME / "hooks.log"
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
         tool = str(payload.get("tool_name", "-"))[:40]
-        sess = str(payload.get("session_id") or "-")[:8]
+        sess = str(payload.get("session_id") or "-")[:40]
         line = f"{stamp}\t{event}\t{_client_label(payload)}\t{sess}\t{tool}\t{decision}\t{ms}ms\t{how}\n"
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:

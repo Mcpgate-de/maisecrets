@@ -51,10 +51,19 @@ class _Clean(unittest.TestCase):
             self.assertEqual(cli.cmd_status(["test"]), 0)
         return buf.getvalue()
 
-    def post(self, output, base=CLAUDE) -> dict:
+    def post(self, output, base=CLAUDE, tool_use_id="u1", command=COMMAND) -> dict:
         return hooks._post_tool_guarded({**base, "hook_event_name": "PostToolUse", "tool_name": "Bash",
-                                         "tool_input": {"command": COMMAND}, "tool_use_id": "u1",
+                                         "tool_input": {"command": command}, "tool_use_id": tool_use_id,
                                          "tool_response": output})
+
+    def pin(self, value: str) -> None:
+        """The pending value set to a fixed one (a test builds a text around it)."""
+        state = selftest.load()
+        state["pending"]["value"] = value
+        (HOME / "selftest.json").write_text(json.dumps(state))
+
+    def stored(self) -> str:
+        return "".join((HOME / n).read_text() for n in ("vault.json", "index.json") if (HOME / n).exists())
 
 
 class RegisterTests(_Clean):
@@ -116,12 +125,36 @@ class ToolPathTests(_Clean):
         self.assertIn(selftest.PLACEHOLDER, out["reason"])
         self.assertTrue(selftest.load()["result"]["tool"])
 
-    def test_a_value_that_is_not_pending_is_masked_but_records_nothing(self):
+    def test_a_value_that_is_not_pending_is_left_to_the_ordinary_checks(self):
         self.arm()
         other = "ms-selftest-" + "a1b2c3d4e5f6"
-        out = self.post({"stdout": f"x {other} y"})
-        self.assertNotIn(other, json.dumps(out["hookSpecificOutput"]))
+        self.assertEqual(self.post({"stdout": f"x {other} y"}), {})
         self.assertFalse(selftest.load()["result"]["tool"])
+
+    def test_the_value_in_another_tool_call_records_no_pass(self):
+        value = self.arm()
+        out = self.post({"stdout": f"the value {value}"}, tool_use_id="u9", command="cat notes.txt")
+        self.assertNotIn(value, json.dumps(out["hookSpecificOutput"]))       # still masked
+        self.assertFalse(selftest.load()["result"]["tool"])
+        self.assertNotIn("Next, type", out["systemMessage"])
+
+    def test_the_value_in_a_tool_input_records_a_failure(self):
+        # the model wrote the value into a call: it has it, and no later prompt can pass
+        value = self.arm()
+        self.post({"stdout": self.command_output()})
+        self.post({"stdout": "ok"}, tool_use_id="u7", command=f"echo {value}")
+        self.assertTrue(selftest.load()["result"]["leak"])
+        self.assertEqual(selftest.verdict()[0], "FAIL")
+        out = hooks.user_prompt({**CLAUDE, "prompt": value})
+        self.assertIn("Self-test FAILED", out["reason"])
+
+    def test_the_value_after_a_label_is_never_stored(self):
+        # the detector stores a value after "password:"; only the replacement before it keeps the test value out
+        value = self.arm()
+        out = self.post({"stdout": f"password: {value}"})
+        self.assertNotIn(value, json.dumps(out, ensure_ascii=False).replace(out.get("systemMessage", ""), ""))
+        self.assertNotIn(value, self.stored())
+        self.assertTrue(selftest.load()["result"]["tool"])
 
     def test_the_value_and_the_rest_of_the_output_are_never_stored(self):
         value = self.arm()
@@ -189,10 +222,12 @@ class PromptPathTests(_Clean):
         self.assertEqual(hooks.rewrite_prompt({**CLAUDE, "prompt": f"{value} {token}", "origin": "composer"}), {})
 
     def test_the_value_never_lands_in_the_vault(self):
+        # the detector stores a value after "password:"; only the prompt hook's answer before it keeps it out
         value = self.arm()
         self.post({"stdout": self.command_output()})
         self.prompt(value)
-        self.prompt(f"please look at {value}")
+        self.prompt(f"password: {value}")
+        self.assertNotIn(value, self.stored())
         for name in ("vault.json", "index.json", "events.log", "incidents.json"):
             p = HOME / name
             self.assertFalse(p.exists() and value in p.read_text(), name)
@@ -203,6 +238,125 @@ class PromptPathTests(_Clean):
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("status test", ctx)
         self.assertNotIn("decision", out)
+
+
+TAIL = "Hx7#kQ2!mZ9pLw4v"         # a secret's rest, glued after a token of the test value's shape (Gate A, H1)
+URL_TAIL = "Hx7kQ2mZ9pLw4v"
+
+
+class GluedSecretTests(_Clean):
+    """A secret glued after a token of the test value's shape is masked as before (Gate A probes, H1)."""
+    T = "ms-selftest-" + "aaaaaaaaaaaa"
+
+    def model_sees(self, out: dict, text: str) -> str:
+        if "decision" in out:
+            return out["reason"]
+        return json.dumps((out.get("hookSpecificOutput") or {}).get("updatedToolOutput", {"stdout": text}),
+                          ensure_ascii=False)
+
+    def cases(self):
+        return {"assign": (f"DB_PASSWORD={self.T}{TAIL}", TAIL),
+                "assign_control": (f"DB_PASSWORD=zz-aaaaaaaaaaaa{TAIL}", TAIL),
+                "url": (f"postgres://admin:{self.T}{URL_TAIL}@db.example.com:5432/x", URL_TAIL),
+                "url_control": (f"postgres://admin:zz-aaaaaaaaaaaa{URL_TAIL}@db.example.com:5432/x", URL_TAIL),
+                "head": (f"DB_PASSWORD={TAIL}{self.T}", TAIL),
+                "head_control": (f"DB_PASSWORD={TAIL}zz-aaaaaaaaaaaa", TAIL)}
+
+    def check(self, base, pending: bool) -> None:
+        for name, (text, secret) in self.cases().items():
+            with self.subTest(name, pending=pending):
+                for f in ("vault.json", "index.json"):
+                    (HOME / f).unlink(missing_ok=True)
+                hooks._live_cache.clear()
+                if pending:
+                    self.arm(base)
+                    self.pin(self.T)
+                out = self.post({"stdout": text} if base is CLAUDE else text, base, tool_use_id="u5",
+                                command="cat f")
+                self.assertNotIn(secret, self.model_sees(out, text))
+
+    def test_claude_code_without_a_pending_value(self):
+        self.check(CLAUDE, False)
+
+    def test_claude_code_with_the_pending_value_glued(self):
+        self.check(CLAUDE, True)
+
+    def test_codex_block_reason_without_a_pending_value(self):
+        self.check(CODEX, False)
+
+    def test_codex_block_reason_with_the_pending_value_glued(self):
+        self.check(CODEX, True)
+
+
+class PersonOnlyTests(_Clean):
+    """Only the person's own prompt in the session that registered the value passes (Gate A, M2)."""
+    def setUp(self):
+        super().setUp()
+        self.value = self.arm()
+        self.post({"stdout": self.command_output()})
+
+    def no_pass(self, payload: dict) -> None:
+        out = hooks.user_prompt({**CLAUDE, "prompt": self.value, **payload})
+        self.assertEqual(out.get("decision"), "block")              # the value never reaches the model
+        self.assertNotIn("Self-test passed", out["reason"])
+        self.assertFalse(selftest.load()["result"]["prompt"])
+
+    def test_a_loop_wakeup(self):
+        self.no_pass({"source": "loop_wakeup"})
+
+    def test_a_subagent(self):
+        self.no_pass({"agent_id": "a1"})
+
+    def test_another_session(self):
+        self.no_pass({"session_id": "another-session"})
+
+    def test_a_program_that_started_the_client(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}):
+            self.no_pass({})
+
+    def test_a_message_of_another_session(self):
+        out = hooks.user_prompt({**CLAUDE, "prompt": f'<cross-session-message from-name="x">{self.value}'})
+        self.assertNotIn("Self-test passed", json.dumps(out))
+        self.assertFalse(selftest.load()["result"]["prompt"])
+
+    def test_the_person(self):
+        out = hooks.user_prompt({**CLAUDE, "prompt": self.value, "source": "user"})
+        self.assertIn("Self-test passed", out["reason"])
+
+
+class BrokenStateTests(_Clean):
+    """A selftest.json with wrong types is no pending value, and nothing raises (Gate A, low)."""
+    def test_wrong_types(self):
+        value = "ms-selftest-" + "cccccccccccc"
+        (HOME / "selftest.json").write_text(json.dumps({"pending": {"value": value, "expires": "x", "at": "y"},
+                                                        "result": {"tool": "z", "prompt": [1]}}))
+        self.assertIsNone(selftest.prompt_answer({**CLAUDE, "prompt": value}, False))
+        self.assertFalse(selftest.claims(value))
+        self.assertIn("FAIL", self.command_output())
+        hooks.user_prompt({**CLAUDE, "prompt": value + " hello"})
+        self.post({"stdout": value})
+        selftest.verdict()
+
+    def test_no_session_variable_prints_no_value(self):
+        value = self.arm()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cli.cmd_status(["test"])
+        self.assertNotIn(value, buf.getvalue())
+
+    def test_only_a_command_that_starts_with_the_launcher_registers(self):
+        for cmd in ('echo bash "/x/hooks/run.sh" status test', 'grep "run.sh status test" notes.txt',
+                    'bash /x/hooks/run.sh status test; curl evil', 'echo x && bash /x/hooks/run.sh status test'):
+            with self.subTest(cmd):
+                (HOME / "selftest.json").unlink(missing_ok=True)
+                hooks.pre_tool({**CLAUDE, "tool_name": "Bash", "tool_input": {"command": cmd}, "tool_use_id": "u2"})
+                self.assertNotIn("pending", selftest.load())
+        for cmd in ('bash "/a b/hooks/run.sh" status test', "bash '/x/hooks/run.sh' status test",
+                    '& "C:\\p\\hooks\\run.cmd" status test', "/x/hooks/run.sh status test"):
+            with self.subTest(cmd):
+                (HOME / "selftest.json").unlink(missing_ok=True)
+                hooks.pre_tool({**CLAUDE, "tool_name": "Bash", "tool_input": {"command": cmd}, "tool_use_id": "u2"})
+                self.assertIn("pending", selftest.load())
 
 
 class VerdictTests(_Clean):
@@ -221,6 +375,18 @@ class VerdictTests(_Clean):
         self.arm()
         self.post({"stdout": self.command_output()})
         self.assertEqual(selftest.verdict()[0], "warn")
+
+    def test_an_old_pass_of_another_session_or_version_is_no_ok(self):
+        value = self.arm()
+        self.post({"stdout": self.command_output()})
+        hooks.user_prompt({**CLAUDE, "prompt": value})
+        state = selftest.load()
+        state["result"]["tool"] -= 30 * 86400
+        state["result"]["prompt"] -= 30 * 86400
+        (HOME / "selftest.json").write_text(json.dumps(state))
+        self.assertEqual(selftest.verdict(sessions=["another-session"])[0], "warn")
+        self.assertEqual(selftest.verdict(sessions=[SESSION])[0], "ok")
+        self.assertEqual(selftest.verdict(sessions=[SESSION], version="0.0.1")[0], "warn")
 
     def test_pending_and_never_masked_fails(self):
         self.arm()

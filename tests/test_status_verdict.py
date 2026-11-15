@@ -63,7 +63,7 @@ class HooksLineTests(_Tmp):
 
     def test_ok_when_the_tool_call_hook_of_this_session_just_ran(self):
         now = time.time()
-        log = self.log([(now - 180, "user-prompt", SESSION[:8]), (now - 2, "pre-tool", SESSION[:8])])
+        log = self.log([(now - 180, "user-prompt", SESSION), (now - 2, "pre-tool", SESSION)])
         state, text = sv.hooks_verdict(log, SESSION, now)
         self.assertEqual(state, "ok")
         self.assertIn("the prompt hook 3 min ago", text)
@@ -78,10 +78,33 @@ class HooksLineTests(_Tmp):
 
     def test_warn_when_this_command_has_no_tool_call_hook(self):
         now = time.time()
-        log = self.log([(now - 900, "pre-tool", SESSION[:8])])
+        log = self.log([(now - 900, "user-prompt", SESSION), (now - 900, "pre-tool", SESSION)])
         state, text = sv.hooks_verdict(log, SESSION, now)
         self.assertEqual(state, "warn")
         self.assertIn("Next:", text)
+
+    def test_fail_when_only_the_tool_call_hook_ran(self):
+        # the session's prompts (/maisecrets:status itself, in Claude Code) fired UserPromptSubmit: no row is a failure
+        now = time.time()
+        state, text = sv.hooks_verdict(self.log([(now - 5, "pre-tool", SESSION)]), SESSION, now)
+        self.assertEqual(state, "FAIL")
+        self.assertIn("the prompt hook did not run", text)
+
+    def test_two_sessions_with_the_same_first_characters_are_told_apart(self):
+        # Codex thread ids (UUIDv7) share their first characters for about a minute
+        now = time.time()
+        other = SESSION[:8] + "-other-thread"
+        log = self.log([(now - 5, "user-prompt", other), (now - 2, "pre-tool", other)])
+        self.assertEqual(sv.hooks_verdict(log, SESSION, now)[0], "FAIL")
+
+    def test_the_session_whose_tool_call_hook_just_ran_is_this_one(self):
+        # Claude Code started from a Codex shell inherits CODEX_THREAD_ID; the hooks ran under the Claude session
+        now = time.time()
+        log = self.log([(now - 60, "user-prompt", SESSION), (now - 2, "pre-tool", SESSION),
+                        (now - 3000, "user-prompt", "outer-codex-thread"),
+                        (now - 3000, "pre-tool", "outer-codex-thread")])
+        self.assertEqual(sv.hooks_verdict(log, ["outer-codex-thread", SESSION], now)[0], "ok")
+        self.assertEqual(sv.hooks_verdict(log, [SESSION, "outer-codex-thread"], now)[0], "ok")
 
     def test_warn_outside_a_session(self):
         now = time.time()
@@ -130,6 +153,12 @@ class VersionLineTests(_Tmp):
         state, text = self.verdict(plugin(self.tmp / "src", "0.9.11"))
         self.assertEqual(state, "warn")
         self.assertIn("newest unknown", text)
+
+    def test_an_unreadable_or_pre_release_installed_version_is_no_ok(self):
+        for inst in ("?", "0.9.0-rc1"):
+            info = {"installed": inst, "newest": "0.9.1", "kind": "claude", "market": "m", "fetched": None,
+                    "where": "Claude Code"}
+            self.assertEqual(sv.version_verdict(info)[0], "warn", inst)
 
     def test_codex_warns_with_its_own_command(self):
         state, text = self.verdict(self.codex_install("0.9.10", "0.9.12"))
