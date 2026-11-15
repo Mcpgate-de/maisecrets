@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.9.13] - 2026-11-15
+
+### Features
+
+- /maisecrets:status starts with a verdict per check (hooks of this session, version, Codex trust, store, incidents, self-test) and the next step; /maisecrets:status test proves the tool-result and the prompt path in the client (66c07fd)
+- /maisecrets:not-a-secret KEY forgets a wrong hit and keeps that exact value unmasked; undo takes it back, /maisecrets:list shows each one, and "found by" says ner for a name the name service found (8862b78)
+
+### Fixes
+
+- the Windows form of /maisecrets:status keeps the sentence its run test finds, and a check on every runner now catches a changed sentence (c0176f6)
+- the self-test hides its test value only after maisecrets has masked the output, so a secret next to the value is masked exactly as without a self-test (9ca139a)
+- the self-test no longer cuts a secret that is glued to a value of its shape, counts only the call and the prompt that belong to it, and the status verdict says ok only for what it checked (b2deab0)
+- /maisecrets:not-a-secret undo removes only the line it wrote and says so when it cannot tell; a value you allowed yourself keeps its line, a key type never goes through a link out of the maisecrets folder, and the hint names no key type (0822c60)
+- a value on your allow list is no longer masked when the name service names it; a longer value that contains it still is (12f7e84)
+
 ## [0.9.12] - 2026-11-15
 
 ### Features
