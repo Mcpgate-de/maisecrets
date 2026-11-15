@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## [0.9.11] - 2026-11-15
+
+### Features
+
+- finds a plain login (jdoe) in sshd and sudo lines, and keyboard-interactive and invalid-user sshd lines (97db490)
+- the setting business_addresses mask masks the address of a company, an office or a public place as any address; keep stays the default (11e0037)
+- finds a user name in more log forms: quoted after user, user=, systemd sessions, sshd and sudo lines (55cac9f)
+- finds a user name in prose after a user cue and after a user-id key (2c4a4b9)
+- finds a street address in the street-before-number order after a street, home, billing or postal address label (e86f0ef)
+- finds a phone number in any country's grouping after a call cue, and after a phone label a local number of 4 and 4 digits (9e36864)
+
+### Fixes
+
+- my user name is takes the whole handle with its dots (kalin.orbek), not the part before the first dot (52cf603)
+- a company is no person only with a legal form that is never a title or an initial (GmbH, LLC, Ltd, Inc, PLC); a person before SE, AG, Group or a comma stays a name (7787b70)
+- the plugin's own name is no term either, and the own-name check runs once per store (bd9bbc4)
+- the word list loads only when a user-name candidate needs it (c213249)
+- product and daemon names with digits (magento2, telegraf1) stay text after a user cue (b0f2c46)
+- the plugin's own name is never hunted, even when it was stored as a value; it no longer blocks the plugin's own commands (Fixes #53) (8195e39)
+- a test runner's summary word alone (Ran, Passed, Skipped) is no person name (3f5e91e)
+- a plain word is no user name in the new log forms, and the sshd form needs Accepted or Failed (959ed57)
+- /maisecrets:ner counts the texts that the gateway's name service checked (73244bc)
+- a name followed by or ending in a legal form (Ltd, LLC, GmbH, and Sons) is a company and stays text; remote.is_company_name for callers that apply the spans (35413fa)
+- the user-id key form is tried only where the text holds user or login (4af754f)
+- the user-id keys are part of their patterns, so a text's other keys cost nothing (64135bc)
+- the user-name cue is found with a string search, not a regex pass over the whole text (4ec60f9)
+- a user name after a cue also takes a leading initial (k.orbek), and service, tool and bot names stay text (6b53842)
+- a user name after a cue also takes a leading initial (k.orbek), and service, tool and bot names stay text (6eb1513)
+- a user name after a cue must look like a person's handle; class names, devices, database roles and product slugs stay text (34426a5)
+- the street-before-number form reads Polish and Czech letters and lower-case street words, and a product name, a year or a code after an address label stays text (Gate A) (67356e2)
+- after a call cue a run, doublings and equal groups stay text, and an Indian mobile number in its local form is found (Gate A round 2) (242674f)
+- after a call cue an IP, a date with a time and a list of numbers stay text, and a label alone keeps its rules (Gate A) (d776106)
+
 ## [0.9.10] - 2026-11-14
 
 ### Features
