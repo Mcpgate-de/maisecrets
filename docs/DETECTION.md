@@ -438,6 +438,9 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
   only by words of `PRODUCT_WORDS` and `PRODUCT_TAILS`, as "Claude Code"), a word of `GREETING_WORDS` alone, and a word
   of `UI_LABEL_WORDS` alone ("Allow", "Deny", "Submit"). A caller that applies the spans itself calls the same
   function (`is_no_person` since 0.9.8, `is_product_name` since 0.8.15).
+- **A company is no person.** A name span that `remote.is_company_name(text, start, end)` accepts is dropped: it ends
+  in a legal form or a company word in its usual spelling (Ltd, LLC, Inc, PLC, GmbH, AG, Group, and Sons), or one
+  follows it. Public since 0.9.11 (#46). Two known limits stay: "X, Y and Z" and "X-Y" read as persons.
 - **It only adds.** A span is kept only where no finding of the rules and no span kept before it lies. A finding of
   the rules is never removed, made smaller, moved or retyped. A span that ends inside a word is widened to the whole
   word.

@@ -467,8 +467,8 @@ class RemoteDetector:
             s, e = words.widen(s, e)
             if s >= e:
                 continue                          # white space only: no word to take
-            if type_ == "NAME" and is_no_person(text[s:e]):
-                continue                          # a product name, a greeting or a UI label word alone is no person
+            if type_ == "NAME" and (is_no_person(text[s:e]) or is_company_name(text, s, e)):
+                continue                          # a product, a greeting, a UI label word or a company is no person
             if _overlaps(occ, ends, s, e):
                 continue
             i = bisect.bisect_left(taken, (s, e))
@@ -583,6 +583,22 @@ def is_no_person(span: str) -> bool:
     the remote path here (#41)."""
     word = span.strip().lower()
     return is_product_name(span) or word in GREETING_WORDS or word in UI_LABEL_WORDS
+
+
+# a legal form or a company word in its usual spelling, as the last word of a name span or right after it (#46: the
+# name service took 155 of 471 company names of the Mendeley sample for persons). Case-sensitive: the surnames Sa,
+# Se, Ag and Kg stay names
+_COMPANY_TAIL = (r"(?:GmbH|mbH|AG|UG|KG|OHG|GbR|SE|SAS|SARL|S\.A\.|S\.r\.l\.|B\.V\.|N\.V\.|Inc\.?|Corp\.?|LLC|LLP"
+                 r"|Ltd\.?|Limited|PLC|plc|Group|Holdings|(?:&|and)[ \t]+Sons|&[ \t]*Co\.?(?:[ \t]+KG)?)")
+_COMPANY_END_RE = re.compile(r"(?:^|[ \t,])" + _COMPANY_TAIL + r"[ \t,.]*$")
+_COMPANY_AFTER_RE = re.compile(r",?[ \t]+" + _COMPANY_TAIL + r"(?![A-Za-z])")
+
+
+def is_company_name(text: str, start: int, end: int) -> bool:
+    """Whether the NAME span text[start:end] names a company: it ends in a legal form or a company word (Ltd, LLC,
+    GmbH, Group, and Sons), or one follows it ("Becker-Lindqvist, Ltd"). Public since 0.9.11: a caller that applies the
+    spans itself drops these too (#46)."""
+    return bool(_COMPANY_END_RE.search(text, start, end) or _COMPANY_AFTER_RE.match(text, end))
 
 
 class _HttpStatus(Exception):

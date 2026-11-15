@@ -378,6 +378,38 @@ class RemoteDetectorTests(unittest.TestCase):
                      "Ok"):
             self.assertFalse(rm.is_no_person(span), span)
 
+    def test_a_company_with_a_legal_form_is_no_name(self):
+        # #46: the name service took company names of the Mendeley sample for persons; invented companies
+        companies = ("Varga Orbek Ltd", "Lindqvist-Haro LLC", "Orbek and Sons", "Haro Group", "Kessler GmbH")
+        text = f"Invoice from Varga Orbek Ltd, then Lindqvist-Haro LLC paid. {NAME} called Orbek and Sons, " \
+               f"Haro Group and Kessler GmbH."
+
+        def answer(t):
+            out = []
+            # the model takes the legal form into the span, or stops before it
+            for word in ("Varga Orbek Ltd", "Lindqvist-Haro", NAME, "Orbek", "Haro", "Kessler"):
+                at = t.find(word)
+                out.append({"entity_group": "PER", "start": at, "end": at + len(word), "score": 0.95, "word": word})
+            return out
+        svc = Service(answer=answer)
+        self.addCleanup(svc.close)
+        spans, status = rm.RemoteDetector(svc.url).ask(text, [])
+        self.assertEqual(status.state, "ok")
+        self.assertEqual([text[s:e] for s, e, _t, _sc in spans], [NAME], companies)
+
+    def test_is_company_name_reads_the_usual_spellings_only(self):
+        for text in ("Kessler GmbH", "Kessler, Ltd.", "Kessler Inc.", "Kessler & Co. KG", "Kessler PLC", "Kessler AG",
+                     "Kessler & Sons", "Kessler Holdings", "Kessler LLP", "Kessler S.A."):
+            with self.subTest(text=text):
+                self.assertTrue(rm.is_company_name(text, 0, len("Kessler")), "a legal form follows")
+                self.assertTrue(rm.is_company_name(text, 0, len(text)), "a legal form ends the span")
+        # a surname that reads as a legal form in another case, a word that starts with one, and a plain name
+        for text, end in (("Maria Sa", 8), ("Jonas Se", 8), ("Kessler groups the files", 7), ("Kessler Agnes", 7),
+                          ("Kessler limited the access", 7), ("Kessler and Sonia", 7), ("Kessler", 7),
+                          ("Kessler SEO tools", 7), ("Kessler grouped the files", 7), ("Kessler group met", 7)):
+            with self.subTest(text=text):
+                self.assertFalse(rm.is_company_name(text, 0, end))
+
     def test_the_hf_format_adds_a_name_with_its_score(self):
         r = self.run_with(Service("hf"), model="d3@test")
         names = [m for m in r.findings if m.type == "NAME"]
