@@ -1024,7 +1024,7 @@ def _selftest_second_prompt(sc: dict, home: Path, first: str, r, settings: Path,
     if sc["selftest"] == "fail":
         if value:
             fails.append("a test value was registered although no maisecrets hook ran")
-        if "Self-test passed" in first + r.stdout + r.stderr:
+        if "Self-test passed: the prompt hook ran" in first + r.stdout + r.stderr:
             fails.append("'Self-test passed' although no maisecrets hook ran")
         return fails
     if not value:
