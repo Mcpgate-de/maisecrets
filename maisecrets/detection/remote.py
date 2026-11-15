@@ -505,6 +505,9 @@ GREETING_WORDS = frozenset({"hallo", "hello", "hi", "hey", "moin", "servus", "gr
 UI_LABEL_WORDS = frozenset({
     "accept", "allow", "approve", "cancel", "decline", "delete", "deny", "login", "logout", "reject", "reset", "save",
     "submit"})
+# words of a test runner's or a build's summary line that the model takes for a person at the start of a line
+# ("Ran 3561 tests in 606 s", "Passed 12, Skipped 3"); "Ok" stays out: it is a Korean surname
+RUNNER_WORDS = frozenset({"ran", "passed", "failed", "skipped", "finished", "collected", "errors", "warnings"})
 # the words after a product word in a product name ("Claude Code", "GitHub Actions", "Docker Desktop"): the model
 # takes the whole name for a person. Never a word that is also a first name (no "max", no "pro")
 PRODUCT_TAILS = frozenset({
@@ -578,11 +581,12 @@ def is_product_name(span: str) -> bool:
 
 
 def is_no_person(span: str) -> bool:
-    """Whether a NAME span is no person: a product name (is_product_name), or a word of GREETING_WORDS or of
-    UI_LABEL_WORDS alone. Public since 0.9.8: a caller that applies the spans itself drops these, the same rule as
-    the remote path here (#41)."""
+    """Whether a NAME span is no person: a product name (is_product_name), or a word of GREETING_WORDS, of
+    UI_LABEL_WORDS or of RUNNER_WORDS alone. Public since 0.9.8: a caller that applies the spans itself drops
+    these, the same rule as the remote path here (#41)."""
     word = span.strip().lower()
-    return is_product_name(span) or word in GREETING_WORDS or word in UI_LABEL_WORDS
+    return (is_product_name(span) or word in GREETING_WORDS or word in UI_LABEL_WORDS
+            or word in RUNNER_WORDS)
 
 
 class _HttpStatus(Exception):
