@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [0.9.12] - 2026-11-15
+
+### Features
+
+- finds more street addresses: the US territories FM, MH and PW, a residence cue after a company name, the USPS street suffixes after an address label, and residence cues in Spanish, Italian, Dutch and Swedish (c56a33e)
+- finds the street line of an address under a street key in JSON and YAML (street, address_line1, addressLine1, billing_street) (02dce22)
+- finds a birth date after birthday and b-day, and a date with an ordinal day (14th March 1987) (18fbbf7)
+
+### Fixes
+
+- the USPS street suffixes only after an address label or key, not after a prose cue (the cache lives at 1 Shared Point) (2c0cf41)
+- the public-value and street-key regexes compile lazily, the street keys read the key-value forms only (not an XML element in markup), and the standalone skill ships public_values.py (b855da5)
+- a toll-free number only in its NANP form and not with region in (Indian mobiles start with 8); year 0001 is no birth date; a placeholder, office or venue record keeps its street as text (6ea0ed7)
+- the birth-date year check is left out; it removed no false alarm and cost real birth dates (1fab226)
+- a bank number that is a run or one repeated digit, a toll-free number and a birth date of no living person are no personal data (c510eba)
+
 ## [0.9.11] - 2026-11-15
 
 ### Features
