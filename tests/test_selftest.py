@@ -79,6 +79,15 @@ class RegisterTests(_Clean):
         self.assertNotIn(value, out)
         self.assertIn("FAIL", out)
 
+    def test_codex_started_from_claude_code_finds_its_own_thread(self):
+        # Codex passes on the Claude Code session variable of the shell that started it (harness, codex-cli 0.169.0)
+        value = self.arm(CODEX)
+        buf = io.StringIO()
+        with redirect_stdout(buf), mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "outer-claude-session",
+                                                                "CODEX_THREAD_ID": SESSION}):
+            cli.cmd_status(["test"])
+        self.assertIn(value, buf.getvalue())
+
     def test_a_registration_older_than_a_minute_prints_no_value(self):
         value = self.arm()
         state = selftest.load()

@@ -54,10 +54,16 @@ def _save(data: dict) -> None:
     atomic_write(_path(), json.dumps(data))
 
 
+def sessions_of_this_command() -> list[str]:
+    """The sessions that may have started this command: Claude Code gives a command its session id (hooks/dispatch.py,
+    the pending prompt), Codex its thread id. Both, when one client runs inside the other: Codex passes on the
+    Claude Code variable of the shell that started it (measured with the harness, codex-cli 0.169.0)."""
+    return [s for s in (os.environ.get("CODEX_THREAD_ID"), os.environ.get("CLAUDE_CODE_SESSION_ID")) if s]
+
+
 def session_of_this_command() -> str | None:
-    """The session that started this command: Claude Code gives a command its session id (hooks/dispatch.py, the
-    pending prompt), Codex its thread id."""
-    return os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or None
+    found = sessions_of_this_command()
+    return found[0] if found else None
 
 
 def _pending(state: dict, now: float | None = None) -> dict | None:
@@ -95,9 +101,9 @@ def command_text(now: float | None = None) -> str:
     now = time.time() if now is None else now
     state = load()
     p = _pending(state, now)
-    session = session_of_this_command()
+    sessions = sessions_of_this_command()
     fresh = p is not None and now - float(p.get("at") or 0) <= ARMED
-    if fresh and session and p.get("session") and p["session"] != session:
+    if fresh and sessions and p.get("session") and p["session"] not in sessions:
         fresh = False
     if not fresh:
         return ("maisecrets self-test: FAIL. No maisecrets hook registered a test value for this command, so the "
