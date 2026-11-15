@@ -25,9 +25,10 @@ import re
 
 from . import deadline as _deadline
 from .lazy_regex import LazyRx as _LazyRx
+from .street_forms import street_number_last
 from .id_labels import _ID_DATE_RE, _ID_RE, _ID_WORDS
 from .text_index import field_end, field_start
-from .phone_forms import _DE_CALL_REGIONS, _PHONE_CUE_INTL_RE, _PHONE_DE_CUE_RE, _PHONE_DE_NEXT_RE, _e164_without_plus
+from .phone_forms import _DE_CALL_REGIONS, _PHONE_DE_CUE_RE, _PHONE_DE_NEXT_RE, _e164_without_plus, intl_after_cue
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
@@ -1576,22 +1577,6 @@ _ADDRESS_LABEL_RE = _lazy(
 # longer value the filters refused (a template with `[City]` after `Apt. 999`, a sentence going on after the unit)
 _ADDRESS_LABEL_SHORT_RE = _lazy(_ADDRESS_LABEL_RE._args[0].replace(
     r"(?=[\"\n|]|\s{2}|\.\s(?!\d)|" + _UNIT_BEFORE_DOT + r"\.\s|$)", r"(?=[\"\n|]|\s{2}|\.\s|$)"))
-# a label that names an address of a place to live or to send to, on the line of the address label (#49): `Street
-# Address:`, `home_address:`; `Address:` alone keeps the stricter value. A key the address label does not read
-# (billing_address, mailingAddress) is not covered
-_STRONG_ADDRESS_LABEL_RE = _lazy(r"(?i)(?<![a-z])(?:street|home|residential|mailing|billing|postal|property)[ _-]?"
-                                 r"address")
-# the street before its number: an optional short form (ul.) or street word (ulica), a capitalised name, up to three
-# more words (a lower-case street word too: Kalinova ulica, Prešernova cesta), a comma, the number
-_STREET_NUMBER_LAST_RE = _lazy(
-    r"(?:[a-z]{1,4}\.\s|(?i:ulica|ulice|ulitsa|cesta|trg|utca|n[áa]m[ěe]st[íi]|prospekt|aleja|ul)\s)?"
-    + _NAME_STEM + r"(?:\s(?:" + _NAME_STEM + r"|[" + _LO + r"]{2,15})){0,3}"
-    r",?\s(\d{1,5})[A-Za-z]?(?:/\d{1,4})?")
-# the names of products, tools and fillers that a test or a seed writes after an address label (Gate A of #49)
-_NOT_A_STREET_NAME = frozenset({"windows", "ubuntu", "debian", "firefox", "chrome", "safari", "terraform",
-                                "ansible", "docker", "gitlab", "github", "gmail", "outlook", "dashboard", "ingress",
-                                "nightly", "invoice", "ticket", "lorem", "ipsum", "holdings", "cluster", "module",
-                                "inbox", "server", "agent", "jira", "slack"})
 _UNIT_NUMBER_AFTER_RE = _lazy(r"\.\s\d{1,6}[A-Za-z]?(?![\w.-])")
 # a house number and a street word, in either order: 12 Harbour Lane, Rua das Flores 12,
 _HOUSE_RE = _lazy(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b(?! \d)"
@@ -1950,11 +1935,6 @@ _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
 _ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
-# an IP and a date (year, day or month first) after a call cue are no phone number (#50)
-_IPV4_SHAPE_RE = _lazy(r"\d{1,3}(?:\.\d{1,3}){3}")
-_YMD_SPACED_RE = _lazy(r"(?:19|20)\d\d[ .\-/](?:0?[1-9]|1[0-2])[ .\-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
-_MDY_SPACED_RE = _lazy(r"(?:0?[1-9]|1[0-2])[ .\-/](?:0?[1-9]|[12]\d|3[01])[ .\-/](?:19|20)\d\d(?!\d)")
-_DMY_SPACED_RE = _lazy(r"(?:0?[1-9]|[12]\d|3[01])[ .\-/](?:0?[1-9]|1[0-2])[ .\-/](?:19|20)\d\d(?!\d)")
 # a North American number (3-3-4); it needs region us or ca, as phone-us-national (0.6.24)
 _NANP_SHAPE_RE = _lazy(r"(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4}")
 # a count with a space between thousands (3 412 908 users, 1 000 000) and a list of small numbers (4 8 15 16 23 42)
@@ -2025,25 +2005,6 @@ def _address_value_ok(v: str) -> bool:
     return (any(c.isdigit() for c in v) and "," in v and bool(_HOUSE_RE.search(v)) and "://" not in v
             and not re.search(r"\d+\.\d+\.\d+|:\d{2,5}\b|[{}<>$()=_\[\]#@]", v)
             and not _NOT_AN_ADDRESS_RE.search(v))
-
-
-def _street_number_last_ok(v: str) -> bool:
-    """The street before its number, as Eastern and Central Europe write it, after a strong address label (#49):
-    `Kalinova ulica 17`, `Rivne Prospekt, 42`, `ul. Łąkowa 5`. Words of letters; one word of four letters and more
-    that is no word of the word list, no product or filler name (Plan Basic 2, Kubernetes
-    Ingress 2, Windows Server 2019, ABCD EFGH 12); none of the words of _NOT_AN_ADDRESS_RE. Without the word list the
-    form is refused."""
-    from .core import _word_set
-    from .value_checks import _WORDS_OK
-    from .remote import PRODUCT_WORDS
-    m = _STREET_NUMBER_LAST_RE.fullmatch(v)
-    if not m or not _WORDS_OK[0] or _NOT_AN_ADDRESS_RE.search(v):
-        return False
-    known = _word_set()
-    words = re.findall(r"[^\W\d_]+", v[:m.start(1)])
-    if any(w.lower() in _NOT_A_STREET_NAME or w.lower() in PRODUCT_WORDS for w in words):
-        return False
-    return any(len(w) >= 4 and w.lower() not in known for w in words)   # the form takes no word in capitals alone
 
 
 def _block_back(text: str, line: int, lines: int = 2, most: int = 200) -> int:
@@ -2320,49 +2281,7 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
                 out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
             elif rx is _PHONE_TIGHT_RE and len(_SERIES_GROUP_RE.findall(v)) >= 3:
                 out.extend((a, b, "phone-after-phone-word", PHONE) for a, b in _numbers_in_series(text, m.start(1)))
-    return out if prompt else _intl_after_cue(text, out)
-
-
-def _intl_after_cue(text: str, out: list) -> list:
-    """Any country's grouping after a call cue, in the tool channel (#50). The core drops a span that overlaps an
-    earlier hit; a span already found is skipped here."""
-    taken = {(a, b) for a, b, _, _ in out}
-    for m in _PHONE_CUE_INTL_RE.finditer(text):
-        v = m.group(1).rstrip(" .-/")
-        span = (m.start(1), m.start(1) + len(v))
-        if span in taken or not _national_phone_ok(v) or _not_a_number_after_cue(v):
-            continue
-        if _NANP_SHAPE_RE.fullmatch(v):
-            continue   # a North American number is phone-us-national's and the loose cue's, with their region
-        out.append((span[0], span[1], "phone-after-phone-word", PHONE))
-    return out
-
-
-def _not_a_number_after_cue(v: str) -> bool:
-    """An IP, a date at the start (a time may follow), round numbers and a list of numbers after `call` or `contact …
-    at` (Gate A of #50): an arithmetic run or doublings (05 10 15 20, 128 256 512), a one-digit group unless after +,
-    pairs without their trunk 0 or with fewer than three distinct pairs, and without a trunk 0, + or ( more than
-    four groups, four equal ones, or two of one length (but the Indian mobile 98765 43219)."""
-    groups = re.findall(r"\d+", v)
-    nums = [int(g) for g in groups]
-    if _IPV4_SHAPE_RE.fullmatch(v) or any(rx.match(v) for rx in (_YMD_SPACED_RE, _DMY_SPACED_RE, _MDY_SPACED_RE)):
-        return True
-    if all(g.endswith("00") for g in groups) or (len(nums) >= 3 and (
-            len({b - a for a, b in zip(nums, nums[1:])}) == 1 or all(b == 2 * a > 0 for a, b in zip(nums, nums[1:])))):
-        return True
-    if all(len(g) == 2 for g in groups):
-        steps = {b - a for a, b in zip(nums, nums[1:])}
-        return not v.startswith("0") or groups[0] == "00" or len(set(groups)) < 3 or steps <= {0, 1, -1}
-    if not v.startswith("+") and any(len(g) == 1 for g in groups):
-        return True
-    if v.startswith(("+", "0", "(")):
-        return False
-    if len(groups) > 4 or (len(groups) == 4 and len({len(g) for g in groups}) == 1):
-        return True
-    if len(groups) == 2 and len(groups[0]) == len(groups[1]):
-        a, b = groups
-        return not (len(a) == 5 and a[0] in "6789" and abs(nums[0] - nums[1]) > 10)
-    return False
+    return out if prompt else intl_after_cue(text, out)
 
 
 def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> list:
@@ -2486,9 +2405,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     if u and re.search(r"(?i)\b(?:ste|apt|rm|fl|bldg|no|nr)$", v) and _address_value_ok(
                             v + text[s0 + len(v):u.end()]):
                         v = text[s0:u.end()]
-                strong = _STRONG_ADDRESS_LABEL_RE.search(text, max(0, m.start() - 14, _line_back(text, m.start())),
-                                                         m.end(1))
-                if not (_address_value_ok(v) or (strong and _street_number_last_ok(v))):
+                if not (_address_value_ok(v) or street_number_last(text, m.start(), m.end(1), v,
+                                                                   _line_back(text, m.start()))):
                     continue
                 done.add(m.start())
                 # the check for a company or a public place reads at most 120 characters of the line before the
