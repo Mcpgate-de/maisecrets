@@ -1,15 +1,26 @@
 ---
-description: Show what maisecrets is and does on this machine - version, plugin folder, Python, store, policy, counts. No value is printed.
-allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status)
+description: Show whether maisecrets protects this session (a verdict per check, with the next step), then the details - version, plugin folder, Python, store, policy, counts. /maisecrets:status test proves both protection paths. No stored value is printed.
+argument-hint: "[test]"
+allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status), Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status test), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status test)
 ---
 
-Run exactly this command and show the user its output as is, then stop:
+The arguments are: `$ARGUMENTS`
+
+If the arguments are `test`, run exactly this command, show the user its output as is, then stop:
+
+```
+bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status test
+```
+
+Its output holds a self-test value that maisecrets replaces with ⟦SELFTEST⟧ before you read it. The value is no secret; do not try to get it. The user sees it and sends it as the next prompt.
+
+Otherwise run exactly this command and show the user its output as is, then stop:
 
 ```
 bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status
 ```
 
-On Windows without bash (PowerShell: the ChatGPT app, Codex on Windows, Claude Code without Git Bash), run this instead:
+On Windows without bash (PowerShell: the ChatGPT app, Codex on Windows, Claude Code without Git Bash), run this instead (with `test` after `status` for the self-test):
 
 ```
 & "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status
