@@ -2,6 +2,841 @@
 
 ## Unreleased
 
+## [0.9.12] - 2026-11-15
+
+### Features
+
+- finds more street addresses: the US territories FM, MH and PW, a residence cue after a company name, the USPS street suffixes after an address label, and residence cues in Spanish, Italian, Dutch and Swedish (c56a33e)
+- finds the street line of an address under a street key in JSON and YAML (street, address_line1, addressLine1, billing_street) (02dce22)
+- finds a birth date after birthday and b-day, and a date with an ordinal day (14th March 1987) (18fbbf7)
+
+### Fixes
+
+- the USPS street suffixes only after an address label or key, not after a prose cue (the cache lives at 1 Shared Point) (2c0cf41)
+- the public-value and street-key regexes compile lazily, the street keys read the key-value forms only (not an XML element in markup), and the standalone skill ships public_values.py (b855da5)
+- a toll-free number only in its NANP form and not with region in (Indian mobiles start with 8); year 0001 is no birth date; a placeholder, office or venue record keeps its street as text (6ea0ed7)
+- the birth-date year check is left out; it removed no false alarm and cost real birth dates (1fab226)
+- a bank number that is a run or one repeated digit, a toll-free number and a birth date of no living person are no personal data (c510eba)
+
+## [0.9.11] - 2026-11-15
+
+### Features
+
+- finds a plain login (jdoe) in sshd and sudo lines, and keyboard-interactive and invalid-user sshd lines (97db490)
+- the setting business_addresses mask masks the address of a company, an office or a public place as any address; keep stays the default (11e0037)
+- finds a user name in more log forms: quoted after user, user=, systemd sessions, sshd and sudo lines (55cac9f)
+- finds a user name in prose after a user cue and after a user-id key (2c4a4b9)
+- finds a street address in the street-before-number order after a street, home, billing or postal address label (e86f0ef)
+- finds a phone number in any country's grouping after a call cue, and after a phone label a local number of 4 and 4 digits (9e36864)
+
+### Fixes
+
+- my user name is takes the whole handle with its dots (kalin.orbek), not the part before the first dot (52cf603)
+- a company is no person only with a legal form that is never a title or an initial (GmbH, LLC, Ltd, Inc, PLC); a person before SE, AG, Group or a comma stays a name (7787b70)
+- the plugin's own name is no term either, and the own-name check runs once per store (bd9bbc4)
+- the word list loads only when a user-name candidate needs it (c213249)
+- product and daemon names with digits (magento2, telegraf1) stay text after a user cue (b0f2c46)
+- the plugin's own name is never hunted, even when it was stored as a value; it no longer blocks the plugin's own commands (Fixes #53) (8195e39)
+- a test runner's summary word alone (Ran, Passed, Skipped) is no person name (3f5e91e)
+- a plain word is no user name in the new log forms, and the sshd form needs Accepted or Failed (959ed57)
+- /maisecrets:ner counts the texts that the gateway's name service checked (73244bc)
+- a name followed by or ending in a legal form (Ltd, LLC, GmbH, and Sons) is a company and stays text; remote.is_company_name for callers that apply the spans (35413fa)
+- the user-id key form is tried only where the text holds user or login (4af754f)
+- the user-id keys are part of their patterns, so a text's other keys cost nothing (64135bc)
+- the user-name cue is found with a string search, not a regex pass over the whole text (4ec60f9)
+- a user name after a cue also takes a leading initial (k.orbek), and service, tool and bot names stay text (6b53842)
+- a user name after a cue also takes a leading initial (k.orbek), and service, tool and bot names stay text (6eb1513)
+- a user name after a cue must look like a person's handle; class names, devices, database roles and product slugs stay text (34426a5)
+- the street-before-number form reads Polish and Czech letters and lower-case street words, and a product name, a year or a code after an address label stays text (Gate A) (67356e2)
+- after a call cue a run, doublings and equal groups stay text, and an Indian mobile number in its local form is found (Gate A round 2) (242674f)
+- after a call cue an IP, a date with a time and a list of numbers stay text, and a label alone keeps its rules (Gate A) (d776106)
+
+## [0.9.10] - 2026-11-14
+
+### Features
+
+- finds a password and an id number after a key in JSON, XML, HTML tables and SQL, also short ones (eff0c79)
+- finds an id after a health, tax or policy label in prose, bold labels and table cells, also a short id with a letter prefix (599136d)
+- finds a person's name after a name key in JSON, XML, HTML tables and SQL, also with a gender suffix (16d2948)
+- /maisecrets:ner shows the load of the gateway's name service and your quota this minute (7fa5b8f)
+- the local name service gets a share of the computer, not all of it (3055d5b)
+- the load of the container maisecrets started is read with its own metrics bearer (58ae3e5)
+- /maisecrets:ner shows the load of the name service from its /metrics (6480192)
+- /maisecrets:ner gateway URL starts the login itself when the login lacks the name scope (a3296dd)
+- your prompts can go to the gateway's name service too, and each unchecked tool result says so on your screen (479cfa3)
+- the gateway of your login can find the names in tool results (/maisecrets:ner gateway URL) (1249b18)
+
+### Fixes
+
+- an insurance policy number is no longer read as a personal id; the release gate counted 207 false alarms in insurance documents (b92d357)
+- a generic document or id number counts in a person's element or next to the type of a person's document, not near any word; a label and its id in parentheses in prose (Gate A round 2) (90783fb)
+- a document or id number of an invoice or an order stays text, a password in any element is a password, and sin (31415), a firewall policy and a year stay text (Gate A) (b72a500)
+- a password after a key passes the checks of a password literal, and a joined expression, a reference of your sources and a fixture stay text; one prefilter per family (dbac1e9)
+- the launch of a subagent is found in one pass over the transcript (b772db6)
+- a subagent report without a tool use id passes only when this session started or resumed that agent (a36ffbd)
+- a subagent's report without a tool use id is no longer blocked as a typed prompt (c1da0e2)
+- a settings command with a name marked with {{…}} or a name the name service finds is not sent either (3429a0c)
+- a settings command that carries a value changes nothing and is not sent, and forget takes a placeholder in brackets whole (0a00526)
+- every line that starts with a slash goes to the settings hook unchanged, also /plugin:dir:cmd and non-ASCII names (72c7ebd)
+- a person-name key inside the element of a thing, such as a security's fullName, stays text (0a44021)
+- the name-key rule leaves a placeholder last name alone, and a sort order or the key word as the value (36170ea)
+- a word like Long or Short inside a name no longer stops the name-key rule; legal_full_name is no person key (e0605c5)
+- the name-key rule also takes a role before the key, a double surname, YAML comments and HTML cells on their own lines (771b03d)
+- the local container never asks for more CPUs than the container engine has, and the load lines end in time (f50e677)
+- a busy gateway that answers 429 with error busy counts as busy, not as the quota (06a0d9b)
+- the AI knows at each result that its names were not checked, and sref login takes the server of the name gateway (6c27409)
+- a name source that cannot be asked says so on your screen too, and a program's prompt never goes to the network (1d80c9f)
+
+### Security
+
+- a value in the arguments of a slash command is blocked again, not passed to the model (f6a520d)
+
+### Dependencies
+
+- the local name service follows mcpgate/ner v2.0.3916, which has /metrics and names its release (02e5abf)
+
+## [0.9.9] - 2026-11-13
+
+### Features
+
+- the first start and a daily tip name /maisecrets:secret-hygiene for secrets that leaked before maisecrets ran (b828d3e)
+
+### Fixes
+
+- a company after an account holder key in JSON is no person name (c33374b)
+- a legal form drops a name only after an account holder label and in its usual spelling (cda4db6)
+- a name followed by a legal form after a holder label is a company, and the bank-block rule reads Windows line ends and name particles (213a750)
+- a name on the line above a bank block, and a name after Kontoinhaber:, is masked in tool results (4ddf55f)
+- the plugin directory reads the mod: one file, and a sent prompt hides values a click opened (23078f9)
+
+## [0.9.8] - 2026-11-13
+
+### Fixes
+
+- button words such as "Allow" and "Deny" are no longer masked as person names, and callers get the whole no-person rule (2bcad91)
+- a person name under assignee, reporter or another role key of API data is masked, also a one-word name (616c114)
+- one ordinary word in a sentence after "the secret:" or "le secret:" is no longer masked (a5da45b)
+
+## [0.9.7] - 2026-11-12
+
+### Features
+
+- detects a Serval secret key that stands alone (e58cdd8)
+
+### Fixes
+
+- the PyPI package installs the command maisecrets-detect and ships the rules once (ed7b99f)
+- a date and time with dots in a mail message id is no longer masked as an IP address (dd2e885)
+- a stored product name or English word no longer masks that word in every later tool result (2b4cee0)
+- with betterleaks 1.10.0 the Box token rule stays on, and its new NuGet rule does not run twice (49fbc90)
+
+### Dependencies
+
+- update dependency betterleaks/betterleaks to v1.10.0 (fcf239f)
+
+## [0.9.6] - 2026-11-11
+
+### Features
+
+- detects 17 more secrets that stand alone: Infisical, Bitwarden Secrets Manager, Gitpod, dbt Cloud, Convex, DeepSeek and Anyscale tokens, private keys as one base64 line, passwords in ODBC, Go MySQL and Oracle connection strings, and the password of a Wi-Fi QR code (7d9004d)
+- detects 16 more token formats that stand alone, among them AWS STS session tokens, Google OAuth refresh tokens, Slack refresh tokens and k3s join tokens (365845d)
+- a token format is one line `id  PREFIX  REST`; maisecrets adds the edges (cf082f1)
+- Detector.label_changes_a_number(label) says whether a label adds a finding to a number or takes one away (b786778)
+- findings_by_leaf(numbers=True) finds a card stored as a number in the same scans (a207a40)
+- detects a Bitbucket OAuth consumer secret (ATOA…) that stands alone, without a label (299a127)
+
+### Fixes
+
+- a short text walks only the rules its alphabet allows; a metric series of 2,680 numbers scans 4 times faster (818c2fc)
+
+## [0.9.5] - 2026-11-10
+
+### Fixes
+
+- the start of a hook compiles the pattern of a gateway login command only when it is used (46cf0c6)
+- the first hint names NER only where docker or podman can start it, and else how to add a missed name (d7aa19a)
+- the lock now says what the AI never saw, and the start line says that plain text is known to the AI and how to find names with NER (66cfbbf)
+- maisecrets.__version__ names the version of the installed package or plugin (d45deb0)
+- the account of a gateway login is shown to you only, not to the AI (d627f7b)
+
+## [0.9.4] - 2026-11-09
+
+### Fixes
+
+- a gateway's display with a hidden character or a clear value is not drawn on the screen (95bfc24)
+- a config or a system locale with a country without rules no longer stops the detector (12ba408)
+- the short password of a URL before a host with a dot is masked again (f78b113)
+- an escaped emoji no longer stops the name service for a whole tool result (d183714)
+- a gateway reference on the screen is labelled with the display the gateway gave, not with the AI's text (3e9e88f)
+- the hint tells the AI to write a gateway reference whole too, so the person can click it (a8e239e)
+- a stored name of two words or more is replaced in any case, so "joachim demo" finds the stored "Joachim Demo" (1ebb171)
+- the name service reads a JSON-escaped text with its escapes as characters, so names after \r\n are found (a634b48)
+- finds an e-mail address as a percent-encoded segment of a URL path, and one with the JSON escape of its @ (a56fe3d)
+- finds an e-mail address with an underscore, hyphens or a phone number glued to its end (c24bd88)
+- the PyPI page names the command line entry point, and the package lists Python 3.9 to 3.15 (0c76b4a)
+- the password of a URL before a host with a dot is a secret, not an e-mail address (7092691)
+- finds an IBAN with no-break spaces between its groups (4b659a0)
+- masks a name after the German label Kontaktperson:, as after contact person: (cb6f9da)
+- masks the whole name after a German salutation with a title (Sehr geehrter Herr Dr. <first name> <surname>) (539cf91)
+- an unknown region, label language or channel raises ValueError with the known codes (6433ffe)
+- findings_with() stops the scan of the rules at its deadline, as findings() does (a68c7b9)
+- a logged hit no longer shows its value: repr() and str() of a Match name its rule, type, offsets and length (a62968b)
+- a refused login names the command that fixes it, and a click's message no longer says "maisecrets:" twice (0128b15)
+
+## [0.9.3] - 2026-11-09
+
+### Features
+
+- /maisecrets:sref status and the login name the masked account of the login (a909319)
+
+### Fixes
+
+- a log timestamp after an id label is no longer masked as an identity number (09d851f)
+- only a reference a gateway gave this session is left alone by detection and replacement (da94300)
+- finds a password in a table column without the Markdown separator row, in a tab table, and under a secret, token or PIN header (6733abf)
+- hides the passcode in a Microsoft Teams join link (12a5be0)
+- the login takes the scope of each sink from the gateway's sinks map (a7e49e8)
+- the note about the name service says why it gave no result (no answer in time, text too long, not running) (b402f10)
+- a secret of your store is never drawn either; its placeholder stays with a lock, and a click copies it (5a80aec)
+- a gateway secret is never drawn on the screen; one click copies it (d7cc054)
+- a value stored from a reference id by 0.9.1 no longer breaks the reference at the next read (379ccb6)
+
+## [0.9.2] - 2026-11-08
+
+### Fixes
+
+- commands keep their values when the gateway lists the command sink as "process-1" (36567d3)
+- a gateway reference after a label such as "token:" stays whole in a tool result (ee3141e)
+
+## [0.9.1] - 2026-11-08
+
+### Features
+
+- the session start says that values with a lock are on your screen only; Claude sees placeholders (fc2124b)
+- the call and result of an MCP tool or any other tool show your values on your screen too (45fe01e)
+- your own prompt shows the values you typed, with the lock, on your screen only (754f4a5)
+- a click on a gateway reference shows its value on your screen, and a second click copies it; /maisecrets:sref says what the login allows (7a80b0b)
+
+### Fixes
+
+- a term from your term list keeps its placeholder on the screen (d7c1a43)
+- an MCP call that gets a stored value asks you instead of being refused (d7f7053)
+- review of 0.9.1: a link without :// keeps its placeholder, a reveal follows a new session, and the guards of the tool rows are tested (d045ada)
+- the AI is told to keep a placeholder whole when it shows one, so you see the value on your screen (43d6051)
+- the plugin syncs to a claude.ai organisation again: old benchmark baselines leave the tree, which stays under 150 MB (7d1852e)
+- a failed command that printed a stored value no longer shows it to the AI in Claude Code (e6cb41c)
+- a link the AI writes can no longer copy a value: each copy link carries a random part only the drawing holds (eefc0d4)
+
+## [0.9.0] - 2026-11-08
+
+### Features
+
+- a Sensitive Reference in a Bash command gets its value again, with a login that allows commands; a refused one names the gateway's reason (1761905)
+- values show on your screen with a lock in Claude Code and the desktop app, never for the AI; a click copies one (setting show_values) (90c28f9)
+- a phone number in more German sentences is masked: office hours before unter, the verb at the end, unter der Nummer, unter:, Rückrufe unter (c5df62b)
+- the local name service gets the image a plugin update pins, at the next session start (05ce1be)
+
+### Fixes
+
+- a value that starts with the refusal marker is never printed; the reason goes out with printf (24bde99)
+- a value never stands in a link or URL the AI wrote, so a click cannot send it away (0afc5a4)
+- the German call-cue scan takes linear time on a long run of spaces, and the Figma exception needs a field only Figma has (7abcaec)
+- the key of a Figma file, component or style in a Figma answer is no longer masked as an API key (9b44348)
+- a German tax id under the display name "Steuer ID" (with a space) is found (a85cd46)
+- a change taken back before its release is no longer listed in the release notes (a023360)
+
+## [0.8.30] - 2026-11-08
+
+### API
+
+- leaves.label: a digit-only string segment counts as a list index (changed) (5252f14)
+- Detector.label_names_a_number(label) -> bool (new) (c3363be)
+
+### Features
+
+- a caller can ask whether a field label can make a number personal data (c3363be)
+
+### Fixes
+
+- leaves.label skips a list index given as a string (phones.0 is labelled phones) (5252f14)
+- a content digest (sha256:…, or an image pinned by it) after a secret or token label is no longer masked (c1d03fc)
+- /maisecrets:ner names the requests of sessions of an older version instead of calling them unknown (7c4339c)
+
+### Dependencies
+
+- the local name service starts from the current image v2.0.3798, pinned by its digest (de8bbcf)
+
+## [0.8.29] - 2026-11-07
+
+### Fixes
+
+- a checksum next to a file name such as secrets.tar.gz is no longer masked as a secret (4f308ac)
+
+## [0.8.28] - 2026-11-07
+
+### Fixes
+
+- finds a second number after a German call cue, and the cue reads only tool output (e26e8f9)
+- finds a phone number in a German sentence after a call cue and "unter" (2e975e9)
+- a card number right after a UUID is found (b5ee985)
+
+## [0.8.27] - 2026-11-07
+
+### Fixes
+
+- finds a phone number that an API keeps in its international form without the + (b4bd1be)
+
+## [0.8.26] - 2026-11-07
+
+### Fixes
+
+- finds a phone number in more API field shapes and before a series of numbers, a surname after Mr or Ms, and two more e-mail forms (2994b27)
+- finds an IPv6 address after a colon or before a dotted port, and judges a wrapped IPv4 by the address it carries (8af1a63)
+- the name service gets time for a long tool result, and ner.log says why it did not answer (af9a100)
+- a command that prints a value from a server and fails no longer shows it to the AI (118f50a)
+- a value a server gave stays masked while the session works, and goes when it ends (51e7ba1)
+- two sessions that renew the gateway login at once keep it (c1ecdf5)
+- ms:( names a test value as one, not as ordinary text (bc7f4a6)
+
+## [0.8.25] - 2026-11-06
+
+### Fixes
+
+- a scan with a deadline now stops within one hit after it, also when your References callback is slow (09ba5c5)
+- an address or other value a server gave you comes back as the same Sensitive Reference when a command prints it, and is not stored on this computer (e907752)
+
+## [0.8.24] - 2026-11-05
+
+### Features
+
+- a record scan that stops at its deadline names the strings it read whole (0722903)
+- a scan can stop at a deadline and return what it found so far (3c74643)
+- tells you once per session when a gateway offers Sensitive References and this computer has no login (5963c3c)
+
+### Fixes
+
+- a command or file with a reference maisecrets cannot resolve is refused, with the cause and the fix (76eb42e)
+
+## [0.8.23] - 2026-11-05
+
+### Fixes
+
+- /maisecrets:sref runs again (3aae54e)
+- finds a password like Sommer2024! after the German word Passwort or Kennwort in a tool result (4a8f626)
+
+## [0.8.22] - 2026-11-05
+
+### Fixes
+
+- large tool results are checked faster (4554cd6)
+
+## [0.8.21] - 2026-11-04
+
+### Fixes
+
+- fewer false alarms in code and docs: an ordinary English word after a "token" or "key" label in a tool result is no longer masked as a secret (a40d199)
+
+## [0.8.20] - 2026-11-04
+
+### Fixes
+
+- names and phone numbers in user directories and chat profiles are masked; a commit hash next to an AWS key is no longer taken for its secret (b974c29)
+- a gateway that cannot record the release of a value says so, and the person may simply try again (33400a4)
+
+## [0.8.19] - 2026-11-04
+
+### Fixes
+
+- a JSON response with many findings spreads them faster: each string is searched only for the values whose longest word it holds (fa2b787)
+- a hook's first long tool result is scanned a third faster: a keyword rule compiles the head of an alternative only where that alternative matches (b4ee4af)
+- measure_resources runs on a Linux host without /usr/bin/time: BENCH_TIME names GNU time (a6c31cf)
+
+## [0.8.18] - 2026-11-04
+
+### Features
+
+- a password or name in a Slack bold or code element, or in an Atlassian code node, is masked like the sentence around it (e13c6cb)
+
+### Fixes
+
+- a rule with context words is checked faster: a word the window does not hold as a substring is not searched for as a whole word (1a22387)
+- a response with many distinct keys keeps the label of each key cached (65,536 keys instead of 4,096) (2822cb4)
+- a Slack response is scanned up to 40 % faster: a string its record already holds after the same label is scanned once (7a1e0a0)
+- a JSON response picks its rules faster: a keyword with a three-letter piece the response lacks is not searched for (b59321b)
+- a JSON response is cut into its strings faster: a string without an escape is not walked by character, and a key's label is worked out once (f7ffe63)
+- a JSON response with repeated keys is scanned faster: each key's column name is folded once (c4a74fd)
+- in a JSON response, a company word or a template in another field no longer hides a street after its label (35f86eb)
+- a JSON response is scanned faster: each record walks only the rules that can fire somewhere in the response (98ebc36)
+
+## [0.8.17] - 2026-11-04
+
+### Fixes
+
+- an empty field no longer splits a JSON record into one scan per field (cca7a8c)
+- each field of a JSON record decodes its base64 and hex with its own budget (727f10a)
+- a field of a JSON record no longer hides a secret or an address in another field (dc21a78). Known limit of this
+  release: a street after its label (address: …) is still hidden by a company or place word in another field, and
+  the template check after an EU street still reads the next field; fixed in 0.8.18 (35f86eb)
+- an address after an empty field of a JSON record keeps its field (f53a300)
+- a JSON response is scanned 17-23 % faster: a rule with no other gate runs only where its literal can be (0865a7f)
+- a hook starts faster: the personal-data regexes compile on first use (f78ec13)
+- a hook starts faster: the rules' leading literals are read from a file instead of parsing 920 patterns (b54f895)
+- a tool result with thousands of addresses is masked instead of withheld (44fbb12)
+
+## [0.8.16] - 2026-11-03
+
+### Features
+
+- a surname after Herr or Frau in a tool result is masked (e845ec7)
+- the library gives the label a JSON string is scanned after (leaves.label) (4718ec2)
+
+## [0.8.15] - 2026-11-03
+
+### Features
+
+- the library tells a caller that applies the name spans itself which span is a product name (remote.is_product_name) (d8c7be0)
+
+### Fixes
+
+- the name service no longer masks a product name such as Claude Code, GitHub Actions or Docker Desktop as a person (5777f90)
+- a release that changes no detection still gets its results directory, so its tag can be verified (162f067)
+
+## [0.8.14] - 2026-11-03
+
+### Features
+
+- a command or a file gets the value of a Sensitive Reference from your gateway, and the AI never sees it (1fb2a49)
+
+## [0.8.13] - 2026-11-03
+
+### Features
+
+- a phone number after Tel. or Telefon is masked in a typed prompt too (fbf8544)
+- the AI knows why an example value such as 040 3456789 stays unmasked (80da048)
+
+### Fixes
+
+- a benchmark report names the release it measured, not the old manifest number (f44b034)
+
+### Security
+
+- the display part of a server token can no longer turn a refused command into an allowed one (02e57cd)
+- a value glued to a placeholder key in a tool result is masked (b4721f1)
+
+## [0.8.12] - 2026-11-02
+
+### Features
+
+- a person's name under author, reviewer or assignee in API data is found when its surname is a word (5c0429e)
+
+### Fixes
+
+- User is a surname after a role key too (04cb5d4)
+- an account or a team after a prefixed role key stays text, and Guest stays a surname (7cee7cf)
+- a rule whose leading characters are not in the text is skipped before its regex runs (92380fd)
+- a greeting alone (Hallo, Hi, Dear) is no longer masked as a person by the name service (0403692)
+
+## [0.8.11] - 2026-11-02
+
+### Fixes
+
+- a string without a label starts a scan of its own in the lines layout (bad67e1)
+- a key that could change the label line is no label, and findings are placed in one pass (25c5424)
+- findings_by_leaf scans one record at a time, each string after its key, as written (59c57e4)
+
+## [0.8.10] - 2026-11-02
+
+### Features
+
+- a parsed response is scanned once, and each finding comes back in its string (09202fa)
+
+### Fixes
+
+- fields= scans a value bare only when its label gives a hit (1ec5f4d)
+- German greetings and street words are no names, with ß or with ss (c046907)
+- German names with ß are found after their label and before a mail address (66550e2)
+- findings_by_leaf writes str subclasses and any depth as json.dumps does (b882297)
+
+## [0.8.9] - 2026-11-02
+
+### Features
+
+- run.sh ner start runs the local name service with a secret of its own, and maisecrets checks it before each text (3ad743c)
+- a service maisecrets started proves its secret before it gets text, and an impostor on the port gets none (69bf0f5)
+
+### Fixes
+
+- the proof and the text of the name service check go to one address (302bfbc)
+- review findings on the name service check: no text after a timeout, closed when the kept secret is lost, a real proof in /maisecrets:ner (1fc19c4)
+- run.sh ner start runs the first image that proves its secret, and /maisecrets:ner names an older one (75386e2)
+- review findings on the challenge: the proof is read to the deadline, the schema names unauthorized and not_ours (bb0ae1b)
+- a product or model name alone (Claude, Copilot, GitHub, Jenkins …) is no longer masked as a person (014e51a)
+
+## [0.8.8] - 2026-11-01
+
+### Features
+
+- a prompt waits up to 1 s for the name service and says once, with the reason, when its names were not checked (552b6a0)
+- the client sends the bearer of a name service that wants one (2fd8b1a)
+- finds a German phone number after Durchwahl, Festnetz and Rufnr (fe4282d)
+
+### Fixes
+
+- /maisecrets:ner says that today's counts are those of all your sessions on this computer (13314c3)
+- two changes at the same moment record a weakening once (b88bdfb)
+
+## [0.8.7] - 2026-11-01
+
+### Features
+
+- /maisecrets:ner prompts off keeps your typed prompts away from the name service (2210a86)
+- an explicit fallback service for tool results while the local one is not running (e7d97d0)
+- after a restart, the session start brings the local name service back (0655b1d)
+- with names from the local service on, names in your prompts become placeholders in Claude Code (f244cc3)
+
+### Fixes
+
+- review round 2: the probe follows the detector's address rules, the schema names every reason (b1a8bae)
+- review findings: no prompt over the network, no fallback on a network error (446f86f)
+
+## [0.8.6] - 2026-10-31
+
+### Features
+
+- when the name service does not answer, the AI tells you once per session (d77c85f)
+- a remote detector asks the service for organisations and places when classes names them (7a66d21)
+- /maisecrets:ner local, url or off switches names from a NER service on with one prompt (03f3c5b)
+- the reference NER service returns organisations, places and dates on request (cbe5f07)
+- examples/ner_service.py takes --host (44563e8)
+- the ssh question names what keeps a command off the read list (cc4338e)
+
+### Fixes
+
+- a service whose person class is PERSON keeps it when more classes are asked for (f5197d4)
+- review findings on /maisecrets:ner and the probe (cf5ad7c)
+- the spaCy NER backend keeps the German PER label (4ec6f0c)
+- ner_service.py imports on Windows (87e489f)
+- access, pass and cookie words keep a revision label a credential (8abadf1)
+- a credential word glued into a revision label keeps the hit (e2ff587)
+- a revision label with a credential word stays a credential label (70450a5)
+- a commit after its label is no secret (eb73af5)
+
+### Dependencies
+
+- update dependency presidio-analyzer to v2.2.366 (9ab8ffe)
+
+## [0.8.5] - 2026-10-30
+
+### Features
+
+- a message to another Claude session goes out with placeholders instead of being dropped by the receiver (79b3bee)
+- finds a BitLocker recovery key by its check digits, bare and after any label (28f61cc)
+- detects Composio org and user API keys (oak_, uak_) (db767dc)
+
+### Fixes
+
+- an update word before an IP address no longer makes it a version (58a9ff5)
+- numbers after the word claim or prior authorization are no US insurance id (e4ab11e)
+- a paging cursor, a file key, the time of a secret or a version number in an API answer is no secret (ae23262)
+
+### Dependencies
+
+- the new Presidio labels match in any case; five code shapes and two context words that fired on developer text stay out (a9af4ad)
+- keep the skip list's line, a belief anchors on it (35152f2)
+- Presidio 2.2.365 with 13 new recognizers for South Africa, Canada, the Philippines and US health records (6e35408)
+- update dependency presidio-analyzer to v2.2.365 (b7c8dc9)
+
+## [0.8.4] - 2026-10-30
+
+### API
+
+- new and provisional: remote.RemoteDetector, RemoteStatus, Result, Detector.findings_with, (b909b1d)
+
+### Features
+
+- an optional name service adds names in tool results, and the library can ask it too (b909b1d)
+
+## [0.8.3] - 2026-10-29
+
+### Features
+
+- ask before a stored secret goes to a host it never went to (secret_destinations protect) (0d40b63)
+- the settings show how often asking before a new host would have asked in your last 30 days (594c9e8)
+- detects Labelbox API keys and the Tailscale key form tskey-k…CNTRL- (bff9b2b)
+
+### Fixes
+
+- test results after PASS:, a heading after Basic, and calendar or message ids are no longer masked (3e781e6)
+- SSH algorithm names such as curve25519-sha256@libssh.org are no e-mail addresses (5b9b4f2)
+- a report or notice matches the model's text only as written or escaped (84d0c08)
+- a background command's notice no longer blocks the session (f5849d0)
+- hides a database URL password that holds a raw # or ? (afaa446)
+- keeps masking a person's long user name that ends in -bot (fea968b)
+- keeps masking a person's long user name that ends in -svc (5a113c8)
+- keeps masking a person's user name that starts with a service word or ends in one after a long name (aec3aa8)
+- leaves the user names of bots and service accounts as text (b0141aa)
+
+## [0.8.2] - 2026-10-26
+
+### Features
+
+- password labels in all 19 supported languages are read by default, whatever the system language (bff0988)
+
+### Fixes
+
+- a phone number after a phone word and a passport number after an EDIFACT + are masked whole again (9c4c9b0)
+- a long tool result is scanned about a tenth faster with all label languages on (cea661b)
+- a full name after a self-introduction in French, Spanish, Italian, Dutch, Swedish, Danish, Norwegian, Polish, Portuguese, Czech, Finnish, Romanian or German is masked (ec1241e)
+- a date of birth after its label in Dutch, Swedish, Danish, Norwegian, Finnish, Polish, Czech, Turkish, Russian, Ukrainian, Romanian, Greek, Arabic, Japanese, Chinese or Korean is masked (b9c7d84)
+- personal data in JSON inside a JSON string or in a Python dict print is masked by its field names (94c3105)
+- personal data in YAML, .env, INI, log key=value lines, SQL UPDATE and WHERE, and PHP print_r is masked by its field names (9b53c7d)
+- a password under a password column of a table or a SQL INSERT is masked, in every label language (1cf90f0)
+- a person's field name in Polish, Dutch, Swedish, Spanish, Italian, French or Portuguese, or as a short form, names its column (f49c8a1)
+- a Chinese or Japanese sentence after a password label, such as the hint of a sign-up form, is no password (c404a94)
+- the password labels of all languages cost no time on text without them (89d7f5e)
+- an ordinary word after a label in a tool result is no longer masked in every later tool result (c39a27a)
+- a medical record number that starts with its own label, such as MRN and digits in one token, is masked whole (52f255f)
+- two words after a bare Student: label that a sentence goes on from stay text (167360c)
+- a table or record with a first-name and a last-name column masks both names (d4a20c6)
+- the values of a SQL dump's INSERT without a column list are named by the CREATE TABLE above it (b1ec7ae)
+- an HTML table of fields and values, one <th> and one <td> per row, is read as one record (338ac17)
+- a name inside an XML element named by a person label, such as <card_holder> or <customerName>, is masked (f1adb45)
+- a name after a key that joins a role and name, such as account_holder_name or investorName, is masked (f988689)
+- a name after a key that names a person's role, such as payer, policyholder or recipient, is masked (c396c18)
+- a first or last name that is also a word is masked next to another name part of the record (ec4945d)
+- a driving licence or passport number after driverLicense, passportNumber, Führerschein or Pasaporte is masked (a561945)
+- a Dutch, Swedish, French, Spanish or Italian street after an address label is masked (59bf002)
+- a US address right after a "home address" or "residential address" label is masked, also next to a company name (7a9fee9)
+- a street line after "located at", "situated at" or "property at" is masked (f5a434b)
+- a user name in an apposition is masked (the user name, value, or the user name (value)) (742a2b3)
+- a US phone number in the (ddd) ddd-dddd form after "reached at" or "me at" is masked (c6b6cc6)
+- an account name after a user id label is masked, and a number, UUID or code stays text (443f529)
+- a birth date after "Date of birth," or a bold "**DOB:**" label is masked (fbcb91f)
+- a birth date, phone number or ID in a two-column Markdown table without a header row is masked (96b3104)
+
+## [0.8.1] - 2026-10-25
+
+### Features
+
+- the client shows what maisecrets does while a hook runs (8d7a29e)
+- ms:( says what a value is masked as and whether it is found alone (9d8295c)
+
+### Fixes
+
+- the cap of stored values in a session names placeholders and uses, not keys and resolves (410048e)
+- when maisecrets cannot run or cannot finish, the message says what to do next (60f9581)
+- a refusal or a permission prompt for a tool call says what to check, without codes (503c23b)
+- the notices, tips and command outputs say what happens in words you know (e93783e)
+- every text names a command that works for the person who reads it (8990742)
+- a name or phone number found by the words around it is no longer listed as a format found alone (20450b3)
+
+## [0.8.0] - 2026-10-24
+
+### Breaking
+
+- a library caller gets a TypeError for a text that is not a str, and LazyRegex is gone (bb0edb8)
+
+### API
+
+- the JSON entry point accepts the optional request key context.fields (additive) (25609f3)
+- scan and findings take an optional keyword argument fields, the field names of values (additive) (e82049b)
+- the offsets of a Match are defined as Unicode code points of the scanned str (text[start:end] == value) (016583d)
+- Detector.scan and Detector.findings raise TypeError for a text that is not a str (None and bytes included); a str subclass is accepted (bb0edb8)
+- LazyRegex is removed from maisecrets.detection (deprecated in 0.7.0); give user_rule the pattern as a string (bb0edb8)
+- new stable name maisecrets.detection.TYPES and the data file maisecrets/detection/types.json (85b6cc3)
+
+### Features
+
+- the JSON entry point takes context.fields, the field names of values (25609f3)
+- a library caller can give the field name of a value, and the name counts as a label (e82049b)
+- a caller in any language scans text with python3 -m maisecrets.detection (contract maisecrets.detect/1) (1ef231b)
+- the library publishes its type vocabulary, each type with its family and class (85b6cc3)
+
+### Fixes
+
+- the release gate names the baseline of an approved minor or major version (b9a56dc)
+
+## [0.7.20] - 2026-10-24
+
+### Features
+
+- finds a Fireworks AI API key and an Infisical service token without a label (ff957f7)
+
+### Fixes
+
+- the directory can read the hook code, as no file is over its size limit any more (9748721)
+
+## [0.7.19] - 2026-10-23
+
+### Fixes
+
+- the directory can read the betterleaks rules, in parts and without a literal key (87289cd)
+
+## [0.7.18] - 2026-10-23
+
+### Fixes
+
+- the directory version ships no design documents and no rule source it never reads (dbab8e6)
+- no rule comment carries an example in the shape of a real token (bdb18c6)
+
+## [0.7.17] - 2026-10-23
+
+### Fixes
+
+- the directory can read each detection file, as none is over its size limit any more (b4dd82f)
+
+## [0.7.16] - 2026-10-23
+
+### Fixes
+
+- the format report link comes only for a value with a fixed start, and fits one line (6d2fca7)
+- the directory version names the mod in its own hooks file again (e83527e)
+- a Cloudflare Access service token secret is found with any checksum letters, as Cloudflare documents it (c3ca1be)
+
+## [0.7.15] - 2026-10-23
+
+### Fixes
+
+- the directory version declares the mod as a module of hooks/hooks.json (320cc76)
+
+## [0.7.14] - 2026-10-23
+
+### Security
+
+- a long run of spaces or "!" after a password word no longer stalls the scan (5e107b0)
+
+## [0.7.13] - 2026-10-23
+
+### Fixes
+
+- an Azure client secret at the end of a sentence is found (62ebee1)
+
+## [0.7.12] - 2026-10-23
+
+### Fixes
+
+- a link into a hexpm repository no longer gives a Hex key (044d84e)
+
+## [0.7.11] - 2026-10-23
+
+### Features
+
+- finds passwords and keys after Russian, Chinese and Japanese labels (3abff8d)
+
+### Fixes
+
+- a private key after a label is masked as one whole block (d6629a1)
+
+## [0.7.10] - 2026-10-23
+
+### Features
+
+- detects 47 more token formats from the providers' own code and documentation (99f8f6f)
+- finds the value of a Kubernetes env entry whose name is a password or a key (955142c)
+- finds keys and passwords in more typed sentences, such as "my stripe key is <value>" (0baf629)
+- finds a password in a note line such as "host (pw:<value>)", "(ID/PW:<value>)" or "-pwd:<value>" (669a13f)
+- finds Laravel's APP_KEY and each key of Strapi's APP_KEYS in an .env file (ba5a771)
+- finds the password of a database URL that holds an unescaped sign such as ! $ & or + (9d752f1)
+- finds the default of a Terraform variable whose name is a key or a password (1e12204)
+- finds the keys and salts that PHP's define() sets, such as the WordPress salts in wp-config.php (f5bfdc2)
+- detects 72 more token formats that providers define in their own code (35b1a01)
+- ms:(…) offers to report the format of a value maisecrets did not catch, with its shape only (8ad067d)
+- masks eight more token formats that Trivy, Veles, nuclei and titus know (6251547)
+- masks 16 more provider keys after the provider's word and a key label (32e21e4)
+
+### Fixes
+
+- a Zapier catch hook URL is found whole with its https:// scheme (8f60527)
+- a Fly.io token of several macaroons is found whole again (23df0ec)
+- a key at the end of a sentence is found again: "the key is <token>." or "(<token>)" (0ba8945)
+- a hex digest after nfp_ is no Netlify token, and the C29 belief anchors the new answer line (2fac9ae)
+- an Akamai host name is no longer taken for an EdgeGrid client token (2c43deb)
+- a token at the end of a sentence no longer takes the full stop or colon into the value (845c20c)
+
+## [0.7.9] - 2026-10-22
+
+### Features
+
+- masks 109 more token formats researched from the providers' own documentation (72e05cd)
+- masks 97 more token formats with a fixed prefix without a label (9833546)
+- masks a Storyblok personal access token without a label (71d376d)
+
+### Fixes
+
+- the release tree builder reads git output as UTF-8 on every platform (4e41130)
+- the directory version ships a short README and the prefix rules as JSON (d2621b2)
+
+## [0.7.8] - 2026-10-22
+
+### Fixes
+
+- the plugin ships no text that the Anthropic directory reads as a credential (008abf2)
+
+## [0.7.7] - 2026-10-22
+
+### Features
+
+- masks a US home address written on one line (eabce9d)
+- masks a password in three more sentence forms (8727587)
+- masks an API key or token named in a sentence (b1e277b)
+
+### Fixes
+
+- the release gate replaces a local path also where JSON escapes it (7bf9127)
+- an encoded token after a key word stays to the tool channel's decoder (c896d38)
+- a one-line US address after a named place stays text (57186af)
+- the software table rule holds back only the new anchors, so a birth date in a CSV row with a sku still names its person (4eea0b3)
+- the software table rule applies only with one personal column, so an order record with a customer stays a person's (41a1e65)
+- a phone number named in a sentence after a contact label is masked again (Escalation contact: Contact the coordinator at …) (237020b)
+- a table of software and a test account are no person's record (500ef2e)
+- a date of birth makes a row a person's only when it lies 12 years back, so a release table's date stays text (d5866f2)
+- a row with a date of birth under its own name counts as a person's record, so its user name and address are masked (4c3b4a3)
+- a person's address and ids in a record under more field names (Property Address, Health Plan Beneficiary Number, MedicalRecordNumber, User ID) (f377ca3)
+
+## [0.7.6] - 2026-10-22
+
+### Fixes
+
+- a company's "we can help you at" and an id after "Contact:" stay text (aee4e79)
+- masks a person's own number in a sentence (reach out to me at, my number is), while a company's line stays text (a77baf1)
+- masks a phone number after a contact label, after "Fax number for notice:" and with four counting digits at its end (5eabe63)
+
+## [0.7.5] - 2026-10-22
+
+### Fixes
+
+- a blocked message from another session is recognised as one, so its text never goes into your clipboard (461c44c)
+- a role name or a given and family name written in camel case (candidateName, givenName) counts as its column (b33eb46)
+- fixture names such as Foo Bar or Jane Doe in a first and last name field stay text (c0a0e49)
+- masks the name column of a candidate, client, player or recipient in a table of personal records (271ec63)
+- masks a first or last name in a record field when the record also holds a person's data (0727d95)
+
+### Security
+
+- a placeholder in a message from another session no longer lets this session use its value (024af1c)
+- a message from another Claude session with a secret is blocked again instead of reaching the model (9bc4b68)
+
+## [0.7.4] - 2026-10-21
+
+### Fixes
+
+- a message from another Claude session is rewritten with placeholders instead of being lost in a block (3cc6b07)
+- a phone number written as one run of digits is masked after a phone word (Telefon: 0999…, +49…) (4350e18)
+
+## [0.7.3] - 2026-10-21
+
+### Fixes
+
+- a US postal address on two lines is masked (street line, then City, ST 12345) (13bab17)
+- a full name after a salutation is masked (Dear Dana Okafor,) (2d3f10b)
+- a full name after a title is masked (Mr Dana Okafor, Mrs. …) (f07d52c)
+- a Visa card number of 19 digits after a card word is masked (2822238)
+- an ID after its label and a comma is masked (beneficiary number, <id>,) (bed99c3)
+- a Markdown table of fields and values is read as one record (| Full Name | … |, one field per row) (5da6304)
+- a North American phone number after calling, dial or contact is masked (8e4678e)
+- an address after a Dutch, Swedish, Italian or German address label is masked (Adres, Adress, Indirizzo, Anschrift) (ceaaaea)
+- a name after the Dutch and Swedish name labels naam and namn is masked (25ee85f)
+
 ## [0.7.2] - 2026-10-20
 
 ### Fixes
