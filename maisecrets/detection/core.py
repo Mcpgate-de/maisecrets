@@ -1842,6 +1842,11 @@ _PUBLIC_TEST_VALUES: list = []
 _DIGITS_ONLY_RE = _LazyRx(r"\+?[\d\s().-]+")
 
 
+def _public_values():
+    from . import public_values
+    return public_values
+
+
 def is_public_test_value(value: str, kind: str) -> bool:
     """A value that vendor documentation publishes for tests, for one placeholder type (rules/public_test_values.txt):
     a payment test card is no CARD, the Stripe API reference key and the jwt.io example are no SECRET, a Twilio test
@@ -2956,6 +2961,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 # make the same bytes no secret there (review of 0.6.12). The label rules run first, so no later rule
                 # claims a span around a skipped key; a value of another type around a test card stays its own hit
                 continue
+            if rule.type != "SECRET" and _public_values().no_person_value(secret, rule.type):
+                continue   # a bank number that is a run, a toll-free number, a birth date of no living person
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
             if alone and not _card_shaped(text, start, secret) and not _has_context_word(
@@ -3109,7 +3116,8 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
             continue   # Kontoinhaber: Musterbau Schmidt GmbH: a legal form after the words names a company (#40)
         low = value.lower()
         if _references().has_marks(value) or "example" in low or low in personal.PLACEHOLDER_NAMES \
-                or looks_like_placeholder(value) or is_public_test_value(value, typ):
+                or looks_like_placeholder(value) or is_public_test_value(value, typ) \
+                or _public_values().no_person_value(value, typ):
             continue
         if kind in personal.ONLY_WIDENS and not overlaps(start, end):
             continue   # a form that only completes a hit another rule made: alone it would mask company addresses
