@@ -33,12 +33,16 @@ claude plugin install maisecrets@maisecrets     # then start a new session
 ```
 
 ```text
-/maisecrets:status        what runs, which version
+/maisecrets:status        does it protect this session? one verdict per check, then the details
 ms:(your value)           would this value be caught?
 /maisecrets:settings      the choices you make
 /maisecrets:not-a-secret KEY   a wrong hit: never mask this exact value again
 /maisecrets:secret-hygiene   secrets that leaked before you installed it
 ```
+
+**Check that it works:** run `/maisecrets:status test` (in Codex, send `maisecrets: status test`). It
+prints a test value that the AI only sees as `⟦SELFTEST⟧`; send that value as your next prompt, and maisecrets
+answers "Self-test passed" without sending it.
 
 Codex and other installs: [Install](#install). More: [How it works](#how-it-works) ·
 [Threat model](docs/THREAT-MODEL.md) · [Benchmarks](docs/BENCHMARKS.md) · [Known gaps](#known-gaps-measured-or-documented).
@@ -436,7 +440,8 @@ link to `report_url`. It opens no browser and files nothing: you open the link
 and decide in GitHub's form. Set `report_url` to your tracker, or set it to
 `null` to turn reporting off.
 
-**Diagnosis.** `/maisecrets:status` prints version, plugin folder, Python,
+**Diagnosis.** `/maisecrets:status` starts with a verdict (`ok`, `warn` or
+`FAIL` per check, with the next command), then prints version, plugin folder, Python,
 store, policy keys and log counts. `/maisecrets:audit` prints the last
 resolves. `MAISECRETS_DEBUG_LOG=<file>` in the client's environment records one
 line per hook call (event, client, duration, answer; never a value).
