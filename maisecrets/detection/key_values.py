@@ -108,7 +108,7 @@ def hits(text: str) -> list:
     from .personal import ID_NUMBER, NAME, USERNAME, _THING_PARENTS, _xml_parent
     from .core import _references
     from .role_names import key_names
-    from .user_forms import USER_ID_KEYS, user_id_forms, user_id_ok, user_names
+    from .user_forms import USER_ID_KEYS, user_id_matches, user_id_ok, user_names
     refs = _references()
     low = text.lower()
     out = [(s, e, "name-after-label", NAME) for s, e in key_names(text)] if "name" in low else []
@@ -121,13 +121,14 @@ def hits(text: str) -> list:
              USERNAME)):
         if not any(w in low for w in words):
             continue
-        for rx in (user_id_forms(value, _COMPARE, _END) if typ == USERNAME else forms(value, _ID_KEY_CHARS, _COMPARE)):
-            for m in rx.finditer(text):
-                key = m.group(2) or m.group(3) or ""
-                if not is_key(key) or not ok(m.group(4)) or _JOINED_RE.match(text, m.end(4)) \
-                        or refs.hit_is_a_reference(text, m.start(4), m.group(4)):
-                    continue   # a reference in a form of the detector's sources is no value
-                if typ == ID_NUMBER and not _a_persons_id(text, m, key, _THING_PARENTS, _xml_parent):
-                    continue
-                out.append((m.start(4), m.end(4), kind, typ))
+        found = user_id_matches(text, low, value, _COMPARE, _END) if typ == USERNAME else \
+            (m for rx in forms(value, _ID_KEY_CHARS, _COMPARE) for m in rx.finditer(text))
+        for m in found:
+            key = m.group(2) or m.group(3) or ""
+            if not is_key(key) or not ok(m.group(4)) or _JOINED_RE.match(text, m.end(4)) \
+                    or refs.hit_is_a_reference(text, m.start(4), m.group(4)):
+                continue   # a reference in a form of the detector's sources is no value
+            if typ == ID_NUMBER and not _a_persons_id(text, m, key, _THING_PARENTS, _xml_parent):
+                continue
+            out.append((m.start(4), m.end(4), kind, typ))
     return out

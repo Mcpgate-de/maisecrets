@@ -113,6 +113,20 @@ def user_id_forms(value: str, ops: str, end: str) -> list:
     return got
 
 
+def user_id_matches(text: str, low: str, value: str, ops: str, end: str):
+    """The matches of user_id_forms in `text`. The key form is tried only where str.find saw `user` or `login` (one
+    regex pass over a megabyte cost 0.03 s); the table and the element forms are cheap passes."""
+    first, *rest = user_id_forms(value, ops, end)
+    for pos in sorted(_at(low, "user") + _at(low, "login")):
+        for at in (pos - 1, pos) if pos and low[pos - 1] in "\"'`" else (pos,):
+            m = first.match(text, at)
+            if m is not None:
+                yield m
+                break
+    for rx in rest:
+        yield from rx.finditer(text)
+
+
 def user_id_ok(v: str) -> bool:
     from .core import _word_set
     from .personal import _username_value_ok
