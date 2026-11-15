@@ -812,7 +812,7 @@ def rewrite_prompt(payload: dict) -> dict:
     the prompt as it is, and the settings hook, which runs after the mod on what the mod passes on,
     decides it as without the mod: a clean prompt, an @file mention, a subagent report, a setting
     that turns the rewrite off. The answer carries placeholders, never a value."""
-    if incidents.recognize(payload.get("prompt"), client_of(payload)):
+    if incidents.recognize(payload.get("prompt"), client_of(payload)) or _selftest().claims(payload.get("prompt")):
         return {}            # the prompt hook answers it, before the config and the store (docs/DIAGNOSTICS.md, 7)
     groups = check_value.parse_all(payload.get("prompt"))
     if groups is not None:
@@ -936,6 +936,9 @@ def user_prompt(payload: dict) -> dict:
         if asked[0] == "usage":
             _scrub_failed_prompt("user-prompt", payload)   # free text after the form: the client keeps the prompt
         return _incident_answer(*asked)
+    selftest = _selftest().prompt_answer(payload, client_of(payload) == "codex")     # selftest.py
+    if selftest:
+        return selftest
     if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow" and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
         # tests only (tests/_isolate.py sets the second variable): the watchdog answers
         time.sleep(WATCHDOG_SECONDS["user-prompt"] + 3)
@@ -2444,6 +2447,7 @@ def _term_keys() -> set:
 def pre_tool(payload: dict) -> dict:
     """Mask only (README "Terms"): a term placeholder in a command, an argument or a file stays as written. The tool
     call runs with the placeholder; maisecrets never puts the name back in v1."""
+    _selftest().arm(payload)
     tool_input = payload.get("tool_input")
     keys: list = []
     pair: list = []
@@ -2909,12 +2913,18 @@ def _post_tool_guarded(payload: dict) -> dict:
     except Exception as exc:  # noqa: BLE001 - a note that fails leaves the reference as text; the output goes on
         _debug(f"post-tool sref notes: {type(exc).__name__}")
     result = _post_tool_guarded_rest(payload)
+    result = _selftest().after(payload, result, client_of(payload) == "codex")     # after the detection: selftest.py
     if notice:
         try:
             return _with_notice(result, notice)
         except Exception as exc:  # noqa: BLE001 - a notice that fails must not change the output
             _debug(f"post-tool notice: {type(exc).__name__}")
     return result
+
+
+def _selftest():
+    from . import selftest
+    return selftest
 
 
 def _with_notice(result: dict, notice: str) -> dict:
@@ -3175,7 +3185,7 @@ def _run_log(event: str, payload: dict, how: str, decision: str, ms: int) -> Non
         path = HOME / "hooks.log"
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
         tool = str(payload.get("tool_name", "-"))[:40]
-        sess = str(payload.get("session_id") or "-")[:8]
+        sess = str(payload.get("session_id") or "-")[:40]
         line = f"{stamp}\t{event}\t{_client_label(payload)}\t{sess}\t{tool}\t{decision}\t{ms}ms\t{how}\n"
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:

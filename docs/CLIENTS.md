@@ -178,3 +178,29 @@ run (`claude -p`, `codex exec`) is a new session each time: a reference from
 an earlier run is `foreign-session` there, and the deny says so. A prompt
 built from untrusted text (an issue body, a log) admits every reference in it
 as typed by a human; keep such runs on a machine without a vault.
+
+## Status and self-test: what the commands see
+
+Measured on 2026-11-15 with Claude Code 2.1.325 and codex-cli 0.169.0 (harness scenarios `selftest_tool_path` and
+`selftest_hooks_not_running` of `harness/run.py`, `selftest_passes` of `harness/codex.py`, `maisecrets/selftest.py`,
+`maisecrets/status_verdict.py`).
+
+- **What the harness proves.** In Codex, the whole self-test: the tool path, and the value typed into the resumed
+  session (`codex exec resume <id>`) gets "Self-test passed". In Claude Code, the tool path, and that the value sent
+  by `claude -p --resume <id>` (the same session id, measured) is blocked without a pass: a prompt of `claude -p` is a
+  program's (C22). The "passed" answer to a typed prompt of Claude Code is held by `tests/test_selftest.py` only.
+
+- **The session of a command.** Claude Code gives a command `CLAUDE_CODE_SESSION_ID`, Codex gives it
+  `CODEX_THREAD_ID`; each equals the `session_id` of the hook payloads. Codex passes on the Claude Code variable of
+  the shell that started it, so a command checks both.
+- **Codex drops a variable whose name holds `SECRET`** from a command's environment (`shell_environment_policy`,
+  default excludes): a maisecrets command in Codex reads the default home, not a `MAISECRETS_HOME` the hooks get.
+  The Codex harness sets it with `shell_environment_policy.set` for the self-test.
+- **The marketplace copies.** Claude Code clones a marketplace to the `installLocation` that
+  `plugins/known_marketplaces.json` names (`plugins/marketplaces/<name>`), with `lastUpdated`. Codex clones a Git
+  marketplace to `$CODEX_HOME/.tmp/marketplaces/<name>` and reads `.agents/plugins/marketplace.json` or, without it,
+  `.claude-plugin/marketplace.json`; `codex plugin add maisecrets@<name>` installs a newer version next to the old
+  one. Each copy is as new as the client's last fetch: `/maisecrets:status` says "newest unknown" without one.
+- **A `systemMessage` of PostToolUse** reaches the person in Claude Code and not the model (no request body held
+  the test value). Claude Code writes it into its local transcript (a `hook_system_message` record), so the test
+  value stands there.

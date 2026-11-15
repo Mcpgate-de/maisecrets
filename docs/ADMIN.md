@@ -132,8 +132,8 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 44 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
-python3 harness/codex.py [--real]                      # 15 scenarios through codex exec (five need --real)
+python3 harness/run.py                                 # 46 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
+python3 harness/codex.py [--real]                      # 16 scenarios through codex exec (five need --real)
 python3 scripts/replay_can_fail.py                     # 401 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
@@ -210,7 +210,8 @@ link to `report_url`. It opens no browser and files nothing: you open the link
 and decide in GitHub's form. Set `report_url` to your tracker, or set it to
 `null` to turn reporting off.
 
-**Diagnosis.** `/maisecrets:status` prints version, plugin folder, Python,
+**Diagnosis.** `/maisecrets:status` starts with a verdict (`ok`, `warn` or
+`FAIL` per check, with the next command), then prints version, plugin folder, Python,
 store, policy keys and log counts. `/maisecrets:audit` prints the last
 resolves. `MAISECRETS_DEBUG_LOG=<file>` in the client's environment records one
 line per hook call (event, client, duration, answer; never a value).

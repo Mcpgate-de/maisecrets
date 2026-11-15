@@ -420,13 +420,23 @@ def cmd_settings(args: list[str]) -> int:
     return 1 if rest else 0
 
 
-def cmd_status(_: list[str]) -> int:
-    """What support needs first: version, where the plugin runs from, which Python, which
-    store, which settings come from a policy, and what the logs counted."""
+def cmd_status(args: list[str]) -> int:
+    """The verdict (status_verdict.py), then what support needs: version, where the plugin runs from, which Python,
+    which store, which settings come from a policy, and what the logs counted. `status test`: the self-test."""
     import platform
     from pathlib import Path as _P
     from .vault import HOME, describe_backend
     root = _P(__file__).resolve().parent.parent
+    if args[:1] == ["test"]:
+        from . import selftest
+        print(selftest.command_text())
+        return 0
+    from . import status_verdict
+    verdict = status_verdict.lines(root)          # first: a configuration error prints alone
+    print("Is maisecrets protecting this session?")
+    for line in verdict:
+        print(line)
+    print("\nDetails")
     version = "?"
     try:
         version = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version", "?")

@@ -510,8 +510,8 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
         expect(after.files == before.files, "files appeared or went")
         return p
     if kind == "config":
-        head = f"maisecrets {VERSION} at {ROOT}\n" if command == "status" else ""
-        expect(r.stdout == head, "a configuration error prints nothing else on stdout")
+        # status checks the store for its verdict before it prints a line, so it prints nothing either
+        expect(r.stdout == "", "a configuration error prints nothing else on stdout")
         expect(r.stderr.startswith(f"maisecrets {command}: configuration error: "), "names the configuration error")
         expect(after.files == ["config.json"], "a configuration error creates nothing")
         return p

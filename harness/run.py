@@ -325,6 +325,30 @@ SCENARIOS = {
         "expect_not_in_transcript": [MAIL],
     },
     # the model runs a command whose output holds a secret
+    # the self-test (maisecrets/selftest.py) in the real client: /maisecrets:status test runs the command, the
+    # PreToolUse hook registers the value, and the PostToolUse hook masks it and records the tool path. A resumed
+    # `claude -p` then sends the value in the same session: a program's prompt, so the hook blocks it without a pass.
+    # The value reaches the upstream in neither run. "Self-test passed" needs a typed prompt (tests/test_selftest.py)
+    "selftest_tool_path": {
+        "prompt": "/maisecrets:status test",
+        "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" status test'}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_in_requests": ["\u27e6SELFTEST\u27e7"],
+        "selftest": "pass",
+    },
+    # the same with the plugin folder moved before the command (as plugin_folder_moved): no hook runs, so no value is
+    # registered, the command prints none and says FAIL, and nothing can answer "passed"
+    "selftest_hooks_not_running": {
+        "prompt": "/maisecrets:status test",
+        "plugin_copy": True,
+        "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}.moved/hooks/run.sh" status test'},
+                   "before": {"rename": ["{plugin}", "{plugin}.moved"]}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_text": "maisecrets self-test: FAIL",
+        "selftest": "fail",
+    },
     "bash_echo": {
         "prompt": "print the env",
         "files": {".env": f"TOKEN={MARK}\n"},
@@ -965,6 +989,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             gpath.write_text(json.dumps(keys, indent=1))
         elif json.loads(gpath.read_text()) != keys:
             fails.append(f"schema drift in {gname}: {keys}")
+    if sc.get("selftest"):
+        fails += _selftest_second_prompt(sc, home, joined, r, settings, plugin, cwd, env, work)
     if sc.get("known_gap"):
         # A canary for the client's own behaviour. Claude Code 2.1.283 runs no hook of a plugin whose
         # folder is gone ("Plugin directory does not exist" in its debug log) and runs the tool
@@ -981,6 +1007,68 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     print(f"[{'OK ' if not fails else 'FAIL'}] {name}  requests={len(bodies)}  out={out}")
     for f in fails:
         print("     -", f)
+    return fails
+
+
+def _selftest_second_prompt(sc: dict, home: Path, first: str, r, settings: Path, plugin: Path, cwd: Path,
+                            env: dict, work: Path) -> list[str]:
+    """The second half of the self-test: the test value as the next prompt of the same session (`claude -p --resume`).
+    A prompt of `claude -p` is a program's (CLAUDE_CODE_ENTRYPOINT=sdk-cli, C22), never the person's, so the hook must
+    block it, send nothing upstream and record no pass: this run proves the tool path and the block, and the
+    "Self-test passed" answer for a typed prompt is held by tests/test_selftest.py. With no hook running, no value is
+    registered at all."""
+    fails: list[str] = []
+
+    def state() -> dict:
+        try:
+            return json.loads((home / "selftest.json").read_text())
+        except (OSError, ValueError):
+            return {}
+    value = (state().get("pending") or {}).get("value")
+    if sc["selftest"] == "fail":
+        if value:
+            fails.append("a test value was registered although no maisecrets hook ran")
+        if "Self-test passed: the prompt hook ran" in first + r.stdout + r.stderr:
+            fails.append("'Self-test passed' although no maisecrets hook ran")
+        return fails
+    if not value:
+        return ["no test value was registered: the PreToolUse hook did not run for the command"]
+    if value in first:
+        fails.append("LEAK: the test value reached the upstream in the tool result")
+    if not (state().get("result") or {}).get("tool"):
+        fails.append("the tool-result hook recorded no pass")
+    session = (state().get("pending") or {}).get("session")
+    out2 = work / "out2"
+    out2.mkdir()
+    srv = start_server([{"text": "unreachable"}], out2)
+    try:
+        r2 = subprocess.run([shutil.which("claude") or "claude", "-p", value, "--resume", str(session),
+                             "--plugin-dir", str(plugin),
+                             "--settings", str(settings), "--permission-mode", "default", "--allowedTools", "Bash",
+                             "--max-turns", "1"], cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
+                            stdin=subprocess.DEVNULL)
+    finally:
+        srv.terminate()
+    (out2 / "claude_stdout.txt").write_text(r2.stdout + "\n--- stderr ---\n" + r2.stderr)
+    bodies = "".join(Path(b).read_text() for b in glob.glob(str(out2 / "request_*.json")))
+    if value in bodies:
+        fails.append("LEAK: the test value of the prompt reached the upstream")
+    elif bodies:
+        fails.append("the prompt with the test value reached the upstream")
+    said = r2.stdout + r2.stderr
+    if "Self-test passed" in said or (state().get("result") or {}).get("prompt"):
+        fails.append("a prompt of claude -p (a program, not the person) passed the self-test")
+    if "the self-test does not count it" not in said:
+        fails.append("the prompt hook did not answer the prompt with the test value")
+    elif "came from a program" not in said:
+        fails.append("the resumed run is not the session that registered the value: " + said.strip()[-160:])
+    # the client's own record of the session on disk: measured, not asserted (a hook cannot replace what the
+    # client writes there before it runs)
+    sids = {json.loads(pf.read_text()).get("session_id") for pf in Path(env["MAISECRETS_DUMP"]).glob("*.json")}
+    held = [t.name for sid in sids if sid for t in (Path.home() / ".claude" / "projects").glob(f"*/{sid}.jsonl")
+            if value in t.read_text(errors="ignore")]
+    if held:
+        print(f"     ~ the test value stands in {len(held)} local transcript(s) of this run (not sent upstream)")
     return fails
 
 
