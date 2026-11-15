@@ -181,8 +181,10 @@ class PromptPathTests(_Clean):
         self.assertNotIn("Self-test", out["reason"])
 
     def test_the_mod_leaves_the_pending_value_to_the_hook(self):
+        # also next to a secret, which the mod would else rewrite: the hook blocks the prompt with the value
         value = self.arm()
-        self.assertEqual(hooks.rewrite_prompt({**CLAUDE, "prompt": value, "origin": "composer"}), {})
+        token = "glpat-" + "SelftestXyz1234567890ab"
+        self.assertEqual(hooks.rewrite_prompt({**CLAUDE, "prompt": f"{value} {token}", "origin": "composer"}), {})
 
     def test_the_value_never_lands_in_the_vault(self):
         value = self.arm()
