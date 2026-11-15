@@ -44,7 +44,7 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
 
 1. **You type a secret or a personal value** (a token, a password after a
    label, an e-mail address, a phone number with a country code, an IBAN, a
-   card number, a public IP, and German identifiers by default; test data such
+   card number, a public IP, and the identifiers of your region (`regions`, by default the country of the system); test data such
    as `example.com` stays alone, see ["Test data that maisecrets leaves alone"](USING.md#test-data-that-maisecrets-leaves-alone)). A
    `UserPromptSubmit` hook
    detects it, stores it in a local vault, blocks the prompt, and keeps the
@@ -151,9 +151,9 @@ pull requests are welcome there.
 - The skill runs `skills/secret-hygiene/scripts/scan_secrets.py` (reads files and
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
-- Sends and fetches: no telemetry and no download. These connections start from
-  a command you run or a call that needs a value, and nothing else in the plugin
-  opens one:
+- Sends and fetches: no telemetry. The plugin downloads nothing, except the image of the optional local name
+  service, which follows the plugin at a session start (`/maisecrets:ner updates off` keeps it). The other
+  connections start from a command you run or a call that needs a value, and nothing else in the plugin opens one:
   - a Write, Edit or Bash call with a token that one of your own MCP servers
     sent: one metadata request and one resolve request to that server's own
     origin, over https, with this computer's key for that server ("Vault
