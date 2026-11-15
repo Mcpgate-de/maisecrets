@@ -495,8 +495,10 @@ def run_scenario(name: str, sc: dict) -> list[str]:
 
 
 def _selftest_second_prompt(home: Path, first: str, env: dict, cwd: Path, work: Path) -> list[str]:
-    """The person sends the test value as the next prompt: a second `codex exec` in the same homes. codex exec prints no
-    block reason, so the record in selftest.json says whether the prompt hook answered."""
+    """The person sends the test value as the next prompt of the same session (`codex exec resume <id>`). Codex sends
+    no `source` and sets no entry point, so its prompt counts as typed (C22); the Claude Code entry point of the shell
+    that started the harness is not passed on. codex exec prints no block reason, so the record in selftest.json says
+    whether the prompt hook answered."""
     import time
     import urllib.request
 
@@ -524,10 +526,12 @@ def _selftest_second_prompt(home: Path, first: str, env: dict, cwd: Path, work: 
             break
         except Exception:
             time.sleep(0.1)
+    session = (state().get("pending") or {}).get("session")
+    env2 = {k: v for k, v in env.items() if not k.startswith("CLAUDE_CODE_")}
     try:
         r = subprocess.run(["codex", "exec", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "-C",
-                            str(cwd), value], env=env, capture_output=True, text=True, timeout=180,
-                           stdin=subprocess.DEVNULL)
+                            str(cwd), "resume", str(session), value], env=env2, capture_output=True, text=True,
+                           timeout=180, stdin=subprocess.DEVNULL)
     finally:
         srv.terminate()
     (work / "codex_out2.txt").write_text(r.stdout + "\n--- stderr ---\n" + r.stderr)

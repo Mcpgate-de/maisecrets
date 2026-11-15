@@ -326,9 +326,10 @@ SCENARIOS = {
     },
     # the model runs a command whose output holds a secret
     # the self-test (maisecrets/selftest.py) in the real client: /maisecrets:status test runs the command, the
-    # PreToolUse hook registers the value, the PostToolUse hook masks it, and a second `claude -p` sends the value as
-    # the person would. The value reaches the upstream in neither run, and the prompt hook answers "Self-test passed"
-    "selftest_passes": {
+    # PreToolUse hook registers the value, and the PostToolUse hook masks it and records the tool path. A resumed
+    # `claude -p` then sends the value in the same session: a program's prompt, so the hook blocks it without a pass.
+    # The value reaches the upstream in neither run. "Self-test passed" needs a typed prompt (tests/test_selftest.py)
+    "selftest_tool_path": {
         "prompt": "/maisecrets:status test",
         "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" status test'}},
                   {"text": "done"}],
@@ -1011,8 +1012,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
 
 def _selftest_second_prompt(sc: dict, home: Path, first: str, r, settings: Path, plugin: Path, cwd: Path,
                             env: dict, work: Path) -> list[str]:
-    """The second half of the self-test: the person sends the test value as the next prompt (a second `claude -p` in
-    the same maisecrets home). Expects no request and "Self-test passed"; with no hook running, no value at all."""
+    """The second half of the self-test: the test value as the next prompt of the same session (`claude -p --resume`).
+    A prompt of `claude -p` is a program's (CLAUDE_CODE_ENTRYPOINT=sdk-cli, C22), never the person's, so the hook must
+    block it, send nothing upstream and record no pass: this run proves the tool path and the block, and the
+    "Self-test passed" answer for a typed prompt is held by tests/test_selftest.py. With no hook running, no value is
+    registered at all."""
     fails: list[str] = []
 
     def state() -> dict:
@@ -1033,11 +1037,13 @@ def _selftest_second_prompt(sc: dict, home: Path, first: str, r, settings: Path,
         fails.append("LEAK: the test value reached the upstream in the tool result")
     if not (state().get("result") or {}).get("tool"):
         fails.append("the tool-result hook recorded no pass")
+    session = (state().get("pending") or {}).get("session")
     out2 = work / "out2"
     out2.mkdir()
     srv = start_server([{"text": "unreachable"}], out2)
     try:
-        r2 = subprocess.run([shutil.which("claude") or "claude", "-p", value, "--plugin-dir", str(plugin),
+        r2 = subprocess.run([shutil.which("claude") or "claude", "-p", value, "--resume", str(session),
+                             "--plugin-dir", str(plugin),
                              "--settings", str(settings), "--permission-mode", "default", "--allowedTools", "Bash",
                              "--max-turns", "1"], cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
                             stdin=subprocess.DEVNULL)
@@ -1049,10 +1055,13 @@ def _selftest_second_prompt(sc: dict, home: Path, first: str, r, settings: Path,
         fails.append("LEAK: the test value of the prompt reached the upstream")
     elif bodies:
         fails.append("the prompt with the test value reached the upstream")
-    if "Self-test passed: the prompt hook ran, and the model did not get the value." not in r2.stdout + r2.stderr:
-        fails.append("the prompt hook did not answer 'Self-test passed'")
-    if not (state().get("result") or {}).get("prompt"):
-        fails.append("the prompt hook recorded no pass")
+    said = r2.stdout + r2.stderr
+    if "Self-test passed" in said or (state().get("result") or {}).get("prompt"):
+        fails.append("a prompt of claude -p (a program, not the person) passed the self-test")
+    if "the self-test does not count it" not in said:
+        fails.append("the prompt hook did not answer the prompt with the test value")
+    elif "came from a program" not in said:
+        fails.append("the resumed run is not the session that registered the value: " + said.strip()[-160:])
     # the client's own record of the session on disk: measured, not asserted (a hook cannot replace what the
     # client writes there before it runs)
     sids = {json.loads(pf.read_text()).get("session_id") for pf in Path(env["MAISECRETS_DUMP"]).glob("*.json")}

@@ -150,8 +150,14 @@ as typed by a human; keep such runs on a machine without a vault.
 
 ## Status and self-test: what the commands see
 
-Measured on 2026-11-15 with Claude Code 2.1.325 and codex-cli 0.169.0 (harness scenarios `selftest_passes` and
-`selftest_hooks_not_running`, `maisecrets/selftest.py`, `maisecrets/status_verdict.py`).
+Measured on 2026-11-15 with Claude Code 2.1.325 and codex-cli 0.169.0 (harness scenarios `selftest_tool_path` and
+`selftest_hooks_not_running` of `harness/run.py`, `selftest_passes` of `harness/codex.py`, `maisecrets/selftest.py`,
+`maisecrets/status_verdict.py`).
+
+- **What the harness proves.** In Codex, the whole self-test: the tool path, and the value typed into the resumed
+  session (`codex exec resume <id>`) gets "Self-test passed". In Claude Code, the tool path, and that the value sent
+  by `claude -p --resume <id>` (the same session id, measured) is blocked without a pass: a prompt of `claude -p` is a
+  program's (C22). The "passed" answer to a typed prompt of Claude Code is held by `tests/test_selftest.py` only.
 
 - **The session of a command.** Claude Code gives a command `CLAUDE_CODE_SESSION_ID`, Codex gives it
   `CODEX_THREAD_ID`; each equals the `session_id` of the hook payloads. Codex passes on the Claude Code variable of
