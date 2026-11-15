@@ -113,12 +113,25 @@ def _street_ok(v: str) -> bool:
     return bool(_STREET_LINE_RE.fullmatch(v.strip()))
 
 
+# a test or placeholder record (Musterstraße, Anytown, a fixture) and a well-known public address are no person's
+_PLACEHOLDER_RE = re.compile(
+    r"(?i)(?<![a-z])(?:muster\w*|anytown|springfield|test\w*|sample|example|fake|fixture|dummy|lorem|placeholder"
+    r"|1600 amphitheatre|1 infinite loop|one apple park|1 microsoft way|1 hacker way|410 terry ave|10 downing street"
+    r"|1600 pennsylvania|742 evergreen|suite|ste\.?(?= ?\d)|floor)(?![a-z])")
+# a place as the parent of the street: a venue, a store, a location of a business
+_PLACE_PARENT_RE = re.compile(r"(?i)[\"']?(?:venue|store|location|place|merchant|branch|site|facility)[\"']?\s*[:=]")
+
+
 def _a_business_near(text: str, a: int, b: int) -> bool:
-    """A company, an office or a public place in the record around a street key: its address stays text, as the
-    address rules leave it (the setting business_addresses mask turns these regexes off, so it is masked then)."""
+    """A company, an office or a public place in the record around a street key, a test or placeholder record, or a
+    well-known public address: its street stays text, as the address rules leave it (the setting business_addresses
+    mask turns the business regexes off; a placeholder stays text either way)."""
     from .personal import _BUSINESS_RE, _NOT_A_HOME_RE
     lo, hi = max(0, a - 300), min(len(text), b + 300)
-    return bool(_NOT_A_HOME_RE.search(text, lo, hi) or _BUSINESS_RE.search(text, lo, hi))
+    if _PLACEHOLDER_RE.search(text, lo, hi):
+        return True
+    return bool(_NOT_A_HOME_RE.search(text, lo, hi) or _BUSINESS_RE.search(text, lo, hi)
+                or _PLACE_PARENT_RE.search(text, lo, a))
 
 
 def hits(text: str) -> list:

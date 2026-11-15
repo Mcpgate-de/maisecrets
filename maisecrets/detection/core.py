@@ -2951,7 +2951,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             labelled = rule.type == "SECRET" and form != "shape"
             # a seed phrase is compared in one form: its words with one space between them
             as_published = " ".join(_WORD_RE_ANY.findall(secret)) if "seed-phrase" in filters else secret
-            if is_public_test_value(as_published, rule.type) and not labelled or _pv.no_person_value(secret, rule.type):
+            if _pv.no_person_value(secret, rule.type) or is_public_test_value(as_published, rule.type) and not labelled:
                 # a documented test card, key or number that a shape rule found. A published key that a label assigns
                 # (PROD_PASSWORD=<the Stripe docs key>) is used as a credential and stays a hit: being public does not
                 # make the same bytes no secret there (review of 0.6.12). The label rules run first, so no later rule

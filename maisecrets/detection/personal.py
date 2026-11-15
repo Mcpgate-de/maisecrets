@@ -2603,9 +2603,10 @@ def _compact_birth_date(v: str) -> bool:
 
 
 def _past_year(date: str) -> bool:
-    """A birth date lies before this year: a date of this year or later is an event, a release, a deadline."""
+    """A birth date lies before this year (a date of this year or later is an event, a release, a deadline) and after
+    the year 1000 (0001-01-01 is the zero time of Go and .NET in API JSON)."""
     years = re.findall(r"(?<!\d)(\d{4})(?!\d)", date)
-    return not years or int(years[-1]) < _host().this_year()
+    return not years or 1000 <= int(years[-1]) < _host().this_year()
 
 
 def _own_user() -> str:
