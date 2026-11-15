@@ -23,7 +23,7 @@ import time
 import sys
 from typing import Any
 
-from . import check_value, detect, incidents, rehydration, term_files, value_files
+from . import check_value, detect, incidents, not_a_secret, rehydration, term_files, value_files
 from .lazy_regex import LazyRx as _LazyRx
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
@@ -834,7 +834,7 @@ def rewrite_prompt(payload: dict) -> dict:
     if "<task-notification>" in prompt:
         return {}
     # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
-    if term_files.parse_command(prompt) or value_files.parse_removal(prompt):
+    if term_files.parse_command(prompt) or value_files.parse_removal(prompt) or not_a_secret.parse(prompt):
         return {}
     # a settings prompt and the ssh grant sentence are the person's controls: the hook reads them before the detector,
     # and the mod must not rewrite a word of them first (an imported or listed value would break the control; Gate A
@@ -1017,6 +1017,10 @@ def user_prompt(payload: dict) -> dict:
         # a subagent's prompt is no prompt of the person (as for the marker below)
         from .terms import command_answer
         return command_answer(payload, term_cmd, typed and not payload.get("agent_id"), cfg)
+    # /maisecrets:not-a-secret KEY (not_a_secret.py): makes detection weaker, so only the person's typed prompt counts
+    nas = not_a_secret.parse(prompt)
+    if nas:
+        return not_a_secret.answer(payload, nas, typed and not payload.get("agent_id"), client_of(payload))
     # /maisecrets:forget import:ID (Codex: maisecrets: forget import:ID): the only way an import of values is removed
     # (C26). It makes detection weaker, so only the person's typed prompt counts, and a tool call that carries it is
     # refused (_pre_bash). Before the detector: an imported value never masks the prompt that removes it
@@ -1706,6 +1710,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _deny(_SETTINGS_IN_A_COMMAND)
     if value_files.removal_in_command(command):
         return _deny(value_files.IN_A_COMMAND)
+    if not_a_secret.in_a_command(command):
+        return _deny(not_a_secret.IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
                                            re.I):
@@ -2383,6 +2389,8 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
         return _deny(_SETTINGS_IN_A_COMMAND)
     if value_files.removal_in_command(command):
         return _deny(value_files.IN_A_COMMAND)
+    if not_a_secret.in_a_command(command):
+        return _deny(not_a_secret.IN_A_COMMAND)
     if _HOOK_ENTRY_TEXT_RE.search(command):
         # PowerShell has no word parser here: any mention of a hook entry with its event is refused
         return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
@@ -2759,7 +2767,8 @@ def post_tool(payload: dict) -> dict:
         "systemMessage": f"maisecrets masked {hit['n']} value(s) in this {tool} "
                          f"result before the AI saw it: {shown}."
                          + (f" It also removed {hidden['n']} invisible character(s)." if hidden["n"] else "")
-                         + (f" {swap[2]}" if swap else ""),
+                         + (f" {swap[2]}" if swap else "")
+                         + not_a_secret.hint(entries),
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "updatedToolOutput": new_response,
