@@ -1,0 +1,17 @@
+# placeholder person names of documentation and tests (lower case).
+# One entry per line. Read by maisecrets/detection/wordlists.py (#54).
+alice
+bob
+erika mustermann
+jane doe
+jane roe
+jane smith
+joe bloggs
+john doe
+john q. public
+john smith
+maria musterfrau
+max muster
+max mustermann
+otto normalverbraucher
+richard roe

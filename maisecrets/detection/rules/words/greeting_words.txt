@@ -1,0 +1,22 @@
+# greetings and salutations that are no person alone (lower case).
+# One entry per line. Read by maisecrets/detection/wordlists.py (#54).
+bonjour
+cheers
+ciao
+danke
+dear
+grüezi
+hallo
+hej
+hello
+hey
+hi
+hoi
+hola
+liebe
+lieben
+lieber
+moin
+salut
+servus
+thanks

@@ -30,15 +30,14 @@ from .street_forms import street_number_last
 from .id_labels import _ID_DATE_RE, _ID_RE, _ID_WORDS
 from .text_index import field_end, field_start
 from .phone_forms import _DE_CALL_REGIONS, _PHONE_DE_CUE_RE, _PHONE_DE_NEXT_RE, _e164_without_plus, intl_after_cue
+from .wordlists import words as _words
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
     "PHONE"
 
 # documentation names: a value that is one of them is an example, not a person
-PLACEHOLDER_NAMES = frozenset({"jane doe", "john doe", "max mustermann", "erika mustermann", "john smith",
-                               "jane smith", "joe bloggs", "john q. public", "richard roe", "jane roe",
-                               "max muster", "maria musterfrau", "otto normalverbraucher", "alice", "bob"})
+PLACEHOLDER_NAMES = _words("placeholder_names")
 
 # ------------------------------------------------------------------------------- phone with one-digit groups --
 # the phone rule of detect.py wants groups of two digits or more after the country code: "+1 4 15 22 3344" and
@@ -84,32 +83,7 @@ _BIRTH_RE = _LazyRx(r"(?i)(?:\bd\.?o\.?b\b|date[ _-]?of[ _-]?birth|birth[ _-]?da
 _URL_USER_RE = _LazyRx(r"://([^:/?#\s@\[\]]{1,64}):[^@\s/]{1,128}@")
 _HOME_USER_RE = _LazyRx(r"(?:/home/|/Users/|[A-Za-z]:\\\\?Users\\\\?)([A-Za-z][A-Za-z0-9._-]{1,31})(?=[/\\])")
 # service accounts and the words of documentation: no person
-SERVICE_USERS = frozenset({
-    "root", "runner", "ubuntu", "user", "admin", "shared", "public", "default", "ec2-user", "git", "node", "app",
-    "vscode", "jenkins", "gitlab-runner", "circleci", "travis", "docker", "dev", "developer", "me", "you",
-    "username", "yourname", "your-user", "your_user", "name", "foo", "bar", "test", "pi", "linuxbrew", "runneradmin",
-    "builder", "build", "ci", "www-data", "nobody", "postgres", "mysql", "jovyan", "vagrant", "centos", "fedora",
-    "debian", "alpine", "azureuser", "opc", "cloud-user", "core", "steam", "guest", "administrator", "all users",
-    "default user", "defaultapppool", "localservice", "networkservice", "systemprofile", "redis", "elastic",
-    "oracle", "sa", "deploy", "deployer", "ansible", "github", "gitlab", "bitbucket", "bamboo", "teamcity",
-    "buildkite", "buildbot", "actions", "codespace", "gitpod", "coder", "workspace", "sandbox", "tester", "demo",
-    "example", "sample", "someone", "somebody", "john", "jane", "alice", "bob", "x", "xxx", "home", "users",
-    "anonymous", "anon", "apikey", "api", "api_key", "token", "oauth", "oauth2", "x-access-token", "x-token-auth",
-    "x-oauth-basic", "bearer", "key", "secret", "pass", "password", "login", "account", "service", "client",
-    "nonroot", "airflow", "rstudio", "rocky", "kali", "vsts", "keycloak", "rabbitmq", "kubeadmin", "aws", "gcp",
-    "azure", "wordpress", "gitlab-ci-token", "personalaccesstoken", "jupyter", "spark", "hadoop", "kafka",
-    "zookeeper", "grafana", "prometheus", "nginx", "apache", "httpd", "tomcat", "minio", "gitea", "sonar",
-    "sonarqube", "nexus", "odoo", "ftp", "mail", "www", "web", "backup", "ops", "devops", "cloud", "ubuntu-server",
-    "arch", "manjaro", "suse", "opensuse", "kubernetes", "k8s", "pi", "postgresql", "mongodb", "mongo", "mariadb",
-    "couchdb", "neo4j", "influxdb", "clickhouse", "sentry", "superset", "metabase", "n8n", "frappe", "erpnext",
-    "dependabot", "renovate", "github-actions", "travis-ci", "drone", "woodpecker", "argocd", "flux", "vault",
-    "consul", "nomad", "terraform", "packer", "bitnami", "daemon", "bin", "sys", "sync", "games", "man", "lp",
-    "news", "uucp", "proxy", "list", "irc", "gnats", "systemd-network", "messagebus", "sshd", "chrony", "ntp",
-    "oai", "readonly", "read_only", "reader", "writer", "readwrite", "migration", "migrations", "migrator",
-    "replication", "replicator", "repl", "monitor", "monitoring", "metrics", "exporter", "healthcheck", "probe",
-    "owner", "dbo", "dbadmin", "dba", "superuser", "su", "operator", "scheduler", "etl", "analytics", "report",
-    "reporting", "integration", "webhook", "smtp", "imap", "noreply", "no-reply", "relay", "upload", "download",
-})
+SERVICE_USERS = _words("service_users")
 # a user name that a tool or an image creates, not a person: appuser, app_user, mambauser, seluser, pwuser, user1
 _SERVICE_USER_RE = _LazyRx(r"(?i)^(?:.{0,12}[-_]?user\d*|user[-_]?\d+|.{0,20}(?:bot|svc|service|admin|runner|"
                            r"agent|daemon|worker|deploy|build)(?:[-_]?\d+)?|[a-z]{1,3}\d+|.*\[bot\])$")

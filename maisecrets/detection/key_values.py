@@ -4,6 +4,7 @@ these forms. Kept out of core.py and personal.py, which are at the size limit of
 from __future__ import annotations
 
 import re
+from .wordlists import words as _words
 
 from .lazy_regex import LazyRx as _LazyRx
 
@@ -68,8 +69,7 @@ _ID_VALUE = r"([A-Za-z0-9](?:[A-Za-z0-9]|[ -](?=[A-Za-z0-9])){3,24})"
 # a key that holds the street line of a postal address (Cloakroom 1.4.0 rules.py:134-138): street, address_line1,
 # addressLine1, billing_street. The value must be a street line (personal._STREET_LINE_RE)
 _STREET_WORDS = ("street", "address_line", "addressline", "address1", "address_1", "address-line")
-_STREET_KEYS = frozenset({"street", "streetaddress", "streetline", "addressline1", "addressline", "address1",
-                          "billingstreet", "shippingstreet", "homestreet", "mailingstreet", "streetline1"})
+_STREET_KEYS = _words("street_keys")
 _STREET_VALUE = r"([0-9A-Za-zÀ-ÿ][^\"'`<>\n,;|]{4,60})"
 # a literal that an expression joins with more: password = "…" + os.environ["PW_SUFFIX"] is a part of the value
 _JOINED_RE = re.compile(r"[\"'`][ \t]*(?:\+|\|\||\.[ \t]|~)")

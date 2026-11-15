@@ -1,0 +1,15 @@
+# button and UI label words that are no person alone (lower case).
+# One entry per line. Read by maisecrets/detection/wordlists.py (#54).
+accept
+allow
+approve
+cancel
+decline
+delete
+deny
+login
+logout
+reject
+reset
+save
+submit

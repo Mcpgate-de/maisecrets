@@ -1,0 +1,10 @@
+# words of a test runner's or a build's summary line that are no person alone (lower case).
+# One entry per line. Read by maisecrets/detection/wordlists.py (#54).
+collected
+errors
+failed
+finished
+passed
+ran
+skipped
+warnings
