@@ -585,18 +585,18 @@ def is_no_person(span: str) -> bool:
     return is_product_name(span) or word in GREETING_WORDS or word in UI_LABEL_WORDS
 
 
-# a legal form or a company word in its usual spelling, as the last word of a name span or right after it (#46: the
-# name service took 155 of 471 company names of the Mendeley sample for persons). Case-sensitive: the surnames Sa,
-# Se, Ag and Kg stay names
-_COMPANY_TAIL = (r"(?:GmbH|mbH|AG|UG|KG|OHG|GbR|SE|SAS|SARL|S\.A\.|S\.r\.l\.|B\.V\.|N\.V\.|Inc\.?|Corp\.?|LLC|LLP"
-                 r"|Ltd\.?|Limited|PLC|plc|Group|Holdings|(?:&|and)[ \t]+Sons|&[ \t]*Co\.?(?:[ \t]+KG)?)")
-_COMPANY_END_RE = re.compile(r"(?:^|[ \t,])" + _COMPANY_TAIL + r"[ \t,.]*$")
-_COMPANY_AFTER_RE = re.compile(r",?[ \t]+" + _COMPANY_TAIL + r"(?![A-Za-z])")
+# a legal form that is never a job title, an initial or a short word of another meaning, in its usual spelling, as
+# the last word of a name span or right after it (#46: the name service took company names of the Mendeley sample for
+# persons). Not SE, AG, KG, Group, S.A. or N.V.: "Jane Doe, SE at Acme", "Hi Tom, Group chat", "Raghav N.V. Rao" are
+# persons (Gate A of #46); no comma before it and no hyphen after it ("Herr Mueller AG-Leiter")
+_COMPANY_TAIL = r"(?:GmbH|mbH|LLC|LLP|Ltd\.?|Inc\.?|Corp\.?|Limited|PLC|plc)"
+_COMPANY_END_RE = re.compile(_COMPANY_TAIL + r"$")
+_COMPANY_AFTER_RE = re.compile(r"[ \t]+" + _COMPANY_TAIL + r"(?![\w-])")
 
 
 def is_company_name(text: str, start: int, end: int) -> bool:
-    """Whether the NAME span text[start:end] names a company: it ends in a legal form or a company word (Ltd, LLC,
-    GmbH, Group, and Sons), or one follows it ("Becker-Lindqvist, Ltd"). Public since 0.9.11: a caller that applies the
+    """Whether the NAME span text[start:end] names a company: it ends in a legal form (Ltd, LLC, GmbH, Inc), or one
+    follows it ("Becker-Lindqvist Ltd"). Public since 0.9.11: a caller that applies the
     spans itself drops these too (#46)."""
     return bool(_COMPANY_END_RE.search(text, start, end) or _COMPANY_AFTER_RE.match(text, end))
 
