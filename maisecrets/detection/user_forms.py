@@ -36,11 +36,11 @@ def user_names(text: str) -> list:
         return []
     from .core import _word_set
     from .personal import _username_value_ok
-    known = _word_set()
     out = []
 
     def keep(v: str, a: int, b: int) -> None:
-        if _username_value_ok(v, False, " ") and _handle_ok(v, known):
+        # the word list loads only for a candidate value: a text with the word `user` and no value loads nothing
+        if _username_value_ok(v, False, " ") and _handle_ok(v, _word_set()):
             out.append((a, b))
     for pos in sorted(starts):
         before = low[max(0, pos - 9):pos].split()
