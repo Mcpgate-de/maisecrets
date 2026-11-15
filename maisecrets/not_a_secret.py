@@ -9,15 +9,19 @@ the vocabulary does not know) needs the same typed command twice within CONFIRM_
 `/maisecrets:not-a-secret undo ID` (Codex: `maisecrets: undo not a secret ID`) takes an allowance back. The ID is the
 key the value had (a key is never given twice, so it stays unique after the entry is gone); /maisecrets:list shows
 each allowance with its ID, its type, its date and the masked form. The record (ALLOWED) keeps no value: the masked
-form and the fingerprint of the vault (Vault.fingerprint), which finds the line again in allow.txt. A comment line
-above the value names the ID too, for the person and for an undo after a wipe made a new fingerprint key.
+form and a salted hash (_digest), which outlives a wipe of the store. Undo deletes only the line directly under the
+comment line `# not-a-secret ID` and only when its hash matches, so a line the person wrote stays. A value that was on
+the list before gets no record: that line is the person's.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import time
+
+from pathlib import Path
 
 from .home import HOME, atomic_write
 from .lazy_regex import LazyRx as _LazyRx      # compiled at first use: a hook imports this module on every call
@@ -104,6 +108,22 @@ def _fits_a_line(value: str) -> bool:
             and not value.startswith("#") and not value.lower().startswith("rule:"))
 
 
+def _digest(salt: str, text: str) -> str:
+    """The salted hash of a line, which finds it again at undo. It tells nothing that allow.txt next to it does not
+    hold in clear, and a wipe of the store leaves it valid (the vault fingerprint key does not)."""
+    return hashlib.sha256((salt + "\0" + text).encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _already(value: str) -> bool:
+    """The value is a line of allow.txt already (the person wrote it): it is not written twice, and gets no record."""
+    from .user_rules import ALLOW_FILE
+    try:
+        old = ALLOW_FILE.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return False
+    return value in {line.strip() for line in old.splitlines()}
+
+
 def _append(rid: str, value: str) -> None:
     """The value as one line of allow.txt, with a comment line above it. Appended (0600 when new), so the lines the
     person wrote stay as they are, and a symlink stays a symlink."""
@@ -113,12 +133,18 @@ def _append(rid: str, value: str) -> None:
         old = ALLOW_FILE.read_bytes()
     except FileNotFoundError:
         old = b""
-    if value in {line.strip() for line in old.decode("utf-8", "replace").splitlines()}:
-        return                         # already allowed by the person: the record still lets undo find it
     head = b"" if not old or old.endswith(b"\n") else b"\n"
     fd = os.open(ALLOW_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "ab") as f:
         f.write(head + f"{MARK}{rid} {time.strftime('%Y-%m-%d')}\n{value}\n".encode("utf-8"))
+
+
+def _inside_home() -> bool:
+    """allow.txt (through any link) lies in the maisecrets home. A link to a shared or team file would carry the
+    value there in clear."""
+    from .user_rules import ALLOW_FILE
+    home = os.path.realpath(HOME)
+    return os.path.commonpath([home, os.path.realpath(ALLOW_FILE)]) == home
 
 
 def _new_id(key: str, taken: dict) -> str:
@@ -150,6 +176,10 @@ def allow_typed(key: str, session: str | None, route: str, cfg: dict | None = No
         return (f"maisecrets: {key} has expired, so its value is no longer stored and cannot go on the allow list. "
                 "Nothing was changed.")
     shown = f"{key} ({meta.get('display')})" if meta.get("display") else key
+    if needs_confirmation(type_) and not _inside_home():
+        return (f"maisecrets: your allow list is a link to a file outside the maisecrets folder, and {shown} is a key "
+                "type: its value would be written there in clear. Nothing was changed. Make allow.txt a file of your "
+                f"own, or delete the value with /maisecrets:forget {key}.")
     if needs_confirmation(type_) and not _confirmed(key, session):
         from .notices import type_word
         return (f"maisecrets: {shown} is {type_word(type_)}, a key type. Type the command again within "
@@ -160,16 +190,21 @@ def allow_typed(key: str, session: str | None, route: str, cfg: dict | None = No
     if not _fits_a_line(value):
         return (f"maisecrets: the value of {shown} cannot be one line of the allow list (it has a line break, a space "
                 f"at an end, or starts with # or rule:). Nothing was changed; /maisecrets:forget {key} deletes it.")
-    fp = v.fingerprint(value)
     if v.forget(key, route=route) != "ok":
         return f"maisecrets: the store refused to delete {key}. Nothing was changed."
     from . import events
     try:
         with _lock():
+            if _already(value):
+                _reset()
+                return (f"maisecrets: {shown} is deleted from the store. Its exact value is a line you wrote in your "
+                        "allow list already, so maisecrets does not mask it; to mask it again, delete that line.")
             taken = records()
             rid = _new_id(key, taken)
             _append(rid, value)
-            taken[rid] = {"key": key, "type": type_, "display": meta.get("display"), "fp": fp, "t": int(time.time())}
+            salt = os.urandom(16).hex()
+            taken[rid] = {"key": key, "type": type_, "display": meta.get("display"), "salt": salt,
+                          "hash": _digest(salt, value), "t": int(time.time())}
             atomic_write(ALLOWED, json.dumps(taken, indent=1))
     except OSError as exc:
         return (f"maisecrets: {key} was deleted, but the allow list could not be written ({type(exc).__name__}), so "
@@ -199,11 +234,11 @@ def _confirmed(key: str, session: str | None) -> bool:
 
 
 def undo_typed(rid: str, cfg: dict | None = None) -> str:
-    """Take the allowance `rid` back: its value line (found by the fingerprint, or under its comment line) and the
-    comment line leave allow.txt, and the record goes. The value is masked again when a rule or the name service
-    finds it; it is no stored value any more, so nothing hunts it."""
+    """Take the allowance `rid` back: the line directly under its comment line, when its hash matches, leaves
+    allow.txt with the comment line, and the record goes. A matching line anywhere else may be the person's own: then
+    nothing changes and the answer says how to remove it by hand. The value is masked again when a rule or the name
+    service finds it; it is no stored value any more, so nothing hunts it."""
     from .user_rules import ALLOW_FILE
-    from .vault import Vault
     with _lock():
         taken = records()
         rec = taken.get(rid)
@@ -215,25 +250,31 @@ def undo_typed(rid: str, cfg: dict | None = None) -> str:
             lines = []
         except (OSError, UnicodeDecodeError) as exc:
             return f"maisecrets: the allow list cannot be read ({type(exc).__name__}). Nothing was changed."
-        v = Vault(cfg)
-        keep, gone, after_mark = [], 0, False
-        for line in lines:
-            text = line.strip()
-            if text.startswith(MARK.strip() + " ") and text.split()[2:3] == [rid]:
-                after_mark = True
+        salt, want = str(rec.get("salt", "")), rec.get("hash")
+        shown = f"{rid} ({rec.get('display')})" if rec.get("display") else rid
+
+        def mark(text: str) -> bool:
+            return text.startswith(MARK.strip() + " ") and text.split()[2:3] == [rid]
+
+        keep, gone, i = [], 0, 0
+        while i < len(lines):
+            if mark(lines[i].strip()) and i + 1 < len(lines) and _digest(salt, lines[i + 1].strip()) == want:
+                gone, i = gone + 1, i + 2
                 continue
-            if text and not text.startswith("#") and (after_mark or v.fingerprint(text) == rec.get("fp")):
-                gone += 1
-                after_mark = False
-                continue
-            after_mark = after_mark and not text
-            keep.append(line)
+            keep.append(lines[i])
+            i += 1
+        if not gone:
+            if any(_digest(salt, x.strip()) == want for x in lines):
+                return (f"maisecrets: the line of {shown} no longer stands directly under its comment line "
+                        f"`{MARK}{rid}`, so it may be a line you wrote. The value is still on your allow list and is "
+                        f"not masked. Nothing was changed. To mask it again, delete that line from {ALLOW_FILE}, then "
+                        "send this command again.")
+            keep = [x for x in lines if not mark(x.strip())]
         if len(keep) != len(lines):
-            atomic_write(ALLOW_FILE.resolve(), "".join(keep))     # through a symlink to the file it names
+            atomic_write(Path(os.path.realpath(ALLOW_FILE)), "".join(keep))   # through a link to the file it names
         del taken[rid]
         atomic_write(ALLOWED, json.dumps(taken, indent=1))
     _reset()
-    shown = f"{rid} ({rec.get('display')})" if rec.get("display") else rid
     if not gone:
         return (f"maisecrets: the allowance {shown} is taken back; its line was no longer in your allow list. "
                 "maisecrets masks the value again where it finds it.")
@@ -271,9 +312,11 @@ def answer(payload: dict, cmd: tuple, typed: bool, client: str) -> dict:
 # ------------------------------------------------------------ what the person reads --
 def hint(entries: list) -> str:
     """One short hint for the line that tells the person what was masked: the key when there is one, else KEY. None
-    for the values the person chose (a term, an import)."""
+    for the values the person chose (a term, an import) and for a key type: the model can make that line appear, and
+    it should never read as an invitation to unmask a secret."""
     keys = list(dict.fromkeys(e.key for e in entries if getattr(e, "key", None)
-                              and not str(getattr(e, "kind", "")).startswith(("term:", "import:"))))
+                              and not str(getattr(e, "kind", "")).startswith(("term:", "import:"))
+                              and not needs_confirmation(str(getattr(e, "type", "")))))
     if not keys:
         return ""
     return f" Wrong? Type /maisecrets:not-a-secret {keys[0] if len(keys) == 1 else 'KEY'}"
