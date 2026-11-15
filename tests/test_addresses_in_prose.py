@@ -32,7 +32,7 @@ class AddressesInProseTests(unittest.TestCase):
                      "Jane Roe from Cook Inc, residing at 5169 Orbek Varga\nNorth Amy, NC 30271",
                      "She lives at 77 Oak Lane\nDover, DE 19901",
                      "- Street Address: 62238 Kristen Haven Suite 305", "Street Address: 900 Rivera Lakes",
-                     "a resident of 12 Hatfield Meadows", "domiciliado en Calle Mayor 5, Madrid",
+                     "a resident of 12 Hatfield Road", "domiciliado en Calle Mayor 5, Madrid",
                      "residente in Via Roma 12, Torino", "woonachtig op Kerkstraat 12"):
             with self.subTest(text=text):
                 self.assertTrue(addresses(text))
@@ -42,7 +42,10 @@ class AddressesInProseTests(unittest.TestCase):
                      "Our office is at 12 Main Street\nSpringfield, IL 62704", "We went to 12 Hills yesterday",
                      "There are 3 Ways to do it", "Address: 5 Point", "the 4 Walks of life",
                      "con sede legale in Via della Pace 12, Roma", "a resident of the city for 20 years",
-                     "resident in 3 countries", "the resident 3 Bears"):
+                     "resident in 3 countries", "the resident 3 Bears", "The cache lives at 1 Shared Point",
+                     "The data is located in 3 Isolated Islands", "the key lives in 2 Vault Ways",
+                     "The bug resides in 2 Hidden Fields", "the file is located in 4 Config Bridge",
+                     '{"venue": "north", "note": "x", "street": "42 Mill Lane", "city": "Dover"}'):
             with self.subTest(text=text):
                 self.assertEqual([], addresses(text))
 

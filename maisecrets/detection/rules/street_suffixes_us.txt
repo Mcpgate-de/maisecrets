@@ -1,7 +1,8 @@
 # The street suffixes of the United States Postal Service (Publication 28, Appendix C1, the primary names), one per
-# line. personal._STREET_LINE reads them: a street line after an address label or key may end in any of them
-# (62238 Kristen Haven Suite 305). Only there: many of them are ordinary words (Park, Run, Walk), so prose rules keep
-# their short list. Add a suffix as one line; the false alarms of the full splits are measured before a merge.
+# line. personal._STREET_LINE reads them: a street line after an address label or under an address key may end in
+# any of them (62238 Kristen Haven Suite 305). Not after a prose cue (lives at, located in: _STREET_LINE_SHORT): many
+# of them are ordinary words (Point, Keys, Fields). Add a suffix as one line; the false alarms of the full splits are
+# measured before a merge.
 Alley
 Annex
 Arcade

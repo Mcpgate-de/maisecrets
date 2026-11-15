@@ -1764,7 +1764,7 @@ _USPS = "|".join(x.strip() for x in (_Path(__file__).parent / "rules" / "street_
     encoding="utf-8").splitlines() if x.strip() and not x.startswith("#"))
 _STREET_LINE = (r"(?:\d{1,6}[A-Za-z]?(?:-\d{1,4})? (?:(?:[A-Z][A-Za-z'.-]{0,30}|\d{1,3}(?:st|nd|rd|th)) ){1,4}"
                 r"(?:" + _STREET[3:-1]
-                + r"|Circle|Cir|Parkway|Pkwy|Trail|Trl|Loop|Pike|Alley|Grove|Gardens|Heights|Mews|" + _USPS + r")\.?"
+                + r"|Circle|Cir|Parkway|Pkwy|Trail|Trl|Loop|Pike|Alley|Grove|Gardens|Heights|Mews{USPS})\.?"
                 # a direction after the street type and a unit, also without a unit word (Main St SW, Oak Ave 12B,
                 # Elm Rd N Ste A): only where the value ends right after it, so a number of the sentence stays out
                 r"(?:(?: " + _STREET_DIRECTION + r")?"
@@ -1788,6 +1788,10 @@ _STREET_LINE_EU = (r"(?:[A-ZÅÄÖ][\wåäöé-]{1,40}(?:straat|laan|gracht|plei
                    r"(?:(?:de la|de l'|des|du|de|d'|la|le|les) ?)?[A-ZÀ-Þ][\wà-ÿ'’-]{1,30}"
                    r"(?: [A-ZÀ-Þ][\wà-ÿ'’-]{1,30}){0,3}"
                    r")(?![\w-])")
+# the long form (the USPS suffixes) after an address label or key; the short one after a prose cue (lives at,
+# located in), where Point, Keys or Fields end ordinary sentences (Gate A: "the cache lives at 1 Shared Point")
+_STREET_LINE_SHORT = _STREET_LINE.replace("{USPS}", "")
+_STREET_LINE = _STREET_LINE.replace("{USPS}", "|" + _USPS)
 _STREET_LINE_RE = _lazy(_STREET_LINE)
 # a company, a supplier or a legal form in the record before an EU street form: a business's address
 _EU_BUSINESS_RE = _lazy(r"(?i)(?<![a-z])(?:fornitore|azienda|societ[aà]|ditta|proveedor|empresa|entreprise"
@@ -1803,7 +1807,7 @@ _STREET_LABEL_RE = _lazy(
     # a place word before a street line: the property located at, situated at (the company check below holds)
     r"|located|situated|property)"
     r"(?: (?:at|in|on|of|en|op|på|aan|im|am|in der|an der))?[ \t]{1,3}"
-    r"(?-i:(" + _STREET_LINE + "|" + _STREET_LINE_EU + "))")
+    r"(?-i:(" + _STREET_LINE_SHORT + "|" + _STREET_LINE_EU + "))")
 
 
 def _eu_street_ok(text: str, a: int, b: int) -> bool:
