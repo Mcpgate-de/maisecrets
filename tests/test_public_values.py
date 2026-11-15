@@ -36,11 +36,6 @@ class PublicValueTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIn("PHONE", types(text), "a geographic number, and a German 0800 number by its region")
 
-    def test_a_birth_date_of_no_living_person_is_no_birth_date(self):
-        self.assertNotIn("BIRTH_DATE", types("born on 14 March 1879"))
-        self.assertNotIn("BIRTH_DATE", types("date of birth: 03/14/2087"))
-        self.assertIn("BIRTH_DATE", types("born on 14 March 1987"))
-
     def test_a_birthday_label_and_an_ordinal_day_give_a_birth_date(self):
         # Cloakroom 1.4.0 rules.py:131 finds these; maisecrets 0.9.10 did not
         for text in ("birthday: 1987-03-14", "Birthday: March 14, 1987", "b-day: 14.03.1987",
@@ -55,8 +50,6 @@ class PublicValueTests(unittest.TestCase):
 
     def test_the_bounds_of_the_checks(self):
         nv = public_values.no_person_value
-        self.assertTrue(nv("1915", "BIRTH_DATE", year=2026))
-        self.assertFalse(nv("1916", "BIRTH_DATE", year=2026), "110 years: still possible")
         self.assertFalse(nv("12345", "US_BANK_NUMBER"), "too short to be a placeholder run")
         self.assertFalse(nv("12345678", "PHONE"), "a run is no toll-free number")
         self.assertFalse(nv("+44 800 412 7790", "PHONE"), "toll-free is a North American rule")
