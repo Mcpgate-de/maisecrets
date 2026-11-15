@@ -1809,7 +1809,9 @@ twice within 2 minutes. Only your typed prompt counts: a subagent, a program,
 a scheduled prompt, another session or a tool call changes nothing.
 `/maisecrets:list` shows each such allowance with its key, type, date and
 masked form; `/maisecrets:not-a-secret undo KEY` (Codex: `maisecrets: undo
-not a secret KEY`) takes it back. The line that tells you what was masked
+not a secret KEY`) takes it back. Undo deletes only the line it wrote, directly under its
+comment line; a line you wrote yourself stays, and the answer says so when it
+cannot tell the two apart. The line that tells you what was masked
 ends with this hint.
 
 ## PDFs and images
