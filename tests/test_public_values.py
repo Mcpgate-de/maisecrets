@@ -41,6 +41,18 @@ class PublicValueTests(unittest.TestCase):
         self.assertNotIn("BIRTH_DATE", types("date of birth: 03/14/2087"))
         self.assertIn("BIRTH_DATE", types("born on 14 March 1987"))
 
+    def test_a_birthday_label_and_an_ordinal_day_give_a_birth_date(self):
+        # Cloakroom 1.4.0 rules.py:131 finds these; maisecrets 0.9.10 did not
+        for text in ("birthday: 1987-03-14", "Birthday: March 14, 1987", "b-day: 14.03.1987",
+                     '{"birthday": "1987-03-14"}',
+                     "born on 14th March 1987", "born on March 14th, 1987", "DOB: 14th Mar 1987"):
+            with self.subTest(text=text):
+                self.assertIn("BIRTH_DATE", types(text))
+        for text in ("birthday: tomorrow", "birthday party on 2026-11-20", "the 4th quarter 2020 report",
+                     "birthday_reminder_at: 2026-03-14", "birthdays: 3"):
+            with self.subTest(text=text):
+                self.assertNotIn("BIRTH_DATE", types(text))
+
     def test_the_bounds_of_the_checks(self):
         nv = public_values.no_person_value
         self.assertTrue(nv("1915", "BIRTH_DATE", year=2026))
