@@ -106,6 +106,24 @@ class BusinessNumberTests(unittest.TestCase):
                 self.assertIn(("id-number-after-label", ID), kinds(text))
 
 
+class StreetAfterAKeyTests(unittest.TestCase):
+    # Cloakroom 1.4.0 rules.py:134-138 reads the street line under these keys; 0.9.10 did not
+    def test_a_street_line_under_a_street_key(self):
+        for text in ('{"street": "12 Branston Lane"}', '{"address_line1": "19 Elm Grove"}',
+                     "address_line_1: 19 Elm Grove",
+                     '{"addressLine1": "742 Evergreen Terrace"}', '{"billing_street": "42 Mill Lane"}',
+                     '{"street": "Hauptstraße 5"}'):
+            with self.subTest(text=text):
+                self.assertIn("address-after-key", [k for k, _v in kinds(text)])
+
+    def test_no_street_line_or_a_business_record_stays_text(self):
+        for text in ('{"street": "main"}', '{"street": "Elm Grove"}', "street: 100 users online",
+                     '{"street_name": "Elm Grove"}', '{"company": "Acme Inc", "street": "42 Mill Lane"}',
+                     '{"warehouse": "north", "street": "42 Mill Lane"}', '{"line1": "42 Mill Lane"}'):
+            with self.subTest(text=text):
+                self.assertNotIn("address-after-key", [k for k, _v in kinds(text)])
+
+
 class KeyFoldingTests(unittest.TestCase):
     def test_a_key_without_case_separators_and_apostrophes(self):
         for key in ("driver&#x27;s-license", "Driver's License", "driver&apos;s_license", "DRIVING-LICENCE"):
