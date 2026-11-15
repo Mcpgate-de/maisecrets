@@ -216,6 +216,15 @@ SCENARIOS = {
         "expect_file": ("used.txt", "<missing>"),
         "expect_text": "Codex cannot ask",
     },
+    # the self-test (maisecrets/selftest.py): the command's output reaches the model with the placeholder only, and a
+    # second `codex exec` sends the value as the person would: blocked, no request, and the prompt hook records it
+    "selftest_passes": {
+        "prompt": "maisecrets: status test",
+        "turns": [{"exec": _js('bash "{plugin}/hooks/run.sh" status test')}, {"text": "done"}],
+        "expect_placeholder": "\u27e6SELFTEST\u27e7",
+        "selftest": True,
+        "command_home": True,
+    },
     # vault references in Codex, three sessions against harness/vault_server.py (run_vault_refs)
     "vault_refs": {
         "custom": True,
@@ -309,6 +318,10 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         # (codex-cli 0.158.0, measured 2026-09-28: "MCP tool call requires approval")
         cfg += (f'[mcp_servers.{server}]\ncommand = {json.dumps(spec["command"])}\nargs = {json.dumps(spec["args"])}\n'
                 'default_tools_approval_mode = "approve"\n')
+    if sc.get("command_home"):
+        # Codex drops every variable whose name holds SECRET from a command's environment (shell_environment_policy,
+        # default excludes), so a maisecrets command would read the default home and not this one
+        cfg += f'[shell_environment_policy]\nset = {{ MAISECRETS_HOME = {json.dumps(str(home))} }}\n'
     (codex_home / "config.toml").write_text(cfg)
     if sc.get("dump"):
         # record every tool payload the real client sends (values masked by the shared detector): the
@@ -344,7 +357,11 @@ def run_scenario(name: str, sc: dict) -> list[str]:
     last = work / "last.txt"
     srv = None
     if not REAL:
-        (out / "scenario.json").write_text(json.dumps({"turns": sc.get("turns", [{"text": "unreachable"}])}))
+        installed = sorted(p.parent.parent for p in (codex_home / "plugins" / "cache").rglob("hooks/hooks.json"))
+        turns = json.dumps(sc.get("turns", [{"text": "unreachable"}]))
+        if installed:
+            turns = turns.replace("{plugin}", json.dumps(installed[0].as_posix())[1:-1])
+        (out / "scenario.json").write_text(json.dumps({"turns": json.loads(turns)}))
         srv = subprocess.Popen([sys.executable, str(ROOT / "harness" / "fake_openai.py"),
                                 str(out / "scenario.json"), str(out), str(PORT)])
         import time
@@ -463,6 +480,8 @@ def run_scenario(name: str, sc: dict) -> list[str]:
             print(f"     ~ {name}: the real model declined to run the command; nothing to check (not a failure)")
         else:
             fails.append(f"expected {sc['expect_text']!r} in the requests, the rollout or the codex output")
+    if sc.get("selftest"):
+        fails += _selftest_second_prompt(home, bodies + rollouts + final, env, cwd, work)
     print(f"[{'OK ' if not fails else 'FAIL'}] {name}  rc={r.returncode}  work={work}")
     for f in fails:
         print("     -", f)
@@ -472,6 +491,57 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         print("     codex output (tail):")
         for line in tail:
             print("       |", line[:200])
+    return fails
+
+
+def _selftest_second_prompt(home: Path, first: str, env: dict, cwd: Path, work: Path) -> list[str]:
+    """The person sends the test value as the next prompt of the same session (`codex exec resume <id>`). Codex sends
+    no `source` and sets no entry point, so its prompt counts as typed (C22); the Claude Code entry point of the shell
+    that started the harness is not passed on. codex exec prints no block reason, so the record in selftest.json says
+    whether the prompt hook answered."""
+    import time
+    import urllib.request
+
+    def state() -> dict:
+        try:
+            return json.loads((home / "selftest.json").read_text())
+        except (OSError, ValueError):
+            return {}
+    value = (state().get("pending") or {}).get("value")
+    if not value:
+        return ["no test value was registered: the PreToolUse hook did not run for the command"]
+    fails = []
+    if value in first:
+        fails.append("LEAK: the test value reached the upstream, the rollout or the final message")
+    if not (state().get("result") or {}).get("tool"):
+        fails.append("the tool-result hook recorded no pass")
+    out2 = work / "out2"
+    out2.mkdir()
+    (out2 / "scenario.json").write_text(json.dumps({"turns": [{"text": "unreachable"}]}))
+    srv = subprocess.Popen([sys.executable, str(ROOT / "harness" / "fake_openai.py"), str(out2 / "scenario.json"),
+                            str(out2), str(PORT)])
+    for _ in range(50):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=0.2)
+            break
+        except Exception:
+            time.sleep(0.1)
+    session = (state().get("pending") or {}).get("session")
+    env2 = {k: v for k, v in env.items() if not k.startswith("CLAUDE_CODE_")}
+    try:
+        r = subprocess.run(["codex", "exec", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "-C",
+                            str(cwd), "resume", str(session), value], env=env2, capture_output=True, text=True,
+                           timeout=180, stdin=subprocess.DEVNULL)
+    finally:
+        srv.terminate()
+    (work / "codex_out2.txt").write_text(r.stdout + "\n--- stderr ---\n" + r.stderr)
+    bodies = "".join(p.read_text(errors="ignore") for p in out2.glob("request_*.json"))
+    if value in bodies:
+        fails.append("LEAK: the test value of the prompt reached the upstream")
+    elif bodies:
+        fails.append("the prompt with the test value reached the upstream")
+    if not (state().get("result") or {}).get("prompt"):
+        fails.append("the prompt hook recorded no pass")
     return fails
 
 

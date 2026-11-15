@@ -300,6 +300,17 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         # one short line every session, so a lost hook registration is visible by its absence
         # (operator review, 2026-09-26); the tip rotates, the version does not
         out["systemMessage"] = f"maisecrets {version} is on{own_rules}.{screen}" + (f" {tip}" if tip else "")
+    # a newer version in the marketplace copy the client fetched (no network request; maisecrets/status_verdict.py)
+    try:
+        from pathlib import Path  # noqa: E402
+        from maisecrets.codex_vault import codex_home  # noqa: E402
+        from maisecrets.status_verdict import newer_version_note  # noqa: E402
+        note = newer_version_note(Path(__file__).resolve().parent.parent,
+                                  Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude"), codex_home())
+    except Exception:  # noqa: BLE001 - the session start must not fail on it
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
     if quieted:
         out["systemMessage"] = (out.get("systemMessage", "") +
                                 f" {len(quieted)} stored word(s) are program code, not secrets "

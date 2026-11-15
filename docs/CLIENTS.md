@@ -1,12 +1,43 @@
 # Client coverage: which hook carries which guard
 
-Companion to the "Client support" table in the README. Read from the vendors' hook
+For the reader who wants to know which client maisecrets protects, how well, and why a client is not
+supported yet. The short table is in the [README](../README.md#where-you-can-use-it-today).
+
+## Client support
+
+✅ proven by the harness in this repo or seen live · ☑️ same runtime or possible per the
+vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
+
+| client | prompt | rehydrate | redact | adapter |
+|---|:---:|:---:|:---:|---|
+| Claude Code CLI | ✅ | ✅ | ✅ | built; from 0.6.0 with mods (2.1.287+) a prompt with a value is rewritten with placeholders instead of blocked, measured live and in the harness; on Windows without Git Bash the shell tool is PowerShell, and a placeholder in a PowerShell command is refused (no PowerShell rewrite) |
+| Claude desktop app, Code tab | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves (with the ask and warning of 0.5.9, now `rehydration: confirm`), and a redacted Bash output seen live (2026-09-28); the mod (mods from 2.1.286) rewrites the prompt, seen live with Claude Code 2.1.288 (2026-10-06): the model got the placeholder, and your own message bubble shows the text as typed (a local display); not in the harness |
+| Cowork | ✅ | ✅ | ✅ | same hooks as the desktop app; whether the mod loads there is not measured, so count on the block |
+| Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
+| Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
+| Codex IDE extension | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured |
+| Gemini CLI | ☑️ | ☑️ | ☑️ | not planned |
+| Cursor | ☑️ | ☑️ | ⚠️ MCP only | waits for a shell-output hook |
+| Copilot CLI | ⚠️ SDK only | ☑️ | ☑️ | waits for a prompt hook |
+| OpenCode | ❌ | ☑️ | ☑️ | waits for a prompt hook |
+| Antigravity | ❌ | ☑️ | ❌ | not supportable |
+| Chat apps, web, mobile | ❌ | ❌ | ❌ | no hooks |
+
+The three columns are the three guards: block a prompt that carries a
+value, resolve a placeholder at execution, redact tool output before the
+model sees it. A client with ❌ or ⚠️ under prompt or redact cannot be made
+safe by this plugin; it would look protected and leak. The hook names
+behind each mark are in [Hook names per guard](#hook-names-per-guard).
+
+## Hook names per guard
+
+Companion to the "Client support" table above. Read from the vendors' hook
 documentation on 2026-09-26 unless marked measured.
 
 One core (detector, vault, placeholder), one adapter per provider (manifest,
 hook names, block/rewrite fields). Proven by the harness: Claude Code CLI
 (hooks: block prompt, rewrite tool I/O; with mods, from 2.1.287, a prompt is rewritten instead of blocked, see the
-README "The mod") and Codex CLI (same format; output via
+"The mod" in [USING.md](USING.md#handing-a-value-to-claude-on-purpose)) and Codex CLI (same format; output via
 block feedback). Same runtime, seen live but not in the harness: the Claude desktop app
 (a blocked prompt, an MCP resolve with its ask and a redacted Bash output, 2026-09-28; in the Code tab with
 Claude Code 2.1.288 the mod rewrites the prompt, 2026-10-06; Cowork: the mod not measured) and Codex in the
@@ -14,7 +45,7 @@ ChatGPT app (2026-09-27). Same runtime, not measured: the Codex IDE extension. D
 Work mode runs plugin hooks in the Codex runtime. OpenCode: own npm plugin, can
 rewrite the prompt (correction 2026-09-26: the current plugin API lists
 `tool.execute.before/after` as modifiable, no prompt hook). Checked in the
-vendor docs on 2026-09-26 (README "Client support" has the marks), hook
+vendor docs on 2026-09-26 ("Client support" above has the marks), hook
 names per guard:
 
 | client | block a prompt | rehydrate | redact output |
@@ -147,3 +178,29 @@ run (`claude -p`, `codex exec`) is a new session each time: a reference from
 an earlier run is `foreign-session` there, and the deny says so. A prompt
 built from untrusted text (an issue body, a log) admits every reference in it
 as typed by a human; keep such runs on a machine without a vault.
+
+## Status and self-test: what the commands see
+
+Measured on 2026-11-15 with Claude Code 2.1.325 and codex-cli 0.169.0 (harness scenarios `selftest_tool_path` and
+`selftest_hooks_not_running` of `harness/run.py`, `selftest_passes` of `harness/codex.py`, `maisecrets/selftest.py`,
+`maisecrets/status_verdict.py`).
+
+- **What the harness proves.** In Codex, the whole self-test: the tool path, and the value typed into the resumed
+  session (`codex exec resume <id>`) gets "Self-test passed". In Claude Code, the tool path, and that the value sent
+  by `claude -p --resume <id>` (the same session id, measured) is blocked without a pass: a prompt of `claude -p` is a
+  program's (C22). The "passed" answer to a typed prompt of Claude Code is held by `tests/test_selftest.py` only.
+
+- **The session of a command.** Claude Code gives a command `CLAUDE_CODE_SESSION_ID`, Codex gives it
+  `CODEX_THREAD_ID`; each equals the `session_id` of the hook payloads. Codex passes on the Claude Code variable of
+  the shell that started it, so a command checks both.
+- **Codex drops a variable whose name holds `SECRET`** from a command's environment (`shell_environment_policy`,
+  default excludes): a maisecrets command in Codex reads the default home, not a `MAISECRETS_HOME` the hooks get.
+  The Codex harness sets it with `shell_environment_policy.set` for the self-test.
+- **The marketplace copies.** Claude Code clones a marketplace to the `installLocation` that
+  `plugins/known_marketplaces.json` names (`plugins/marketplaces/<name>`), with `lastUpdated`. Codex clones a Git
+  marketplace to `$CODEX_HOME/.tmp/marketplaces/<name>` and reads `.agents/plugins/marketplace.json` or, without it,
+  `.claude-plugin/marketplace.json`; `codex plugin add maisecrets@<name>` installs a newer version next to the old
+  one. Each copy is as new as the client's last fetch: `/maisecrets:status` says "newest unknown" without one.
+- **A `systemMessage` of PostToolUse** reaches the person in Claude Code and not the model (no request body held
+  the test value). Claude Code writes it into its local transcript (a `hook_system_message` record), so the test
+  value stands there.

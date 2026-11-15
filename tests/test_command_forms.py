@@ -70,6 +70,19 @@ def _powershell_block(name: str) -> str:
     return re.search(r"run this instead:\n\n```\n(.*?)```", text, re.S).group(1)
 
 
+class PowerShellBlockFormTests(unittest.TestCase):
+    """Every command with a PowerShell form keeps the sentence the Windows run test parses: on every runner, so a
+    changed sentence fails here and not only on the Windows runner (status.md, 2026-11-15)."""
+
+    def test_every_powershell_form_can_be_found(self):
+        files = [f for f in sorted((ROOT / "commands").glob("*.md")) if "On Windows without bash" in f.read_text(
+            encoding="utf-8")]
+        self.assertGreaterEqual(len(files), 8)
+        for f in files:
+            with self.subTest(command=f.name):
+                self.assertTrue(_powershell_block(f.name).strip())
+
+
 class PowerShellFormRunTests(unittest.TestCase):
     """The PowerShell form of a command runs in a real PowerShell (the GitHub Windows runner has it)."""
 

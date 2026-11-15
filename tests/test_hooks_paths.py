@@ -210,13 +210,16 @@ class FailClosedAnswerTests(unittest.TestCase):
     def test_the_run_log_keeps_the_newest_2000_lines_and_truncates_the_tool_name(self):
         log = Path(_TMP, "hooks.log")
         log.write_text("".join(f"old-line-{i:05d} " + "x" * 90 + "\n" for i in range(2100)), encoding="utf-8")
-        hooks._run_log("pre-tool", {"tool_name": "mcp__" + "t" * 80, "session_id": "session-long-id",
+        # 40 characters of the session id: Codex thread ids (UUIDv7) share their first 8 for about a minute, and the
+        # hooks line of /maisecrets:status tells sessions apart by this column
+        session = "019a1e05-c230-7ac1-9d5b-e954073f52ce-tail-cut-here"
+        hooks._run_log("pre-tool", {"tool_name": "mcp__" + "t" * 80, "session_id": session,
                                     "prompt_id": "p"}, "ok", "pass", 3)
         lines = log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(lines), 2000)
         self.assertTrue(lines[0].startswith("old-line-00101"), lines[0][:20])
         last = lines[-1].split("\t")
-        self.assertEqual(last[1:4], ["pre-tool", "claude", "session-"])
+        self.assertEqual(last[1:4], ["pre-tool", "claude", session[:40]])
         self.assertEqual(len(last[4]), 40)
         self.assertEqual(last[5:], ["pass", "3ms", "ok"])
         if os.name != "nt":  # Windows keeps no POSIX mode (st_mode & 0o777 is 0o666)
