@@ -32,7 +32,11 @@ class UserNameAfterACueTests(unittest.TestCase):
                             ("including the user KOrbek7.\n", "KOrbek7"),
                             ("the user KalinOrbek has reported", "KalinOrbek"),
                             ("<userID>korbek7</userID>", "korbek7"),
-                            ('{"login_name": "kalin.orbek"}', "kalin.orbek")):
+                            ('{"login_name": "kalin.orbek"}', "kalin.orbek"),
+                            ("[INFO] User plind88 logged in", "plind88"),
+                            ("2026-11-15 10:00 user plind88 logged in", "plind88"),
+                            ("Failed password for invalid user plind88 from", "plind88"),
+                            ("Welcome back, kalin_orb_42!", "kalin_orb_42")):
             with self.subTest(text=text):
                 self.assertIn(value, users(text))
 
@@ -43,7 +47,15 @@ class UserNameAfterACueTests(unittest.TestCase):
                      "<userID>12345</userID>", '{"handle": "true"}', "from user data.json", "the user user.email",
                      "My username is admin.", "for user service_account", "by user ci-runner",
                      "the user default_reader01", "for user x86_64", "Welcome, Python3.", "for user v1.2.3",
-                     "the user my_app", "User KOrbek7 Settings", "My username is visible."):
+                     "the user my_app", "User KOrbek7 Settings", "My username is visible.",
+                     '{"handle": "summer-collection"}', '{"handle": "zalto-glas"}', '{"screenName": "HomeScreen"}',
+                     '{"userId": "usr_4f2a9c"}', "FATAL: password authentication failed for user analytics_ro",
+                     "the user eu-west-2 region",
+                     "Raises PermissionError for user AccessDenied", "// lookup by user UserRepository",
+                     "Permission denied for user django_app", "the user utf-8 data", "for user sda1",
+                     "the user eth0 interface", "by user pod-7f9c", "Welcome, JetBrains.",
+                     "login for user SAML2 provider",
+                     "My user name is in the config.", "the user eslint-plugin-react"):
             with self.subTest(text=text):
                 self.assertEqual([], users(text))
 

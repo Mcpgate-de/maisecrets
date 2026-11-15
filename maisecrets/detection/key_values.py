@@ -59,9 +59,8 @@ _ID_WORDS = ("licen", "identit", "passport", "documentnumber", "document_number"
 _ID_KEY_CHARS = r"[A-Za-z0-9 _'’&#;-]"            # driver's-license, driver&#x27;s-license in a table head
 _COMPARE = r"(?:=>|<>|!=|[:=])"                   # WHEN "keypassword"<>'…' in SQL
 _PASSWORD_VALUE = r"([^\s\"'`<>,;|&]{3,64})"
-# a key that holds a user name (#51): userID, login_name, screen_name, handle
-_USER_ID_WORDS = ("userid", "user_id", "user-id", "userlogin", "loginname", "login_name", "loginid", "login_id",
-                  "accountname", "account_name", "screenname", "screen_name", "handle")
+# a key that holds a user name (#51): userID, login_name
+_USER_ID_WORDS = ("userid", "user_id", "user-id", "userlogin", "loginname", "login_name", "loginid", "login_id")
 _USER_VALUE = r"([A-Za-z][A-Za-z0-9._-]{1,30}[A-Za-z0-9])"
 _ID_VALUE = r"([A-Za-z0-9](?:[A-Za-z0-9]|[ -](?=[A-Za-z0-9])){3,24})"
 # a literal that an expression joins with more: password = "…" + os.environ["PW_SUFFIX"] is a part of the value
