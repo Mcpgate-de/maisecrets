@@ -37,6 +37,8 @@ class _Clean(unittest.TestCase):
         for name in ("selftest.json", "vault.json", "index.json", "events.log", "incidents.json"):
             (HOME / name).unlink(missing_ok=True)
         hooks._live_cache.clear()
+        import _hygiene
+        _hygiene.patch(self, hooks, "_clipboard", lambda text: True)  # no real clipboard in tests
 
     def arm(self, base=CLAUDE) -> str:
         hooks.pre_tool({**base, "hook_event_name": "PreToolUse", "tool_name": "Bash",
@@ -233,6 +235,14 @@ def cli_list_output() -> str:
         except SystemExit:
             pass
     return buf.getvalue()
+
+
+def tearDownModule():  # noqa: N802 - unittest hook
+    for name in ("selftest.json", "vault.json", "index.json", "events.log", "hooks.log"):
+        (HOME / name).unlink(missing_ok=True)
+    hooks._live_cache.clear()
+    import _hygiene
+    _hygiene.assert_pristine()
 
 
 if __name__ == "__main__":
