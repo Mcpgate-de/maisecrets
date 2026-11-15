@@ -5,17 +5,21 @@
    `ms-selftest-<12>` in `selftest.json` of the maisecrets home, with the call's id, its session, the version and a
    time to live of 10 minutes. Only the hook writes it: the command itself writes nothing, so it also runs in the
    Codex sandbox, and a command whose PreToolUse hook did not run prints no value at all (a moved plugin folder, C13).
-2. The command prints the value. The PostToolUse hook replaces the pending value, where it stands alone, with
-   `⟦SELFTEST⟧` before the rest of the hook reads the output, shows the value to the person only (`systemMessage`),
-   and records "tool path passed" only for the call that registered it. Every other text, a token of the same shape
-   included, goes to the ordinary checks unchanged. A tool call whose input holds the pending value means the model
-   has it: the self-test records a failure.
+2. The command prints the value. The PostToolUse hook first detects and masks the original output exactly as without
+   a self-test. Then, in what the model reads (Claude Code's updatedToolOutput, Codex's block reason), each occurrence
+   of the pending value that is still visible becomes `⟦SELFTEST⟧`. So the self-test never masks less than no
+   self-test. The hook shows the value to the person only (`systemMessage`) and records "tool path passed" when the
+   raw output of the call that registered the value held it. A tool call whose input holds the pending value means
+   the model has it: the self-test records a failure.
 3. The person sends the value as the next prompt. The prompt hook blocks a prompt that holds the pending value. It
    answers "Self-test passed" only for a prompt the person typed in the session that registered the value; any other
    such prompt is blocked without a pass.
 
-The test value is no secret: it never goes into the vault, the incident record or /maisecrets:list, and nothing here
-lets a prompt or a tool call through that the ordinary checks would stop. Any program of the user can write
+The test value is no secret, and maisecrets never stores it as a test value. When the detector takes it as part of a
+secret (after `password:`, inside a connection string), it stores that span as it would without a self-test; this is
+the accepted cost of a detection on the original text. The prompt hook answers a prompt with the pending value before
+the detector, so a prompt stores nothing. Nothing here lets a prompt or a tool call through that the ordinary checks
+would stop. Any program of the user can write
 `selftest.json`, so a pass is a convenience for the person, not a proof against an agent that evades.
 """
 from __future__ import annotations
@@ -37,11 +41,6 @@ FILE = "selftest.json"
 _COMMAND_RE = LazyRx(r"\A\s*(?:bash\s+|&\s*)?(?:\"[^\"\n]*|'[^'\n]*|[^\s\"']*)(?:run\.sh|run\.cmd)[\"']?"
                      r"\s+status\s+test\s*\Z")
 _TYPED_RE = LazyRx(r"\A\s*maisecrets:\s*status\s+test\s*\Z", re.IGNORECASE)
-# a value that stands alone: after the start, a blank, a quote, an opening bracket or one of , ; : = and before the
-# end, a blank, a quote, a closing bracket, , ; or a full stop at the end of a sentence. A value glued to other
-# characters is left to the detector, which then sees the whole token (Gate A: a secret glued after it was cut off)
-_LEFT = r"(?<![^\s\"'`(\[{<,;:=])"
-_RIGHT = r"(?=\Z|[\s\"'`)\]}>,;]|\.(?:\s|\Z))"
 # a value in a prompt or a tool input: not part of a longer word
 _WORD_LEFT, _WORD_RIGHT = r"(?<![A-Za-z0-9_\-])", r"(?![A-Za-z0-9_\-])"
 
@@ -169,70 +168,59 @@ def command_text(now: float | None = None) -> str:
             f"The value is no secret and works for {TTL // 60} minutes. /maisecrets:status shows the result.")
 
 
-# --- PostToolUse: mask the value ----------------------------------------------------------------------------------
+# --- PostToolUse: hide the value in what the model reads -------------------------------------------------------
 
-def mask(payload: dict) -> tuple[dict, dict | None]:
-    """(the payload with the pending value replaced where it stands alone in its tool_response, what the answer needs
-    or None). Only the pending value: the rest of the hook sees every other text as it was. A tool input that holds
-    the pending value is recorded as a failure: the model wrote it, so it has it."""
+def _replace(node, value: str, count: list):
+    """The node with every occurrence of the pending value replaced by the placeholder; count[0] counts them."""
+    if isinstance(node, str):
+        if value not in node:
+            return node
+        count[0] += node.count(value)
+        return node.replace(value, PLACEHOLDER)
+    if isinstance(node, list):
+        return [_replace(x, value, count) for x in node]
+    if isinstance(node, dict):
+        return {(_replace(k, value, count) if isinstance(k, str) else k): _replace(v, value, count)
+                for k, v in node.items()}
+    return node
+
+
+def after(payload: dict, result: dict, codex: bool) -> dict:
+    """The PostToolUse answer once the hook has detected and masked the original output as without a self-test: each
+    occurrence of the pending value that is still visible in what the model reads (Claude Code's updatedToolOutput,
+    or the output itself; Codex's block reason) becomes the placeholder. Detection never sees a changed text, so the
+    self-test cannot mask less than no self-test (Gate A, round 2). Records "tool path passed" when the raw output of
+    the tool call that registered the value held it, and a failure when a tool input held it (the model has it)."""
     response, tool_input = payload.get("tool_response"), payload.get("tool_input")
     if not (_has_prefix(response) or _has_prefix(tool_input)):
-        return payload, None                                         # most calls: no file read
+        return result                                                # most calls: no file read
     state = load()
     p = _pending(state)
     if p is None:
-        return payload, None
+        return result
     value = p["value"]
     leak = _holds(tool_input, value)
-    if leak:
-        res = _result(state)
-        res["leak"] = time.time()
-        state["result"] = res
-        try:
-            _save(state)
-        except OSError:
-            pass
-    rx = re.compile(_LEFT + re.escape(value) + _RIGHT)
-    found = [0]
-
-    def walk(node):
-        if isinstance(node, str):
-            if value not in node:
-                return node
-            new, n = rx.subn(PLACEHOLDER, node)
-            found[0] += n
-            return new
-        if isinstance(node, list):
-            return [walk(x) for x in node]
-        if isinstance(node, dict):
-            return {(walk(k) if isinstance(k, str) else k): walk(v) for k, v in node.items()}
-        return node
-    new = walk(response)
-    if not found[0]:
-        return payload, None
-    return {**payload, "tool_response": new}, {"value": value, "pending": p, "leak": leak}
-
-
-def answer(payload: dict, result: dict, info: dict, codex: bool) -> dict:
-    """The PostToolUse answer with the pending value replaced: the model reads the placeholder, the person the value.
-    Records "tool path passed" only for the tool call that registered the value."""
-    value, p = info["value"], info["pending"]
-    state = load()
-    mine = (not info["leak"] and str(payload.get("tool_use_id") or "") == p.get("tool_use_id")
+    held = value in (response if isinstance(response, str) else json.dumps(response, ensure_ascii=False))
+    mine = (held and not leak and str(payload.get("tool_use_id") or "") == p.get("tool_use_id")
             and str(payload.get("session_id") or "") == p.get("session"))
-    if mine:
+    if leak or mine:
         res = _result(state)
-        res["tool"] = time.time()
+        res["leak" if leak else "tool"] = time.time()
         state["result"] = res
         try:
             _save(state)
         except OSError:
             mine = False
+    if not held:
+        return result
     result = dict(result or {})
-    masked = payload.get("tool_response")
-    text = masked if isinstance(masked, str) else json.dumps(masked, ensure_ascii=False)
+    count = [0]
     if codex:
-        if result.get("decision") != "block":
+        if result.get("decision") == "block":
+            result["reason"] = _replace(str(result.get("reason") or ""), value, count)
+        else:
+            shown = _replace(response, value, count)
+            text = shown if isinstance(shown, str) else json.dumps(shown, ensure_ascii=False)
             result = {**result, "decision": "block",
                       "reason": ("[maisecrets: the command ran and finished; this is not an error. The self-test value "
                                  f"in its output is replaced by {PLACEHOLDER}. Show the output as it is.]\n\n{text}")}
@@ -247,16 +235,17 @@ def answer(payload: dict, result: dict, info: dict, codex: bool) -> dict:
             pass
     else:
         hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUse"})
-        hso.setdefault("updatedToolOutput", masked)
-        hso["additionalContext"] = ((hso.get("additionalContext") or "") + " " +
-                                    f"maisecrets replaced a self-test value with {PLACEHOLDER}. It is no secret; show "
-                                    "the output to the person as it is and do not try to get the value.").strip()
+        hso["updatedToolOutput"] = _replace(hso.get("updatedToolOutput", response), value, count)
+        if count[0]:
+            hso["additionalContext"] = ((hso.get("additionalContext") or "") + " " +
+                                        f"maisecrets replaced a self-test value with {PLACEHOLDER}. It is no secret; "
+                                        "show the output to the person as it is and do not try to get the value."
+                                        ).strip()
         result["hookSpecificOutput"] = hso
-    line = (f"maisecrets self-test: the tool-result hook ran for the self-test command and replaced the test value "
-            f"{value} with {PLACEHOLDER} before the AI saw it. Next, type or paste the test value alone as your next "
-            "prompt." if mine else
-            f"maisecrets replaced the self-test value {value} with {PLACEHOLDER} in this result before the AI saw it "
-            "(not the self-test command, so it does not count as a pass).")
+    line = (f"maisecrets self-test: the tool-result hook ran for the self-test command, and the AI did not see the "
+            f"test value {value}. Next, type or paste the test value alone as your next prompt." if mine else
+            f"maisecrets kept the self-test value {value} out of this result before the AI saw it (not the self-test "
+            "command, so it does not count as a pass).")
     result["systemMessage"] = (result["systemMessage"] + " " + line) if result.get("systemMessage") else line
     return result
 

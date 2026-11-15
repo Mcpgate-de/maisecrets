@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import time
 import unittest
@@ -148,12 +149,13 @@ class ToolPathTests(_Clean):
         out = hooks.user_prompt({**CLAUDE, "prompt": value})
         self.assertIn("Self-test FAILED", out["reason"])
 
-    def test_the_value_after_a_label_is_never_stored(self):
-        # the detector stores a value after "password:"; only the replacement before it keeps the test value out
+    def test_the_value_after_a_label_is_masked_as_without_a_self_test(self):
+        # the detector runs on the original text and stores a value after "password:" (an accepted cost, Gate A round
+        # 2): the model reads its placeholder, never the value, and the tool path still counts
         value = self.arm()
         out = self.post({"stdout": f"password: {value}"})
         self.assertNotIn(value, json.dumps(out, ensure_ascii=False).replace(out.get("systemMessage", ""), ""))
-        self.assertNotIn(value, self.stored())
+        self.assertIn("\u27e6SECRET_c", out["hookSpecificOutput"]["updatedToolOutput"]["stdout"])
         self.assertTrue(selftest.load()["result"]["tool"])
 
     def test_the_value_and_the_rest_of_the_output_are_never_stored(self):
@@ -245,47 +247,68 @@ URL_TAIL = "Hx7kQ2mZ9pLw4v"
 
 
 class GluedSecretTests(_Clean):
-    """A secret glued after a token of the test value's shape is masked as before (Gate A probes, H1)."""
+    """The self-test never masks less than no self-test: with the value pending, the model sees what it sees without
+    one, with each visible pending value as the placeholder (Gate A round 1, H1, and round 2: the separators)."""
     T = "ms-selftest-" + "aaaaaaaaaaaa"
 
-    def model_sees(self, out: dict, text: str) -> str:
+    def model_sees(self, out: dict, raw) -> str:
+        """The output as the model reads it, without the note in brackets that a Codex block puts before it."""
         if "decision" in out:
-            return out["reason"]
-        return json.dumps((out.get("hookSpecificOutput") or {}).get("updatedToolOutput", {"stdout": text}),
-                          ensure_ascii=False)
+            reason = out["reason"]
+            return reason.split("]\n\n", 1)[1] if reason.startswith("[maisecrets:") else reason
+        seen = (out.get("hookSpecificOutput") or {}).get("updatedToolOutput", raw)
+        return seen if isinstance(seen, str) else json.dumps(seen, ensure_ascii=False)
 
     def cases(self):
-        return {"assign": (f"DB_PASSWORD={self.T}{TAIL}", TAIL),
-                "assign_control": (f"DB_PASSWORD=zz-aaaaaaaaaaaa{TAIL}", TAIL),
-                "url": (f"postgres://admin:{self.T}{URL_TAIL}@db.example.com:5432/x", URL_TAIL),
-                "url_control": (f"postgres://admin:zz-aaaaaaaaaaaa{URL_TAIL}@db.example.com:5432/x", URL_TAIL),
-                "head": (f"DB_PASSWORD={TAIL}{self.T}", TAIL),
-                "head_control": (f"DB_PASSWORD={TAIL}zz-aaaaaaaaaaaa", TAIL)}
+        T, S = self.T, TAIL
+        return {"assign": f"DB_PASSWORD={T}{S}",
+                "assign_control": f"DB_PASSWORD=zz-aaaaaaaaaaaa{S}",
+                "url": f"postgres://admin:{T}{URL_TAIL}@db.example.com:5432/x",
+                "url_control": f"postgres://admin:zz-aaaaaaaaaaaa{URL_TAIL}@db.example.com:5432/x",
+                "head": f"DB_PASSWORD={S}{T}",
+                "head_control": f"DB_PASSWORD={S}zz-aaaaaaaaaaaa",
+                # round 2: a separator that the detector takes as part of the value
+                "comma": f"DB_PASSWORD={T},{S}",
+                "colon_before": f"DB_PASSWORD={S}:{T}",
+                "url_semicolon": f"postgres://admin:{T};{S}@db.example.com:5432/x",
+                "label_comma": f"password: {T},{S}",
+                "connection_string": f"Server=db;User Id=sa;Password={T};{S}",
+                "quoted_blank": f'DB_PASSWORD="{T} {S}"',
+                "json_blank": f'{{"password": "{T} {S}"}}',
+                "bracket": f"DB_PASSWORD=({T}){S}",
+                "alone": f"the value {T} here",
+                # the detector masks a secret, so Codex gets a block reason; the value on its own line is visible in it
+                "next_to_a_secret": f"DB_PASSWORD={S}\nthe value {T} here"}
 
-    def check(self, base, pending: bool) -> None:
-        for name, (text, secret) in self.cases().items():
-            with self.subTest(name, pending=pending):
-                for f in ("vault.json", "index.json"):
-                    (HOME / f).unlink(missing_ok=True)
-                hooks._live_cache.clear()
-                if pending:
-                    self.arm(base)
-                    self.pin(self.T)
-                out = self.post({"stdout": text} if base is CLAUDE else text, base, tool_use_id="u5",
-                                command="cat f")
-                self.assertNotIn(secret, self.model_sees(out, text))
+    def seen(self, base, text: str, pending: bool) -> str:
+        for f in ("vault.json", "index.json", "selftest.json"):
+            (HOME / f).unlink(missing_ok=True)
+        hooks._live_cache.clear()
+        if pending:
+            self.arm(base)
+            self.pin(self.T)
+        raw = {"stdout": text} if base is CLAUDE else text
+        out = self.post(raw, base, tool_use_id="u5", command="cat f")
+        # the placeholders without their numbers and displays: the two runs may number or show them apart
+        return re.sub("\u27e6([A-Z_]+)_c\\d+(?::[^\u27e7]*)?\u27e7", lambda m: f"\u27e6{m.group(1)}\u27e7",
+                      self.model_sees(out, raw))
 
-    def test_claude_code_without_a_pending_value(self):
-        self.check(CLAUDE, False)
+    def check(self, base) -> None:
+        for name, text in self.cases().items():
+            with self.subTest(name):
+                without = self.seen(base, text, False)
+                with_test = self.seen(base, text, True)
+                self.assertEqual(with_test, without.replace(self.T, selftest.PLACEHOLDER))
+                self.assertNotIn(self.T, with_test)
+                for secret in (TAIL, URL_TAIL):
+                    if secret not in without:
+                        self.assertNotIn(secret, with_test)
 
-    def test_claude_code_with_the_pending_value_glued(self):
-        self.check(CLAUDE, True)
+    def test_claude_code(self):
+        self.check(CLAUDE)
 
-    def test_codex_block_reason_without_a_pending_value(self):
-        self.check(CODEX, False)
-
-    def test_codex_block_reason_with_the_pending_value_glued(self):
-        self.check(CODEX, True)
+    def test_codex_block_reason(self):
+        self.check(CODEX)
 
 
 class PersonOnlyTests(_Clean):

@@ -2912,10 +2912,8 @@ def _post_tool_guarded(payload: dict) -> dict:
             notice = (notice + " " + hint) if notice else hint
     except Exception as exc:  # noqa: BLE001 - a note that fails leaves the reference as text; the output goes on
         _debug(f"post-tool sref notes: {type(exc).__name__}")
-    payload, test = _selftest().mask(payload)        # the self-test value never reaches the steps below
     result = _post_tool_guarded_rest(payload)
-    if test:
-        result = _selftest().answer(payload, result, test, client_of(payload) == "codex")
+    result = _selftest().after(payload, result, client_of(payload) == "codex")     # after the detection: selftest.py
     if notice:
         try:
             return _with_notice(result, notice)
