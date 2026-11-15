@@ -105,7 +105,7 @@ Only the clients that are built and measured (in the harness of this repository,
 
 | Client | Prompt | Values back in commands and files | Tool output |
 |---|---|---|---|
-| Claude Code (CLI, desktop app, Cowork) | ✓ replaced (from Claude Code 2.1.287; before that, and in Cowork, blocked) | ✓ | ✓ |
+| Claude Code (CLI, desktop app, Cowork) | ✓ replaced (from Claude Code 2.1.287; before that blocked; in Cowork not measured, count on the block) | ✓ | ✓ |
 | Codex (CLI, ChatGPT desktop app) | ✓ blocked; you send the cleaned prompt again | ✓ | ✓ |
 
 Not yet: Gemini CLI, Cursor, Copilot CLI, OpenCode. Why: [docs/CLIENTS.md](docs/CLIENTS.md#client-support).
