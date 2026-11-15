@@ -436,7 +436,8 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
 - **A product name, a greeting and a button word are no person.** A name span that `remote.is_no_person(span)`
   accepts is dropped: a product name (`remote.is_product_name(span)`: a word of `PRODUCT_WORDS` alone, or one followed
   only by words of `PRODUCT_WORDS` and `PRODUCT_TAILS`, as "Claude Code"), a word of `GREETING_WORDS` alone, and a word
-  of `UI_LABEL_WORDS` alone ("Allow", "Deny", "Submit"). A caller that applies the spans itself calls the same
+  of `UI_LABEL_WORDS` alone ("Allow", "Deny", "Submit") and a word of a test runner's summary alone (`RUNNER_WORDS`:
+  "Ran", "Passed", "Skipped"). A caller that applies the spans itself calls the same
   function (`is_no_person` since 0.9.8, `is_product_name` since 0.8.15).
 - **It only adds.** A span is kept only where no finding of the rules and no span kept before it lies. A finding of
   the rules is never removed, made smaller, moved or retyped. A span that ends inside a word is widened to the whole

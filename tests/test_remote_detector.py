@@ -371,7 +371,7 @@ class RemoteDetectorTests(unittest.TestCase):
 
     def test_is_no_person_is_the_whole_rule_a_caller_applies_itself(self):
         # the gateway applies the spans itself and asks this function (#41, devs/ai-gateway#1808)
-        for span in ("Allow", " deny ", "Submit", "Lieben", "Hallo", "hoi", "Claude Code", "GitHub"):
+        for span in ("Allow", " deny ", "Submit", "Lieben", "Hallo", "hoi", "Claude Code", "GitHub", "Ran", "Skipped"):
             self.assertTrue(rm.is_no_person(span), span)
         # a button word that is also a given name or a surname stays a name: Edit (Hungarian), Ok (Korean)
         for span in ("", NAME, NAME.split()[0], NAME.split()[-1], "Allow " + NAME.split()[-1], "Allowance", "Edit",
