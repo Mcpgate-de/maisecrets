@@ -20,7 +20,7 @@ Otherwise run exactly this command and show the user its output as is, then stop
 bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status
 ```
 
-On Windows without bash (PowerShell: the ChatGPT app, Codex on Windows, Claude Code without Git Bash), run this instead (with `test` after `status` for the self-test):
+On Windows without bash (PowerShell: the ChatGPT app, Codex on Windows, Claude Code without Git Bash; for the self-test, `test` goes after `status`), run this instead:
 
 ```
 & "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status
