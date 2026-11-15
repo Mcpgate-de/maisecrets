@@ -232,6 +232,14 @@ class NotASecretTests(_ServiceBase):
         _prompt(f"/maisecrets:not-a-secret undo {key}")
         self.assertNotIn(NAME, _allow_text())
 
+    def test_undo_finds_the_line_by_its_fingerprint_when_the_comment_line_is_gone(self):
+        key = self.found_key()
+        _prompt(f"/maisecrets:not-a-secret {key}")
+        ALLOW_FILE.write_text("".join(f"{x}\n" for x in _allow_text().splitlines() if not x.startswith("#"))
+                              + "kept-value\n", encoding="utf-8")
+        _prompt(f"/maisecrets:not-a-secret undo {key}")
+        self.assertEqual(_allow_text(), "kept-value\n")
+
     def test_undo_from_anywhere_but_the_persons_typed_prompt_changes_nothing(self):
         key = self.found_key()
         _prompt(f"/maisecrets:not-a-secret {key}")
@@ -261,6 +269,23 @@ class NotASecretTests(_ServiceBase):
         self.assertEqual(many["systemMessage"].count("Wrong?"), 1)
         self.assertTrue(many["systemMessage"].endswith("Wrong? Type /maisecrets:not-a-secret KEY"))
         self.assertNotIn("Wrong?", _post(f"please ask {NAME} today\n", client=CODEX).get("reason", ""))
+
+    def test_a_value_the_allow_list_cannot_hold_a_term_and_an_expired_value_change_nothing(self):
+        v = Vault(load_config())
+        hashed = v.put("#Kolibri Laterne", "NAME", "remote:hf", session=SESSION)
+        term = v.put("Kolibri Laterne", "NAME", "term:e1", session=SESSION)
+        old = v.put("Laterne Kolibri", "NAME", "remote:hf", session=SESSION)
+        idx = json.loads(Path(HOME, "index.json").read_text())
+        idx["entries"][old.key]["expires"] = time.time() - 10
+        Path(HOME, "index.json").write_text(json.dumps(idx))
+        for e, says in ((hashed, "cannot be one line"), (term, "term list"), (old, "has expired")):
+            with self.subTest(says):
+                out = _prompt(f"/maisecrets:not-a-secret {e.key}")
+                self.assertIn(says, out["reason"])
+                self.assertIn("Nothing was changed", out["reason"])
+                self.assertIn(e.key, _entries())
+                self.assertEqual(_allow_text(), "")
+                self.assertEqual(not_a_secret.records(), {})
 
     def test_usage_and_unknown_keys(self):
         self.assertIn("name one stored value", _prompt("/maisecrets:not-a-secret")["reason"])
