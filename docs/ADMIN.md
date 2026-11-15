@@ -158,7 +158,7 @@ policy.
 **Updates.** A new version reaches a member when `version` in
 `.claude-plugin/plugin.json` changes: at the next session start for an
 org-synced plugin, with `claude plugin update` otherwise. Every session starts
-with one line `maisecrets X.Y.Z active`; its absence means the plugin did not
+with one line `maisecrets X.Y.Z is on`; its absence means the plugin did not
 load. A rollback is a `git revert` on `main`: the pipeline releases it as the
 next patch version.
 
@@ -806,7 +806,7 @@ revoke bound that. A value written into a file is plain text there.
 ## Sensitive References
 
 A gateway with Sensitive References (for example mcpgate, where the resolver is
-experimental and on only for accounts its admin enables) can mask a value in
+where every person with an account may use it, unless an administrator blocks them) can mask a value in
 its tool results with a reference such as `⟦sref:email:<id>:ma•••@example.org⟧`.
 The AI sees the reference and its display part, not the value in the call.
 With maisecrets, a command or a file that needs the value gets it on your
