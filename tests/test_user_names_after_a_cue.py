@@ -43,7 +43,7 @@ class UserNameAfterACueTests(unittest.TestCase):
                      "<userID>12345</userID>", '{"handle": "true"}', "from user data.json", "the user user.email",
                      "My username is admin.", "for user service_account", "by user ci-runner",
                      "the user default_reader01", "for user x86_64", "Welcome, Python3.", "for user v1.2.3",
-                     "the user my_app"):
+                     "the user my_app", "User KOrbek7 Settings", "My username is visible."):
             with self.subTest(text=text):
                 self.assertEqual([], users(text))
 

@@ -9,7 +9,7 @@ import re
 _HANDLE = (r"(?:[A-Za-z][A-Za-z0-9]{1,20}(?:[._-][A-Za-z0-9]{1,20}){1,3}|[A-Za-z]{2,20}\d{1,6}"
            r"|[A-Z][a-z]{1,15}[A-Z][a-z0-9]{1,15})")
 # the cues: `for user kalin.orbek`, `User kalin.orbek successfully logged in`, `Welcome, kalin_orb_42.`, and `my
-# username is korbek` (a plain word too after `is`, when it is no word of the word list)
+# username is korbek` (a plain word too after `is`)
 _CUE_RE = re.compile(
     r"(?:(?i:\b(?:for|by|from|the|a) user)|(?:^|(?<=[\n:]))[ \t]*User|(?i:\bwelcome),)[ \t]+(" + _HANDLE + r")"
     r"(?=[.,;:!?)\s]|$)", re.M)
@@ -34,24 +34,21 @@ def user_names(text: str) -> list:
             continue
         if _username_value_ok(v, False, " ") and _handle_ok(v, _word_set()):
             out.append((m.start(1), m.end(1)))
-    known = _word_set()
     for m in _IS_RE.finditer(text):
         v = m.group(1).rstrip("._-")
-        if v.lower() not in known and _username_value_ok(v, False, " "):
+        # _username_value_ok refuses a word of the word list (`my username is visible`)
+        if _username_value_ok(v, False, " "):
             out.append((m.start(1), m.start(1) + len(v)))
     return out
 
 
 def _handle_ok(v: str, known) -> bool:
-    """A person's handle, not a version, an architecture, a placeholder or words of the word list: the first part has
-    no digit, one part at most is digits alone, and a part of letters is no word of the list and longer than two
-    letters (x86_64, v1.2.3, my_app, john.doe stay text)."""
+    """A person's handle, not a placeholder or words of the word list: one part of letters is no word of the list and
+    longer than two letters (x86_64, v1.2.3, my_app and john.doe stay text)."""
     from .personal import PLACEHOLDER_NAMES
     parts = [p for p in re.split(r"[._-]|(?<=[a-z])(?=[A-Z])", v) if p]
     letters = [re.sub(r"\d+$", "", p) for p in parts if not p.isdigit()]
-    if len(parts) > 1 and any(c.isdigit() for c in parts[0]):
-        return False
-    if sum(p.isdigit() for p in parts) > 1 or " ".join(letters).lower() in PLACEHOLDER_NAMES:
+    if " ".join(letters).lower() in PLACEHOLDER_NAMES:
         return False
     return any(len(w) > 2 and w.lower() not in known for w in letters)
 
