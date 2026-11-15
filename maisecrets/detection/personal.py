@@ -25,9 +25,10 @@ import re
 
 from . import deadline as _deadline
 from .lazy_regex import LazyRx as _LazyRx
+from .street_forms import street_number_last
 from .id_labels import _ID_DATE_RE, _ID_RE, _ID_WORDS
 from .text_index import field_end, field_start
-from .phone_forms import _DE_CALL_REGIONS, _PHONE_CUE_INTL_RE, _PHONE_DE_CUE_RE, _PHONE_DE_NEXT_RE, _e164_without_plus
+from .phone_forms import _DE_CALL_REGIONS, _PHONE_DE_CUE_RE, _PHONE_DE_NEXT_RE, _e164_without_plus, intl_after_cue
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
@@ -1934,11 +1935,6 @@ _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
 _ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
-# an IP and a date (year, day or month first) after a call cue are no phone number (#50)
-_IPV4_SHAPE_RE = _lazy(r"\d{1,3}(?:\.\d{1,3}){3}")
-_YMD_SPACED_RE = _lazy(r"(?:19|20)\d\d[ .\-/](?:0?[1-9]|1[0-2])[ .\-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
-_MDY_SPACED_RE = _lazy(r"(?:0?[1-9]|1[0-2])[ .\-/](?:0?[1-9]|[12]\d|3[01])[ .\-/](?:19|20)\d\d(?!\d)")
-_DMY_SPACED_RE = _lazy(r"(?:0?[1-9]|[12]\d|3[01])[ .\-/](?:0?[1-9]|1[0-2])[ .\-/](?:19|20)\d\d(?!\d)")
 # a North American number (3-3-4); it needs region us or ca, as phone-us-national (0.6.24)
 _NANP_SHAPE_RE = _lazy(r"(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4}")
 # a count with a space between thousands (3 412 908 users, 1 000 000) and a list of small numbers (4 8 15 16 23 42)
@@ -2285,49 +2281,7 @@ def _phone_word_hits(text: str, low: str, regions: tuple, want, prompt: bool = F
                 out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
             elif rx is _PHONE_TIGHT_RE and len(_SERIES_GROUP_RE.findall(v)) >= 3:
                 out.extend((a, b, "phone-after-phone-word", PHONE) for a, b in _numbers_in_series(text, m.start(1)))
-    return out if prompt else _intl_after_cue(text, out)
-
-
-def _intl_after_cue(text: str, out: list) -> list:
-    """Any country's grouping after a call cue, in the tool channel (#50). The core drops a span that overlaps an
-    earlier hit; a span already found is skipped here."""
-    taken = {(a, b) for a, b, _, _ in out}
-    for m in _PHONE_CUE_INTL_RE.finditer(text):
-        v = m.group(1).rstrip(" .-/")
-        span = (m.start(1), m.start(1) + len(v))
-        if span in taken or not _national_phone_ok(v) or _not_a_number_after_cue(v):
-            continue
-        if _NANP_SHAPE_RE.fullmatch(v):
-            continue   # a North American number is phone-us-national's and the loose cue's, with their region
-        out.append((span[0], span[1], "phone-after-phone-word", PHONE))
-    return out
-
-
-def _not_a_number_after_cue(v: str) -> bool:
-    """An IP, a date at the start (a time may follow), round numbers and a list of numbers after `call` or `contact …
-    at` (Gate A of #50): an arithmetic run or doublings (05 10 15 20, 128 256 512), a one-digit group unless after +,
-    pairs without their trunk 0 or with fewer than three distinct pairs, and without a trunk 0, + or ( more than
-    four groups, four equal ones, or two of one length (but the Indian mobile 98765 43219)."""
-    groups = re.findall(r"\d+", v)
-    nums = [int(g) for g in groups]
-    if _IPV4_SHAPE_RE.fullmatch(v) or any(rx.match(v) for rx in (_YMD_SPACED_RE, _DMY_SPACED_RE, _MDY_SPACED_RE)):
-        return True
-    if all(g.endswith("00") for g in groups) or (len(nums) >= 3 and (
-            len({b - a for a, b in zip(nums, nums[1:])}) == 1 or all(b == 2 * a > 0 for a, b in zip(nums, nums[1:])))):
-        return True
-    if all(len(g) == 2 for g in groups):
-        steps = {b - a for a, b in zip(nums, nums[1:])}
-        return not v.startswith("0") or groups[0] == "00" or len(set(groups)) < 3 or steps <= {0, 1, -1}
-    if not v.startswith("+") and any(len(g) == 1 for g in groups):
-        return True
-    if v.startswith(("+", "0", "(")):
-        return False
-    if len(groups) > 4 or (len(groups) == 4 and len({len(g) for g in groups}) == 1):
-        return True
-    if len(groups) == 2 and len(groups[0]) == len(groups[1]):
-        a, b = groups
-        return not (len(a) == 5 and a[0] in "6789" and abs(nums[0] - nums[1]) > 10)
-    return False
+    return out if prompt else intl_after_cue(text, out)
 
 
 def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> list:
@@ -2451,7 +2405,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     if u and re.search(r"(?i)\b(?:ste|apt|rm|fl|bldg|no|nr)$", v) and _address_value_ok(
                             v + text[s0 + len(v):u.end()]):
                         v = text[s0:u.end()]
-                if not _address_value_ok(v):
+                if not (_address_value_ok(v) or street_number_last(text, m.start(), m.end(1), v,
+                                                                   _line_back(text, m.start()))):
                     continue
                 done.add(m.start())
                 # the check for a company or a public place reads at most 120 characters of the line before the
