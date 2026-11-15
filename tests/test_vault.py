@@ -973,6 +973,35 @@ class LifeCycleTests(unittest.TestCase):
         self.assertEqual(sorted(self.v().live_fingerprints().values()), sorted([real.key, other.key]))
         self.assertEqual(self.v().quiet_code_words(), [], "a second run finds nothing")
 
+    def test_the_plugins_own_name_is_never_hunted_whoever_stored_it(self):
+        # #53: the plugin's name stored as a value masked its own commands and paths, and blocked the forget prompt
+        own = vault.OWN_NAME
+        manual = self.v().put(own, "SECRET", "manual", session="A")
+        self.assertTrue(vault.is_weak("manual", own.capitalize()))
+        self.assertTrue(vault.is_weak("term:list", own.upper()))
+        self.assertFalse(vault.is_weak("manual", own + "x"), "a longer value is a value")
+        self.assertEqual(self.v().live_fingerprints(), {}, "a new entry with the own name is weak at once")
+        self.assertEqual(self.v().get(manual.key, "A")[1], "ok", "its placeholder still resolves")
+
+    def test_an_old_entry_with_the_own_name_is_marked_weak_by_fingerprint(self):
+        own = vault.OWN_NAME
+        old = self.v().put(own.capitalize(), "SECRET", "manual", session="A")
+        other = self.v().put("Sommerwiese7", "SECRET", "manual", session="A")
+        v = self.v()
+        v._index["entries"][old.key].pop("weak", None)        # as a version before #53 stored it
+        v._save_index()
+        real_get = JsonFileBackend.get
+
+        def only_the_fingerprint_key(backend, key):
+            if key != FP_KEY_ENTRY:
+                raise AssertionError(f"the value of {key} was read")
+            return real_get(backend, key)
+        with mock.patch.object(JsonFileBackend, "get", only_the_fingerprint_key):
+            marked = self.v().weaken_own_name()
+        self.assertEqual(marked, [old.key])
+        self.assertEqual(list(self.v().live_fingerprints().values()), [other.key])
+        self.assertEqual(self.v().weaken_own_name(), [], "a second run finds nothing")
+
     def test_the_code_word_cleanup_makes_no_fingerprint_key_in_an_empty_store(self):
         self.assertEqual(self.v().quiet_code_words(), [])
         self.assertIsNone(self.v().backend.get(FP_KEY_ENTRY))
