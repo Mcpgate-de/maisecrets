@@ -92,6 +92,27 @@ def _handle_ok(v: str, known) -> bool:
 USER_ID_KEYS = frozenset({"userid", "userlogin", "loginname", "loginid"})
 
 
+_USER_ID_KEY = r"(?i:user[_-]?(?:id|login)|login[_-]?(?:name|id))"
+_ID_FORMS: dict = {}
+
+
+def user_id_forms(value: str, ops: str, end: str) -> list:
+    """The forms of key_values.forms with the key in the pattern: the general forms take every `key: value` of a text
+    and check the key after, which cost 0.08 s on a megabyte for this one family. Groups as there: 2 or 3 the key,
+    4 the value."""
+    got = _ID_FORMS.get((value, ops, end))
+    if got is None:
+        k = _USER_ID_KEY
+        got = _ID_FORMS[(value, ops, end)] = [
+            re.compile(r"(?:([\"'`])(" + k + r")\1|(?<![\w.-])(" + k + r"))[ \t]{0,3}" + ops + r"[ \t]{0,3}[\"'`]?"
+                       + value + end, re.M),
+            re.compile(r"<th(?:\s[^<>]{0,80})?>\s{0,32}()(" + k + r")()\s{0,32}</th>\s{0,64}"
+                       r"<td(?:\s[^<>]{0,80})?>\s{0,32}" + value + r"\s{0,32}</td>"),
+            re.compile(r"<()(" + k + r")()(?:\s[^<>]{0,200})?>[ \t]*" + value + r"[ \t]*</\2>"),
+        ]
+    return got
+
+
 def user_id_ok(v: str) -> bool:
     from .core import _word_set
     from .personal import _username_value_ok
