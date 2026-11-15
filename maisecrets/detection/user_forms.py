@@ -12,26 +12,24 @@ _CAMEL = r"[A-Z][a-z]{1,15}[A-Z][a-z0-9]{1,15}"
 # the cues: `for user kalin.orbek`, `for invalid user k.orbek` (sshd), `User kalin.orbek successfully logged in` (also
 # after a log prefix), `Welcome, kalin_orb_42.` and `Welcome back, ...`
 # matched only where str.find saw `user` or `welcome`: one regex pass over a megabyte cost 0.09 s (#51)
-# a plain word as a user name, only where the form says it is one: in quotes, after `user=`, in an sshd, a sudo or a
-# pam line (#52: `Accepted password for kmorgan from`). Not after `for user` in prose: the word list lacks many
-# ordinary words (input, preferences, profile), so `from user input` would be a name
-_PLAIN = r"[a-z]{4,20}"
+# a plain word is never a user name here, not even in quotes or after `user=`: the word list lacks many ordinary
+# words and service accounts (`User=caddy` in a systemd unit, `?user=dashboard`, `for user 'profile'`; Gate A of #52)
 _AT_RE = re.compile(r"(?i:user|welcome(?: back)?,)(?:[ \t]+(?P<q>[\"'])?|(?P<eq>=))(?P<v>" + _HANDLE + "|" + _CAMEL
-                    + "|" + _PLAIN + r")(?(q)(?P=q))(?=[.,;:!?)(@\s&]|$)")
+                    + r")(?(q)(?P=q))(?=[.,;:!?)(@\s&]|$)")
 _STRONG = ("for", "by", "from", "the", "a", "invalid", "of")  # `for user x` needs no verb of a login after it
 # sshd `Accepted password for kmorgan42 from`, sudo `sudo: kmorgan42 : TTY=`, pam `by kmorgan42(uid=1001)` (#52)
-_SSHD_RE = re.compile(r"(?:password|publickey) for (" + _HANDLE + "|" + _PLAIN + r") from\b")
-_SUDO_RE = re.compile(r"sudo:[ \t]+(" + _HANDLE + "|" + _PLAIN + r")[ \t]+:[ \t]+TTY=")
-_UID_RE = re.compile(r"\bby[ \t]+(" + _HANDLE + "|" + _PLAIN + r")$")
+_SSHD_RE = re.compile(r"(?:Accepted|Failed) (?:password|publickey) for (" + _HANDLE + r") from\b")
+_SUDO_RE = re.compile(r"sudo:[ \t]+(" + _HANDLE + r")[ \t]+:[ \t]+TTY=")
+_UID_RE = re.compile(r"\bby[ \t]+(" + _HANDLE + r")$")
 _LOGIN_VERB_RE = re.compile(r"[ \t]+(?:successfully|logged|signed|accessed|failed|was|has|reported|attempted)\b")
 _IS_RE = re.compile(r"(?i)user ?name is[ \t]+([A-Za-z][A-Za-z0-9._-]{1,30}?)(?=[.,;:!?)\s]|$)")
 
 
 def user_names(text: str) -> list:
-    """(start, end) of a user name after a cue in prose."""
+    """(start, end) of a user name after a cue in prose, and in an sshd, a sudo or a pam line."""
     low = text.lower()
     starts = _at(low, "user") + _at(low, "welcome")
-    lines = _all(low, "password for ") + _all(low, "publickey for ")
+    lines = _all(low, "accepted ") + _all(low, "failed ")
     sudo = _all(low, "sudo:")
     uids = _all(low, "(uid=")
     if not (starts or sudo or uids or lines):
@@ -56,8 +54,6 @@ def user_names(text: str) -> list:
             # `user=` mark a value (`User "lena.hartmann" cannot list`, `user=lhartmann7`)
             weak = low.startswith("user", pos) and cue not in _STRONG and not marked
             if (weak or re.fullmatch(_CAMEL, v)) and not login:
-                continue
-            if re.fullmatch(_PLAIN, v) and not marked:
                 continue
             keep(v, m.start("v"), m.end("v"))
             continue
