@@ -57,6 +57,7 @@ class UserNameAfterACueTests(unittest.TestCase):
                      "the user eth0 interface", "by user pod-7f9c", "Welcome, JetBrains.",
                      "login for user SAML2 provider",
                      "My user name is in the config.", "the user eslint-plugin-react", '{"userId": "jenkins2"}',
+                     '{"userId": "ftpuser2"}',
                      "session closed for user postgres2", "User ConfigManager failed", '{"userId": "kalinorbek"}',
                      '{"branch": "fix-orbek7"}', '{"handle": "kalin_orb_42"}', "for user e.g", "the user a.out",
                      "for user x.y", "session closed for user kibana8", "Requested by user codecov-commenter",

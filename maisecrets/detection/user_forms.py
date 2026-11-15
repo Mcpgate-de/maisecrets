@@ -49,11 +49,11 @@ def user_names(text: str) -> list:
 # a part that names a daemon, a tool or a bot, not a person: `user kibana8`, `codecov-commenter`, `jira-integration2`
 _TOOL_PARTS = frozenset(
     "bot bots svc service daemon cron cronjob runner deploy deployer integration commenter webhook kibana zabbix "
-    "nagios pgbouncer grafana prometheus elastic elasticsearch logstash redis mongo mongodb mariadb postgres mysql jenkins "
-    "gitlab github bitbucket jira confluence sonar sonarqube nexus artifactory ansible terraform docker podman "
-    "kube kubernetes helm vault consul nomad airflow celery rabbitmq kafka zookeeper hadoop spark nginx apache httpd "
-    "tomcat jetty ubuntu debian centos fedora alpine admin root guest webmaster postmaster backup monitor monitoring "
-    "codecov dependabot renovate travis circleci".split())
+    "nagios pgbouncer grafana prometheus elastic elasticsearch logstash redis mongo mongodb mariadb postgres "
+    "mysql jenkins gitlab github bitbucket jira confluence sonar sonarqube nexus artifactory ansible terraform "
+    "docker podman kube kubernetes helm vault consul nomad airflow celery rabbitmq kafka zookeeper hadoop spark "
+    "nginx apache httpd tomcat jetty ubuntu debian centos fedora alpine admin root guest webmaster postmaster "
+    "backup monitor monitoring codecov dependabot renovate travis circleci".split())
 
 
 def _handle_ok(v: str, known) -> bool:
@@ -81,5 +81,5 @@ USER_ID_KEYS = frozenset({"userid", "userlogin", "loginname", "loginid"})
 def user_id_ok(v: str) -> bool:
     from .core import _word_set
     from .personal import _username_value_ok
-    # _username_value_ok refuses a service user (jenkins2, ubuntu2), as on the cue path
+    # _username_value_ok refuses a service user (ftpuser2), as on the cue path
     return bool(re.fullmatch(_HANDLE, v)) and _username_value_ok(v, False, " ") and _handle_ok(v, _word_set())
