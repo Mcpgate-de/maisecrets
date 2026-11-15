@@ -24,6 +24,10 @@ def _age(ts: float) -> str:
 def cmd_list(_: list[str]) -> int:
     """What is stored, masked: the same view a person gets from /maisecrets:list. No value."""
     rc = _list_values()
+    from .not_a_secret import list_lines
+    allowed = list_lines()       # the values the person said are no secret: masked form and date (C22)
+    if allowed:
+        print("\n" + "\n".join(allowed))
     from . import value_files
     if value_files.present():
         from . import values
@@ -261,7 +265,7 @@ def cmd_report(args: list[str]) -> int:
     return rc
 
 
-TEST_DATA_URL = "https://github.com/Mcpgate-de/maisecrets#test-data-that-maisecrets-leaves-alone"
+TEST_DATA_URL = "https://github.com/Mcpgate-de/maisecrets/blob/main/docs/USING.md#test-data-that-maisecrets-leaves-alone"
 
 
 def _forget_the_false_positive(ev: dict) -> None:
@@ -416,13 +420,23 @@ def cmd_settings(args: list[str]) -> int:
     return 1 if rest else 0
 
 
-def cmd_status(_: list[str]) -> int:
-    """What support needs first: version, where the plugin runs from, which Python, which
-    store, which settings come from a policy, and what the logs counted."""
+def cmd_status(args: list[str]) -> int:
+    """The verdict (status_verdict.py), then what support needs: version, where the plugin runs from, which Python,
+    which store, which settings come from a policy, and what the logs counted. `status test`: the self-test."""
     import platform
     from pathlib import Path as _P
     from .vault import HOME, describe_backend
     root = _P(__file__).resolve().parent.parent
+    if args[:1] == ["test"]:
+        from . import selftest
+        print(selftest.command_text())
+        return 0
+    from . import status_verdict
+    verdict = status_verdict.lines(root)          # first: a configuration error prints alone
+    print("Is maisecrets protecting this session?")
+    for line in verdict:
+        print(line)
+    print("\nDetails")
     version = "?"
     try:
         version = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version", "?")
