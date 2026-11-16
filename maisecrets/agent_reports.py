@@ -260,6 +260,22 @@ def _command_span(body: str, transcript: str) -> tuple[int, int] | None:
     return span if any(_same_text(body[span[0]:span[1]], t) for t in said) else None
 
 
+def report_kind(prompt: str) -> str | None:
+    """What a blocked prompt of nothing but notification blocks is, in words for the notice: a subagent's report, or a
+    background command's notice when every block is one. None for any other prompt. The block notice must not tell the
+    person to paste a text they did not write."""
+    blocks = list(_NOTIFICATION_RE.finditer(prompt)) if prompt.count("<task-notification>") <= 16 else []
+    if not blocks:
+        return None
+    gaps = [prompt[:blocks[0].start()], prompt[blocks[-1].end():]]
+    gaps += [prompt[x.end():y.start()] for x, y in zip(blocks, blocks[1:])]
+    if any(g.strip() for g in gaps):
+        return None
+    if all("<summary>Background command " in m.group("body") for m in blocks):
+        return "a background command's notice"
+    return "a subagent's report"
+
+
 def _report_rest(payload: dict, prompt: str) -> str | None:
     """The text outside the results when the prompt is nothing but reports of subagents of this session, each
     proven as described above; None otherwise. Two agents that finish in the same turn may arrive in one prompt;

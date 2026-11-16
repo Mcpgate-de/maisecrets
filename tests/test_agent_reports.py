@@ -273,6 +273,34 @@ class AgentReportTests(unittest.TestCase):
         out = hooks.user_prompt({"prompt": text, "session_id": "s1", "transcript_path": str(s.transcript), **CLAUDE})
         self.assertEqual(out.get("decision"), "block", out)
 
+    def test_a_blocked_report_says_to_pass_it_on_and_ms_sends_it_with_placeholders(self):
+        copied = []
+        _hygiene.patch(self, hooks, "_clipboard", lambda text: copied.append(text) or True)
+        out = self.prompt(self.s.notification(self.answer + " and more"))
+        self.assertBlocked(out)
+        self.assertTrue(out["reason"].startswith("maisecrets kept a secret in a subagent's report from the AI.\n"))
+        self.assertIn("pass the report on with placeholders", out["reason"])
+        self.assertNotIn("paste", out["reason"], "the person did not write the report")
+        self.assertNotIn("wrong hit", out["reason"])
+        self.assertEqual(copied, [], "the clipboard stays the person's own")
+        sent = hooks.take_pending("s1")          # what /ms (/maisecrets:send) gives the model
+        self.assertIn("<task-notification>", sent)
+        self.assertIn("The CI file sets the token to \u27e6SECRET_c", sent)
+        self.assertNotIn(VALUE, sent)
+
+    def test_a_blocked_command_notice_says_notice(self):
+        out = self.prompt(self.s.notification(self.answer + " more", summary='Background command "x" completed '
+                                              '(exit code 0)'))
+        self.assertBlocked(out)
+        self.assertIn("in a background command's notice from the AI.", out["reason"])
+        self.assertIn("pass the notice on with placeholders", out["reason"])
+
+    def test_a_report_with_typed_text_around_it_gets_the_notice_of_a_prompt(self):
+        out = self.prompt("look at this\n" + self.s.notification(self.answer + " and more"))
+        self.assertBlocked(out)
+        self.assertIn("maisecrets kept a secret from the AI.", out["reason"])
+        self.assertIn("send the cleaned prompt now", out["reason"])
+
     def test_a_missing_transcript_is_blocked(self):
         self.assertBlocked(self.prompt(self.s.notification(self.answer), transcript_path=""))
 
