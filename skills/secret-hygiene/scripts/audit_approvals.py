@@ -18,8 +18,9 @@ Nothing this script prints is a value, a line of a file, a hash of a value, or a
 chose. A finding is a per-run id (S1, S2 ...; the same value keeps its id across files), the file, the place in
 it, the type, the rule, how sure the match is and the length. Names print only from a fixed list: a project folder
 prints as <project N>; a file name prints only when the client itself writes that name (rules/default.rules,
-backups/.claude.json.backup.<ms>), else as [file N]; a key prints only when it is a setting name of a client
-(known_keys.txt), else as [key N]; a CLAUDE_CONFIG_DIR or CODEX_HOME that is set prints as <claude config> or
+backups/.claude.json.backup N, without its digits), else as [file N]; a key prints only when it is a setting name
+of a client (known_keys.txt) and not a child of mcpServers, mcp_servers, env or projects, else as [key N]; a rule
+of the person's own prints as user rule N; a CLAUDE_CONFIG_DIR or CODEX_HOME that is set prints as <claude config> or
 <codex home>. A label whose parts form a token once the separators are gone is withheld whole. The names are
 still scanned: a token in a project path or a file name is a finding. The script never changes a file.
 
@@ -68,7 +69,10 @@ KNOWN_KEYS = _known_keys()
 # backups/.claude.json.backup.<ms> and a file it cannot parse to backups/.claude.json.corrupted.<ms>
 # (code.claude.com/docs/en/errors, "Configuration error in ~/.claude.json")
 RULES_NAMES = frozenset({"default.rules"})
-BACKUP_NAME = re.compile(r"\.claude\.json\.(?:backup|corrupted)\.\d{13}")
+BACKUP_NAME = re.compile(r"\.claude\.json\.(backup|corrupted)\.\d{13}")
+# the children of these keys are names a person chooses (an MCP server, an environment variable, a project): they
+# print by number even when a setting has the same name (an MCP server called `filesystem`; Gate A round 4, F3)
+CHOSEN_CHILDREN = frozenset({"mcpServers", "mcp_servers", "env", "projects"})
 
 
 def shown(text: str) -> str:
@@ -93,11 +97,15 @@ class Names:
 
     def __init__(self) -> None:
         self.projects: dict[str, int] = {}
-        self.origin: dict[int, str] = {}
+        self.origin: dict[int, Source] = {}
         self.files: dict[str, int] = {}
+        self.backups: dict[str, dict[str, int]] = {}
         self.keys: dict[str, int] = {}
+        self.rules: dict[str, int] = {}
 
-    def project(self, name: str, origin: str) -> int:
+    def project(self, name: str, origin: Source) -> int:
+        """The number of a project folder; ``origin`` is the Source that names it, kept as the object so that the
+        report prints its checked label (Gate A round 4, F2)."""
         if name not in self.projects:
             self.projects[name] = len(self.projects) + 1
             self.origin[self.projects[name]] = origin
@@ -108,10 +116,28 @@ class Names:
             return name
         return f"[file {self.files.setdefault(name, len(self.files) + 1)}]"
 
-    def key(self, name: str) -> str:
-        if name in KNOWN_KEYS:
+    def backup(self, name: str) -> str:
+        """A backup of the client config as `.claude.json.backup N` or `.claude.json.corrupted N`: the 13 digits of
+        its name are not printed (Gate A round 4, F2); any other name as [file N]."""
+        m = BACKUP_NAME.fullmatch(name)
+        if not m:
+            return self.file(name, False)
+        seen = self.backups.setdefault(m.group(1), {})
+        return f".claude.json.{m.group(1)} {seen.setdefault(name, len(seen) + 1)}"
+
+    def key(self, name: str, parent: str | None = None) -> str:
+        if name in KNOWN_KEYS and parent not in CHOSEN_CHILDREN:
             return name
         return f"[key {self.keys.setdefault(name, len(self.keys) + 1)}]"
+
+    def rule(self, kind: str) -> str:
+        """A rule id of the person's own (`user:<id>`, chosen up to 64 characters) or a term id prints by number
+        (Gate A round 4, F1); a built-in rule id prints by name."""
+        if ":" not in kind:
+            return kind
+        prefix = kind.split(":", 1)[0]
+        word = {"user": "user rule", "term": "term"}.get(prefix, "rule")
+        return f"{word} {self.rules.setdefault(kind, len(self.rules) + 1)}"
 
 
 def _root(var: str, default: str, placeholder: str) -> tuple[Path, str]:
@@ -167,8 +193,8 @@ def rules_in(folder: Path) -> list[Path]:
     return listed(folder, lambda n: n.endswith(".rules") and n != ".rules")
 
 
-def _claude_projects(files: list[Source]) -> list[tuple[str, str]]:
-    out: list[tuple[str, str]] = []
+def _claude_projects(files: list[Source]) -> list[tuple[str, Source]]:
+    out: list[tuple[str, Source]] = []
     for s in files:
         try:
             data = json.loads(_read(s.path))
@@ -176,7 +202,7 @@ def _claude_projects(files: list[Source]) -> list[tuple[str, str]]:
             continue
         projects = data.get("projects") if isinstance(data, dict) else None
         if isinstance(projects, dict):
-            out += [(p, s.label) for p in projects if isinstance(p, str)]
+            out += [(p, s) for p in projects if isinstance(p, str)]
     return out
 
 
@@ -256,7 +282,7 @@ def sources(names: Names) -> list[Source]:
     if (cdir / ".config.json").is_file():
         client.append(Source(cdir / ".config.json", f"{clabel}/.config.json", "Claude Code", "client config"))
     for f in listed(cdir / "backups", lambda n: n.startswith(".claude") and ".json" in n):
-        shown_name = names.file(f.name, bool(BACKUP_NAME.fullmatch(f.name)))
+        shown_name = names.backup(f.name)
         client.append(Source(f, f"{clabel}/backups/{shown_name}", "Claude Code", "client config"))
     out += client
     for name, origin in _claude_projects(client):
@@ -276,7 +302,7 @@ def sources(names: Names) -> list[Source]:
     except (OSError, ValueError):
         text = ""
     for name in codex_project_names(text):
-        n = names.project(name, config.label)
+        n = names.project(name, config)
         folder = Path(name) / ".codex"
         out.append(Source(folder / "config.toml", f"<project {n}>/.codex/config.toml", "Codex", "project config"))
         out += [Source(f, f"<project {n}>/.codex/rules/{names.file(f.name, f.name in RULES_NAMES)}", "Codex",
@@ -307,14 +333,15 @@ def json_strings(node, path: tuple = ()):
 
 
 def render(path: tuple, names: Names) -> str:
-    out = ""
+    out, parent = "", None
     for x in path:
         if isinstance(x, int):
             out += f"[{x}]"
         elif x == "(key)":
             out += " (key)"
         else:
-            out += ("." if out else "") + names.key(x)
+            out += ("." if out else "") + names.key(x, parent)
+            parent = x
     return out
 
 
@@ -367,7 +394,8 @@ def line_parts(text: str, toml: bool) -> list[tuple[int, list[str]]]:
 
 
 def render_line(n: int, parts: list[str], names: Names) -> str:
-    return f"line {n} ({'.'.join(names.key(x) for x in parts)})" if parts else f"line {n}"
+    shown = [names.key(x, parts[i - 1] if i else None) for i, x in enumerate(parts)]
+    return f"line {n} ({'.'.join(shown)})" if parts else f"line {n}"
 
 
 # -------------------------------------------------------------------------------------------- scan --
@@ -393,7 +421,7 @@ def scan_file(detect, enabled, src: Source, names: Names) -> list[tuple[str, obj
             for name, entry in (projects.items() if isinstance(projects, dict) else []):
                 tools = entry.get("allowedTools") if isinstance(entry, dict) else None
                 if isinstance(tools, list):
-                    n = names.project(name, src.label)
+                    n = names.project(name, src)
                     items += [(f"projects[<project {n}>].allowedTools[{i}]", t)
                               for i, t in enumerate(tools) if isinstance(t, str)]
             for place, s in items:
@@ -506,6 +534,7 @@ def run(args) -> int:
             return
         sid = ids.setdefault(m.value, f"S{len(ids) + 1}")
         rule, sure = classify(m.kind, inner_rule(detect, m))
+        rule = names.rule(rule)
         findings.append((sid, m.type, rule, sure, len(m.value), src.label, place, src.client, src.what))
 
     rules = _detector.secret_rules(detect)
@@ -536,11 +565,10 @@ def run(args) -> int:
             add(m, src, joined_check(detect, rules, place))
     # the names are scanned although they are never printed: a project folder (as its client decoded it) and
     # each path this script looked at can hold a token (Gate A B1, round 2 H1)
-    by_label = {s.label: s for s in files}
     for name, n in names.projects.items():
-        origin = by_label.get(names.origin[n])
+        origin = names.origin[n]      # the Source itself: a withheld label must not lose the finding (round 4, F2)
         for m in detect.scan(name, enabled, "tool"):
-            if m.value not in ids and origin is not None:
+            if m.value not in ids:
                 add(m, origin, f"<project {n}> (project path)")
     for src in files:
         for m in detect.scan(str(src.path), enabled, "tool"):
@@ -563,7 +591,7 @@ def run(args) -> int:
     lines += [f"  {x}" for x in missing] or ["  (none)"]
     if names.projects:
         lines.append("Projects (their folder names are not printed; open the file named here to find one):")
-        lines += [f"  project {n} (from {names.origin[n]})" for n in sorted(names.origin)]
+        lines += [f"  project {n} (from {names.origin[n].label})" for n in sorted(names.origin)]
     shape = len({f[0] for f in findings if f[3] == "shape"})
     lines.append(f"Summary: {len(ids)} value(s); {shape} match a provider's token format (rotate first). "
                  "Removing an entry does not revoke the credential: the command ran with it, and copies of the "

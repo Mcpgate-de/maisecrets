@@ -1,8 +1,9 @@
 # The keys of the client settings that audit_approvals.py prints by name; every other key prints as [key N].
 # Claude Code: the setting names of code.claude.com/docs/en/settings-reference (headings) and the nested keys
 # of permissions, hooks, MCP servers and .claude.json. Codex: every property name of
-# codex-rs/core/config.schema.json on openai/codex main, 2026-11-16. A name of a person's choosing (an MCP
-# server, an environment variable, a project) is not in this list on purpose.
+# codex-rs/core/config.schema.json on openai/codex main, 2026-11-16. Some names here are also common names of MCP
+# servers (filesystem, sqlite, memory_tool ...): a child of mcpServers, mcp_servers, env or projects therefore always
+# prints as [key N], whatever this list holds (audit_approvals.py CHOSEN_CHILDREN).
 Interrupt
 Notification
 PermissionRequest

@@ -193,11 +193,13 @@ class ApprovalAuditTests(unittest.TestCase):
 
     # -- sources no test read before Gate A ----------------------------------------------------------------------
     def test_the_client_config_backups_are_read(self):
-        """The client's own backup name prints (code.claude.com/docs/en/errors: .claude.json.backup.<ms>)."""
-        self.write_json(self.claude / "backups" / ".claude.json.backup.1793660400000", {"projects": {"/p": {
+        """A backup in the client's own form (code.claude.com/docs/en/errors: .claude.json.backup.<ms>) prints by
+        its kind and a number, never by its digits (Gate A round 4, F2)."""
+        digits = _digits(13)
+        self.secrets.append(digits)
+        self.write_json(self.claude / "backups" / f".claude.json.backup.{digits}", {"projects": {"/p": {
             "allowedTools": [self.approve()]}}})
-        self.assert_found(self.audit(), "<claude config>/backups/.claude.json.backup.1793660400000",
-                          ".allowedTools[0]")
+        self.assert_found(self.audit(), "<claude config>/backups/.claude.json.backup 1", ".allowedTools[0]")
 
     def test_the_legacy_config_json_is_read(self):
         self.write_json(self.claude / ".config.json", {"projects": {"/p": {"allowedTools": [self.approve()]}}})
@@ -318,12 +320,16 @@ class ApprovalAuditTests(unittest.TestCase):
 
     def test_a_backup_name_outside_the_clients_pattern_prints_as_a_number(self):
         name = ".claude.json.backup" + _letters(30)
-        self.secrets.append(name[19:])
+        digits = [_digits(13) for _ in range(3)]
+        self.secrets += [name[19:]] + digits
         self.write_json(self.claude / "backups" / name, {})
-        self.write_json(self.claude / "backups" / ".claude.json.corrupted.1793664000000", {})
+        for d in digits:
+            self.write_json(self.claude / "backups" / f".claude.json.corrupted.{d}", {})
         run = self.audit()
         self.assertIn("<claude config>/backups/[file 1] (Claude Code client config)", run.report)
-        self.assertIn("<claude config>/backups/.claude.json.corrupted.1793664000000", run.report)
+        for n in (1, 2, 3):
+            self.assertIn(f"<claude config>/backups/.claude.json.corrupted {n} (Claude Code client config)",
+                          run.report)
 
     def test_a_set_config_folder_always_prints_as_its_placeholder(self):
         cases = [("relative letters", Path(_letters(40))), ("plain parts", self.dir / "plain" / _letters(40)),
@@ -363,6 +369,69 @@ class ApprovalAuditTests(unittest.TestCase):
         run = self.audit()
         self.assertIn("line 2 ([key 1].[key 2])", run.report)
         self.assertIn("line 4 ([key 3].[key 4])", run.report)
+
+    # -- Gate A round 4 ----------------------------------------------------------------------------------------------
+    def test_a_rule_id_of_the_persons_own_prints_by_number(self):
+        """A rule from rules.d (JSON and .prefixes) has the kind user:<id>, and the person chooses the id (F1). The
+        run gets a vault home of its own, a temp folder of this test."""
+        home = self.dir / "vault-home"
+        (home / "rules.d").mkdir(parents=True)
+        (home / "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}', encoding="utf-8")
+        json_id, prefix_id = _letters(16), _letters(16)
+        self.secrets += [json_id, prefix_id]
+        (home / "rules.d" / "team.json").write_text(json.dumps({"rules": [
+            {"id": json_id, "regex": r"zqvk_[A-Za-z0-9]{24}", "keywords": ["zqvk_"]}]}), encoding="utf-8")
+        (home / "rules.d" / "more.prefixes").write_text(f"{prefix_id}  wxjb-  [0-9a-f]{{32}}\n", encoding="utf-8")
+        v1, v2 = "zqvk_" + _rnd(24), "wxjb-" + "".join(secrets.choice("0123456789abcdef") for _ in range(32))
+        self.secrets += [v1, v2]
+        self.write_json(self.claude / "settings.json", {"permissions": {"allow": [f"Bash(deploy --key {v1})",
+                                                                                 f"Bash(build --key {v2})"]}})
+        env = dict(self.env)
+        env["MAISECRETS" + "_HOME"] = str(home)
+        run = self.audit(env=env)
+        self.assertEqual(run.rc, 1, run.text)
+        rows = run.rows()
+        self.assertEqual(len(rows), 2, run.report)
+        self.assertEqual(sorted(" ".join(r.split()[2:5]) for r in rows), ["user rule 1", "user rule 2"])
+
+    def test_a_term_kind_prints_by_number_and_a_built_in_rule_by_name(self):
+        names = _module().Names()
+        self.assertEqual(names.rule("term:0123456789ab"), "term 1")
+        self.assertEqual(names.rule("user:" + _letters(16)), "user rule 2")
+        self.assertEqual(names.rule("github-pat"), "github-pat")
+
+    def test_an_mcp_server_with_a_setting_name_prints_by_number(self):
+        self.write_json(self.claude / "settings.json", {"mcpServers": {"filesystem": {"env": {"sqlite": self.token}}}})
+        self.assert_found(self.audit(), "<claude config>/settings.json", "mcpServers.[key 1].env.[key 2]",
+                          fix="take the value out of this setting")
+        (self.claude / "settings.json").unlink()
+        (self.codex / "config.toml").write_text(f'[mcp_servers.filesystem.env]\nsearch = "{self.token}"\n',
+                                                encoding="utf-8")
+        self.assert_found(self.audit(), "<codex home>/config.toml", "line 2 (mcp_servers.[key 1].env.[key 2])",
+                          fix="take the value out of this setting")
+
+    def test_a_withheld_client_config_label_keeps_its_project_finding_and_its_project_list_entry(self):
+        """The origin of a project is the Source itself: a label that layer 2 withholds still names its project
+        finding, and the Projects list prints the checked label (F2)."""
+        import contextlib
+        import io
+        from unittest import mock
+        self.write_json(self.claude / ".claude.json", {"projects": {f"/srv/{self.token}": {}}})
+        mod = _module()
+        real = mod.joined_check
+
+        def withhold(detect, rules, label):
+            return "[label withheld]" if label.endswith(".claude.json") else real(detect, rules, label)
+        mod.joined_check = withhold
+        buf = io.StringIO()
+        env = {k: v for k, v in self.env.items() if k != "PYTHONUTF8"}
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(buf):
+            rc = mod.main([])
+        out = buf.getvalue()
+        self.assert_no_run_of_a_secret(out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("[label withheld]  <project 1> (project path)", out)
+        self.assertIn("project 1 (from [label withheld])", out)
 
     def test_a_known_setting_name_prints_by_name(self):
         self.write_json(self.claude / "settings.json",
