@@ -33,6 +33,14 @@ def _rnd(n: int) -> str:
             return s
 
 
+def _letters(n: int) -> str:
+    return "".join(secrets.choice(string.ascii_letters) for _ in range(n))
+
+
+def _digits(n: int) -> str:
+    return "".join(secrets.choice(string.digits) for _ in range(n))
+
+
 def _token() -> str:
     return "gh" + "p_" + _rnd(36)
 
@@ -84,14 +92,14 @@ class ApprovalAuditTests(unittest.TestCase):
             for i in range(len(s) - 7):
                 self.assertNotIn(s[i:i + 8], text, f"8 characters of a secret (at {i}) are in the output")
 
-    def audit(self, *args, env=None, out: bool = True) -> Run:
+    def audit(self, *args, env=None, out: bool = True, cwd=None) -> Run:
         """Run the script; with ``out`` the full report goes to a file of the test. stdout, stderr and the report
         are checked for every secret of the test, in each run."""
         self.runs += 1
         report = self.dir / f"report-{self.runs}.txt"
         extra = ["--out", str(report)] if out else []
         r = subprocess.run([sys.executable, str(SCRIPT), *args, *extra], capture_output=True, text=True,
-                           encoding="utf-8", env=env or self.env, timeout=120)
+                           encoding="utf-8", env=env or self.env, timeout=120, cwd=cwd)
         run = Run(r, report.read_text(encoding="utf-8") if report.exists() else "")
         self.assert_no_run_of_a_secret(run.text)
         self.assertNotIn("Traceback", run.stderr)
@@ -122,7 +130,7 @@ class ApprovalAuditTests(unittest.TestCase):
 
     def test_a_value_in_a_setting_gets_the_setting_fix(self):
         self.write_json(self.claude / "settings.json", {"env": {"GH_TOKEN": self.token}})
-        self.assert_found(self.audit(), "<claude config>/settings.json", "env.GH_TOKEN",
+        self.assert_found(self.audit(), "<claude config>/settings.json", "env.[key 1]",
                           fix="take the value out of this setting")
 
     # -- (b) a project allowedTools entry in the client config --------------------------------------------------
@@ -161,7 +169,7 @@ class ApprovalAuditTests(unittest.TestCase):
     def test_a_value_in_the_codex_config_names_its_table_and_key(self):
         (self.codex / "config.toml").write_text(f'model = "x"\n\n[mcp_servers.gh.env]\nGITHUB_TOKEN = "{self.token}"\n',
                                                 encoding="utf-8")
-        self.assert_found(self.audit(), "<codex home>/config.toml", "line 4 (mcp_servers.gh.env.GITHUB_TOKEN)",
+        self.assert_found(self.audit(), "<codex home>/config.toml", "line 4 (mcp_servers.[key 1].env.[key 2])",
                           fix="take the value out of this setting")
 
     def test_the_rules_of_a_codex_project_are_read(self):
@@ -171,7 +179,7 @@ class ApprovalAuditTests(unittest.TestCase):
         f = project / ".codex" / "rules" / "team.rules"
         f.parent.mkdir(parents=True)
         f.write_text(f'prefix_rule(pattern=["gh", "auth", "--with-token", "{self.token}"])\n', encoding="utf-8")
-        self.assert_found(self.audit(), "<project 1>/.codex/rules/team.rules", "line 1", fix="remove this prefix_rule")
+        self.assert_found(self.audit(), "<project 1>/.codex/rules/[file 1]", "line 1", fix="remove this prefix_rule")
 
     def test_the_config_toml_of_a_codex_project_is_read(self):
         project = self.dir / "work" / "repo"
@@ -180,14 +188,16 @@ class ApprovalAuditTests(unittest.TestCase):
         f = project / ".codex" / "config.toml"
         f.parent.mkdir(parents=True)
         f.write_text(f'[mcp_servers.gh.env]\nGITHUB_TOKEN = "{self.token}"\n', encoding="utf-8")
-        self.assert_found(self.audit(), "<project 1>/.codex/config.toml", "line 2 (mcp_servers.gh.env.GITHUB_TOKEN)",
+        self.assert_found(self.audit(), "<project 1>/.codex/config.toml", "line 2 (mcp_servers.[key 1].env.[key 2])",
                           fix="take the value out of this setting")
 
     # -- sources no test read before Gate A ----------------------------------------------------------------------
     def test_the_client_config_backups_are_read(self):
-        self.write_json(self.claude / "backups" / ".claude.json.backup", {"projects": {"/p": {
+        """The client's own backup name prints (code.claude.com/docs/en/errors: .claude.json.backup.<ms>)."""
+        self.write_json(self.claude / "backups" / ".claude.json.backup.1793660400000", {"projects": {"/p": {
             "allowedTools": [self.approve()]}}})
-        self.assert_found(self.audit(), "<claude config>/backups/.claude.json.backup", ".allowedTools[0]")
+        self.assert_found(self.audit(), "<claude config>/backups/.claude.json.backup.1793660400000",
+                          ".allowedTools[0]")
 
     def test_the_legacy_config_json_is_read(self):
         self.write_json(self.claude / ".config.json", {"projects": {"/p": {"allowedTools": [self.approve()]}}})
@@ -267,7 +277,7 @@ class ApprovalAuditTests(unittest.TestCase):
         (self.codex / "config.toml").write_text(f'[projects."{rules.parent.parent.as_posix()}"]\n', encoding="utf-8")
         (rules / "a.rules").write_text("", encoding="utf-8")
         run = self.audit()
-        self.assertIn("<project 2>/.codex/rules/a.rules", run.report)
+        self.assertIn("<project 2>/.codex/rules/[file 1]", run.report)
 
     def test_other_name_forms_from_the_review_are_never_printed(self):
         parts = [_rnd(18) for _ in range(4)]
@@ -285,16 +295,90 @@ class ApprovalAuditTests(unittest.TestCase):
         self.assertIn("<codex home>/rules/[file", run.report)
         self.assertIn("<claude config>/backups/[file", run.report)
 
-    def test_a_config_folder_that_is_a_plain_path_prints_and_another_does_not(self):
-        mod = _module()
-        self.assertTrue(mod.safe_path(Path("/home/me/.claude")))
-        self.assertFalse(mod.safe_path(Path("/home/me/ghp_" + _rnd(10))))
+    def test_an_unset_config_folder_prints_as_its_default_and_a_set_one_never(self):
         env = dict(self.env)
         del env["CLAUDE_CONFIG_DIR"], env["CODEX_HOME"]
         run = self.audit(env=env)
         self.assertIn("~/.claude/settings.json (Claude Code user settings)", run.report)
         self.assertIn("~/.codex/config.toml (Codex config)", run.report)
         self.assertNotIn(str(self.home), run.text)
+
+    # -- Gate A round 3: names print only from a fixed vocabulary ------------------------------------------------
+    def test_a_rules_file_name_of_letters_or_digits_prints_as_a_number(self):
+        (self.codex / "rules").mkdir()
+        for name in (_letters(40), _digits(16), "-".join(_digits(4) for _ in range(4))):
+            self.secrets.append(name)
+            (self.codex / "rules" / f"{name}.rules").write_text("", encoding="utf-8")
+        (self.codex / "rules" / "default.rules").write_text("", encoding="utf-8")
+        run = self.audit()
+        self.assertEqual(run.rc, 0, run.text)
+        for n in (1, 2, 3):
+            self.assertIn(f"<codex home>/rules/[file {n}] (Codex approval rules)", run.report)
+        self.assertIn("<codex home>/rules/default.rules (Codex approval rules)", run.report, "the client's own name")
+
+    def test_a_backup_name_outside_the_clients_pattern_prints_as_a_number(self):
+        name = ".claude.json.backup" + _letters(30)
+        self.secrets.append(name[19:])
+        self.write_json(self.claude / "backups" / name, {})
+        self.write_json(self.claude / "backups" / ".claude.json.corrupted.1793664000000", {})
+        run = self.audit()
+        self.assertIn("<claude config>/backups/[file 1] (Claude Code client config)", run.report)
+        self.assertIn("<claude config>/backups/.claude.json.corrupted.1793664000000", run.report)
+
+    def test_a_set_config_folder_always_prints_as_its_placeholder(self):
+        cases = [("relative letters", Path(_letters(40))), ("plain parts", self.dir / "plain" / _letters(40)),
+                 ("digits", self.dir / _digits(16)), ("card form", self.dir / "-".join(_digits(4) for _ in range(4))),
+                 ("split token", self.dir / ("gh" + "p_" + _rnd(18)) / _rnd(18))]
+        for what, folder in cases:
+            with self.subTest(what):
+                self.secrets += [x for x in folder.parts if len(x) >= 8 and x not in self.dir.parts]
+                (self.dir / folder).mkdir(parents=True, exist_ok=True)
+                env = dict(self.env, CLAUDE_CONFIG_DIR=str(folder), CODEX_HOME=str(folder))
+                run = self.audit(env=env, cwd=str(self.dir))
+                self.assertIn("<claude config>/settings.json", run.report)
+                self.assertIn("<codex home>/config.toml", run.report)
+                # the error path prints the placeholder too
+                (self.dir / folder / "settings.json").mkdir(exist_ok=True)
+                run = self.audit(env=env, cwd=str(self.dir))
+                self.assertEqual(run.rc, 2, run.text)
+                self.assertIn("<claude config>/settings.json (Claude Code user settings): ", run.report)
+
+    def test_a_json_key_of_letters_digits_or_a_split_token_prints_as_a_number(self):
+        head, a, b = "gh" + "p_" + _rnd(12), _rnd(12), _rnd(12)
+        self.secrets += [head + a + b]
+        name = _letters(40)
+        self.secrets.append(name)
+        self.write_json(self.claude / "settings.json", {"env": {name: self.token}, head: {a: {b: self.token}}})
+        run = self.audit()
+        self.assertEqual(run.rc, 1, run.text)
+        self.assertIn("env.[key 1]", run.report)
+        self.assertIn("[key 2].[key 3].[key 4]", run.report)
+
+    def test_a_toml_section_and_key_of_letters_or_a_split_token_print_as_numbers(self):
+        head, tail = "gh" + "p_" + _rnd(18), _rnd(18)
+        sec, key = _letters(40), _letters(40)
+        self.secrets += [head + tail, sec, key]
+        (self.codex / "config.toml").write_text(f'[{sec}]\n{key} = "{self.token}"\n[{head}]\n{tail} = "{self.token}"\n',
+                                                encoding="utf-8")
+        run = self.audit()
+        self.assertIn("line 2 ([key 1].[key 2])", run.report)
+        self.assertIn("line 4 ([key 3].[key 4])", run.report)
+
+    def test_a_known_setting_name_prints_by_name(self):
+        self.write_json(self.claude / "settings.json",
+                        {"hooks": {"PreToolUse": [{"hooks": [{"command": self.approve()}]}]}})
+        self.assert_found(self.audit(), "<claude config>/settings.json", "hooks.PreToolUse[0].hooks[0].command",
+                          fix="take the value out of this setting")
+
+    def test_a_label_whose_parts_form_a_token_is_withheld_whole(self):
+        mod = _module()
+        detect = mod._detector.load()
+        rules = mod._detector.secret_rules(detect)
+        head, tail = "gh" + "p_" + _rnd(18), _rnd(18)
+        self.assertEqual(mod.joined_check(detect, rules, f"<x>/{head}/{tail}.rules"), "[label withheld]")
+        self.assertEqual(mod.joined_check(detect, rules, f"[{head}].[{tail}]"), "[label withheld]")
+        self.assertEqual(mod.joined_check(detect, rules, "<codex home>/rules/default.rules"),
+                         "<codex home>/rules/default.rules")
 
     # -- Gate A M1 and round 2 M1 -------------------------------------------------------------------------------
     def test_the_guard_withholds_a_value_in_its_json_escaped_and_control_escaped_forms(self):
@@ -342,11 +426,11 @@ class ApprovalAuditTests(unittest.TestCase):
     def test_a_key_that_looks_like_a_credential_is_not_printed(self):
         # not a plain name of letters alone (only the character class catches it); not a plain name; random 24;
         # random 11
-        for name in ("only!letters", _rnd(23) + "!", _rnd(24), _rnd(11)):
+        for name in ("only!letters", _rnd(23) + "!", _rnd(24), _rnd(11), _letters(40), _digits(16)):
             with self.subTest(length=len(name)):
                 self.secrets.append(name.rstrip("!"))
                 self.write_json(self.claude / "settings.json", {"env": {"X": {name: self.token}}})
-                self.assert_found(self.audit(), "<claude config>/settings.json", "env.X[key]",
+                self.assert_found(self.audit(), "<claude config>/settings.json", "env.[key 1].[key 2]",
                                   fix="take the value out of this setting")
 
     def test_a_toml_key_that_is_not_a_plain_name_is_not_printed(self):
@@ -355,8 +439,8 @@ class ApprovalAuditTests(unittest.TestCase):
         (self.codex / "config.toml").write_text(f'[env]\n"{key}!" = "{self.token}"\n{key} = "{self.token}"\n',
                                                 encoding="utf-8")
         run = self.audit()
-        self.assertIn("line 2 (env.[key])", run.report)
-        self.assertIn("line 3 (env.[key])", run.report)
+        self.assertIn("line 2 (env.[key 1])", run.report)
+        self.assertIn("line 3 (env.[key 2])", run.report)
 
     # -- Gate A M2, M3, M4 ------------------------------------------------------------------------------------------
     @unittest.skipIf(sys.platform == "win32", "no FIFO on Windows")

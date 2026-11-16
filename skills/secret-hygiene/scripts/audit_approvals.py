@@ -16,10 +16,12 @@ tree scan (scan_secrets.py) sees only the files of one repository; this script r
 
 Nothing this script prints is a value, a line of a file, a hash of a value, or a name that a person or a client
 chose. A finding is a per-run id (S1, S2 ...; the same value keeps its id across files), the file, the place in
-it, the type, the rule, how sure the match is and the length. A project folder prints as <project N>, a file name
-from a folder listing as [file N] unless it is a plain name, a key as [key] unless it is a plain name, and a
-CLAUDE_CONFIG_DIR or CODEX_HOME that is not a plain path as <claude config> or <codex home>. The names are still
-scanned: a token in a project path or a file name is a finding. The script never changes a file.
+it, the type, the rule, how sure the match is and the length. Names print only from a fixed list: a project folder
+prints as <project N>; a file name prints only when the client itself writes that name (rules/default.rules,
+backups/.claude.json.backup.<ms>), else as [file N]; a key prints only when it is a setting name of a client
+(known_keys.txt), else as [key N]; a CLAUDE_CONFIG_DIR or CODEX_HOME that is set prints as <claude config> or
+<codex home>. A label whose parts form a token once the separators are gone is withheld whole. The names are
+still scanned: a token in a project path or a file name is a finding. The script never changes a file.
 
     python3 audit_approvals.py [--pii] [--out FILE] [--max-mb N]
 
@@ -32,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import re
 import stat
@@ -48,31 +49,26 @@ MAX_MB = 50.0     # a settings file is kilobytes; a 100 MB file took 214 s and 5
 
 
 # ------------------------------------------------------------------------------------------- names --
-SAFE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+HERE = Path(__file__).resolve().parent
 
 
-def _high_entropy(s: str) -> bool:
-    """A name of 16 or more characters with letters and digits and more than 3.5 bits per character."""
-    if len(s) < 16 or not re.search(r"\d", s) or not re.search(r"[A-Za-z]", s):
-        return False
-    n = len(s)
-    return -sum(c / n * math.log2(c / n) for c in (s.count(x) for x in set(s))) > 3.5
+def _known_keys() -> frozenset:
+    """The setting names of both clients (known_keys.txt next to this script). Only these print by name: a name
+    judged by its shape let 40 letters, 16 digits and tokens split across keys through (Gate A round 3)."""
+    try:
+        text = (HERE / "known_keys.txt").read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    return frozenset(x.strip() for x in text.splitlines() if x.strip() and not x.startswith("#"))
 
 
-def safe_name(name: str) -> bool:
-    """A name prints only when it looks like a name a program gives: a key, a file name or a folder can itself be
-    a credential that no rule matches (Gate A L1). Not printed: anything outside [A-Za-z0-9_.-]{1,64}, a name of
-    8 or more characters that mixes letters and digits (a random id or a cut token), and a high-entropy name."""
-    if not SAFE_NAME.fullmatch(name):
-        return False
-    if len(name) >= 8 and re.search(r"\d", name) and re.search(r"[A-Za-z]", name):
-        return False
-    return not _high_entropy(name)
-
-
-def safe_path(p: Path) -> bool:
-    parts = p.parts[1:] if p.anchor else p.parts
-    return bool(parts) and all(safe_name(x) for x in parts)
+KNOWN_KEYS = _known_keys()
+# the file names the clients write themselves: Codex appends approvals to rules/default.rules
+# (codex-rs/core/src/exec_policy.rs DEFAULT_POLICY_FILE); Claude Code copies .claude.json to
+# backups/.claude.json.backup.<ms> and a file it cannot parse to backups/.claude.json.corrupted.<ms>
+# (code.claude.com/docs/en/errors, "Configuration error in ~/.claude.json")
+RULES_NAMES = frozenset({"default.rules"})
+BACKUP_NAME = re.compile(r"\.claude\.json\.(?:backup|corrupted)\.\d{13}")
 
 
 def shown(text: str) -> str:
@@ -84,19 +80,22 @@ def shown(text: str) -> str:
 
 class Source:
     """A file this script looks for. ``label`` is what the report prints for it, built only from fixed names and
-    from names that pass safe_name(); ``path`` is never printed (Gate A round 2, H2)."""
+    from the clients' own names (RULES_NAMES, BACKUP_NAME); ``path`` is never printed (Gate A round 2, H2;
+    round 3)."""
 
     def __init__(self, path: Path, label: str, client: str, what: str) -> None:
         self.path, self.label, self.client, self.what = path, label, client, what
 
 
 class Names:
-    """The numbers of the project folders and of the listed file names that are not plain names."""
+    """The numbers of what prints by number: project folders, file names outside the clients' own names, and
+    keys outside the vocabulary. The same name keeps its number within one report."""
 
     def __init__(self) -> None:
         self.projects: dict[str, int] = {}
         self.origin: dict[int, str] = {}
-        self.files = 0
+        self.files: dict[str, int] = {}
+        self.keys: dict[str, int] = {}
 
     def project(self, name: str, origin: str) -> int:
         if name not in self.projects:
@@ -104,19 +103,23 @@ class Names:
             self.origin[self.projects[name]] = origin
         return self.projects[name]
 
-    def file(self, name: str) -> str:
-        if safe_name(name):
+    def file(self, name: str, own: bool) -> str:
+        if own:
             return name
-        self.files += 1
-        return f"[file {self.files}]"
+        return f"[file {self.files.setdefault(name, len(self.files) + 1)}]"
+
+    def key(self, name: str) -> str:
+        if name in KNOWN_KEYS:
+            return name
+        return f"[key {self.keys.setdefault(name, len(self.keys) + 1)}]"
 
 
 def _root(var: str, default: str, placeholder: str) -> tuple[Path, str]:
+    """A folder the person chose prints as its placeholder; only the default prints, as ~/<default>."""
     value = os.environ.get(var)
     if not value:
         return Path.home() / default, f"~/{default}"
-    p = Path(value)
-    return p, (str(p) if safe_path(p) else placeholder)
+    return Path(value), placeholder
 
 
 def claude_dir() -> tuple[Path, str]:
@@ -253,7 +256,8 @@ def sources(names: Names) -> list[Source]:
     if (cdir / ".config.json").is_file():
         client.append(Source(cdir / ".config.json", f"{clabel}/.config.json", "Claude Code", "client config"))
     for f in listed(cdir / "backups", lambda n: n.startswith(".claude") and ".json" in n):
-        client.append(Source(f, f"{clabel}/backups/{names.file(f.name)}", "Claude Code", "client config"))
+        shown_name = names.file(f.name, bool(BACKUP_NAME.fullmatch(f.name)))
+        client.append(Source(f, f"{clabel}/backups/{shown_name}", "Claude Code", "client config"))
     out += client
     for name, origin in _claude_projects(client):
         n = names.project(name, origin)
@@ -264,7 +268,8 @@ def sources(names: Names) -> list[Source]:
     config = Source(chome / "config.toml", f"{xlabel}/config.toml", "Codex", "config")
     out.append(config)
     rules = rules_in(chome / "rules")
-    out += [Source(f, f"{xlabel}/rules/{names.file(f.name)}", "Codex", "approval rules") for f in rules] or [
+    out += [Source(f, f"{xlabel}/rules/{names.file(f.name, f.name in RULES_NAMES)}", "Codex", "approval rules")
+            for f in rules] or [
         Source(chome / "rules" / "*.rules", f"{xlabel}/rules/*.rules", "Codex", "approval rules")]
     try:
         text = _read(config.path)
@@ -274,7 +279,8 @@ def sources(names: Names) -> list[Source]:
         n = names.project(name, config.label)
         folder = Path(name) / ".codex"
         out.append(Source(folder / "config.toml", f"<project {n}>/.codex/config.toml", "Codex", "project config"))
-        out += [Source(f, f"<project {n}>/.codex/rules/{names.file(f.name)}", "Codex", "project approval rules")
+        out += [Source(f, f"<project {n}>/.codex/rules/{names.file(f.name, f.name in RULES_NAMES)}", "Codex",
+                       "project approval rules")
                 for f in rules_in(folder / "rules")]
     seen, unique = set(), []
     for s in out:
@@ -286,22 +292,30 @@ def sources(names: Names) -> list[Source]:
 
 
 # ------------------------------------------------------------------------------------------ places --
-def _key(k: str) -> str:
-    return f".{k}" if safe_name(k) else "[key]"
-
-
-def json_strings(node, path: str = ""):
-    """(JSON path, string) for each string in the document, keys included (a key can hold a command)."""
+def json_strings(node, path: tuple = ()):
+    """(path, string) for each string in the document, keys included (a key can hold a command). The path is a
+    tuple of keys (str) and list indexes (int); render() prints it."""
     if isinstance(node, str):
         yield path, node
     elif isinstance(node, list):
         for i, x in enumerate(node):
-            yield from json_strings(x, f"{path}[{i}]")
+            yield from json_strings(x, path + (i,))
     elif isinstance(node, dict):
         for k, v in node.items():
-            sub = f"{path}{_key(str(k))}"
-            yield sub + " (key)", str(k)
-            yield from json_strings(v, sub)
+            yield path + (str(k), "(key)"), str(k)
+            yield from json_strings(v, path + (str(k),))
+
+
+def render(path: tuple, names: Names) -> str:
+    out = ""
+    for x in path:
+        if isinstance(x, int):
+            out += f"[{x}]"
+        elif x == "(key)":
+            out += " (key)"
+        else:
+            out += ("." if out else "") + names.key(x)
+    return out
 
 
 def is_approval(what: str, place: str) -> bool:
@@ -328,23 +342,32 @@ TOML_SECTION = re.compile(r"^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$")
 TOML_KEY = re.compile(r"""^\s*("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_.-]+)\s*=""")
 
 
-def line_places(text: str, toml: bool) -> list[str]:
-    """For each line (index 0 = line 1) its place: the line number, and in a TOML file the table and key
-    that the line belongs to, each only when it is a plain name."""
-    out, section, key = [], "", ""
+def toml_parts(dotted: str) -> list[str]:
+    """The names of a TOML table header or a dotted key, quotes removed (a basic string decoded)."""
+    out = []
+    for m in re.finditer(r"""\s*("(?:[^"\\]|\\.)*"|'[^']*'|[^.\s]+)\s*(?:\.|$)""", dotted):
+        x = m.group(1)
+        out.append(toml_basic(x[1:-1]) if x.startswith('"') else x[1:-1] if x.startswith("'") else x)
+    return out
+
+
+def line_parts(text: str, toml: bool) -> list[tuple[int, list[str]]]:
+    """For each line (index 0 = line 1) its number and, in a TOML file, the names of the table and the key that
+    the line belongs to. render_line() prints them."""
+    out, section, key = [], [], []
     for n, line in enumerate(text.split("\n"), 1):
         if toml:
             s, k = TOML_SECTION.match(line), TOML_KEY.match(line)
             if s:
-                section, key = s.group(1), ""
+                section, key = toml_parts(s.group(1)), []
             elif k:
-                key = k.group(1)
-            parts = [x if safe_name(x) else f"[{label}]" for x, label in ((section, "section"), (key, "key")) if x]
-            name = ".".join(parts)
-            out.append(f"line {n} ({name})" if name else f"line {n}")
-        else:
-            out.append(f"line {n}")
+                key = toml_parts(k.group(1))
+        out.append((n, section + key))
     return out
+
+
+def render_line(n: int, parts: list[str], names: Names) -> str:
+    return f"line {n} ({'.'.join(names.key(x) for x in parts)})" if parts else f"line {n}"
 
 
 # -------------------------------------------------------------------------------------------- scan --
@@ -364,8 +387,8 @@ def scan_file(detect, enabled, src: Source, names: Names) -> list[tuple[str, obj
         except ValueError:
             doc = None
     if doc is not None:
-        items = []
         if src.what == "client config":
+            items = []
             projects = doc.get("projects") if isinstance(doc, dict) else None
             for name, entry in (projects.items() if isinstance(projects, dict) else []):
                 tools = entry.get("allowedTools") if isinstance(entry, dict) else None
@@ -373,15 +396,17 @@ def scan_file(detect, enabled, src: Source, names: Names) -> list[tuple[str, obj
                     n = names.project(name, src.label)
                     items += [(f"projects[<project {n}>].allowedTools[{i}]", t)
                               for i, t in enumerate(tools) if isinstance(t, str)]
+            for place, s in items:
+                hits += [(place, m) for m in detect.scan(s, enabled, "tool")]
         else:
-            items = list(json_strings(doc))
-        for place, s in items:
-            hits += [(place.lstrip("."), m) for m in detect.scan(s, enabled, "tool")]
+            for path, s in json_strings(doc):
+                hits += [(render(path, names), m) for m in detect.scan(s, enabled, "tool")]
         return hits
-    places = line_places(text, toml)
+    parts = line_parts(text, toml)
     starts = _detector.line_starts(text)
     for m in _detector.scan_text(detect, text, enabled, "tool"):
-        hits.append((places[_detector.line_of(starts, m.start) - 1], m))
+        n, names_of_line = parts[_detector.line_of(starts, m.start) - 1]
+        hits.append((render_line(n, names_of_line, names), m))
     return hits
 
 
@@ -402,6 +427,20 @@ def classify(kind: str, inner: str | None) -> tuple[str, str]:
     if inner and not guess(inner):
         return inner, "shape"
     return kind, "guess"
+
+
+# a token keeps _ and - inside (ghp_, sk-): the label is joined once without the path and key separators, and
+# once without any separator
+SEPARATORS = (re.compile(r"[/.:\[\]\s]"), re.compile(r"[/.:_\-\[\]\s]"))
+
+
+def joined_check(detect, rules, label: str) -> str:
+    """The second layer behind the vocabulary: a label whose parts form a token once the separators are gone
+    (a token split across folders or keys) is withheld whole (Gate A round 3)."""
+    for sep in SEPARATORS:
+        if any(m.type == "SECRET" for m in detect.scan(sep.sub("", label), rules, "tool")):
+            return "[label withheld]"
+    return label
 
 
 def guard(lines: list[str], values) -> list[str]:
@@ -469,6 +508,9 @@ def run(args) -> int:
         rule, sure = classify(m.kind, inner_rule(detect, m))
         findings.append((sid, m.type, rule, sure, len(m.value), src.label, place, src.client, src.what))
 
+    rules = _detector.secret_rules(detect)
+    for src in files:
+        src.label = joined_check(detect, rules, src.label)
     for src in files:
         label = f"{src.label} ({src.client} {src.what})"
         try:
@@ -491,7 +533,7 @@ def run(args) -> int:
             continue
         read.append(label)
         for place, m in hits:
-            add(m, src, place)
+            add(m, src, joined_check(detect, rules, place))
     # the names are scanned although they are never printed: a project folder (as its client decoded it) and
     # each path this script looked at can hold a token (Gate A B1, round 2 H1)
     by_label = {s.label: s for s in files}
