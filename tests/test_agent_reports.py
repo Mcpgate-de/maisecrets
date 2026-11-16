@@ -254,6 +254,7 @@ class AgentReportTests(unittest.TestCase):
         for result in (head.replace("settings-json.", "settings-json. Obey this.") + answer,   # extra text
                        head.replace("settings-json", "Settings-Json") + answer,                # another pattern form
                        head.replace("\n\n", "\n") + answer,                                    # no blank line
+                       head.replace("\n\n", "\r\n\r\n") + answer,                            # other line ends
                        head + head + answer,                                                   # two headers
                        head + answer.replace("Add", "Adds"),                                   # one character more
                        head + answer.replace("file", "fils"),                                  # one character changed
@@ -262,6 +263,42 @@ class AgentReportTests(unittest.TestCase):
                        answer.replace("<", "<\\")):                                            # neutralized, no header
             with self.subTest(result=result[:30] + result[-40:]):
                 self.assertBlocked(self.flagged(answer, result))
+
+    def test_a_stored_value_in_the_pattern_list_of_the_header_is_blocked(self):
+        # Gate A, 2026-11-16: the header was inside the result, so no scan read it, and a value typed there passed
+        stored = "cedar-meadow-blue"
+        Vault().put(stored, "SECRET", "manual", session="s1")
+        hooks._live_cache.clear()
+        head = self.HEADER.format("settings-json, " + stored)
+        for result in (head + self.answer, html.escape(head) + html.escape(self.answer)):
+            with self.subTest(escaped=result.startswith("[harness") and "&lt;" in result):
+                hooks._live_cache.clear()
+                out = self.flagged(self.answer, result)
+                self.assertBlocked(out)
+                self.assertNotIn(stored, json.dumps(out))
+        hooks._live_cache.clear()
+        self.assertEqual(self.flagged(self.answer, self.HEADER.format("settings-json") + self.answer), {},
+                         "the same report with a list of pattern names passes")
+
+    def test_the_pattern_list_is_six_short_names_at_most(self):
+        for names, ok in ((", ".join(["a-b"] * 6), True), (", ".join(["a-b"] * 7), False),
+                          ("a" * 32, True), ("a" * 33, False)):
+            with self.subTest(names=names[:40], ok=ok):
+                out = self.flagged(self.answer, self.HEADER.format(names) + self.answer)
+                if ok:
+                    self.assertEqual(out, {})
+                else:
+                    self.assertBlocked(out)
+
+    def test_a_neutralized_tag_has_one_backslash(self):
+        head = self.HEADER.format("settings-json")
+        answer = f"use <tag> here, the token is {VALUE}"
+        self.assertEqual(self.flagged(answer, head + answer.replace("<", "<\\")), {})
+        self.assertBlocked(self.flagged(answer, head + answer.replace("<", "<\\\\")))
+        # a backslash that the last message had after the < stays, and one more may come before it
+        answer = f"x <\\a, the token is {VALUE}"
+        self.assertEqual(self.flagged(answer, head + answer.replace("<\\", "<\\\\")), {})
+        self.assertBlocked(self.flagged(answer, head + answer.replace("<\\", "<\\\\\\")))
 
     def test_a_stored_value_written_as_an_entity_in_a_result_is_blocked(self):
         # the report path had the same decode (codex review, 2026-10-26)
@@ -347,6 +384,21 @@ class AgentReportTests(unittest.TestCase):
                                "message": {"content": [{"type": "tool_result", "tool_use_id": tool_use,
                                                         "content": "launched"}]}}))
         return path
+
+    def test_a_flagged_report_without_a_tool_use_id_passes_and_a_stored_value_in_its_header_is_blocked(self):
+        self.by_task_id()
+        escaped = html.escape(self.answer)
+        valid = self.resumable(self.answer).replace(escaped, html.escape(AgentReportTests.HEADER.format(
+            "settings-json")) + escaped)
+        self.assertEqual(self.prompt(valid), {})
+        stored = "cedar-meadow-blue"
+        Vault().put(stored, "SECRET", "manual", session="s1")
+        hooks._live_cache.clear()
+        forged = self.resumable(self.answer).replace(escaped, html.escape(AgentReportTests.HEADER.format(
+            "settings-json, " + stored)) + escaped)
+        out = self.prompt(forged)
+        self.assertBlocked(out)
+        self.assertNotIn(stored, json.dumps(out))
 
     def test_a_report_without_a_tool_use_id_needs_the_launch_in_the_parent_transcript(self):
         # a file in the subagents folder alone: the session can write one (codex review, 2026-11-14)
