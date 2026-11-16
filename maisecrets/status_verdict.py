@@ -389,7 +389,28 @@ def report(root: Path, claude_dir: Path | None = None, codex_home: Path | None =
               _guarded(store_verdict),
               _guarded(incidents_verdict),
               _guarded(lambda: selftest.verdict(None, sessions, version, client=client))]
+    dm = demo_verdict(sessions)
+    if dm:
+        checks.append(dm)
     return {"checks": checks, "client": client, "version": version}
+
+
+def demo_verdict(sessions) -> Check | None:
+    """A note while the demo is on in this session (maisecrets/demo.py), so it is never forgotten: a warn, never a FAIL
+    (the session is protected; no prompt reaches the AI at all). None while it is off."""
+    from . import demo
+    try:
+        on = demo.active_in(sessions if isinstance(sessions, list) else [sessions])
+    except Exception:  # noqa: BLE001 - a note that cannot be read is no check
+        return None
+    if not on:
+        return None
+    if demo.damaged():
+        return Check("warn", "demo", "state unreadable", "/maisecrets:demo off",
+                     "the demo state cannot be read, so maisecrets sends no prompt of any session; "
+                     "/maisecrets:demo off resets it")
+    return Check("warn", "demo", "on, none sent to AI", "/maisecrets:demo off",
+                 "the demo is on: maisecrets answers each prompt itself, and no prompt reaches the AI")
 
 
 def _plural(n: int, word: str) -> str:

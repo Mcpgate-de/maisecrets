@@ -13,6 +13,7 @@ Contents:
 - [Options](#options)
 - [Vault](#vault)
 - [Check a value first: ms:(…)](#check-a-value-first-ms)
+- [Try it with real data: the demo mode](#try-it-with-real-data-the-demo-mode)
 - [Handing a value to Claude on purpose](#handing-a-value-to-claude-on-purpose)
 - [Reporting a wrong detection](#reporting-a-wrong-detection)
 - [Reporting an internal failure](#reporting-an-internal-failure)
@@ -411,6 +412,54 @@ In Remote Control the block notice is not shown (see "Sending a blocked
 prompt" below), so the verdict is not visible there; the value is still not
 sent.
 
+## Try it with real data: the demo mode
+
+`ms:(…)` checks one value. To see what maisecrets does with a whole text, such
+as a real customer mail, switch the demo mode on. Type it as your own prompt:
+
+```
+/maisecrets:demo on          (Codex: maisecrets: demo on)
+```
+
+While the demo is on, maisecrets answers each prompt of this session itself,
+and no prompt reaches the AI:
+
+```
+maisecrets demo: nothing was sent to the AI.
+It masks 1 secret, 1 e-mail address.
+
+Please check the token ⟦SECRET_c1⟧ and write to ⟦EMAIL_c1:jo•••@•••.de⟧ today
+
+/maisecrets:demo off to send again
+```
+
+- **The values are stored** as when you send a prompt, so the placeholders are
+  the normal ones. Only the sending is replaced by this answer.
+- **A long text** shows its first 20 lines and the count of the rest. When
+  maisecrets masked something, the full masked text goes to the clipboard,
+  where one exists.
+- **Names.** In Claude Code a name service (`/maisecrets:ner`) takes part as
+  for a normal prompt. A service on the network reads a prompt only when you
+  turn its prompts on (`/maisecrets:ner prompts on`).
+- **Only your own commands pass, in their exact form:** `/maisecrets:demo off`,
+  the settings, `ms:(…)`, `/maisecrets:term`, `/maisecrets:not-a-secret`, and
+  for example `/maisecrets:status`, `/maisecrets:status all` or
+  `/maisecrets:list`. A command with other text after it gets the demo answer.
+  `/ms` and `/maisecrets:send` send nothing during the demo.
+  `/maisecrets:status` shows a `!` line while the demo is on.
+- **A pasted image** goes nowhere during the demo: the demo blocks the whole
+  prompt, also an image alone (measured on Claude Code 2.1.325). It does not
+  read the image.
+- **If the demo state cannot be read** (a damaged file), maisecrets sends no
+  prompt of any session until you type `/maisecrets:demo off`, which resets it.
+- **It ends** with `/maisecrets:demo off` or with the session. A new session or
+  `/clear` ends it: `/clear` starts a new session (measured on Claude Code
+  2.1.325). Only your own typed prompt switches it: a subagent, a program
+  (`claude -p`), a scheduled prompt or a tool call changes nothing.
+- In Claude Code the answer comes as one line ("Prompt dropped by a hook"),
+  and a line break of the prompt shows as ↵. The screen shows the placeholders
+  there, also with `show_values` on. In Codex the block shows the answer.
+
 ## Handing a value to Claude on purpose
 
 Paste it. A value with a known shape (a token, a key, an IBAN) is blocked,
@@ -750,10 +799,12 @@ they are large (measured on 2.1.296: an image of about 8 KB or more): the AI
 then reads only a note to run `cat <notebook> | jq '.cells[0].outputs'` in
 Bash, and that output is text, which maisecrets redacts like any output.
 
-**Not covered:** an image you paste into the prompt (Ctrl+V or drag of an
-image into Claude Code) reaches the model without passing any hook; the
-prompt hook sees only your typed text. maisecrets cannot stop or mask it. An
-image in the result of an MCP tool is not covered either.
+**Not covered:** maisecrets cannot read or mask an image you paste into the
+prompt (Ctrl+V or drag of an image into Claude Code). The prompt hook runs for
+that prompt, but it gets only the text: `[Image #1]` in the terminal, an empty
+text for an image alone in `claude -p` (measured on 2.1.325). When the hook
+blocks the prompt, the image does not go either; in the demo mode that is each
+prompt. An image in the result of an MCP tool is not covered either.
 
 ## Terms: names, case numbers, customer names
 

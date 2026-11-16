@@ -23,7 +23,7 @@ import time
 import sys
 from typing import Any
 
-from . import check_value, detect, incidents, not_a_secret, rehydration, term_files, value_files
+from . import check_value, detect, incidents, demo, not_a_secret, rehydration, term_files, value_files
 from .lazy_regex import LazyRx as _LazyRx
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
@@ -830,6 +830,9 @@ def rewrite_prompt(payload: dict) -> dict:
     # a minted key resolves only in its session (C4), and the scrub handoff is found by it
     if not isinstance(prompt, str) or not session or not _SESSION_ID_RE.fullmatch(session):
         return {}
+    dm = demo.mod_answer(payload, cfg)          # demo.py: the demo answers and drops the prompt
+    if dm is not None:
+        return dm
     # a subagent's report is the hook's to judge (C19); a model wrote it, so nothing of it is stored
     if "<task-notification>" in prompt:
         return {}
@@ -960,8 +963,9 @@ def user_prompt(payload: dict) -> dict:
         }
 
     # a subagent's report: before the references are admitted (a model wrote them, not the human) and
-    # before anything is stored; the audit line counts it
-    if cfg.get("pass_agent_reports", True) and client_of(payload) == "claude" and agent_report(payload, prompt):
+    # before anything is stored; the audit line counts it. A damaged demo state passes no report (demo.py)
+    if cfg.get("pass_agent_reports", True) and client_of(payload) == "claude" and agent_report(payload, prompt) \
+            and not demo.damaged():
         found = detect.scan(prompt)
         if found:
             from types import SimpleNamespace
@@ -1042,6 +1046,9 @@ def user_prompt(payload: dict) -> dict:
             return {"decision": "block", "reason": reason}
         return {"decision": "block", "reason": reason,
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+    dm = None if grant else demo.gate(payload, cfg, typed)     # demo.py: the demo answers in place of the AI
+    if dm:
+        return dm
     if typed and not payload.get("agent_id"):
         # {{Jan Kowalski}} in a prompt the person typed: the name is masked from now on (terms.take_markers)
         try:
@@ -1718,6 +1725,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _deny(value_files.IN_A_COMMAND)
     if not_a_secret.in_a_command(command):
         return _deny(not_a_secret.IN_A_COMMAND)
+    if demo.in_a_command(command):
+        return _deny(demo.IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
                                            re.I):
@@ -2397,6 +2406,8 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
         return _deny(value_files.IN_A_COMMAND)
     if not_a_secret.in_a_command(command):
         return _deny(not_a_secret.IN_A_COMMAND)
+    if demo.in_a_command(command):
+        return _deny(demo.IN_A_COMMAND)
     if _HOOK_ENTRY_TEXT_RE.search(command):
         # PowerShell has no word parser here: any mention of a hook entry with its event is refused
         return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
