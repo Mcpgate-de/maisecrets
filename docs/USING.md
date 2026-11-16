@@ -105,8 +105,12 @@ values that already leaked. The model loads it when a task fits; in Claude Code 
   Python 3.9 for the hooks. This is how the skill, which a store can list alone, brings the
   hooks along.
 - **Check what the agents already received.** `audit_transcripts.py` reads the local Claude Code
-  and Codex sessions and lists every secret that sat in a prompt, a tool result or a model answer,
-  so it reached Anthropic or OpenAI: by type, rule, dates and sessions, never by value. On request
+  and Codex sessions and lists the secrets it finds in a prompt, a tool result or a model answer,
+  so it reached Anthropic or OpenAI: by type, rule, dates and sessions, never by value. It reads the
+  last 30 days by default (`--all` for all), tells the size and an estimate first (`--estimate` stops
+  there), and shows its progress. The default fast scan runs the rules only near a line with a rule's
+  prefix or label, so it can miss a value whose label stands more than three lines away; `--full`
+  reads each record as one text with every rule, as before, and finds those too. On request
   it replaces the values in the local files (`--scrub`, then `--scrub --yes`), which does not
   take back what the provider received.
 - **Check the saved approvals.** `audit_approvals.py` reads what the agents keep outside the
