@@ -150,7 +150,9 @@ that lists maisecrets with this repository as its source, or mirror this
 repository into a namespace you control and review each release there before
 your members get it. ChatGPT workspace: Admin > Plugins > Add > Import
 marketplace, with the same `marketplace.json`; the sync runs daily or on
-"Sync now". Codex CLI users trust the hooks in `/hooks`; a change to
+"Sync now". Such an import delivered maisecrets with `hooks: []` (a field report of 2026-10), and a
+plugin without its hooks protects nothing: until a workspace delivers the hooks, each person
+installs maisecrets locally (see [Install](#install)). Codex CLI users trust the hooks in `/hooks`; a change to
 `hooks/hooks.json`, and from Codex 0.164 every maisecrets update, asks again, and
 until then Codex runs no maisecrets hook and lets prompts and tool calls through. Managed hooks (`requirements.toml` through MDM) are trusted by
 policy.
