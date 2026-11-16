@@ -121,7 +121,7 @@ pull requests are welcome there.
 ### What `/maisecrets:status` says
 
 The command fits on one screen. The head line says whether this session is
-protected: `🔒` when no check failed, `🔓 … is NOT protecting this session`
+protected: `🔒` when no check failed, `⚠️ … is NOT protecting this session`
 when one did. Outside a client session (a terminal) no session can be judged,
 so the head line makes no claim. One line follows per check: `✓` ok, `!` warn,
 `✗` FAIL, `–` does not apply. A warn or FAIL line names the next command after

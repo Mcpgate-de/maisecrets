@@ -278,7 +278,7 @@ class HeadLineTests(unittest.TestCase):
     def test_a_fail_opens_the_lock(self):
         checks = [check("FAIL", "hooks", nxt="a")] + OK6[1:4] + [check("warn", "incidents", nxt="b"), OK6[5]]
         head = sv.head_line("0.9.13", checks, "codex")
-        self.assertEqual(head, "\U0001F513 maisecrets 0.9.13 is NOT protecting this session \u00b7 1 failure")
+        self.assertEqual(head, "\u26a0\ufe0f maisecrets 0.9.13 is NOT protecting this session \u00b7 1 failure")
         self.assertNotIn("\U0001F512", head)
 
     def test_outside_a_session_no_lock_and_no_claim(self):
@@ -287,7 +287,7 @@ class HeadLineTests(unittest.TestCase):
             self.assertTrue(head.startswith("maisecrets 0.9.13 \u00b7 status outside a client session"), head)
             self.assertNotIn("protect", head)
             self.assertNotIn("\U0001F512", head)
-            self.assertNotIn("\U0001F513", head)
+            self.assertNotIn("\u26a0\ufe0f", head)
 
 
 class CheckLineTests(_Tmp):
@@ -380,7 +380,7 @@ class StatusOutputTests(unittest.TestCase):
 
     def test_the_default_is_a_head_six_check_lines_and_one_line_of_facts(self):
         out = self.run_status([])
-        self.assertTrue(out[0].startswith("maisecrets ") or out[0][:1] in ("\U0001F512", "\U0001F513"), out[0])
+        self.assertTrue(out[0].startswith("maisecrets ") or out[0][:1] in ("\U0001F512", "\u26a0"), out[0])
         self.assertEqual(out[1], "")
         checks = out[2:8]
         self.assertEqual([ln.split()[1] for ln in checks], list(sv.NAMES))
