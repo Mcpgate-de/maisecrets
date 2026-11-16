@@ -204,7 +204,7 @@ class ReportTests(unittest.TestCase):
         svc = Service()
         self.addCleanup(svc.close)
         _reset(remote_detector={"url": svc.url, "format": "hf"})
-        code, out = self.run_ner()
+        code, out = self.run_ner("all")
         self.assertEqual(code, 0)
         self.assertIn("model d3 int8, types DATE, LOC, ORG, PER", out)
 
@@ -215,14 +215,15 @@ class ReportTests(unittest.TestCase):
                                   else None):
             code, out = self.run_ner()
         self.assertEqual(code, 3)
-        self.assertIn("start: run.sh ner start (with podman)", out)      # a container with a secret (#1699)
-        self.assertIn("rules mask tool results alone", out)
+        # a container with a secret (#1699)
+        self.assertRegex(out, r"\n \u2717 service +not running +\u2192  run\.sh ner start \(podman\)\n")
+        self.assertIn("rules alone mask a tool result", self.run_ner("all")[1])
 
     def test_without_docker_it_names_the_three_ways(self):
         _reset(remote_detector={"url": ner_setup.LOCAL_URL, "format": "hf"})
         with mock.patch.object(ner_setup, "probe", return_value=(False, "the service: does not answer")), \
                 mock.patch.object(ner_setup.shutil, "which", return_value=None):
-            code, out = self.run_ner()
+            code, out = self.run_ner("all")
         self.assertEqual(code, 1)
         self.assertNotIn("start:", out)
         for words in ("Neither docker nor podman", "/maisecrets:ner url URL", "/maisecrets:ner off"):
@@ -233,7 +234,7 @@ class ReportTests(unittest.TestCase):
         svc = Service({"model": "ok\nstart: touch /tmp/x #", "labels": ["PER\nstart: y"]})
         self.addCleanup(svc.close)
         _reset(remote_detector={"url": svc.url, "format": "hf"})
-        code, out = self.run_ner()
+        code, out = self.run_ner("all")
         self.assertEqual(code, 0)
         self.assertEqual([x for x in out.splitlines() if x.startswith("start:")], [])
         self.assertIn("model ok?start: touch /tmp/x #", out)
