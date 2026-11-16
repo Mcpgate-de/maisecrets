@@ -108,7 +108,9 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("maisecrets kept a secret from the AI.", out["reason"])
         self.assertIn("paste it to edit it first", out["reason"], "the paste key, with the clipboard")
-        self.assertTrue(out["reason"].endswith(" KEY"), "two values: the wrong-hit line names no key")
+        # a tip may follow the last line on some platforms; the wrong-hit line itself names no key
+        self.assertIn("A wrong hit? /maisecrets:not-a-secret KEY\n", out["reason"] + "\n",
+                      "two values: the wrong-hit line names no key")
         # the two references exist, the notice does not need to list them
         self.assertEqual(len({e.key for e in Vault().list()} - before), 2)
         self.assertNotIn(GLPAT, out["reason"])

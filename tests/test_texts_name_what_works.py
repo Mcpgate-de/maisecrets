@@ -49,10 +49,11 @@ class SendCommandTests(unittest.TestCase):
         commands = Path(self.dir.name, "commands")
         commands.mkdir()
         Path(commands, "ms.md").write_text("!`bash ~/.maisecrets/bin/ms.sh`\n", encoding="utf-8")
-        self.assertIn("\n  /ms   send the cleaned prompt now", self._notice(True))
+        # the column width follows the paste key (⌘V on macOS, Ctrl+V elsewhere)
+        self.assertRegex(self._notice(True), r"\n  /ms +send the cleaned prompt now")
         # a command file of the person's own with that name is no maisecrets shortcut
         Path(commands, "ms.md").write_text("my own command\n", encoding="utf-8")
-        self.assertIn("\n  /maisecrets:send   send the cleaned prompt now", self._notice(True))
+        self.assertRegex(self._notice(True), r"\n  /maisecrets:send +send the cleaned prompt now")
 
     # the maintainer, 2026-11-16: the notice names /ms first, then the paste key, then the command for a wrong hit
     def _entries(self, *spec):
