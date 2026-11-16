@@ -132,6 +132,13 @@ my agents already leak?".
    only `--scrub --yes`, after the user's explicit yes, replaces the values. Say every time
    that this cleans only this computer: the provider keeps what it received, so rotation
    comes first.
+4. Next to the transcript audit, check the approvals that the agents saved outside the
+   repository: `python3 scripts/audit_approvals.py --out <file>`. It reads the settings and
+   the client config of Claude Code and the rules and config of Codex, and it names each file
+   it read. Each finding names a file and a place, for example `permissions.allow[3]` or
+   `rules/default.rules line 12`, never the value. For each finding, the credential must be
+   rotated first (`references/rotation.md`), and then the user removes that entry. Change
+   no file of the agents yourself without the user's yes.
 
 ## Contain a leak
 

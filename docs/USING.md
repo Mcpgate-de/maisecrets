@@ -101,6 +101,12 @@ values that already leaked. The model loads it when a task fits; in Claude Code 
   so it reached Anthropic or OpenAI: by type, rule, dates and sessions, never by value. On request
   it replaces the values in the local files (`--scrub`, then `--scrub --yes`), which does not
   take back what the provider received.
+- **Check the saved approvals.** `audit_approvals.py` reads what the agents keep outside the
+  repository: the user and project settings and the `allowedTools` of Claude Code, and the
+  `rules/*.rules` and `config.toml` of Codex (it honours `CLAUDE_CONFIG_DIR` and `CODEX_HOME`).
+  A command that you approved stays there as text, with any token in it. The report names the
+  file and the place (`permissions.allow[3]`, `rules/default.rules line 12`), never the value,
+  and it changes no file.
 - **Contain a leak.** For a value that reached a chat, a commit, a log or a ticket, the skill
   gives the rotation steps per service from `references/rotation.md`: rotate first, clean up
   second. This part needs no shell, so it also works in a chat.
