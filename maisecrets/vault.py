@@ -41,8 +41,11 @@ INDEX = HOME / "index.json"
 SERVICE = "maisecrets" if HOME == _DEFAULT_HOME else "maisecrets@" + hashlib.sha256(str(HOME).encode()).hexdigest()[:8]
 
 
+STATUS_DOC = "https://github.com/Mcpgate-de/maisecrets/blob/main/docs/HOW-IT-WORKS.md#status"
+
+
 def describe_backend(backend) -> str:
-    """One line for a human: which store, where, and how to change it."""
+    """One line for a human: which store and where; how to change it is in STATUS_DOC."""
     name = type(backend).__name__
     where = {
         "KeychainBackend": f"macOS login keychain, service '{SERVICE}' (Keychain Access shows the entries)",
@@ -50,9 +53,7 @@ def describe_backend(backend) -> str:
         "EncryptedFileBackend": f"encrypted file {HOME / 'vault.enc.json'} (openssl, key file {HOME / 'key'})",
         "JsonFileBackend": f"PLAINTEXT file {HOME / 'vault.json'} - TEST MODE, not for real secrets",
     }.get(name, name)
-    return (f"Stored values: {where}. Metadata: {INDEX}. "
-            f"To change it: write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (takes effect on the next call). "
-            "Free and open source, by mcpgate.de.")
+    return f"store backend: {where}; metadata {INDEX}; config {CONFIG} (to change the store: {STATUS_DOC})"
 
 
 def intro_line(backend, names: bool = True, codex: bool = False) -> str:
