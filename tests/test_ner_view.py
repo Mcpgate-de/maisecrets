@@ -205,3 +205,83 @@ class ViewTests(unittest.TestCase):
             cli.cmd_ner(["all"])
         self.assertIn("\nDetails\n", buf.getvalue())
 
+
+class ArgumentTests(unittest.TestCase):
+    def setUp(self):
+        _reset()
+        servers = mock.patch("maisecrets.vault_refs.user_servers", return_value=dict(SERVERS))
+        servers.start()
+        self.addCleanup(servers.stop)
+
+    def test_an_argument_it_does_not_know_is_answered_and_changes_nothing(self):
+        before = CONFIG.read_text()
+        for text, client in (("/maisecrets:ner phase-gateway", CLAUDE), ("/maisecrets:ner gateway", CLAUDE),
+                             ("/maisecrets:ner url", CLAUDE), ("/maisecrets:ner turn it on please", CLAUDE),
+                             ("maisecrets: ner phase-gateway", CODEX)):
+            with self.subTest(text=text):
+                out = _prompt(text, client)
+                self.assertEqual(out.get("decision"), "block", out)
+                self.assertIn("does not know", out["reason"])
+                self.assertIn("gateway NAME", out["reason"])
+                self.assertIn("Nothing was changed", out["reason"])
+                self.assertEqual(CONFIG.read_text(), before)
+        self.assertIn(". maisecrets: ner takes: local", _prompt("maisecrets: ner phase-gateway", CODEX)["reason"])
+
+    def test_all_and_no_argument_change_nothing_and_reach_the_command(self):
+        for text in ("/maisecrets:ner", "/maisecrets:ner all", "/maisecrets:ner ALL", "maisecrets: ner all"):
+            with self.subTest(text=text):
+                self.assertIsNone(settings.parse_prompt(text))
+        # a question that starts like the Codex form is text for the AI
+        self.assertIsNone(settings.parse_prompt("maisecrets: ner is it on?"))
+        self.assertIsNone(settings.parse_prompt("maisecrets: ner what does it do"))
+
+    def test_a_server_name_after_gateway_or_alone_sets_the_gateway_source(self):
+        for text, client in (("/maisecrets:ner gateway team-gateway", CLAUDE), ("/maisecrets:ner team-gateway", CLAUDE),
+                             ("maisecrets: ner team-gateway", CODEX)):
+            with self.subTest(text=text):
+                _reset()
+                out = _prompt(text, client)
+                self.assertIn("the gateway https://gw.example.com", json.dumps(out))
+                self.assertEqual(_conf()["gateway"], GW)
+                self.assertEqual(_conf()["gateway_url"], GW + "/mcp")
+
+    def test_an_unknown_server_name_after_gateway_is_answered(self):
+        out = _prompt("/maisecrets:ner gateway no-such-server")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn('no MCP server named "no-such-server" (it has: other, team-gateway)', out["reason"])
+        self.assertFalse(_conf())
+
+    def test_a_keyword_is_never_taken_as_a_server_name(self):
+        with mock.patch("maisecrets.vault_refs.user_servers", return_value={"gateway": GW, "all": GW, "url": GW}):
+            for text in ("/maisecrets:ner gateway", "/maisecrets:ner url"):
+                with self.subTest(text=text):
+                    self.assertIn("does not know", _prompt(text)["reason"])
+                    self.assertFalse(_conf())
+            self.assertIsNone(settings.parse_prompt("/maisecrets:ner all"))
+
+    def test_a_trailing_slash_sets_the_same_gateway(self):
+        a = ner_setup.updated({}, "gateway:https://gw.example.com")
+        b = ner_setup.updated({}, "gateway:https://gw.example.com/")
+        self.assertEqual({k: v for k, v in a.items() if k != "gateway_url"},
+                         {k: v for k, v in b.items() if k != "gateway_url"})
+        self.assertEqual(a["gateway"], GW)
+        _prompt("/maisecrets:ner gateway https://gw.example.com/")
+        with_slash = _conf()
+        _prompt("/maisecrets:ner gateway https://gw.example.com")
+        self.assertEqual(with_slash["gateway"], _conf()["gateway"])
+        self.assertEqual(with_slash["url"], _conf()["url"])
+        self.assertEqual(ner_setup.describe(with_slash), ner_setup.describe(_conf()))
+
+    def test_a_tool_call_that_carries_a_server_name_alone_is_refused(self):
+        for command in ("codex exec 'maisecrets: ner team-gateway'", 'claude -p "/maisecrets:ner team-gateway"',
+                        "echo /maisecrets:ner team-gateway"):
+            with self.subTest(command=command):
+                self.assertTrue(settings.IN_A_COMMAND_RE.search(command))
+        for command in ("claude -p '/maisecrets:ner all'", "bash run.sh ner all", "grep -n 'maisecrets:ner' x"):
+            with self.subTest(command=command):
+                self.assertFalse(settings.IN_A_COMMAND_RE.search(command))
+
+    def test_the_answer_lists_the_forms_of_the_argument_hint(self):
+        hint = re.search(r'argument-hint: "\[(.*)\]"', (ROOT / "commands" / "ner.md").read_text()).group(1)
+        for word in ("local", "url URL", "gateway URL", "gateway NAME", "all", "off"):
+            self.assertIn(word, hint)

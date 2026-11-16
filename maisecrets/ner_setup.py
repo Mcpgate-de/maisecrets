@@ -49,15 +49,34 @@ _NER_RE = re.compile(r"\A\s*(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:(off|loca
                      r"unavailable\s+(rules|withhold))\s*\Z", re.I)
 # the same sentence anywhere in a tool call (settings.IN_A_COMMAND_RE)
 IN_A_COMMAND = (r"(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:off|local|on|url|gateway|fallback|prompts|updates|"
-                r"unavailable)\b")
+                r"unavailable)\b|"
+                # a server name alone: one word that ends the quoted prompt or the command
+                r"(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?!all\b)[\w.-]+(?=\s*(?:[\"'`]|\Z))")
+
+
+# an argument the hook does not know: the slash form with any text, the Codex form with one word only (a sentence that
+# starts with "maisecrets: ner" is a question to the AI, not a command)
+_OTHER_RE = re.compile(r"\A\s*(?:/maisecrets:ner\s+(\S.{0,400}?)|maisecrets:\s*ner\s+([^\s?!]{1,200}))\s*\Z",
+                       re.I | re.S)
+# the arguments that change nothing: the view with the details (ner_view.py)
+VIEW_WORDS = ("all",)
+# the words of the command: never taken as the name of a server
+KEYWORDS = ("off", "local", "on", "url", "gateway", "fallback", "prompts", "updates", "unavailable",
+            "start") + VIEW_WORDS
 
 
 def parse(prompt) -> str | None:
-    """`off`, `local`, `url:<URL>`, `fallback:off`, `fallback:url:<URL>`, `prompts:on`, `prompts:off`, `updates:on` or
-    `updates:off` when the whole prompt is a change of the setting, else None."""
+    """`off`, `local`, `url:<URL>`, `gateway:<URL or server name>`, `fallback:off`, `fallback:url:<URL>`, `prompts:on`,
+    `prompts:off`, `updates:on`, `updates:off`, `unavailable:<choice>` when the whole prompt is a change of the setting,
+    `other:<text>` for an argument the command does not know (a server name, or an answer with the valid forms), else
+    None (no argument, `all`, or no /maisecrets:ner prompt)."""
     m = _NER_RE.match(prompt) if isinstance(prompt, str) else None
     if not m:
-        return None
+        other = _OTHER_RE.match(prompt) if isinstance(prompt, str) else None
+        if not other:
+            return None
+        text = (other.group(1) or other.group(2)).strip()
+        return None if text.lower() in VIEW_WORDS else "other:" + text
     if m.group(1):
         return "off" if m.group(1).lower() == "off" else "local"
     if m.group(2):
@@ -156,6 +175,51 @@ def updated(current, word: str) -> dict:
     if not remote.is_local(url):
         new["allow_network"] = True
     return new
+
+
+FORMS = ("local", "url URL", "gateway URL", "gateway NAME (a server of /maisecrets:sref)", "off", "all",
+         "prompts on|off", "unavailable rules|withhold", "updates on|off", "fallback url URL|off")
+
+
+def _servers() -> dict:
+    """name -> URL of the MCP servers of the person's configuration (the list of /maisecrets:sref), or {}."""
+    from . import vault_refs
+    try:
+        servers = vault_refs.user_servers()
+    except Exception:  # noqa: BLE001 - a configuration that cannot be read has no names
+        return {}
+    return servers if isinstance(servers, dict) else {}
+
+
+def _quoted(text: str) -> str:
+    return '"' + "".join(c if c.isprintable() else "?" for c in text)[:60] + '"'
+
+
+def typed_word(word: str, slash: bool = True) -> tuple:
+    """(the word to write, "") or (None, the answer) for a word of parse. A server name of the person's
+    configuration becomes `gateway:<its URL>`: after `gateway`, or alone when it is no keyword. Any other argument is
+    answered with the valid forms, and nothing changes."""
+    cmd = "/maisecrets:ner" if slash else "maisecrets: ner"
+    sref = "/maisecrets:sref" if slash else "maisecrets: sref"
+    if word.startswith("gateway:") and "://" not in word:
+        name = word[len("gateway:"):]
+        url = _servers().get(name)
+        if url:
+            return "gateway:" + str(url), ""
+        names = sorted(n for n in _servers() if re.fullmatch(r"[\w.-]{1,64}", n))[:10]
+        have = f" (it has: {', '.join(names)})" if names else ""
+        return None, (f"maisecrets: your configuration has no MCP server named {_quoted(name)}{have}; {sref} lists "
+                      f"them, and {cmd} gateway URL takes an address. Nothing was changed.")
+    if word.startswith("other:"):
+        text = word[len("other:"):]
+        if text.lower() not in KEYWORDS and not any(c.isspace() for c in text):
+            url = _servers().get(text)
+            if url:
+                return "gateway:" + str(url), ""
+        forms = ", ".join(f.replace("/maisecrets:sref", sref) for f in FORMS)
+        return None, (f"maisecrets: the command does not know {_quoted(text)}. {cmd} takes: {forms}; without an "
+                      "argument it shows the source. Nothing was changed.")
+    return word, ""
 
 
 def describe(conf) -> str:

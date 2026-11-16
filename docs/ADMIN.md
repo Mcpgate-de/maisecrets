@@ -863,6 +863,7 @@ a source, with one command typed as your own prompt:
 | `/maisecrets:ner local` | the service on this computer, `http://127.0.0.1:8765/` (`on` is the same) |
 | `/maisecrets:ner url URL` | a service of your team on a private network |
 | `/maisecrets:ner gateway URL` | the gateway of your `/maisecrets:sref login`, when it offers name detection (log in once more after the switch) |
+| `/maisecrets:ner gateway NAME` | the same, by the name of an MCP server of your configuration (the list of `/maisecrets:sref`); the name alone, `/maisecrets:ner NAME`, is the same when it is no word of the command |
 | `/maisecrets:ner off` | the rules alone (the default) |
 | `/maisecrets:ner fallback url URL` | a second service for tool results while the local one is not running (`fallback off` removes it) |
 | `/maisecrets:ner prompts off` | the prompts you type keep the rules alone; tool results still go to the service (`prompts on` turns it back on) |
@@ -873,7 +874,8 @@ a source, with one command typed as your own prompt:
 | `/maisecrets:ner all` | the same, then the details: what the service reads, what a tool result gets while it does not answer, the model and types, the image against the pin, the load from `GET /metrics` (workers in use, requests that wait, CPU and memory of its container; numbers only) and today's counts per service |
 
 In Codex, send `maisecrets: ner local` (or `url URL`, `off`) alone as your
-prompt. One source at a time: a new one replaces the old one. A fallback only
+prompt. An argument the command does not know gets an answer with the valid
+forms, and nothing changes. One source at a time: a new one replaces the old one. A fallback only
 when you add one. Only a prompt you type changes it, with the limits of every
 setting (threat model, C22). `local` means whatever listens on 127.0.0.1:8765;
 maisecrets does not verify that it is `mcpgate/ner`.

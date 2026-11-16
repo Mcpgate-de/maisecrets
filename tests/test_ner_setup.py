@@ -166,7 +166,12 @@ class SetTests(unittest.TestCase):
         self.assertNotIn("prompts", _conf())
         self.assertEqual(_conf()["url"], "http://127.0.0.1:9000/")
         self.assertEqual(len(_weakened()), 1)
-        self.assertIsNone(settings.parse_prompt("/maisecrets:ner prompts maybe"))
+        # an argument the command does not know is answered, and changes nothing
+        self.assertEqual(settings.parse_prompt("/maisecrets:ner prompts maybe"),
+                         ("remote_detector", "ner:other:prompts maybe"))
+        before = CONFIG.read_text()
+        self.assertIn("does not know", json.dumps(_prompt("/maisecrets:ner prompts maybe")))
+        self.assertEqual(CONFIG.read_text(), before)
 
     def test_a_subagent_does_not_turn_the_prompt_part_off(self):
         _prompt("/maisecrets:ner local")
