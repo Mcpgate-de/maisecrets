@@ -109,6 +109,7 @@ Details: `PRIVACY.md` and `SECURITY.md` in this folder.
 /maisecrets:settings      the choices you make
 /maisecrets:forget        delete a stored value
 /maisecrets:not-a-secret  a wrong hit: delete it and never mask that exact value again
+/maisecrets:demo          try it with real data: each prompt gets an answer, and no prompt reaches the AI
 /maisecrets:report        an issue text for a problem
 ```
 
