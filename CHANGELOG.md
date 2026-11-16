@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## [0.9.14] - 2026-11-16
+
+### Features
+
+- /maisecrets:demo on answers each prompt of the session with what maisecrets masks, and no prompt reaches the AI until /maisecrets:demo off (#57) (3f51f89)
+- /maisecrets:ner fits on one screen, with the details under /maisecrets:ner all (010331b)
+- a blocked prompt names /ms first, then the paste key, and a wrong hit's command; a blocked subagent report says how to pass it on (deeaca5)
+- checks the approvals Claude Code and Codex saved outside the repository for credentials (#56) (b377891)
+- /maisecrets:status fits on one screen: a lock in the head line says whether this session is protected, one short line per check, the details under /maisecrets:status all (813a203)
+
+### Fixes
+
+- the session audit of your past AI sessions is about 7 times faster, says how long it will take and shows its progress; --full reads as thoroughly as before (#59) (0d45f1d)
+- a scan with a rule selection runs only the personal-data steps whose kinds it selected (#59) (71a4450)
+- /maisecrets:ner answers an argument it does not know, and takes a server name for the gateway (123856e)
+- a session that is not protected starts with the warning sign, not an open lock that looked like the closed one (19fa0ef)
+- the approvals check numbers your own rule ids, the backups of the client config and MCP servers with a setting's name (#56) (6b4ab48)
+- the approvals check prints only the setting and file names that the clients themselves use (#56) (623b2e2)
+- the approvals check never prints a folder or file name that a person or a client chose, and it reads Codex projects whose path holds a TOML escape (#56) (7d268c5)
+- a subagent's report that Claude Code flagged as instruction-shaped passes again, instead of blocking the session (7ef4d10)
+- the approvals check never prints a token from a project folder or a file name, and it stops with an error on a pipe, a huge or a broken file (#56) (791dc63)
+- Codex no longer warns about the hook timeout of the session end (it allows at most 3 s); the guide says that a ChatGPT workspace import of 0.9.13 delivered the hooks (4519be2)
+- when a hook did not run, /maisecrets:status names a new session as the step; /reload-plugins keeps the old plugin folder after a synced update (f6209c0)
+- every arrow of /maisecrets:status stands in one column, and the store line of /maisecrets:status all is one short line (aac2c87)
+
+### Security
+
+- a value typed into the header of a flagged subagent report is blocked again (6dad437)
+
+### Dependencies
+
+- update dependency betterleaks/betterleaks to v1.10.1 (7bd2500)
+
 ## [0.9.13] - 2026-11-15
 
 ### Features
