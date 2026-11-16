@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 """Find credentials in the approvals and settings that Claude Code and Codex keep outside the repository.
 
-A command that a person approves is stored as text. A token in that command stays in the file, and the
-client sends the rule back to the model with each later session. The working tree scan (scan_secrets.py)
-sees only the files of one repository; this script reads the files of this user:
+A command that a person approves is stored as text, and a token in that command stays in the file. The working
+tree scan (scan_secrets.py) sees only the files of one repository; this script reads the files of this user:
 
-  Claude Code  <config dir>/settings.json, settings.local.json            (the whole file: permissions, env ...)
-               <config dir>/.claude.json, its backups, .config.json      (projects[<path>].allowedTools)
-               <project>/.claude/settings.json, settings.local.json     (each project of .claude.json)
-  Codex        <codex home>/config.toml                                  (the whole file)
-               <codex home>/rules/*.rules                                (prefix_rule lines, the approvals)
-               <project>/.codex/config.toml, .codex/rules/*.rules       (each [projects."<path>"] of config.toml)
+  Claude Code  <claude config>/settings.json, settings.local.json        (the whole file: permissions, env ...)
+               .claude.json, its backups, .config.json                 (projects[<path>].allowedTools)
+               <project N>/.claude/settings.json, settings.local.json  (each project of .claude.json)
+  Codex        <codex home>/config.toml                                (the whole file)
+               <codex home>/rules/*.rules                              (prefix_rule lines, the approvals)
+               <project N>/.codex/config.toml, .codex/rules/*.rules    (each [projects."<path>"] of config.toml)
 
-<config dir> is CLAUDE_CONFIG_DIR or ~/.claude; .claude.json sits in CLAUDE_CONFIG_DIR, else in the home.
+<claude config> is CLAUDE_CONFIG_DIR or ~/.claude; .claude.json sits in CLAUDE_CONFIG_DIR, else in the home.
 <codex home> is CODEX_HOME or ~/.codex.
 
-Nothing this script prints is a value, a line of a file or a hash of a value. A finding is a per-run id
-(S1, S2 ...; the same value keeps its id across files), the file, the place in it, the type, the rule, how
-sure the match is and the length. The script never changes a file.
-
-Every path the report prints (a project folder, a file name) is scanned too, and a key that does not look like
-a plain name is printed as [key].
+Nothing this script prints is a value, a line of a file, a hash of a value, or a name that a person or a client
+chose. A finding is a per-run id (S1, S2 ...; the same value keeps its id across files), the file, the place in
+it, the type, the rule, how sure the match is and the length. A project folder prints as <project N>, a file name
+from a folder listing as [file N] unless it is a plain name, a key as [key] unless it is a plain name, and a
+CLAUDE_CONFIG_DIR or CODEX_HOME that is not a plain path as <claude config> or <codex home>. The names are still
+scanned: a token in a project path or a file name is a finding. The script never changes a file.
 
     python3 audit_approvals.py [--pii] [--out FILE] [--max-mb N]
 
@@ -33,8 +32,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import math
+import os
 import re
 import stat
 import sys
@@ -45,44 +44,90 @@ import _detector  # noqa: E402
 
 ROTATION = "references/rotation.md"
 WITHHELD = "[withheld]"
-
-
-# ------------------------------------------------------------------------------------------- files --
-def claude_dir() -> Path:
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-
-
-def claude_client_files() -> list[Path]:
-    """The client config of Claude Code: `.claude.json` in CLAUDE_CONFIG_DIR, else in the home (the rule of
-    maisecrets/vault_refs.py global_file, copied: the standalone skill zip has no vault_refs), its
-    `-custom-oauth` form, the legacy `.config.json` of the config dir, and the copies the client keeps in
-    `backups/`. Each holds `projects[<path>].allowedTools`."""
-    base = os.environ.get("CLAUDE_CONFIG_DIR")
-    home = Path(base) if base else Path.home()
-    out = [home / ".claude.json"]
-    if os.environ.get("CLAUDE_CODE_CUSTOM_OAUTH_URL"):
-        out.append(home / ".claude-custom-oauth.json")
-    for extra in [claude_dir() / ".config.json", *sorted((claude_dir() / "backups").glob(".claude*.json*"))]:
-        if extra.is_file():
-            out.append(extra)
-    return out
-
-
-def codex_home() -> Path:
-    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
-
-
-def rules_in(folder: Path) -> list[Path]:
-    """`*.rules` in a rules folder, as Codex loads them (codex-rs/core/src/exec_policy.rs collect_policy_files)."""
-    try:
-        return sorted(p for p in folder.iterdir() if p.suffix == ".rules" and p.is_file())
-    except OSError:
-        return []
-
-
 MAX_MB = 50.0     # a settings file is kilobytes; a 100 MB file took 214 s and 511 MB (Gate A M3)
 
 
+# ------------------------------------------------------------------------------------------- names --
+SAFE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def _high_entropy(s: str) -> bool:
+    """A name of 16 or more characters with letters and digits and more than 3.5 bits per character."""
+    if len(s) < 16 or not re.search(r"\d", s) or not re.search(r"[A-Za-z]", s):
+        return False
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in (s.count(x) for x in set(s))) > 3.5
+
+
+def safe_name(name: str) -> bool:
+    """A name prints only when it looks like a name a program gives: a key, a file name or a folder can itself be
+    a credential that no rule matches (Gate A L1). Not printed: anything outside [A-Za-z0-9_.-]{1,64}, a name of
+    8 or more characters that mixes letters and digits (a random id or a cut token), and a high-entropy name."""
+    if not SAFE_NAME.fullmatch(name):
+        return False
+    if len(name) >= 8 and re.search(r"\d", name) and re.search(r"[A-Za-z]", name):
+        return False
+    return not _high_entropy(name)
+
+
+def safe_path(p: Path) -> bool:
+    parts = p.parts[1:] if p.anchor else p.parts
+    return bool(parts) and all(safe_name(x) for x in parts)
+
+
+def shown(text: str) -> str:
+    """Text as printed: a control character as \\xNN and a lone surrogate as \\uXXXX, so that no line can fail
+    to encode (Gate A round 2, M1) or move the cursor of a terminal."""
+    text = re.sub(r"[\x00-\x1f\x7f]", lambda m: f"\\x{ord(m.group()):02x}", text)
+    return re.sub(r"[\ud800-\udfff]", lambda m: f"\\u{ord(m.group()):04x}", text)
+
+
+class Source:
+    """A file this script looks for. ``label`` is what the report prints for it, built only from fixed names and
+    from names that pass safe_name(); ``path`` is never printed (Gate A round 2, H2)."""
+
+    def __init__(self, path: Path, label: str, client: str, what: str) -> None:
+        self.path, self.label, self.client, self.what = path, label, client, what
+
+
+class Names:
+    """The numbers of the project folders and of the listed file names that are not plain names."""
+
+    def __init__(self) -> None:
+        self.projects: dict[str, int] = {}
+        self.origin: dict[int, str] = {}
+        self.files = 0
+
+    def project(self, name: str, origin: str) -> int:
+        if name not in self.projects:
+            self.projects[name] = len(self.projects) + 1
+            self.origin[self.projects[name]] = origin
+        return self.projects[name]
+
+    def file(self, name: str) -> str:
+        if safe_name(name):
+            return name
+        self.files += 1
+        return f"[file {self.files}]"
+
+
+def _root(var: str, default: str, placeholder: str) -> tuple[Path, str]:
+    value = os.environ.get(var)
+    if not value:
+        return Path.home() / default, f"~/{default}"
+    p = Path(value)
+    return p, (str(p) if safe_path(p) else placeholder)
+
+
+def claude_dir() -> tuple[Path, str]:
+    return _root("CLAUDE_CONFIG_DIR", ".claude", "<claude config>")
+
+
+def codex_home() -> tuple[Path, str]:
+    return _root("CODEX_HOME", ".codex", "<codex home>")
+
+
+# ------------------------------------------------------------------------------------------- files --
 class Unreadable(OSError):
     """A file this script does not read: not a regular file, or larger than --max-mb."""
 
@@ -105,83 +150,142 @@ def _read(path: Path) -> str:
             os.close(fd)
 
 
-def _claude_projects(files: list[Path]) -> list[str]:
-    out: list[str] = []
-    for f in files:
+def listed(folder: Path, keep) -> list[Path]:
+    """The regular files of a folder that ``keep`` accepts, sorted. A folder that is absent, not a folder, or has
+    a NUL in its name (a Codex project header can hold one) gives none."""
+    try:
+        return sorted(p for p in folder.iterdir() if keep(p.name) and p.is_file())
+    except (OSError, ValueError):
+        return []
+
+
+def rules_in(folder: Path) -> list[Path]:
+    """`*.rules` in a rules folder, as Codex loads them (codex-rs/core/src/exec_policy.rs collect_policy_files)."""
+    return listed(folder, lambda n: n.endswith(".rules") and n != ".rules")
+
+
+def _claude_projects(files: list[Source]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for s in files:
         try:
-            data = json.loads(_read(f))
+            data = json.loads(_read(s.path))
         except Exception:   # main() reports the file; a deep nesting raised RecursionError here
             continue
         projects = data.get("projects") if isinstance(data, dict) else None
         if isinstance(projects, dict):
-            out += [p for p in projects if isinstance(p, str) and p not in out]
+            out += [(p, s.label) for p in projects if isinstance(p, str)]
     return out
+
+
+TOML_ESCAPES = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r", '"': '"', "\\": "\\", "e": "\x1b"}
+TOML_HEX = {"x": 2, "u": 4, "U": 8}
+
+
+def toml_basic(s: str) -> str:
+    """A TOML basic string as Codex decodes it: \\b \\t \\n \\f \\r \\" \\\\ \\e, \\xHH, \\uXXXX, \\UXXXXXXXX. A
+    header `[projects."/x/\\u0067hp_…"]` names a folder with a token that the raw text hides (Gate A round 2,
+    H1)."""
+    out, i = [], 0
+    while i < len(s):
+        c = s[i]
+        n = s[i + 1:i + 2]
+        if c != "\\" or not n:
+            out.append(c)
+            i += 1
+        elif n in TOML_ESCAPES:
+            out.append(TOML_ESCAPES[n])
+            i += 2
+        elif n in TOML_HEX:
+            digits = s[i + 2:i + 2 + TOML_HEX[n]]
+            try:
+                if len(digits) != TOML_HEX[n]:
+                    raise ValueError
+                out.append(chr(int(digits, 16)))
+                i += 2 + TOML_HEX[n]
+            except ValueError:
+                out.append(c)
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 
 PROJECT_HEADER = re.compile(r"""^\s*\[\s*projects\s*\.\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\s*\]""")
 
 
-def _codex_projects(config: Path) -> list[str]:
-    try:
-        text = _read(config)
-    except (OSError, ValueError):
-        return []
+def codex_project_names(text: str) -> list[str]:
+    """The project folders of a Codex config.toml: with tomllib (3.11+) every form TOML allows, and the
+    `[projects."…"]` headers decoded as above in any case (the 3.9 fallback, and a file tomllib refuses)."""
     out: list[str] = []
+    try:
+        import tomllib   # type: ignore[import-not-found]
+        projects = tomllib.loads(text).get("projects")
+        if isinstance(projects, dict):
+            out += [k for k in projects if isinstance(k, str)]
+    except Exception:   # 3.9 has no tomllib; a file Codex cannot parse either is still read by its headers
+        pass
     for line in text.splitlines():
         m = PROJECT_HEADER.match(line)
         if m:
-            path = m.group(1).replace("\\\\", "\\").replace('\\"', '"') if m.group(1) is not None else m.group(2)
-            if path not in out:
-                out.append(path)
+            name = toml_basic(m.group(1)) if m.group(1) is not None else m.group(2)
+            if name not in out:
+                out.append(name)
     return out
 
 
-def sources() -> list[tuple[Path, str, str]]:
-    """(file, client, what it is) for every file this script looks for, present or not."""
-    cdir, chome = claude_dir(), codex_home()
-    out = [(cdir / "settings.json", "Claude Code", "user settings"),
-           (cdir / "settings.local.json", "Claude Code", "user settings")]
-    client = claude_client_files()
-    out += [(f, "Claude Code", "client config") for f in client]
-    for p in _claude_projects(client):
-        for name in ("settings.json", "settings.local.json"):
-            out.append((Path(p) / ".claude" / name, "Claude Code", "project settings"))
-    out.append((chome / "config.toml", "Codex", "config"))
-    user_rules = rules_in(chome / "rules")
-    out += [(f, "Codex", "approval rules") for f in user_rules] or [(chome / "rules" / "*.rules", "Codex",
-                                                                        "approval rules")]
-    for p in _codex_projects(chome / "config.toml"):
-        folder = Path(p) / ".codex"
-        out.append((folder / "config.toml", "Codex", "project config"))
-        out += [(f, "Codex", "project approval rules") for f in rules_in(folder / "rules")]
+def sources(names: Names) -> list[Source]:
+    """Every file this script looks for, present or not, with the label the report prints for it."""
+    cdir, clabel = claude_dir()
+    out = [Source(cdir / n, f"{clabel}/{n}", "Claude Code", "user settings")
+           for n in ("settings.json", "settings.local.json")]
+    # the client config: `.claude.json` in CLAUDE_CONFIG_DIR, else in the home (the rule of maisecrets/vault_refs.py
+    # global_file, copied: the standalone skill zip has no vault_refs), its `-custom-oauth` form, the legacy
+    # `.config.json` of the config dir, and the copies the client keeps in `backups/`
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        home, hlabel = cdir, clabel
+    else:
+        home, hlabel = Path.home(), "~"
+    client = [Source(home / ".claude.json", f"{hlabel}/.claude.json", "Claude Code", "client config")]
+    if os.environ.get("CLAUDE_CODE_CUSTOM_OAUTH_URL"):
+        client.append(Source(home / ".claude-custom-oauth.json", f"{hlabel}/.claude-custom-oauth.json",
+                             "Claude Code", "client config"))
+    if (cdir / ".config.json").is_file():
+        client.append(Source(cdir / ".config.json", f"{clabel}/.config.json", "Claude Code", "client config"))
+    for f in listed(cdir / "backups", lambda n: n.startswith(".claude") and ".json" in n):
+        client.append(Source(f, f"{clabel}/backups/{names.file(f.name)}", "Claude Code", "client config"))
+    out += client
+    for name, origin in _claude_projects(client):
+        n = names.project(name, origin)
+        for f in ("settings.json", "settings.local.json"):
+            out.append(Source(Path(name) / ".claude" / f, f"<project {n}>/.claude/{f}", "Claude Code",
+                              "project settings"))
+    chome, xlabel = codex_home()
+    config = Source(chome / "config.toml", f"{xlabel}/config.toml", "Codex", "config")
+    out.append(config)
+    rules = rules_in(chome / "rules")
+    out += [Source(f, f"{xlabel}/rules/{names.file(f.name)}", "Codex", "approval rules") for f in rules] or [
+        Source(chome / "rules" / "*.rules", f"{xlabel}/rules/*.rules", "Codex", "approval rules")]
+    try:
+        text = _read(config.path)
+    except (OSError, ValueError):
+        text = ""
+    for name in codex_project_names(text):
+        n = names.project(name, config.label)
+        folder = Path(name) / ".codex"
+        out.append(Source(folder / "config.toml", f"<project {n}>/.codex/config.toml", "Codex", "project config"))
+        out += [Source(f, f"<project {n}>/.codex/rules/{names.file(f.name)}", "Codex", "project approval rules")
+                for f in rules_in(folder / "rules")]
     seen, unique = set(), []
-    for f, c, w in out:
-        key = os.path.normcase(os.path.abspath(str(f)))
+    for s in out:
+        key = os.path.normcase(os.path.abspath(str(s.path))) if "\x00" not in str(s.path) else str(s.path)
         if key not in seen:
             seen.add(key)
-            unique.append((f, c, w))
+            unique.append(s)
     return unique
 
 
 # ------------------------------------------------------------------------------------------ places --
-SAFE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
-
-
-def _high_entropy(s: str) -> bool:
-    """A name of 16 or more characters with letters and digits and more than 3.5 bits per character: a key of
-    random characters, not a word such as GITHUB_TOKEN."""
-    if len(s) < 16 or not re.search(r"\d", s) or not re.search(r"[A-Za-z]", s):
-        return False
-    n = len(s)
-    return -sum(c / n * math.log2(c / n) for c in (s.count(x) for x in set(s))) > 3.5
-
-
-def safe_name(name: str) -> bool:
-    """A JSON key or a TOML name is printed only when it looks like a name: a key can itself be a credential
-    that no rule matches (Gate A L1)."""
-    return bool(SAFE_NAME.fullmatch(name)) and not _high_entropy(name)
-
-
 def _key(k: str) -> str:
     return f".{k}" if safe_name(k) else "[key]"
 
@@ -226,7 +330,7 @@ TOML_KEY = re.compile(r"""^\s*("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_.-]+)\s*="""
 
 def line_places(text: str, toml: bool) -> list[str]:
     """For each line (index 0 = line 1) its place: the line number, and in a TOML file the table and key
-    that the line belongs to (names only)."""
+    that the line belongs to, each only when it is a plain name."""
     out, section, key = [], "", ""
     for n, line in enumerate(text.split("\n"), 1):
         if toml:
@@ -244,14 +348,15 @@ def line_places(text: str, toml: bool) -> list[str]:
 
 
 # -------------------------------------------------------------------------------------------- scan --
-def scan_file(detect, enabled, path: Path, what: str) -> list[tuple[str, object]]:
+def scan_file(detect, enabled, src: Source, names: Names) -> list[tuple[str, object]]:
     """(place, match) for each hit. A JSON file is scanned string by string with its JSON path; the client
     config only in `projects.*.allowedTools` (the rest is account state and MCP servers, which the plugin
     handles elsewhere). A file that is not valid JSON, a rules file and a TOML file are scanned as text with
     line numbers."""
-    text = _read(path)
+    text = _read(src.path)
     hits: list[tuple[str, object]] = []
-    if path.name.endswith(".rules") or path.suffix == ".toml" or what.endswith("approval rules"):
+    toml = src.path.name.endswith(".toml")
+    if toml or src.what.endswith("approval rules"):
         doc = None
     else:
         try:
@@ -259,30 +364,24 @@ def scan_file(detect, enabled, path: Path, what: str) -> list[tuple[str, object]
         except ValueError:
             doc = None
     if doc is not None:
-        if what == "client config":
+        items = []
+        if src.what == "client config":
             projects = doc.get("projects") if isinstance(doc, dict) else None
-            items = []
             for name, entry in (projects.items() if isinstance(projects, dict) else []):
-                # the project path is a key of this file and is printed as the folder of its settings: scanned
-                # here, so a token in it is a finding and the guard withholds it (Gate A B1)
-                shown_name = json.dumps(name, ensure_ascii=False)
-                items.append((f"projects[{shown_name}] (project path)", name))
                 tools = entry.get("allowedTools") if isinstance(entry, dict) else None
                 if isinstance(tools, list):
-                    items += [(f"projects[{shown_name}].allowedTools[{i}]", t)
+                    n = names.project(name, src.label)
+                    items += [(f"projects[<project {n}>].allowedTools[{i}]", t)
                               for i, t in enumerate(tools) if isinstance(t, str)]
         else:
             items = list(json_strings(doc))
         for place, s in items:
             hits += [(place.lstrip("."), m) for m in detect.scan(s, enabled, "tool")]
         return hits
-    places = line_places(text, path.suffix == ".toml")
+    places = line_places(text, toml)
     starts = _detector.line_starts(text)
     for m in _detector.scan_text(detect, text, enabled, "tool"):
-        place = places[_detector.line_of(starts, m.start) - 1]
-        if what.endswith("approval rules"):
-            place = f"rules/{path.name} {place}"
-        hits.append((place, m))
+        hits.append((places[_detector.line_of(starts, m.start) - 1], m))
     return hits
 
 
@@ -305,16 +404,10 @@ def classify(kind: str, inner: str | None) -> tuple[str, str]:
     return kind, "guess"
 
 
-def shown(text: str) -> str:
-    """A path or a place as printed: a control character (a NUL or an escape in a project key) as \\xNN."""
-    return re.sub(r"[\x00-\x1f\x7f]", lambda m: f"\\x{ord(m.group()):02x}", text)
-
-
 def guard(lines: list[str], values) -> list[str]:
-    """The last check before any output: a line that holds a found value (a project path or a TOML key that
-    contains it, for example) loses that part, also in the forms the report writes it: JSON-escaped (a project
-    key) and with control characters escaped (Gate A M1). No value leaves this script, whatever the report
-    builds."""
+    """The last check before any output: a line that holds a found value loses that part, also in the forms a
+    report could write it (JSON-escaped, control-escaped; Gate A M1). The labels hold no chosen name, so this
+    is the second line of defence, not the first."""
     forms = set()
     for v in values:
         if v:
@@ -330,7 +423,6 @@ def guard(lines: list[str], values) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    global MAX_MB
     ap = argparse.ArgumentParser(
         description="Credentials in the approvals and settings of Claude Code and Codex, by place, never by value.")
     ap.add_argument("--pii", action="store_true", help="also list personal data (e-mail, IBAN, phone ...)")
@@ -338,6 +430,15 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--max-mb", type=float, default=MAX_MB,
                     help=f"do not read a file larger than this (default {MAX_MB:g}); the report names it")
     args = ap.parse_args(argv)
+    try:
+        return run(args)
+    except Exception as exc:   # whatever a file holds, the answer is an error code, not a traceback (round 2, M1)
+        print(f"secret-hygiene: the approvals check stopped: {exc.__class__.__name__}")
+        return 2
+
+
+def run(args) -> int:
+    global MAX_MB
     MAX_MB = args.max_mb
     try:
         detect = _detector.load()
@@ -345,7 +446,8 @@ def main(argv: list[str]) -> int:
         print(exc)
         return 2
     enabled = None if args.pii else _detector.secret_rules(detect)
-    files = sources()
+    names = Names()
+    files = sources(names)
     if args.out:
         def real(f) -> str:
             try:
@@ -353,26 +455,26 @@ def main(argv: list[str]) -> int:
             except ValueError:   # a NUL in a project path: no file can have that name
                 return ""
         out_real = real(args.out)
-        if out_real and any(real(f) == out_real for f, _c, _w in files):
+        if out_real and any(real(s.path) == out_real for s in files):
             print("secret-hygiene: --out names a file this script reads; it writes no source file. "
                   "Choose another --out file.")
             return 2
     ids: dict[str, str] = {}
     findings, read, missing, failed = [], [], [], []
 
-    def add(m, path: Path, place: str, client: str, what: str) -> None:
+    def add(m, src: Source, place: str) -> None:
         if not args.pii and m.type != "SECRET":
             return
         sid = ids.setdefault(m.value, f"S{len(ids) + 1}")
         rule, sure = classify(m.kind, inner_rule(detect, m))
-        findings.append((sid, m.type, rule, sure, len(m.value), path, place, client, what))
+        findings.append((sid, m.type, rule, sure, len(m.value), src.label, place, src.client, src.what))
 
-    for path, client, what in files:
-        label = f"{shown(str(path))} ({client} {what})"
+    for src in files:
+        label = f"{src.label} ({src.client} {src.what})"
         try:
-            if "*" in path.name:
+            if src.path.name == "*.rules":
                 raise FileNotFoundError
-            os.stat(str(path))
+            os.stat(str(src.path))
         except (FileNotFoundError, NotADirectoryError, ValueError):   # ValueError: a NUL in a project path
             missing.append(label)
             continue
@@ -380,7 +482,7 @@ def main(argv: list[str]) -> int:
             failed.append(f"{label}: {exc.__class__.__name__}")
             continue
         try:
-            hits = scan_file(detect, enabled, path, what)
+            hits = scan_file(detect, enabled, src, names)
         except Unreadable as exc:
             failed.append(f"{label}: {exc}")
             continue
@@ -389,21 +491,26 @@ def main(argv: list[str]) -> int:
             continue
         read.append(label)
         for place, m in hits:
-            add(m, path, shown(place), client, what)
-    # every path this report prints is scanned too: a project key or a file name can hold a token, and the
-    # guard withholds only values it knows (Gate A B1; scan_secrets.py _safe_author is the model)
-    for path, client, what in files:
-        for m in detect.scan(str(path), enabled, "tool"):
+            add(m, src, place)
+    # the names are scanned although they are never printed: a project folder (as its client decoded it) and
+    # each path this script looked at can hold a token (Gate A B1, round 2 H1)
+    by_label = {s.label: s for s in files}
+    for name, n in names.projects.items():
+        origin = by_label.get(names.origin[n])
+        for m in detect.scan(name, enabled, "tool"):
+            if m.value not in ids and origin is not None:
+                add(m, origin, f"<project {n}> (project path)")
+    for src in files:
+        for m in detect.scan(str(src.path), enabled, "tool"):
             if m.value not in ids:
-                add(m, path, "(path)", client, what)
+                add(m, src, "(path)")
     lines = ["Approvals and settings that Claude Code and Codex keep outside the repository.",
              f"Read {len(read)} file(s); {len(missing)} known file(s) do not exist"
              + (f"; {len(failed)} could NOT be read" if failed else "") + "."]
     lines.append(f"Findings: {len(ids)} distinct value(s) in {len(findings)} place(s).")
-    for sid, mtype, rule, sure, n, path, place, client, what in sorted(
-            findings, key=lambda f: (f[3] != "shape", int(f[0][1:]), str(f[5]), f[6])):
-        lines.append(f"  {sid:<4} {mtype:<7} {rule:<24} {sure:<5} len {n:<4} {shown(str(path))}  {place}  "
-                     f"({client} {what})")
+    for sid, mtype, rule, sure, n, label, place, client, what in sorted(
+            findings, key=lambda f: (f[3] != "shape", int(f[0][1:]), f[5], f[6])):
+        lines.append(f"  {sid:<4} {mtype:<7} {rule:<24} {sure:<5} len {n:<4} {label}  {place}  ({client} {what})")
         lines.append(f"       fix: {fix_for(what, place)}")
     if failed:
         lines.append("Could NOT be read (nothing found there is not proven):")
@@ -412,19 +519,23 @@ def main(argv: list[str]) -> int:
     lines += [f"  {x}" for x in read] or ["  (none)"]
     lines.append("Files that do not exist:")
     lines += [f"  {x}" for x in missing] or ["  (none)"]
+    if names.projects:
+        lines.append("Projects (their folder names are not printed; open the file named here to find one):")
+        lines += [f"  project {n} (from {names.origin[n]})" for n in sorted(names.origin)]
     shape = len({f[0] for f in findings if f[3] == "shape"})
     lines.append(f"Summary: {len(ids)} value(s); {shape} match a provider's token format (rotate first). "
                  "Removing an entry does not revoke the credential: the command ran with it, and copies of the "
                  f"file (backups, transcripts) can still hold it. Rotate it ({ROTATION}), then remove the entry.")
-    lines.append("Values are not shown. The same id means the same value. This script changed no file.")
-    lines = guard(lines, ids)
+    lines.append("Values and names that a person or a client chose are not shown. The same id means the same "
+                 "value. This script changed no file.")
+    lines = [shown(x) for x in guard(lines, ids)]
     if args.out:
         try:
             Path(args.out).write_text("\n".join(lines) + "\n", encoding="utf-8")
         except OSError as exc:
             print(f"secret-hygiene: cannot write the --out file: {exc.__class__.__name__}")
             return 2
-        print(guard([f"Wrote the full report to {shown(args.out)}."], ids)[0])
+        print("Wrote the full report to the --out file.")
         print("\n".join(line for line in lines if not line.startswith("  ")))
     else:
         print("\n".join(lines))
