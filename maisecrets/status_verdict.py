@@ -397,14 +397,15 @@ def _plural(n: int, word: str) -> str:
 
 
 def head_line(version: str, checks: list, client: str | None) -> str:
-    """The lock only for a session that was checked: 🔒 with no FAIL, 🔓 with one; outside a session no claim."""
+    """The lock only for a session that was checked: 🔒 with no FAIL, ⚠️ with one (an open
+    lock looked like the closed one); outside a session no claim."""
     fails = sum(c.state == "FAIL" for c in checks)
     warns = sum(c.state == "warn" for c in checks)
     tail = (f" · {_plural(fails, 'failure')}" if fails else f" · {_plural(warns, 'note')}" if warns else "")
     if client is None:
         return f"maisecrets {version} · status outside a client session{tail}"
     if fails:
-        return f"\U0001F513 maisecrets {version} is NOT protecting this session{tail}"
+        return f"\u26a0\ufe0f maisecrets {version} is NOT protecting this session{tail}"
     return f"\U0001F512 maisecrets {version} protects this session{tail or ' · all checks ok'}"
 
 
