@@ -377,11 +377,19 @@ class ModTests(_Base):
         transcript = folder / f"{session}.jsonl"
         self.addCleanup(lambda: transcript.unlink(missing_ok=True))
         transcript.write_text(json.dumps({"type": "queue-operation", "content": prompt}) + "\n")
+        def text():  # Windows locks the file while the child replaces it
+            for _ in range(50):
+                try:
+                    return transcript.read_text()
+                except PermissionError:
+                    time.sleep(0.05)
+            return transcript.read_text()
+
         for _ in range(100):
-            if TOKEN not in transcript.read_text():
+            if TOKEN not in text():
                 break
             time.sleep(0.1)
-        self.assertNotIn(TOKEN, transcript.read_text())
+        self.assertNotIn(TOKEN, text())
 
     def test_off_the_mod_rewrites_as_before(self):
         out = self._mod(PROMPT, session="0b6f1c2e-0000-4000-8000-00000000005a")
