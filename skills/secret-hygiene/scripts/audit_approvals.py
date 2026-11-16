@@ -19,16 +19,24 @@ Nothing this script prints is a value, a line of a file or a hash of a value. A 
 (S1, S2 ...; the same value keeps its id across files), the file, the place in it, the type, the rule, how
 sure the match is and the length. The script never changes a file.
 
-    python3 audit_approvals.py [--pii] [--out FILE]
+Every path the report prints (a project folder, a file name) is scanned too, and a key that does not look like
+a plain name is printed as [key].
 
-Exit code: 0 nothing found, 1 findings, 2 error (a file could not be read, so "nothing found" is not proven).
+    python3 audit_approvals.py [--pii] [--out FILE] [--max-mb N]
+
+--out must not name a file this script reads. --max-mb (default 50) skips a larger file; the report names it.
+
+Exit code: 0 nothing found, 1 findings, 2 error (a file could not be read: not a regular file, too large, or not
+parsable; so "nothing found" is not proven).
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import math
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -72,9 +80,29 @@ def rules_in(folder: Path) -> list[Path]:
         return []
 
 
+MAX_MB = 50.0     # a settings file is kilobytes; a 100 MB file took 214 s and 511 MB (Gate A M3)
+
+
+class Unreadable(OSError):
+    """A file this script does not read: not a regular file, or larger than --max-mb."""
+
+
 def _read(path: Path) -> str:
-    with open(path, encoding="utf-8", errors="replace") as fh:   # read only: this script never writes a source
-        return fh.read()
+    """The text of a regular file, read only (this script never writes a source). Opened without blocking and
+    checked on the open descriptor: a FIFO or a link to /dev/stdin made a plain open() wait forever (Gate A M2)."""
+    fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Unreadable("not a regular file")
+        if st.st_size > MAX_MB * 1_000_000:
+            raise Unreadable(f"too large ({st.st_size // 1_000_000} MB, --max-mb {MAX_MB:g})")
+        with os.fdopen(fd, "rb") as fh:
+            fd = -1
+            return fh.read().decode("utf-8", errors="replace")
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def _claude_projects(files: list[Path]) -> list[str]:
@@ -82,7 +110,7 @@ def _claude_projects(files: list[Path]) -> list[str]:
     for f in files:
         try:
             data = json.loads(_read(f))
-        except (OSError, ValueError):
+        except Exception:   # main() reports the file; a deep nesting raised RecursionError here
             continue
         projects = data.get("projects") if isinstance(data, dict) else None
         if isinstance(projects, dict):
@@ -96,7 +124,7 @@ PROJECT_HEADER = re.compile(r"""^\s*\[\s*projects\s*\.\s*(?:"((?:[^"\\]|\\.)*)"|
 def _codex_projects(config: Path) -> list[str]:
     try:
         text = _read(config)
-    except OSError:
+    except (OSError, ValueError):
         return []
     out: list[str] = []
     for line in text.splitlines():
@@ -136,8 +164,26 @@ def sources() -> list[tuple[Path, str, str]]:
 
 
 # ------------------------------------------------------------------------------------------ places --
+SAFE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def _high_entropy(s: str) -> bool:
+    """A name of 16 or more characters with letters and digits and more than 3.5 bits per character: a key of
+    random characters, not a word such as GITHUB_TOKEN."""
+    if len(s) < 16 or not re.search(r"\d", s) or not re.search(r"[A-Za-z]", s):
+        return False
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in (s.count(x) for x in set(s))) > 3.5
+
+
+def safe_name(name: str) -> bool:
+    """A JSON key or a TOML name is printed only when it looks like a name: a key can itself be a credential
+    that no rule matches (Gate A L1)."""
+    return bool(SAFE_NAME.fullmatch(name)) and not _high_entropy(name)
+
+
 def _key(k: str) -> str:
-    return f".{k}" if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", k) else f"[{json.dumps(k)}]"
+    return f".{k}" if safe_name(k) else "[key]"
 
 
 def json_strings(node, path: str = ""):
@@ -160,6 +206,12 @@ def is_approval(what: str, place: str) -> bool:
 
 
 def fix_for(what: str, place: str) -> str:
+    if place == "(path)":
+        return (f"a file or folder name holds the credential: rotate the credential ({ROTATION}), then rename "
+                "the file or folder")
+    if place.endswith("(project path)"):
+        return (f"a project folder name holds the credential: rotate the credential ({ROTATION}), then remove "
+                "that project entry")
     if what.endswith("approval rules"):
         return f"remove this prefix_rule from the file, then rotate the credential ({ROTATION})"
     if is_approval(what, place):
@@ -183,7 +235,8 @@ def line_places(text: str, toml: bool) -> list[str]:
                 section, key = s.group(1), ""
             elif k:
                 key = k.group(1)
-            name = ".".join(x for x in (section, key) if x)
+            parts = [x if safe_name(x) else f"[{label}]" for x, label in ((section, "section"), (key, "key")) if x]
+            name = ".".join(parts)
             out.append(f"line {n} ({name})" if name else f"line {n}")
         else:
             out.append(f"line {n}")
@@ -210,9 +263,13 @@ def scan_file(detect, enabled, path: Path, what: str) -> list[tuple[str, object]
             projects = doc.get("projects") if isinstance(doc, dict) else None
             items = []
             for name, entry in (projects.items() if isinstance(projects, dict) else []):
+                # the project path is a key of this file and is printed as the folder of its settings: scanned
+                # here, so a token in it is a finding and the guard withholds it (Gate A B1)
+                shown_name = json.dumps(name, ensure_ascii=False)
+                items.append((f"projects[{shown_name}] (project path)", name))
                 tools = entry.get("allowedTools") if isinstance(entry, dict) else None
                 if isinstance(tools, list):
-                    items += [(f"projects[{json.dumps(name)}].allowedTools[{i}]", t)
+                    items += [(f"projects[{shown_name}].allowedTools[{i}]", t)
                               for i, t in enumerate(tools) if isinstance(t, str)]
         else:
             items = list(json_strings(doc))
@@ -248,10 +305,21 @@ def classify(kind: str, inner: str | None) -> tuple[str, str]:
     return kind, "guess"
 
 
+def shown(text: str) -> str:
+    """A path or a place as printed: a control character (a NUL or an escape in a project key) as \\xNN."""
+    return re.sub(r"[\x00-\x1f\x7f]", lambda m: f"\\x{ord(m.group()):02x}", text)
+
+
 def guard(lines: list[str], values) -> list[str]:
     """The last check before any output: a line that holds a found value (a project path or a TOML key that
-    contains it, for example) loses that part. No value leaves this script, whatever the report builds."""
-    order = sorted({v for v in values if v}, key=len, reverse=True)
+    contains it, for example) loses that part, also in the forms the report writes it: JSON-escaped (a project
+    key) and with control characters escaped (Gate A M1). No value leaves this script, whatever the report
+    builds."""
+    forms = set()
+    for v in values:
+        if v:
+            forms |= {v, json.dumps(v)[1:-1], json.dumps(v, ensure_ascii=False)[1:-1], shown(v)}
+    order = sorted((f for f in forms if f), key=len, reverse=True)
     out = []
     for line in lines:
         for v in order:
@@ -262,43 +330,80 @@ def guard(lines: list[str], values) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    global MAX_MB
     ap = argparse.ArgumentParser(
         description="Credentials in the approvals and settings of Claude Code and Codex, by place, never by value.")
     ap.add_argument("--pii", action="store_true", help="also list personal data (e-mail, IBAN, phone ...)")
     ap.add_argument("--out", help="write the full report to this file and print only the summary")
+    ap.add_argument("--max-mb", type=float, default=MAX_MB,
+                    help=f"do not read a file larger than this (default {MAX_MB:g}); the report names it")
     args = ap.parse_args(argv)
+    MAX_MB = args.max_mb
     try:
         detect = _detector.load()
     except SystemExit as exc:
         print(exc)
         return 2
     enabled = None if args.pii else _detector.secret_rules(detect)
+    files = sources()
+    if args.out:
+        def real(f) -> str:
+            try:
+                return os.path.realpath(str(f))
+            except ValueError:   # a NUL in a project path: no file can have that name
+                return ""
+        out_real = real(args.out)
+        if out_real and any(real(f) == out_real for f, _c, _w in files):
+            print("secret-hygiene: --out names a file this script reads; it writes no source file. "
+                  "Choose another --out file.")
+            return 2
     ids: dict[str, str] = {}
     findings, read, missing, failed = [], [], [], []
-    for path, client, what in sources():
-        label = f"{path} ({client} {what})"
-        if "*" in path.name or not path.exists():
+
+    def add(m, path: Path, place: str, client: str, what: str) -> None:
+        if not args.pii and m.type != "SECRET":
+            return
+        sid = ids.setdefault(m.value, f"S{len(ids) + 1}")
+        rule, sure = classify(m.kind, inner_rule(detect, m))
+        findings.append((sid, m.type, rule, sure, len(m.value), path, place, client, what))
+
+    for path, client, what in files:
+        label = f"{shown(str(path))} ({client} {what})"
+        try:
+            if "*" in path.name:
+                raise FileNotFoundError
+            os.stat(str(path))
+        except (FileNotFoundError, NotADirectoryError, ValueError):   # ValueError: a NUL in a project path
             missing.append(label)
+            continue
+        except OSError as exc:
+            failed.append(f"{label}: {exc.__class__.__name__}")
             continue
         try:
             hits = scan_file(detect, enabled, path, what)
-        except OSError as exc:
+        except Unreadable as exc:
+            failed.append(f"{label}: {exc}")
+            continue
+        except Exception as exc:   # a deep nesting raised RecursionError and read as "findings" (Gate A M4)
             failed.append(f"{label}: {exc.__class__.__name__}")
             continue
         read.append(label)
         for place, m in hits:
-            if not args.pii and m.type != "SECRET":
-                continue
-            sid = ids.setdefault(m.value, f"S{len(ids) + 1}")
-            rule, sure = classify(m.kind, inner_rule(detect, m))
-            findings.append((sid, m.type, rule, sure, len(m.value), path, place, client, what))
+            add(m, path, shown(place), client, what)
+    # every path this report prints is scanned too: a project key or a file name can hold a token, and the
+    # guard withholds only values it knows (Gate A B1; scan_secrets.py _safe_author is the model)
+    for path, client, what in files:
+        for m in detect.scan(str(path), enabled, "tool"):
+            if m.value not in ids:
+                add(m, path, "(path)", client, what)
     lines = ["Approvals and settings that Claude Code and Codex keep outside the repository.",
              f"Read {len(read)} file(s); {len(missing)} known file(s) do not exist"
              + (f"; {len(failed)} could NOT be read" if failed else "") + "."]
     lines.append(f"Findings: {len(ids)} distinct value(s) in {len(findings)} place(s).")
     for sid, mtype, rule, sure, n, path, place, client, what in sorted(
             findings, key=lambda f: (f[3] != "shape", int(f[0][1:]), str(f[5]), f[6])):
-        lines.append(f"  {sid:<4} {mtype:<7} {rule:<24} {sure:<5} len {n:<4} {path}  {place}  ({client} {what})")
+        lines.append(f"  {sid:<4} {mtype:<7} {rule:<24} {sure:<5} len {n:<4} {shown(str(path))}  {place}  "
+                     f"({client} {what})")
         lines.append(f"       fix: {fix_for(what, place)}")
     if failed:
         lines.append("Could NOT be read (nothing found there is not proven):")
@@ -317,9 +422,9 @@ def main(argv: list[str]) -> int:
         try:
             Path(args.out).write_text("\n".join(lines) + "\n", encoding="utf-8")
         except OSError as exc:
-            print(f"secret-hygiene: cannot write {args.out}: {exc.__class__.__name__}")
+            print(f"secret-hygiene: cannot write the --out file: {exc.__class__.__name__}")
             return 2
-        print(f"Wrote the full report to {args.out}.")
+        print(guard([f"Wrote the full report to {shown(args.out)}."], ids)[0])
         print("\n".join(line for line in lines if not line.startswith("  ")))
     else:
         print("\n".join(lines))
