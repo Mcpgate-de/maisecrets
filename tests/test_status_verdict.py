@@ -80,7 +80,7 @@ class HooksLineTests(_Tmp):
         log = self.log([(now - 2, "pre-tool", "otherses")])
         state, text = st(sv.hooks_verdict(log, SESSION, now))
         self.assertEqual(state, "FAIL")
-        self.assertIn("/reload-plugins", text)
+        self.assertIn("a new session", text)
 
     def test_warn_when_this_command_has_no_tool_call_hook(self):
         now = time.time()

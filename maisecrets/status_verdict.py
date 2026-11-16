@@ -38,9 +38,10 @@ class Check(NamedTuple):
 
 
 def reload_next(client: str | None) -> str:
-    """The step when a hook did not run: Claude Code reloads the plugins, Codex trusts the hooks again."""
-    return {"claude": "/reload-plugins or a new session", "codex": "trust maisecrets in /hooks"}.get(
-        client, "/reload-plugins (Codex: /hooks)")
+    """The step when a hook did not run: a new Claude Code session (/reload-plugins keeps the old plugin folder after
+    a synced update, docs/ADMIN.md "Updates and open sessions"), and in Codex the hooks trusted again."""
+    return {"claude": "start a new session", "codex": "trust maisecrets in /hooks"}.get(
+        client, "a new session (Codex: /hooks)")
 
 
 def ago(seconds: float) -> str:

@@ -401,7 +401,7 @@ class VerdictTests(_Clean):
         self.assertEqual(selftest.verdict().next, "/maisecrets:status test")
         self.arm()
         c = selftest.verdict(client="claude")
-        self.assertEqual((c.state, c.next), ("FAIL", "/reload-plugins or a new session"))
+        self.assertEqual((c.state, c.next), ("FAIL", "start a new session"))
 
     def test_tool_path_only_while_pending(self):
         self.arm()
