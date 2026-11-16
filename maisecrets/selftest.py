@@ -348,7 +348,7 @@ def verdict(now: float | None = None, sessions: list | None = None, version: str
     tool, prompt, leak = _num(res.get("tool")), _num(res.get("prompt")), _num(res.get("leak"))
     test = "/maisecrets:status test"
     if leak:
-        return Check("FAIL", "self-test", "the AI got the test value", "a new session",
+        return Check("FAIL", "self-test", "the AI saw the value", "a new session",
                      f"the AI wrote the test value into a tool call {ago(now - leak)}, so it had the value; start a "
                      "new session, then run the self-test again")
     if tool and prompt:
@@ -359,21 +359,21 @@ def verdict(now: float | None = None, sessions: list | None = None, version: str
                 f"the prompt hook stopped it {ago(now - prompt)}")
         if current:
             return Check("ok", "self-test", f"passed {ago(now - last)}", None, what)
-        return Check("warn", "self-test", f"passed {ago(now - last)}, elsewhere", test,
-                     f"passed in another session or version: {what}")
+        return Check("warn", "self-test", "passed elsewhere", test,
+                     f"passed {ago(now - last)}, in another session or version: {what}")
     p = _pending(state, now)
     if tool and p:
-        return Check("warn", "self-test", "prompt path not tested yet", "send the test value as a prompt",
+        return Check("warn", "self-test", "prompt path open", "send the test value as a prompt",
                      f"the tool path passed {ago(now - tool)}; type or paste the test value alone as your next prompt")
     if prompt and not tool:
-        return Check("FAIL", "self-test", "the result hook did not mask", reload_next(client),
+        return Check("FAIL", "self-test", "tool path failed", reload_next(client),
                      f"the prompt hook stopped the test value {ago(now - prompt)}, but the tool-result hook did not "
                      "mask it in the self-test command; then run the self-test again")
     if tool:
-        return Check("warn", "self-test", "only the tool path passed", test,
+        return Check("warn", "self-test", "prompt path expired", test,
                      f"the tool path passed {ago(now - tool)}; the test value expired before a prompt sent it")
     if p:
-        return Check("FAIL", "self-test", "test value not masked", reload_next(client),
+        return Check("FAIL", "self-test", "value not masked", reload_next(client),
                      "a test value is pending, and no tool-result hook masked it in the self-test command; if the AI "
                      "read the value, the hook did not run; then run the self-test again")
     return Check("warn", "self-test", "not run", test, None)

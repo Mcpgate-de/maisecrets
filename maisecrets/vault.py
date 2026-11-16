@@ -41,19 +41,17 @@ INDEX = HOME / "index.json"
 SERVICE = "maisecrets" if HOME == _DEFAULT_HOME else "maisecrets@" + hashlib.sha256(str(HOME).encode()).hexdigest()[:8]
 
 
-STATUS_DOC = "https://github.com/Mcpgate-de/maisecrets/blob/main/docs/HOW-IT-WORKS.md#status"
-
-
 def describe_backend(backend) -> str:
-    """One line for a human: which store and where; how to change it is in STATUS_DOC."""
+    """One line for a human: which store; the maisecrets folder (values of a file store, index.json, config.json)
+    once; how to change the store is in docs/HOW-IT-WORKS.md#status."""
     name = type(backend).__name__
-    where = {
+    what = {
         "KeychainBackend": f"macOS login keychain, service '{SERVICE}' (Keychain Access shows the entries)",
         "WindowsVaultBackend": f"Windows Credential Locker, resource '{SERVICE}' (Settings > Credential Manager)",
-        "EncryptedFileBackend": f"encrypted file {HOME / 'vault.enc.json'} (openssl, key file {HOME / 'key'})",
-        "JsonFileBackend": f"PLAINTEXT file {HOME / 'vault.json'} - TEST MODE, not for real secrets",
+        "EncryptedFileBackend": "encrypted file (openssl, with a key file)",
+        "JsonFileBackend": "PLAINTEXT file (TEST MODE, not for real secrets)",
     }.get(name, name)
-    return f"store backend: {where}; metadata {INDEX}; config {CONFIG} (to change the store: {STATUS_DOC})"
+    return f"store: {what}; folder {HOME} · how to change it: docs/HOW-IT-WORKS.md#status"
 
 
 def intro_line(backend, names: bool = True, codex: bool = False) -> str:

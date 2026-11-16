@@ -25,6 +25,7 @@ RECENT = 120         # the tool-call hook of this very command ran within this m
 NAMES = ("hooks", "version", "codex", "store", "incidents", "self-test")
 MARK = {"ok": "\u2713", "warn": "!", "FAIL": "\u2717", "n/a": "\u2013"}   # one column wide each
 NAME_COL = 11
+FACT_COL = 20        # every fact of a warn or FAIL line fits here, so all arrows stand in one column
 WIDTH = 80           # no check line wider than this with realistic facts (tests/test_status_verdict.py)
 
 
@@ -118,15 +119,17 @@ def hooks_verdict(log: Path, session, now: float | None = None, client: str | No
     if not session:
         detail = (f"this command runs outside a client session; last runs in any session: {seen}" if runs
                   else "this command runs outside a client session, and hooks.log has no hook run")
-        return Check("warn", "hooks", "no client session", "run it inside Claude Code or Codex", detail)
+        return Check("warn", "hooks", "no client session", "run it in Claude Code or Codex", detail)
     if not runs:
-        return Check("FAIL", "hooks", "none ran in this session", reload_next(client),
+        return Check("FAIL", "hooks", "no hook ran", reload_next(client),
                      "no maisecrets hook ran in this session")
     if "user-prompt" not in runs:
-        return Check("FAIL", "hooks", "the prompt hook did not run", reload_next(client), f"in this session: {seen}")
+        return Check("FAIL", "hooks", "no prompt hook", reload_next(client),
+                     f"the prompt hook did not run; in this session: {seen}")
     if now - runs.get("pre-tool", 0) > RECENT:
-        return Check("warn", "hooks", f"no tool-call hook in {RECENT // 60} min", "a new session",
-                     f"this command is a tool call, but its hook did not run; in this session: {seen}")
+        return Check("warn", "hooks", "no tool-call hook", "a new session",
+                     f"the tool-call hook did not run in the last {RECENT // 60} minutes, although this command is a "
+                     f"tool call; in this session: {seen}")
     return Check("ok", "hooks", f"ran ({_hook_facts(runs, now)})", None, f"in this session: {seen}")
 
 
@@ -233,34 +236,36 @@ def update_command(info: dict) -> str:
 
 
 def _update_short(info: dict) -> str:
+    """The update command for the check line: Codex's own; in Claude Code the plugin menu (the full command is in
+    the detail and in update_command)."""
     market = info.get("market") or "maisecrets"
-    return f"codex plugin add maisecrets@{market}" if info["kind"] == "codex" \
-        else f"claude plugin update maisecrets@{market}"
+    return f"codex plugin add maisecrets@{market}" if info["kind"] == "codex" else "/plugin, then update maisecrets"
 
 
 def version_verdict(info: dict) -> Check:
     inst, new = info["installed"], info["newest"]
-    after = ("then trust the maisecrets hooks again in /hooks" if info["kind"] == "codex"
-             else "then start a new session")
     if info["kind"] == "synced":
-        return Check("warn", "version", f"{inst}, synced; newest unknown", "ask your admin",
+        return Check("warn", "version", "synced by your org", "ask your admin",
                      "synced by your organisation: its sync decides; a new session gets a synced update")
     if not new:
         why = ("no marketplace copy found on this computer" if info["kind"] in ("claude", "codex")
                else "maisecrets runs from a folder no marketplace installed")
         nxt = ("codex plugin marketplace upgrade" if info["kind"] == "codex"
-               else f"/plugin marketplace update {info.get('market') or 'maisecrets'}" if info["kind"] == "claude"
-               else "update that folder (git pull)")
-        return Check("warn", "version", f"{inst}, newest unknown", nxt, f"newest unknown: {why}")
+               else "/plugin, update the marketplace" if info["kind"] == "claude"
+               else "git pull in that folder")
+        full = (f"claude plugin marketplace update {info.get('market') or 'maisecrets'}" if info["kind"] == "claude"
+                else nxt)
+        return Check("warn", "version", "newest unknown", nxt, f"{inst}; newest unknown: {why}; next: {full}")
     fetched = f", fetched {info['fetched'][:16].replace('T', ' ')}" if info.get("fetched") else ""
     copy = f"the marketplace copy of {info['where']}{fetched}"
     a, b = _version_tuple(inst), _version_tuple(new)
     if not a:
         return Check("warn", "version", "not comparable", _update_short(info),
-                     f"the installed version {inst!r} cannot be compared with {new} in {copy}; {after}")
+                     f"the installed version {inst!r} cannot be compared with {new} in {copy}; next: "
+                     f"{update_command(info)}")
     if not b or b > a:
         return Check("warn", "version", f"{new} is newer", _update_short(info),
-                     f"{inst} is installed; {new} is in {copy}; {after}")
+                     f"{inst} is installed; {new} is in {copy}; next: {update_command(info)}")
     return Check("ok", "version", f"{inst}, the newest", None,
                  f"the newest in {copy} (that copy is only as new as its last fetch)")
 
@@ -309,16 +314,15 @@ def store_verdict() -> Check:
     except ConfigError:
         raise                         # the command prints the configuration error alone (cli.main)
     except Exception as exc:  # noqa: BLE001 - the verdict names the failure; the details say more
-        return Check("FAIL", "store", f"no answer ({type(exc).__name__})", "/maisecrets:report incident",
-                     "the store did not answer a read; every prompt with a value is blocked until it does")
+        return Check("FAIL", "store", "no answer", "/maisecrets:report incident",
+                     f"the store did not answer a read ({type(exc).__name__}); every prompt with a value is blocked "
+                     "until it does")
     name = {"KeychainBackend": "macOS keychain", "WindowsVaultBackend": "Windows Credential Locker",
-            "EncryptedFileBackend": "encrypted file", "JsonFileBackend": "plaintext test file"}.get(
+            "EncryptedFileBackend": "encrypted file", "JsonFileBackend": "test file"}.get(
         type(v.backend).__name__, type(v.backend).__name__)
     if v.backend.test_mode:
-        return Check("warn", "store", f"{name}, {_values(live)}", "set backend in config.json",
-                     f'{name} answered a read; test mode, not for real secrets: write {{"backend": "encrypted-file"}} '
-                     'to config.json')
-    return Check("ok", "store", f"{name}, {_values(live)}", None, f"{name} answered a read")
+        return Check("warn", "store", f"{name}, {_values(live)}", "set backend in config.json", None)
+    return Check("ok", "store", f"{name}, {_values(live)}", None, None)
 
 
 def incidents_verdict() -> Check:
@@ -326,7 +330,8 @@ def incidents_verdict() -> Check:
     groups, damaged = incidents.load()
     days = incidents.WINDOW_DAYS
     if damaged:
-        return Check("warn", "incidents", "the record is damaged", "/maisecrets:report incident", None)
+        return Check("warn", "incidents", "record damaged", "/maisecrets:report incident",
+                     "the incident record is damaged")
     closed = sum(int(g.get("count", 0)) for g in groups.values() if g.get("class") == "fail-closed")
     other = sum(int(g.get("count", 0)) for g in groups.values() if g.get("class") != "fail-closed")
     markers = len(incidents.unfolded_markers())
@@ -339,9 +344,8 @@ def incidents_verdict() -> Check:
         parts.append(f"{other} times a side step failed (a cleanup or a record)")
     if markers:
         parts.append(f"{markers} not yet counted")
-    fact = (f"{closed + other} in {days} days" if closed or other else "") + (
-        f"{', ' if closed or other else ''}{markers} not yet counted" if markers else "")
-    return Check("warn", "incidents", fact, "/maisecrets:report incident", "; ".join(parts))
+    return Check("warn", "incidents", f"{closed + other + markers} in {days} days", "/maisecrets:report incident",
+                 "; ".join(parts))
 
 
 # --- all of it ----------------------------------------------------------------------------------------------------
@@ -353,8 +357,8 @@ def _guarded(fn, *args) -> Check:
         raise
     except Exception as exc:  # noqa: BLE001 - one line that fails must not hide the others
         name = getattr(fn, "__name__", "check").replace("_verdict", "")
-        return Check("warn", name if name in NAMES else "check", f"not checked ({type(exc).__name__})",
-                     "/maisecrets:report incident", None)
+        return Check("warn", name if name in NAMES else "check", "not checked", "/maisecrets:report incident",
+                     f"could not be checked ({type(exc).__name__})")
 
 
 def client_of(log: Path, sessions: list) -> str | None:
@@ -403,20 +407,16 @@ def head_line(version: str, checks: list, client: str | None) -> str:
     return f"\U0001F512 maisecrets {version} protects this session{tail or ' · all checks ok'}"
 
 
-def check_lines(checks: list, client: str | None = None, width: int = WIDTH) -> list[str]:
-    """One line per check: mark, name, fact, and for warn and FAIL the next command, the arrows in one column where
-    the width allows it. In Codex a command is typed as `maisecrets: status test`."""
+def check_lines(checks: list, client: str | None = None) -> list[str]:
+    """One line per check: mark, name, fact, and for warn and FAIL the next command, the arrows in one column.
+    In Codex a command is typed as `maisecrets: status test`."""
     if client == "codex":
         checks = [c._replace(next=c.next.replace("/maisecrets:", "maisecrets: ")) if c.next else c for c in checks]
-    arrow = [c for c in checks if c.next and c.state in ("warn", "FAIL")]
-    lead = NAME_COL + 4          # " ! " and the space after the name
-    # the arrows in one column, as far right as the longest fact, as far left as the longest command needs
-    col = min([max((len(c.fact) for c in arrow), default=0)] + [width - lead - 5 - len(c.next) for c in arrow])
     out = []
     for c in checks:
         line = f" {MARK.get(c.state, '?')} {c.name:<{NAME_COL}} {c.fact}"
-        if c in arrow:
-            line = f"{line:<{lead + col}}  \u2192  {c.next}"
+        if c.next and c.state in ("warn", "FAIL"):
+            line = f" {MARK.get(c.state, '?')} {c.name:<{NAME_COL}} {c.fact:<{FACT_COL}}  \u2192  {c.next}"
         out.append(line)
     return out
 

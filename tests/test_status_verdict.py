@@ -223,7 +223,7 @@ class StoreLineTests(unittest.TestCase):
     def test_the_test_store_answers_and_says_test_mode(self):
         state, text = st(sv.store_verdict())
         self.assertEqual(state, "warn")
-        self.assertIn("answered a read", text)
+        self.assertIn("test file, 0 values | Next: set backend in config.json", text)
 
     def test_ok_for_a_real_store_that_answers(self):
         with mock.patch("maisecrets.vault.JsonFileBackend.test_mode", False):
@@ -314,13 +314,11 @@ class CheckLineTests(_Tmp):
         lines = ["WARNING: maisecrets does not protect Codex now: codex hooks: 3 of 8 not trusted: open /hooks"]
         with mock.patch("maisecrets.codex_trust.status_lines", return_value=lines):
             out.append(sv.codex_verdict(ROOT, self.codex))
-        out.append(sv.Check("FAIL", "store", "no answer (TimeoutExpired)", "/maisecrets:report incident",
-                            None))
-        out.append(sv.Check("warn", "store", "plaintext test file, 9999 values", "set backend in config.json", None))
+        with mock.patch("maisecrets.vault.JsonFileBackend.get", side_effect=TimeoutError("slow")):
+            out.append(sv.store_verdict())
+        out.append(sv.store_verdict())
         out.append(sv.Check("ok", "store", "Windows Credential Locker, 9999 values", None, None))
-        out.append(sv.Check("warn", "incidents", "999 in 30 days, 9 not yet counted",
-                            "/maisecrets:report incident", None))
-        out.append(sv.Check("warn", "self-test", "passed 23 h ago, elsewhere", "/maisecrets:status test", None))
+        out.append(sv.Check("warn", "incidents", "9999 in 30 days", "/maisecrets:report incident", None))
         return out
 
     def test_no_check_line_over_80_characters(self):
@@ -333,20 +331,28 @@ class CheckLineTests(_Tmp):
             with mock.patch.object(selftest, "load", return_value={"result": {**texts, **res}}):
                 for c in (None, "claude", "codex"):
                     checks.append(selftest.verdict(now=86000.0, sessions=[SESSION], client=c))
+        with mock.patch.object(selftest, "load", return_value={"result": {**texts, "tool": 1.0, "prompt": 2.0,
+                                                                          "session": "other", "version": "0"}}):
+            checks.append(selftest.verdict(now=86000.0 * 3, sessions=[SESSION], version="0.9.13"))
+        self.assertIn("warn", {c.state for c in checks})
+        self.assertIn("FAIL", {c.state for c in checks})
         for client in (None, "claude", "codex"):
-            for c in checks:
-                for line in sv.check_lines([c] + OK6[1:], client):
-                    with self.subTest(line=line):
-                        self.assertLessEqual(len(line), 80)
-            for line in sv.check_lines(checks, client):
-                self.assertLessEqual(len(line), 80, line)
+            lines = sv.check_lines(checks, client)
+            for line in lines:
+                with self.subTest(line=line):
+                    self.assertLessEqual(len(line), 80)
+            arrows = {line.index("\u2192") for line in lines if "\u2192" in line}
+            self.assertEqual(arrows, {sv.NAME_COL + 4 + sv.FACT_COL + 2}, "every arrow in one column")
+        for c in checks:
+            if c.state in ("warn", "FAIL"):
+                self.assertLessEqual(len(c.fact), sv.FACT_COL, c)
 
     def test_marks_and_the_arrow_for_warn_and_fail_only(self):
         lines = sv.check_lines([check("ok", "hooks", "ran"), check("warn", "version", "a", "x"),
                                 check("FAIL", "store", "b", "y"), check("n/a", "codex", "not installed")], "claude")
         self.assertEqual([ln[1] for ln in lines], ["\u2713", "!", "\u2717", "\u2013"])
         self.assertEqual(lines[0], " \u2713 hooks       ran")
-        self.assertEqual(lines[1], " ! version     a  \u2192  x")
+        self.assertEqual(lines[1], " ! version     " + "a".ljust(sv.FACT_COL) + "  \u2192  x")
         self.assertNotIn("\u2192", lines[3])
 
     def test_codex_gets_the_typed_form(self):
