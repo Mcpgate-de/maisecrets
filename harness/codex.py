@@ -99,6 +99,14 @@ SCENARIOS = {
         "expect_home_text": [("index.json", '"kind": "manual"')],
         "expect_absent": [UNSEEN],
     },
+    # `codex exec` prints no systemMessage: the first ssh write gives no hint and does not record one as given. The
+    # hook reads `exec` from the rollout's session_meta line (settings.person_sees_hook_lines)
+    "ssh_hint_not_in_exec": {
+        "prompt": "Restart the web service.",
+        "turns": [{"exec": _js("ssh -o BatchMode=yes -o ConnectTimeout=2 nohost.invalid "
+                               "'sudo systemctl restart nginx' || true")}, {"text": "done"}],
+        "expect_home_file_missing": "hints.json",
+    },
     "bash_echo": {
         # a real model refuses "print .env verbatim" on its own (2026-09-26); asking for the
         # variable names makes it run the command, and the redacted output is what it reads

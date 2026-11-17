@@ -1,5 +1,5 @@
 """Settings and hints (maisecrets/settings.py): a setting changes only from a prompt the person typed, a missing key
-is "not decided", and a hint goes to the model once, at the first case it is about."""
+is "not decided", and a hint is one fixed line for the person, once, at the first case it is about."""
 from __future__ import annotations
 
 import json
@@ -17,7 +17,7 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 from maisecrets import hooks, settings  # noqa: E402
 from maisecrets.vault import _CONFIG_TYPES, DEFAULT_CONFIG, HOME, load_config  # noqa: E402
 import _hygiene  # noqa: E402
-from _hygiene import CLAUDE, CODEX  # noqa: E402
+from _hygiene import CLAUDE, CODEX, codex_rollout  # noqa: E402
 
 TEST_CONFIG = {"backend": "jsonfile", "allow_plaintext_store": True}
 CONFIG = Path(HOME, "config.json")
@@ -55,6 +55,11 @@ def _post(command: str, client: dict = CLAUDE, **extra) -> dict:
 
 def _context(out: dict) -> str:
     return (out.get("hookSpecificOutput") or {}).get("additionalContext") or out.get("reason") or ""
+
+
+def _shown(out: dict) -> str:
+    """The line for the person: Claude Code and Codex show a hook's systemMessage, and neither sends it to the model."""
+    return out.get("systemMessage") or ""
 
 
 class Classes(unittest.TestCase):
@@ -366,21 +371,84 @@ class Hint(unittest.TestCase):
         _reset()
 
     def test_the_first_ssh_write_gives_the_hint_once(self):
-        self.assertNotIn("ssh_consent", _context(_post("ls -la")))
-        self.assertNotIn("ssh_consent", _context(_post("ssh web1 uptime")), "a read is no case for it")
-        self.assertNotIn("ssh_consent", _context(_post("grep ssh README.md")), "a text that names ssh is none")
+        self.assertNotIn("ssh_consent", _shown(_post("ls -la")))
+        self.assertNotIn("ssh_consent", _shown(_post("ssh web1 uptime")), "a read is no case for it")
+        self.assertNotIn("ssh_consent", _shown(_post("grep ssh README.md")), "a text that names ssh is none")
         out = _post("ssh web1 'sudo systemctl restart nginx'")
-        self.assertIn("/maisecrets:settings ssh_consent on", _context(out))
-        self.assertIn("Do not change settings yourself", _context(out))
-        self.assertNotIn("ssh_consent", _context(_post("ssh web2 reboot")), "once, not per host or per session")
-        self.assertNotIn("ssh_consent", _context(_post("ssh web2 reboot", session_id="S2")))
+        self.assertEqual(_shown(out), settings.HINTS["ssh_consent"]["claude"], "the fixed line, for the person")
+        self.assertEqual(_context(out), "", "the model gets nothing of the hint, so it cannot word it or repeat it")
+        self.assertNotIn("ssh_consent", _shown(_post("ssh web2 reboot")), "once, not per host or per session")
+        self.assertNotIn("ssh_consent", _shown(_post("ssh web2 reboot", session_id="S2")))
+
+    def test_every_hint_is_one_short_line_for_the_person_and_no_instruction_to_the_model(self):
+        for feature, hint in settings.HINTS.items():
+            for client in ("claude", "codex"):
+                text = hint.get(client)
+                if text is None:
+                    continue          # check_value: its line lives in maisecrets/check_value.py
+                with self.subTest(feature=feature, client=client):
+                    self.assertTrue(text.startswith("maisecrets: "), "the person sees who speaks")
+                    self.assertNotIn("\n", text)
+                    self.assertLessEqual(len(text), 240, "short: a line, not a paragraph")
+                    for word in ("Mention", "tell the user", "after your answer", "yourself", "you just read"):
+                        self.assertNotIn(word, text, "a line for the person, not an instruction to the model")
+                    self.assertIn(feature, text, "it names the setting the command changes")
+                    if client == "codex":
+                        self.assertNotIn("/maisecrets:", text, "Codex has no slash command for plugins")
+                    else:
+                        self.assertIn(f"/maisecrets:settings {feature} ", text, "the exact command")
 
     def test_codex_gets_its_sentence_and_an_unread_form_is_no_case(self):
         # an unread form shares its class with a plain mention (`echo ssh`), so it gives no hint
-        self.assertNotIn("ssh_consent", _context(_post("bash -c 'ssh web1 reboot'", CODEX)))
-        out = _post("ssh web1 reboot", CODEX)
-        self.assertIn("maisecrets: set ssh_consent on", _context(out))
-        self.assertNotIn("/maisecrets:settings", _context(out), "Codex has no slash command for plugins")
+        tui = {**CODEX, **codex_rollout("cli")}
+        self.assertNotIn("ssh_consent", _shown(_post("bash -c 'ssh web1 reboot'", tui)))
+        out = _post("ssh web1 reboot", tui)
+        self.assertEqual(_shown(out), settings.HINTS["ssh_consent"]["codex"])
+        self.assertIn("maisecrets: set ssh_consent on", _shown(out))
+        self.assertEqual(_context(out), "", "Codex shows systemMessage as a hook warning; the model gets nothing")
+
+    def test_a_headless_run_neither_shows_nor_claims_and_a_later_interactive_run_shows_it_once(self):
+        # Gate A of 30fb8d30: `claude -p`, an Agent SDK program and `codex exec` show no systemMessage; a hint claimed
+        # there is used up unseen
+        cases = ((CLAUDE, {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, "claude -p"),
+                 (CLAUDE, {"CLAUDE_CODE_ENTRYPOINT": "sdk-py"}, "an Agent SDK program"),
+                 ({**CODEX, **codex_rollout("exec")}, {}, "codex exec"),
+                 ({**CODEX, **codex_rollout("mcp")}, {}, "codex as an MCP server"),
+                 ({**CODEX, **codex_rollout({"subagent": "review"})}, {}, "a Codex subagent"),
+                 ({**CODEX, "transcript_path": "/nonexistent/rollout.jsonl"}, {}, "a rollout that cannot be read"),
+                 (CODEX, {}, "no transcript_path"))
+        for client, env, why in cases:
+            with self.subTest(why):
+                _reset()
+                with mock.patch.dict(os.environ, env):
+                    out = _post("ssh web1 reboot", client)
+                self.assertEqual(_shown(out), "", "not shown")
+                self.assertEqual(_context(out), "")
+                self.assertFalse(HINTS.exists(), "and not claimed")
+        for client, env, why in ((CLAUDE, {"CLAUDE_CODE_ENTRYPOINT": "cli"}, "the terminal"),
+                                 (CLAUDE, {"CLAUDE_CODE_ENTRYPOINT": "claude-desktop"}, "the desktop app"),
+                                 (CLAUDE, {}, "no entry point"),
+                                 ({**CODEX, **codex_rollout("cli")}, {}, "the Codex terminal UI"),
+                                 ({**CODEX, **codex_rollout("vscode")}, {}, "the Codex app server")):
+            with self.subTest(why):
+                _reset()
+                with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}):
+                    self.assertEqual(_shown(_post("ssh web1 reboot", CLAUDE)), "", "first a headless run")
+                with mock.patch.dict(os.environ, env):
+                    self.assertIn("ssh command that changes", _shown(_post("ssh web1 reboot", client)))
+                    self.assertEqual(_shown(_post("ssh web1 reboot", client)), "", "once")
+
+    def test_the_codex_session_source_comes_from_the_first_line_only(self):
+        self.assertEqual(settings.codex_session_source(codex_rollout("exec")["transcript_path"]), "exec")
+        for text in ("", "{damaged\n", '{"type": "response_item", "payload": {"source": "cli"}}\n',
+                     '{"type": "session_meta", "payload": {"source": {"subagent": "x"}}}\n',
+                     '{"type": "response_item"}\n{"type": "session_meta", "payload": {"source": "cli"}}\n'):
+            with self.subTest(text=text[:40]):
+                path = Path(HOME, "rollout-probe.jsonl")
+                path.write_text(text, encoding="utf-8")
+                self.assertIsNone(settings.codex_session_source(str(path)))
+        for value in (None, "", 3):
+            self.assertIsNone(settings.codex_session_source(value))
 
     def test_no_hint_after_a_decision_with_tips_off_in_a_policy_or_a_subagent(self):
         for user, extra, why in (({"ssh_consent": False}, {}, "decided: off"),
@@ -389,29 +457,29 @@ class Hint(unittest.TestCase):
                                  ({}, {"agent_id": "sub1"}, "a subagent")):
             with self.subTest(why):
                 _reset(**user)
-                self.assertNotIn("maisecrets can ask", _context(_post("ssh web1 reboot", **extra)))
+                self.assertNotIn("ssh command that changes", _shown(_post("ssh web1 reboot", **extra)))
                 self.assertFalse(HINTS.exists(), "a hint not given is not marked as given")
         _reset()
         with mock.patch.object(hooks, "load_config", return_value={**load_config(), "policy_keys": ["ssh_consent"]}):
-            self.assertNotIn("maisecrets can ask", _context(_post("ssh web1 reboot")))
+            self.assertNotIn("ssh command that changes", _shown(_post("ssh web1 reboot")))
 
     def test_default_resets_the_decision_but_not_the_given_hint(self):
         _post("ssh web1 reboot")
         _prompt("maisecrets: set ssh_consent off")
         _prompt("maisecrets: set ssh_consent default")
-        self.assertNotIn("maisecrets can ask", _context(_post("ssh web1 reboot")), "this revision was given")
+        self.assertNotIn("ssh command that changes", _shown(_post("ssh web1 reboot")), "this revision was given")
         with mock.patch.dict(settings.HINTS["ssh_consent"], {"revision": HINTS_REV + 1}):
-            self.assertIn("maisecrets can ask", _context(_post("ssh web1 reboot")), "a new revision comes once more")
-            self.assertNotIn("maisecrets can ask", _context(_post("ssh web1 reboot")))
+            self.assertIn("ssh command that changes", _shown(_post("ssh web1 reboot")), "a new revision: once more")
+            self.assertNotIn("ssh command that changes", _shown(_post("ssh web1 reboot")))
 
     def test_a_decision_in_a_file_that_was_ignored_still_stops_the_hint(self):
         _reset(ssh_consent=False, tips="yes")       # a wrong type elsewhere: load_config ignores the file
-        self.assertNotIn("maisecrets can ask", _context(_post("ssh web1 reboot")))
+        self.assertNotIn("ssh command that changes", _shown(_post("ssh web1 reboot")))
 
     def test_an_unwritable_record_gives_no_hint_and_parallel_hooks_give_it_once(self):
         with mock.patch.object(settings, "atomic_write", side_effect=OSError):
             for _ in range(3):
-                self.assertNotIn("maisecrets can ask", _context(_post("ssh web1 reboot")))
+                self.assertNotIn("ssh command that changes", _shown(_post("ssh web1 reboot")))
         _reset()
         import subprocess
         code = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets import settings; "
@@ -422,13 +490,14 @@ class Hint(unittest.TestCase):
         got = [p.communicate(timeout=60)[0].strip() for p in procs]
         self.assertEqual(sorted(got), ["False"] * 5 + ["True"], got)
 
-    def test_the_codex_block_answer_carries_the_hint_after_its_output(self):
+    def test_the_codex_block_answer_keeps_its_output_and_the_hint_goes_to_the_person(self):
         result = {"decision": "block", "reason": "[maisecrets: the command ran and finished]\n\noutput"}
         with mock.patch.object(hooks, "post_tool", return_value=result):
-            out = _post("ssh web1 reboot", CODEX)
-        self.assertEqual(set(out), {"decision", "reason"}, "Codex reads PostToolUse through a strict schema")
-        self.assertTrue(out["reason"].startswith(result["reason"]))
-        self.assertIn("maisecrets: set ssh_consent on", out["reason"])
+            out = _post("ssh web1 reboot", {**CODEX, **codex_rollout("cli")})
+        # Codex reads PostToolUse through a strict schema; systemMessage is in it (post-tool-use.command.output)
+        self.assertEqual(set(out), {"decision", "reason", "systemMessage"})
+        self.assertEqual(out["reason"], result["reason"], "the reason is what the model reads: no hint in it")
+        self.assertIn("maisecrets: set ssh_consent on", out["systemMessage"])
 
     def test_the_hint_keeps_what_the_answer_does(self):
         # a redacted result keeps its output and its own context; the hint comes after it
@@ -437,8 +506,13 @@ class Hint(unittest.TestCase):
         with mock.patch.object(hooks, "post_tool", return_value=result):
             out = _post("ssh web1 reboot")
         self.assertEqual(out["hookSpecificOutput"]["updatedToolOutput"], {"stdout": "x"})
-        self.assertTrue(_context(out).startswith("maisecrets masked 1 value(s)"))
-        self.assertIn("maisecrets can ask", _context(out))
+        self.assertEqual(_context(out), "maisecrets masked 1 value(s)", "the model's context is the answer's own")
+        self.assertIn("ssh command that changes", _shown(out))
+        # a line the answer already shows the person stays, and the hint comes after it
+        _reset()
+        with mock.patch.object(hooks, "post_tool", return_value={**result, "systemMessage": "maisecrets masked 1"}):
+            self.assertEqual(_shown(_post("ssh web1 reboot")),
+                             "maisecrets masked 1 " + settings.HINTS["ssh_consent"]["claude"])
         # a hint that fails does not withhold the output
         _reset()
         with mock.patch.object(hooks, "post_tool", return_value=result), \

@@ -440,16 +440,28 @@ SCENARIOS = {
         "expect_blocked": True,
         "expect_no_home_json": ("config.json", ["ssh_consent"]),
     },
-    # the person has not decided ssh_consent: the first ssh write gives the model the hint, once. `|| true`: a
-    # command that fails gets PostToolUseFailure from Claude Code (2.1.292), not PostToolUse, and so no hint
-    "ssh_consent_hint_once": {
+    # `claude -p` runs its hooks under the entry point sdk-cli and shows no systemMessage: a one-time hint is neither
+    # given nor claimed there, so it is not used up unseen (Gate A of 30fb8d30), and the model gets nothing of it
+    # (field report 2026-11-17). The line on the person's screen: harness/hint_screen.py. `|| true`: a command that
+    # fails gets PostToolUseFailure from Claude Code (2.1.292), not PostToolUse
+    "ssh_consent_hint_not_in_a_headless_run": {
         "prompt": "restart the web service",
         "turns": [{"tool": "Bash", "input": {"command": "ssh -o BatchMode=yes -o ConnectTimeout=2 nohost.invalid "
                                                         "'sudo systemctl restart nginx' || true"}},
                   {"text": "done"}],
         "expect_requests": 2,
-        "expect_in_requests": ["/maisecrets:settings ssh_consent on"],
-        "expect_home_json": ("hints.json", ["ssh_consent", "revision"]),
+        "expect_not_in_requests": ["the AI just ran an ssh command", "Mention this once"],
+        "expect_no_home_json": ("hints.json", ["ssh_consent"]),
+    },
+    # read_pdf not decided (allow): the PDF goes as it is; the hint waits for a run where a person sees it
+    "read_pdf_hint_not_in_a_headless_run": {
+        "prompt": "Read notes.pdf and tell me what it says.",
+        "binary_files": {"notes.pdf": ("Notes 2026", "nothing secret here")},
+        "turns": [{"tool": "Read", "input": {"file_path": "{cwd}/notes.pdf"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_in_requests": ["JVBERi0"],          # the premise: the PDF reached the model as it is (allow)
+        "expect_not_in_requests": ["cannot mask inside", "Mention this once"],
+        "expect_no_home_json": ("hints.json", ["read_pdf"]),
     },
     # a command that fails: Claude Code answers PostToolUseFailure, whose answer cannot replace the output, so the
     # value reaches the model (a known gap). What maisecrets still does: the model is told not to use the value, it is
