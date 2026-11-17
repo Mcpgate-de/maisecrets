@@ -397,19 +397,27 @@ def note_result(layer) -> None:
         NER_DOWN["fallback"] = ner_setup.LAST["source"] == "fallback"
 
 
-def hint(payload: dict):
+def hint(payload: dict, codex: bool = False):
     """Once per session, when the service of /maisecrets:ner did not answer: the person learns that names went
-    unmasked by it. Not in a subagent: it has no conversation with the person."""
-    from . import ner_setup
+    unmasked by it. Not in a subagent: it has no conversation with the person. A line for the person, so only where a
+    person sees it (settings.person_sees_hook_lines); elsewhere it is not claimed."""
+    from . import ner_setup, settings
     from .vault import HOME
-    if NER_DOWN.pop("fallback", False) and not payload.get("agent_id"):
+    if payload.get("agent_id") or not (NER_DOWN.get("fallback") or NER_DOWN["v"]):
+        return None
+    if not settings.person_sees_hook_lines(payload, codex):
+        return None
+    if NER_DOWN.pop("fallback", False):
         # the first tool result of the session that the fallback checked: where text goes now (akruse-7a, G)
         if ner_setup.claim_down_note(HOME, str(payload.get("session_id")) + ":fallback"):
-            return ner_setup.FALLBACK_NOTE
-    if not NER_DOWN["v"] or payload.get("agent_id"):
+            return ner_setup.FALLBACK_NOTE_CODEX if codex else ner_setup.FALLBACK_NOTE
+    if not NER_DOWN["v"]:
         return None
     NER_DOWN["v"] = False
     # the reason in the note: "did not answer" sent the person looking for a stopped service that ran (2026-11-08)
     why = _TOOL_WHY.get(NER_DOWN.get("why") or "", "no usable answer")
-    note = ner_setup.NOT_OURS_NOTE if NER_DOWN.pop("not_ours", False) else ner_setup.DOWN_NOTE.format(why=why)
+    if NER_DOWN.pop("not_ours", False):
+        note = ner_setup.NOT_OURS_NOTE_CODEX if codex else ner_setup.NOT_OURS_NOTE
+    else:
+        note = (ner_setup.DOWN_NOTE_CODEX if codex else ner_setup.DOWN_NOTE).format(why=why)
     return note if ner_setup.claim_down_note(HOME, payload.get("session_id")) else None

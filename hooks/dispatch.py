@@ -376,7 +376,9 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         try:
             from maisecrets import settings as _settings  # noqa: E402
             from maisecrets.check_value import TIP_CODEX  # noqa: E402
-            if _settings.hint_due("check_value", cfg) and _settings.claim_hint("check_value") and not tried:
+            # claimed only where a person sees the start line, not in `codex exec` (Gate A of 30fb8d30)
+            if (_settings.hint_due("check_value", cfg) and _settings.person_sees_hook_lines(payload, True)
+                    and _settings.claim_hint("check_value") and not tried):
                 out["systemMessage"] = out.get("systemMessage", "") + " " + TIP_CODEX
         except Exception:  # noqa: BLE001 - a tip never stops a session start
             pass

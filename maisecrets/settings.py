@@ -640,59 +640,41 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
 
 
 # ------------------------------------------------------------------ hints --
-# A hint is a sentence for the model, once. REVISION goes up only when the feature changes in a way that
-# matters: then the hint comes once more. A hint never comes again because time passed.
+# A hint is one fixed line for the person, once per home: the hook's systemMessage, which the client shows to the
+# person and not to the model. The model gets nothing about it, so it cannot word it again or repeat it (field
+# report 2026-11-17: the model said the image hint twice, in its own words, and added the ssh hint to an unrelated
+# answer). REVISION goes up only when the feature changes in a way that matters: then the hint comes once more. A
+# hint never comes again because time passed, and a new wording of the line is no reason for a new revision.
 HINTS = {
     "ssh_consent": {
         "revision": 2,
-        "claude": ("maisecrets can ask the user before each ssh command that changes something on a host "
-                   "(setting ssh_consent; it is off, and the user has not decided). Mention this once, in one "
-                   "sentence, after your answer. If the user wants it, tell them to send this as their own prompt: "
-                   "/maisecrets:settings ssh_consent on (or off, so the question does not come again). "
-                   "Do not change settings yourself."),
-        "codex": ("maisecrets can ask the user before each ssh command that changes something on a host "
-                  "(setting ssh_consent; it is off, and the user has not decided). Mention this once, in one "
-                  "sentence, after your answer. If the user wants it, tell them to send this alone as their own "
-                  "prompt: maisecrets: set ssh_consent on (or off, so the question does not come again). "
-                  "Do not change settings yourself."),
+        "claude": ("maisecrets: the AI just ran an ssh command that changes a host. "
+                   "/maisecrets:settings ssh_consent on asks you before each one; off keeps it as it is."),
+        "codex": ("maisecrets: the AI just ran an ssh command that changes a host. "
+                  "Send `maisecrets: set ssh_consent on` alone as your prompt to be asked before each one; "
+                  "off keeps it as it is."),
     },
 }
+# no destination and no secret name in the line: the list, rendered by maisecrets, names the destination
 HINTS["secret_destinations"] = {
     "revision": 1,
-    # no destination and no secret name in the text: an injection that caused the new destination cannot use the
-    # hint as an instruction ("allow …"); the list, rendered by maisecrets, names the destination
-    "claude": ("maisecrets notes, on this computer only, where stored secrets are sent. A call with a stored secret "
-               "just named a host that this secret was not used with before. maisecrets only notes this and did not "
-               "stop the call; it does not judge whether a destination is safe. Mention this once, in one or two "
-               "sentences, after your answer, and tell the user that /maisecrets:list shows where each secret was "
-               "used. If the user does not want this note again, tell them to send this as their own prompt: "
-               "/maisecrets:settings secret_destinations observe. Do not change settings yourself and do not call any "
-               "destination safe or approved."),
-    "codex": ("maisecrets notes, on this computer only, where stored secrets are sent. A call with a stored secret "
-              "just named a host that this secret was not used with before. maisecrets only notes this and did not "
-              "stop the call; it does not judge whether a destination is safe. Mention this once, in one or two "
-              "sentences, after your answer. If the user does not want this note again, tell them to send this alone "
-              "as their own prompt: maisecrets: set secret_destinations observe. Do not change settings yourself and "
-              "do not call any destination safe or approved."),
+    "claude": ("maisecrets: a stored secret just went to a host it was not used with before; maisecrets only notes "
+               "this. /maisecrets:list shows where each secret went; /maisecrets:settings secret_destinations protect "
+               "asks you before a new host."),
+    "codex": ("maisecrets: a stored secret just went to a host it was not used with before; maisecrets only notes "
+              "this. Send `maisecrets: set secret_destinations protect` alone as your prompt to be asked before a new "
+              "host."),
 }
-for _key, _noun, _more in (("read_pdf", "PDF", "convert (only its text goes to you, with secrets and personal data "
-                                               "masked), ask (the user is asked each time), block"),
-                           ("read_image", "image", "ask (the user is asked each time), block")):
-    # the same sentence for every file: nothing of the file or its name is in it (C28)
+for _key, _noun, _first, _does, _rest in (
+        ("read_pdf", "PDFs", "convert", "sends only their text, masked", "ask asks you each time, block stops them"),
+        ("read_image", "images", "ask", "asks you each time", "block stops them")):
+    # the same line for every file: nothing of the file or its name is in it (C28)
     HINTS[_key] = {
         "revision": 1,
-        "claude": (f"maisecrets cannot look inside an image or a PDF: the {_noun} you just read went to you as it is, "
-                   f"with any password or personal data in it (setting {_key}; it is allow, and the user has not "
-                   "decided). Mention this once, in one or two sentences, after your answer. If the user wants "
-                   f"another way, tell them to send this as their own prompt: /maisecrets:settings {_key} MODE, "
-                   f"where MODE is {_more}, or allow so this note does not come again. Do not change settings "
-                   "yourself."),
-        "codex": (f"maisecrets cannot look inside an image or a PDF: the {_noun} you just read went to you as it is, "
-                  f"with any password or personal data in it (setting {_key}; it is allow, and the user has not "
-                  "decided). Mention this once, in one or two sentences, after your answer. If the user wants "
-                  f"another way, tell them to send this alone as their own prompt: maisecrets: set {_key} MODE, "
-                  f"where MODE is {_more}, or allow so this note does not come again. Do not change settings "
-                  "yourself."),
+        "claude": (f"maisecrets: {_noun} go to the AI as they are; maisecrets cannot mask inside them. "
+                   f"/maisecrets:settings {_key} {_first} {_does}; {_rest}."),
+        "codex": (f"maisecrets: {_noun} go to the AI as they are; maisecrets cannot mask inside them. "
+                  f"`maisecrets: set {_key} {_first}`, alone as your prompt, {_does}; {_rest}."),
     }
 # ms:(…) is no setting: its hint is a line for the person, once (maisecrets/check_value.py). Claude Code shows it under
 # the first blocked or rewritten prompt that carried a value, Codex at the session start
@@ -724,6 +706,35 @@ def hint_due(feature: str, cfg: dict) -> bool:
     if cfg.get(feature) != DEFAULT_CONFIG.get(feature):
         return False      # a file that was ignored as a whole still turned it on (vault._keep_the_stricter)
     return not _given_this_revision(feature, _given())
+
+
+# A hint is claimed only where a person sees the line: a headless run would use it up unseen (Gate A of 30fb8d30).
+# Claude Code: not under an Agent SDK entry point (`claude -p` is sdk-cli). Codex sets no entry point, but the first
+# line of its rollout (the payload's transcript_path) is session_meta with the session source, serialized lowercase
+# (codex-rs protocol SessionSource): cli is the terminal UI and vscode the app server (IDE extension, desktop app),
+# which show a hook's systemMessage; exec prints none; mcp, a subagent and an unknown source get no hint either
+_SHOWN_SOURCES = ("cli", "vscode")
+_META_MAX = 4 << 20        # session_meta carries the base instructions: one line of some KB
+
+
+def person_sees_hook_lines(payload: dict, codex: bool) -> bool:
+    if not codex:
+        return not os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith(NESTED_ENTRYPOINTS)
+    return codex_session_source(payload.get("transcript_path")) in _SHOWN_SOURCES
+
+
+def codex_session_source(path) -> str | None:
+    """The `source` of a Codex rollout's session_meta line; None when the file or the line cannot tell."""
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        with open(path, "rb") as f:
+            meta = json.loads(f.readline(_META_MAX))
+    except (OSError, ValueError):
+        return None
+    body = meta.get("payload") if isinstance(meta, dict) and meta.get("type") == "session_meta" else None
+    source = body.get("source") if isinstance(body, dict) else None
+    return source if isinstance(source, str) else None
 
 
 def claim_hint(feature: str) -> bool:

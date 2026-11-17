@@ -196,8 +196,14 @@ A program that runs as you can also change that file; the line makes an
 ordinary agent's action visible, it does not stop one that evades.
 
 **Hints.** maisecrets stays quiet until a case comes up that one of these
-settings is about. Then the AI gets one sentence about it, and mentions it
-once. For `ssh_consent` that case is the first ssh command that changes
+settings is about. Then you get one fixed line from maisecrets, such as
+`maisecrets: images go to the AI as they are; maisecrets cannot mask inside
+them. /maisecrets:settings read_image ask asks you each time; block stops
+them.` The line goes to you only, not to the AI, so the AI does not word it
+again or repeat it later. Codex shows it as a hook message in its terminal
+UI. A run without a screen for it (`claude -p`, an Agent SDK program, `codex
+exec`) gets no hint, and the hint waits for your next interactive session. For
+`ssh_consent` that case is the first ssh command that changes
 something on a host (`ssh web1 'sudo systemctl restart nginx'`; not `ssh web1
 uptime`; and only when the command succeeds: Claude Code reports a failed one
 through another event). A hint comes once, also when hooks run at the same

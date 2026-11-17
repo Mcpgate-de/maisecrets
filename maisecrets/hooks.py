@@ -1546,11 +1546,16 @@ def _destination_hint(payload: dict) -> str | None:
     cfg = load_config()
     if cfg.get("secret_destinations", "observe") != "observe" or payload.get("agent_id"):
         return None
+    codex = client_of(payload) == "codex"
+    if not settings.person_sees_hook_lines(payload, codex):
+        return None       # first: a headless run keeps the waiting break for a run where a person sees the line
     if not destinations.take_pending(payload.get("session_id")):
         return None
-    if not settings.hint_due("secret_destinations", cfg) or not settings.claim_hint("secret_destinations"):
+    if not settings.hint_due("secret_destinations", cfg):
         return None
-    return settings.HINTS["secret_destinations"]["codex" if client_of(payload) == "codex" else "claude"]
+    if not settings.claim_hint("secret_destinations"):
+        return None
+    return settings.HINTS["secret_destinations"]["codex" if codex else "claude"]
 
 
 def _autonomous(hosts: list[str], cfg: dict) -> bool:
@@ -2865,9 +2870,12 @@ def _ssh_hint(payload: dict) -> str | None:
         return None
     if ssh_consent.classify(command, _parse_for_consent).kind != "write":
         return None
+    codex = client_of(payload) == "codex"
+    if not settings.person_sees_hook_lines(payload, codex):
+        return None       # a headless run: the line would be claimed and never seen
     if not settings.claim_hint("ssh_consent"):
         return None       # another hook gave it first, or the record cannot be written: no hint rather than many
-    return settings.HINTS["ssh_consent"]["codex" if client_of(payload) == "codex" else "claude"]
+    return settings.HINTS["ssh_consent"]["codex" if codex else "claude"]
 
 
 def _file_read_hint(payload: dict) -> str | None:
@@ -2879,25 +2887,16 @@ def _file_read_hint(payload: dict) -> str | None:
 
 def _ner_hint(payload: dict) -> str | None:
     from . import remote_layer
-    return remote_layer.hint(payload)
+    return remote_layer.hint(payload, client_of(payload) == "codex")
 
 
 def _with_hint(payload: dict, result: dict) -> dict:
-    """Add a hint to the answer of a PostToolUse without changing what the answer does."""
+    """Add a hint to the answer of a PostToolUse without changing what the answer does. A hint is a line for the
+    person (systemMessage), in both clients; the model gets nothing of it, so it cannot word it again or repeat it."""
     # both, when both are due: with `or` the destination hint of this call waited for an unrelated later one (codex)
-    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload), _file_read_hint(payload),
-                                    _ner_hint(payload)) if h)
-    if not hint:
-        return result
-    result = dict(result)
-    if result.get("decision") == "block":
-        # Codex: the reason replaces the output the model sees, so the hint goes after it
-        result["reason"] = f"{result.get('reason', '')}\n\n[{hint}]"
-        return result
-    hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUse"})
-    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{hint}" if hso.get("additionalContext") else hint
-    result["hookSpecificOutput"] = hso
-    return result
+    hint = "\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload), _file_read_hint(payload),
+                                  _ner_hint(payload)) if h)
+    return _with_notice(result, hint) if hint else result
 
 
 def _post_tool_guarded(payload: dict) -> dict:
@@ -2942,7 +2941,7 @@ def _selftest():
 
 
 def _with_notice(result: dict, notice: str) -> dict:
-    """The one-time notice of vault references (vault_refs.enable) for the person, next to any message of the hook."""
+    """A line for the person (a one-time notice or hint), next to any message of the hook."""
     out = dict(result or {})
     out["systemMessage"] = (out["systemMessage"] + " " + notice) if out.get("systemMessage") else notice
     return out
@@ -3049,13 +3048,7 @@ def _post_tool_failure_observed(payload: dict) -> dict:
     except Exception as exc:  # noqa: BLE001 - a hint that fails changes nothing
         _debug(f"post-tool-failure hint: {type(exc).__name__}")
         hint = None
-    if not hint:
-        return result
-    result = dict(result)
-    hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUseFailure"})
-    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{hint}" if hso.get("additionalContext") else hint
-    result["hookSpecificOutput"] = hso
-    return result
+    return _with_notice(result, hint) if hint else result
 
 
 HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded,

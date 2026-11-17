@@ -883,19 +883,24 @@ def prompts_note(conf, home=None) -> str | None:
 
 
 # --------------------------------------------------------- the down note --
-DOWN_NOTE = ("maisecrets: the name service set with /maisecrets:ner gave no result ({why}), so the rules alone "
-             "masked this tool result; names that only the service finds were not masked. Mention this once, in one "
-             "sentence, with that reason, after your answer, and tell the user that /maisecrets:ner shows the "
-             "service. Do not start or change the service or the setting yourself.")
-NOT_OURS_NOTE = ("maisecrets: the service on 127.0.0.1:8765 is not the container that maisecrets started (it could not "
-                 "prove the secret maisecrets gave that container), so no text went to it and the rules alone masked "
-                 "this tool result. Mention this once, in one sentence, after your answer, and tell the user to run "
-                 "/maisecrets:ner, which starts the right container. Do not start or stop a service yourself.")
+# a line for the person (the hook's systemMessage), once per session; the model gets nothing of it
+DOWN_NOTE = ("maisecrets: the name service of /maisecrets:ner gave no result ({why}), so the rules alone masked this "
+             "tool result; names that only the service finds stand in it as they are.")
+NOT_OURS_NOTE = ("maisecrets: the service on 127.0.0.1:8765 is not the container maisecrets started, so no text went "
+                 "to it and the rules alone masked this tool result. /maisecrets:ner starts the right container.")
 FALLBACK_NOTE = ("maisecrets: the name service of this computer did not answer, so the fallback set with "
-                 "/maisecrets:ner checked this tool result; the tool results of this session go there while the "
-                 "local one is down, your prompts never do. Mention this once, in one sentence, after your answer, and "
-                 "tell the user that /maisecrets:ner shows the counts per service. Do not change the setting "
-                 "yourself.")
+                 "/maisecrets:ner checked this tool result. Tool results of this session go there while the local one "
+                 "is down; your prompts never do.")
+# Codex has no slash commands for plugins: the same notes with the prompt form, sent alone as the person's prompt
+DOWN_NOTE_CODEX = ("maisecrets: the name service gave no result ({why}), so the rules alone masked this tool result; "
+                   "names that only the service finds stand in it as they are. `maisecrets: ner all`, alone as your "
+                   "prompt, shows the service.")
+NOT_OURS_NOTE_CODEX = ("maisecrets: the service on 127.0.0.1:8765 is not the container maisecrets started, so no text "
+                       "went to it and the rules alone masked this tool result. `maisecrets: ner local`, alone as your "
+                       "prompt, starts the right container.")
+FALLBACK_NOTE_CODEX = ("maisecrets: the name service of this computer did not answer, so the fallback checked this "
+                       "tool result. Tool results of this session go there while the local one is down; your prompts "
+                       "never do.")
 _NOTES_MAX = 1000          # sessions; an older one may get the note once more
 
 
