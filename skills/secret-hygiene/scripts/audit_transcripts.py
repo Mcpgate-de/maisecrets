@@ -17,9 +17,10 @@ how sure the match is, where in the session it sat, and the sessions it appears 
 The default is the sessions of the last 30 days and the fast scan (_fast.py); --full reads each record as one
 text, as 0.9.13 did, with every rule.
 
-It prints the size of the transcripts first, an estimate after the first few MB, a progress line at
-least every 30 seconds and the time it took, on stderr. --estimate scans only a sample in one process
-and prints the estimate.
+It prints the size of the transcripts first, an estimate from the real speed of the scan after its
+first 25 seconds, a progress line at least every 30 seconds with the time left at the current speed,
+and the time it took, on stderr; a busy computer is named. --estimate runs the same pool on a sample
+of files from all projects for 15 seconds, stops it and prints the estimate.
 
 --scrub lists which local transcript files hold a found value; with --yes it replaces each
 value in them with ⟦TYPE_n⟧, keeping every line valid JSON. It skips files written to in the
@@ -35,6 +36,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import time
 import zlib
 from collections import Counter, defaultdict
@@ -46,17 +48,20 @@ import _fast  # noqa: E402
 
 SENT = {"prompt", "tool result", "model output"}
 ACTIVE_SECONDS = 600
-LINES_PER_JOB = 2000
-JOB_BYTES = 2_000_000       # a job ends at this size too: a file of few long lines balanced badly over the pool
+JOB_BYTES = 512_000         # a job ends at this size too: a file of few long lines balanced badly over the pool, and
+#                             the progress counts finished jobs only (2 MB jobs hid up to 2 MB per worker)
+SAMPLE_JOB_BYTES = 256_000  # --estimate: smaller jobs, so the short sample counts what it scanned
 SMALL = 512                 # the strings of a record shorter than this are joined and scanned as one text
 PART = 1024                 # a long text is cut at a blank line, into parts of about this size or more
 PART_MAX = 65536
 MODE = "fast"               # "full" (--full): each record one text, every rule; "fast": _fast.py
 SEEN_MAX = 300_000          # the texts a worker remembers by hash before it forgets them all
-SAMPLE_BYTES = 2_000_000    # the estimate is measured on the first ~2 MB
-SAMPLE_SECONDS = 20         # or on what one process scans in this time
-POOL_SHARE = 0.7            # a pool of N processes scans about 0.7 x N times one (netcup, 8 cores, #59)
+ESTIMATE_SECONDS = 25       # the scan estimates its time from what the pool did in its first 25 s
+SAMPLE_SECONDS = 15         # --estimate: the pool scans spread files this long, then stops
+SAMPLE_BYTES = 64_000_000   # --estimate: at most this much of them
 PROGRESS_SECONDS = 30
+BUSY_LOAD = 1.0             # a 1-minute load above the cores at the start: other work slows the scan (the load
+#                             lags: a pool that just ran, an --estimate, adds to it for a minute)
 
 
 def sources(claude: bool, codex: bool, days: int) -> list[tuple[str, Path]]:
@@ -78,7 +83,21 @@ def sources(claude: bool, codex: bool, days: int) -> list[tuple[str, Path]]:
                     out.append((client, f))
             except OSError:
                 continue
-    return sorted(out, key=lambda x: str(x[1]))
+    return spread(out)
+
+
+def spread(files: list) -> list:
+    """The files in an order that mixes the projects: one file of each project folder in turn, each folder in path
+    order. The first seconds of the scan then show its speed on the whole history, not on the first project of the
+    alphabet (#59: an estimate from the first 2 MB in path order was four times too fast)."""
+    groups: dict = defaultdict(list)
+    for item in sorted(files, key=lambda x: str(x[1])):
+        groups[(item[0], str(item[1].parent))].append(item)
+    queues = [groups[k] for k in sorted(groups)]
+    out = []
+    for i in range(max((len(q) for q in queues), default=0)):
+        out.extend(q[i] for q in queues if i < len(q))
+    return out
 
 
 def kind_of(client: str, rec: dict) -> str:
@@ -326,6 +345,11 @@ def worker_jsonl(job: tuple) -> tuple:
     detect, enabled = _detector._W["detect"], _detector._W["enabled"]
     rows: list = []
     notes: dict = {}
+    if isinstance(lines, tuple):    # ("range", start, length): this worker reads it
+        try:
+            lines = _read_range(tag[0], lines[1], lines[2])
+        except OSError:
+            return tag, rows, {"unread": 1}
     for i, line in enumerate(lines):
         mark = len(rows)
         try:
@@ -350,24 +374,86 @@ def worker_jsonl(job: tuple) -> tuple:
     return tag, rows, notes
 
 
-def _jobs(files: list[tuple[str, Path]]):
-    """(job, the size in bytes of each of its lines) per job. The file is read in bytes and each line decoded: the
-    progress counts what the file holds on disk, also a CRLF line end (Windows) and a letter of several bytes; a count
-    of the decoded characters never reached the file size there, and no estimate came (round 6 of #59)."""
+class _LineTooLong(Exception):
+    """A line longer than the limit of the --estimate sample: its file leaves the sample."""
+
+
+class _Deadline(Exception):
+    """The --estimate sample ran out of time while it searched for line ends."""
+
+
+def _ranges(f: Path, job_bytes: int, max_line: int = 0, stop=None):
+    """(start, end) of each job of a file: up to job_bytes, ending after the last whole line in it. A line longer than
+    job_bytes is a job of its own. The line ends are searched in blocks of 64 KB, so a long line is never held whole
+    here. For the --estimate sample: a line longer than `max_line` raises _LineTooLong as soon as the search has passed
+    that length, and `stop()` is asked before each block (_Deadline): a line of gigabytes has no end to wait for
+    (round 3 of Gate A). The scan itself passes neither."""
+    size = f.stat().st_size
+    with open(f, "rb") as fh:
+
+        def last_newline(lo: int, hi: int) -> int:
+            pos = hi
+            while pos > lo:
+                if stop is not None and stop():
+                    raise _Deadline
+                at = max(lo, pos - 65536)
+                fh.seek(at)
+                k = fh.read(pos - at).rfind(b"\n")
+                if k >= 0:
+                    return at + k
+                pos = at
+            return -1
+
+        def next_newline(pos: int, line_start: int) -> int:
+            fh.seek(pos)
+            while True:
+                if stop is not None and stop():
+                    raise _Deadline
+                if max_line and pos - line_start > max_line:
+                    raise _LineTooLong
+                block = fh.read(65536)
+                if not block:
+                    return size - 1
+                k = block.find(b"\n")
+                if k >= 0:
+                    return pos + k
+                pos += len(block)
+        start = 0
+        while start < size:
+            end = min(start + job_bytes, size)
+            if end < size:
+                k = last_newline(start, end)
+                end = k + 1 if k >= 0 else next_newline(end, start) + 1   # the first line is longer than a job
+            yield start, end
+            start = end
+
+
+def _jobs(files: list[tuple[str, Path]], job_bytes: int = 0, max_line: int = 0, stop=None, skipped=None):
+    """(job, [its size in bytes]) per job. A job names a byte range of a file; the worker reads and decodes it, so the
+    parent only finds line ends (round 2 of Gate A on the estimate: a huge line was read and decoded here, before the
+    deadline). The progress counts what the files hold on disk, also a CRLF line end and a letter of several bytes
+    (round 6 of #59)."""
     for client, f in files:
         try:
-            with open(f, "rb") as fh:
-                batch, sizes, start = [], [], 0
-                for n, raw in enumerate(fh):
-                    batch.append(raw.decode("utf-8", errors="replace"))
-                    sizes.append(len(raw))
-                    if len(batch) >= LINES_PER_JOB or sum(sizes) >= JOB_BYTES:
-                        yield ((str(f), start), client, batch), sizes
-                        batch, sizes, start = [], [], n + 1
-                if batch:
-                    yield ((str(f), start), client, batch), sizes
+            for start, end in _ranges(f, job_bytes or JOB_BYTES, max_line, stop):
+                yield ((str(f), start), client, ("range", start, end - start)), [end - start]
+        except _LineTooLong:
+            if skipped is not None:
+                skipped.append(max_line)
+        except _Deadline:
+            return
         except OSError:
             continue
+
+
+def _read_range(path: str, start: int, length: int) -> list:
+    """The lines of a byte range, decoded; only a line feed ends a line (a CR stays at its end, as JSON allows)."""
+    with open(path, "rb") as fh:
+        fh.seek(start)
+        data = fh.read(length)
+    parts = data.split(b"\n")
+    lines = [x + b"\n" for x in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+    return [x.decode("utf-8", errors="replace") for x in lines]
 
 
 def jobs_for(files: list[tuple[str, Path]]):
@@ -379,30 +465,44 @@ def default_workers() -> int:
     return max(1, (os.cpu_count() or 2) - 1)
 
 
-def run(files, enabled, workers: int = 0):
-    """(tag, rows, notes, characters) per job, in the order of the jobs."""
+def run(files, enabled, workers: int = 0, progress=None):
+    """(tag, rows, notes, characters) per job, in the order of the jobs. The progress counts each job when it ends, in
+    any order, and gets a tick at least every second while the scan waits for the next job in order: a slow first job
+    held back the estimate and gave it only its own bytes (Gate A of #59)."""
+    import concurrent.futures
     workers = workers or default_workers()
     total = sum(f.stat().st_size for _c, f in files if f.exists())
     if total < 1_000_000 or workers == 1:
         _detector._worker_init(enabled, MODE)
         for job, sizes in _jobs(files):
-            yield worker_jsonl(job) + (sum(sizes),)
+            res = worker_jsonl(job) + (sum(sizes),)
+            if progress is not None:
+                progress.finished(sum(sizes))
+            yield res
         return
     ex = _detector.pool(enabled, workers, MODE)
     done = False
     try:
         window = 4 * workers
-        pending = []
+        pending: list = []
+
+        def ready(fut, n):
+            while progress is not None and not fut.done():
+                concurrent.futures.wait([fut], timeout=1)
+                progress.tick()
+            return fut.result() + (n,)
         for job, sizes in _jobs(files):
-            pending.append((ex.submit(worker_jsonl, job), sum(sizes)))
+            fut = ex.submit(worker_jsonl, job)
+            if progress is not None:
+                fut.add_done_callback(lambda f, n=sum(sizes): progress.finished(n) if not f.cancelled() else None)
+            pending.append((fut, sum(sizes)))
             if len(pending) >= window:
-                fut, n = pending.pop(0)
-                yield fut.result() + (n,)
+                yield ready(*pending.pop(0))
         for fut, n in pending:
-            yield fut.result() + (n,)
+            yield ready(fut, n)
         done = True
     finally:
-        # closed early (--estimate): the jobs that wait are cancelled, and nothing waits for the running ones
+        # closed early: the jobs that wait are cancelled, and nothing waits for the running ones
         ex.shutdown(wait=done, cancel_futures=not done)
 
 
@@ -415,70 +515,167 @@ def _took(seconds: float) -> str:
 
 
 class Progress:
-    """Size and file count first (stat only), an estimate after the first SAMPLE_BYTES, a line at least every
-    PROGRESS_SECONDS, the time at the end. On stderr; it names no value, line or hash."""
+    """Size and file count first (stat only), a warning when other work keeps the cores busy, an estimate from the
+    real speed of the scan after its first ESTIMATE_SECONDS (or at its end when it is shorter), a line at least
+    every PROGRESS_SECONDS with the time left at the current speed, the time at the end. On stderr; it names no
+    value, line or hash. `clock` is for the tests."""
 
-    def __init__(self, files, workers: int, out=None):
-        self.out, self.files = out or sys.stderr, len(files)
+    def __init__(self, files, workers: int, out=None, clock=time.monotonic):
+        self.out, self.files, self.clock = out or sys.stderr, len(files), clock
         self.total = sum(_size(f) for _c, f in files)
-        self.t0 = self.last = time.monotonic()
+        self.t0 = self.last = clock()
         self.done = self.files_done = 0
+        self.lock = threading.Lock()
         self.rate = 0.0
         self.estimated = False
         self.say(f"Scanning {self.files} transcript file(s), {self.total / 1e6:,.0f} MB, with {workers} process(es).")
+        busy = busy_load()
+        if busy:
+            self.say(f"Other work on this computer slows the scan (load {busy[0]:.0f} on {busy[1]} cores).")
 
     def say(self, text: str) -> None:
         print(text, file=self.out, flush=True)
 
+    def finished(self, nbytes: int) -> None:
+        """A job ended (from the pool's thread)."""
+        with self.lock:
+            self.done += nbytes
+
     def step(self, nbytes: int, files_done: int) -> None:
-        self.done += nbytes
-        self.files_done = files_done
-        now = time.monotonic()
+        self.finished(nbytes)
+        self.tick(files_done)
+
+    def tick(self, files_done: int | None = None) -> None:
+        if files_done is not None:
+            self.files_done = files_done
+        now = self.clock()
         spent = max(now - self.t0, 1e-6)
         self.rate = self.done / spent
-        if not self.estimated and (self.done >= min(SAMPLE_BYTES, self.total) or spent >= SAMPLE_SECONDS):
+        if not self.estimated and spent >= ESTIMATE_SECONDS and self.done:   # no speed before any work ended
             self.estimated = True
-            self.say(f"Estimate: about {_took(self.left())} for {self.total / 1e6:,.0f} MB "
-                     f"({self.rate / 1e6:.2f} MB/s on the first {self.done / 1e6:.1f} MB).")
+            self.say(f"Estimate: about {_took(self.total / max(self.rate, 1.0))} for {self.total / 1e6:,.0f} MB, "
+                     f"{_took(self.left())} left ({self.rate / 1e6:.2f} MB/s in the first {spent:.0f} s).")
             self.last = now
         elif now - self.last >= PROGRESS_SECONDS:
             self.last = now
+            left = f"about {_took(self.left())} left" if self.done else "no part finished yet"
             self.say(f"Progress: {self.files_done}/{self.files} files, {100 * self.done / max(self.total, 1):.0f} %, "
-                     f"{self.rate / 1e6:.2f} MB/s, about {_took(self.left())} left.")
+                     f"{self.rate / 1e6:.2f} MB/s, {left}.")
 
     def left(self) -> float:
         return max(self.total - self.done, 0) / max(self.rate, 1.0)
 
     def end(self) -> None:
-        if not self.estimated:   # a file that shrank or could not be read: the sample size was never reached
+        spent = max(self.clock() - self.t0, 1e-6)
+        if not self.estimated and self.done:   # a scan shorter than ESTIMATE_SECONDS: its whole speed
             self.estimated = True
-            self.say(f"Estimate: about {_took(self.left())} for {self.total / 1e6:,.0f} MB "
-                     f"({self.rate / 1e6:.2f} MB/s on {self.done / 1e6:.1f} MB).")
-        self.say(f"Scanned {self.done / 1e6:,.0f} MB in {_took(time.monotonic() - self.t0)}.")
+            self.say(f"Estimate: about {_took(self.total / max(self.done / spent, 1.0))} for "
+                     f"{self.total / 1e6:,.0f} MB ({self.done / spent / 1e6:.2f} MB/s).")
+        self.say(f"Scanned {self.done / 1e6:,.0f} MB in {_took(spent)}.")
+
+
+def busy_load():
+    """(1-minute load, cores) when other work keeps more than BUSY_LOAD of the cores busy, else None. No load on
+    Windows."""
+    try:
+        load = os.getloadavg()[0]
+    except (AttributeError, OSError):
+        return None
+    cores = os.cpu_count() or 1
+    return (load, cores) if load > BUSY_LOAD * cores else None
+
+
+def _sample_jobs(files: list, skipped: list | None = None, stop=None):
+    """The jobs of the --estimate sample, SAMPLE_JOB_BYTES each: one job of each project in turn, until SAMPLE_BYTES.
+    One large file no longer fills the sample alone (Gate A of #59). A line larger than SAMPLE_BYTES leaves its file out
+    of the sample, noted in `skipped`; the sample stays within SAMPLE_BYTES; the search for line ends stops at the
+    deadline (`stop`)."""
+    skipped = [] if skipped is None else skipped
+    groups: dict = defaultdict(list)
+    for item in files:
+        groups[(item[0], str(item[1].parent))].append(item)
+    queues = [_jobs(groups[k], SAMPLE_JOB_BYTES, SAMPLE_BYTES, stop, skipped) for k in sorted(groups)]
+    size = 0
+    while queues:
+        for q in list(queues):
+            item = next(q, None)
+            if item is None:
+                queues.remove(q)
+                continue
+            if size + sum(item[1]) > SAMPLE_BYTES:
+                return   # the sample stays within SAMPLE_BYTES
+            yield item
+            size += sum(item[1])
+
+
+def _stop(ex) -> None:
+    """End a pool at once: cancel the jobs that wait and end the running ones. A worker that still runs keeps the
+    process alive at its exit (Gate A of #59)."""
+    procs = list((getattr(ex, "_processes", None) or {}).values())   # shutdown() forgets them
+    ex.shutdown(wait=False, cancel_futures=True)
+    for proc in procs:
+        try:
+            proc.terminate()
+        except (OSError, AttributeError):
+            pass
+    ex.shutdown(wait=True)
 
 
 def estimate(files, enabled, workers: int, progress: Progress) -> int:
-    """--estimate: one process scans the first records, up to SAMPLE_BYTES or SAMPLE_SECONDS, one record at a time,
-    and the time for all is worked out from that rate. No pool starts, so nothing runs on after the estimate (Gate A
-    of #59). What the sample finds is not shown."""
-    _detector._worker_init(enabled, MODE)
-    target = min(SAMPLE_BYTES, progress.total)
-    t0 = time.monotonic()
-    done = 0
-    for (tag, client, lines), sizes in _jobs(files):
-        for line, size in zip(lines, sizes):
-            worker_jsonl((tag, client, [line]))
-            done += size
-            if done >= target or time.monotonic() - t0 >= SAMPLE_SECONDS:
+    """--estimate: the pool that the scan would use (a pool of one with --workers 1) scans spread files for
+    SAMPLE_SECONDS and stops at once, also in the middle of a slow record; the time for all comes from that real
+    speed, its start included. What the sample finds is not shown. A job that fails ends it with exit code 2."""
+    import concurrent.futures
+    t0 = progress.clock()
+    done, tags, failed, skipped = 0, set(), None, []
+    ex = _detector.pool(enabled, max(1, workers), MODE)
+    try:
+        jobs = _sample_jobs(files, skipped, lambda: progress.clock() - t0 >= SAMPLE_SECONDS)
+        pending: dict = {}
+        while True:
+            # a short queue: a job half written into the pipe of a stopped worker kept the process alive
+            for job, sizes in jobs:
+                pending[ex.submit(worker_jsonl, job)] = (sum(sizes), job[0][0])
+                if len(pending) >= 2 * max(1, workers):
+                    break
+            left = SAMPLE_SECONDS - (progress.clock() - t0)
+            if not pending or left <= 0:
                 break
-        else:
-            continue
-        break
-    one = done / max(time.monotonic() - t0, 1e-6)
-    rate = one if workers == 1 else one * workers * POOL_SHARE
-    progress.say(f"Estimate: about {_took(progress.total / max(rate, 1.0))} for {progress.total / 1e6:,.0f} MB with "
-                 f"{workers} process(es) ({one / 1e6:.2f} MB/s in one process on the first {done / 1e6:.1f} MB).")
+            finished, _rest = concurrent.futures.wait(pending, timeout=left,
+                                                      return_when=concurrent.futures.FIRST_COMPLETED)
+            for fut in finished:
+                nbytes, tag = pending.pop(fut)
+                try:
+                    fut.result()
+                except Exception as e:   # noqa: BLE001  a crashed worker: no estimate from it
+                    failed = type(e).__name__
+                    break
+                done += nbytes
+                tags.add(tag)
+            if failed:
+                break
+        spent = max(progress.clock() - t0, 1e-6)   # before the stop: ending the workers is no part of the speed
+    finally:
+        _stop(ex)
+    if skipped:
+        progress.say(f"Left out of the sample: {len(skipped)} line(s) larger than {SAMPLE_BYTES / 1e6:.0f} MB.")
+    if failed:
+        progress.say(f"No estimate: a part of the sample could not be scanned ({failed}).")
+        return 2
+    if not done:
+        progress.say(f"No estimate yet: no part of the sample finished in {SAMPLE_SECONDS} s. The scan itself "
+                     "prints its estimate once its first parts are done.")
+        return 2
+    progress.say(estimate_line(progress.total, done, spent, workers, len(tags)))
     return 0
+
+
+def estimate_line(total: int, done: int, spent: float, workers: int, files: int) -> str:
+    """The --estimate line: the time for `total` bytes at the measured speed of the sample, whatever the number of
+    processes."""
+    rate = done / spent
+    return (f"Estimate: about {_took(total / max(rate, 1.0))} for {total / 1e6:,.0f} MB with {workers} process(es) "
+            f"({rate / 1e6:.2f} MB/s on a sample of {done / 1e6:.1f} MB from {files} file(s) in {spent:.0f} s).")
 
 
 def _size(f: Path) -> int:
@@ -545,9 +742,9 @@ def main(argv: list[str]) -> int:
         return estimate(files, enabled, workers, progress)
     order = {str(f): n for n, (_c, f) in enumerate(files)}
     notes: Counter = Counter()
-    for (tag, _start), rows, job_notes, nbytes in run(files, enabled, workers):
+    for (tag, _start), rows, job_notes, _nbytes in run(files, enabled, workers, progress):
         notes.update(job_notes)
-        progress.step(nbytes, order.get(tag, 0))
+        progress.tick(order.get(tag, 0))
         for _i, kind, stamp, mtype, rule, value, inner in rows:
             if not args.pii and mtype != "SECRET":
                 continue
