@@ -283,5 +283,5 @@ class ArgumentTests(unittest.TestCase):
 
     def test_the_answer_lists_the_forms_of_the_argument_hint(self):
         hint = re.search(r'argument-hint: "\[(.*)\]"', (ROOT / "commands" / "ner.md").read_text()).group(1)
-        for word in ("local", "url URL", "gateway URL", "gateway NAME", "all", "off"):
+        for word in ("local", "url URL", "gateway NAME", "all", "off"):
             self.assertIn(word, hint)

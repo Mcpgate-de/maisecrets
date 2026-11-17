@@ -1,6 +1,6 @@
 ---
 name: secret-hygiene
-description: Protect secrets from the AI and clean up those that already leaked. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat; or when you are about to read a file full of secrets, such as a password export, a .har recording, a .vcf or an .ics file; or when a placeholder such as ⟦EMAIL_c1⟧ must go into a document or a file. Never shows a secret value.
+description: "Find secrets that already leaked: in a repository, in git history, in past AI sessions. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat; or when you are about to read a file full of secrets, such as a password export, a .har recording, a .vcf or an .ics file; or when a placeholder such as ⟦EMAIL_c1⟧ must go into a document or a file. Never shows a secret value."
 ---
 
 # Secret hygiene
@@ -11,15 +11,17 @@ maisecrets hooks do that, in Claude Code, Cowork and Codex, when the plugin is i
 
 ## What this skill offers
 
-When the user asks what you can do, or asks in general to check for leaked secrets, offer these options, one line
-each, in the user's words:
+When the user asks what you can do, or asks in general to check for leaked secrets, offer these four options,
+one line each, in this order (the urgent one first), in the user's words:
 
-- Protect my secrets: install maisecrets, so a typed password or key no longer reaches the AI (2 minutes).
-- Check a repository: secrets in its files (seconds) and in its git history (minutes on a large repository).
-- Check my AI history: what went to Claude or Codex in past sessions, and what your agents saved in their settings
-  (the last 30 days by default or all of them; long: see the estimate).
-- Something leaked: the steps to contain it, rotation first (no scan, a few minutes).
-- Make a file safe to share: a masked copy of a log, config or export (seconds).
+- Something leaked just now: the steps to contain it (a few minutes, no scan).
+- Check my AI history: what went to Claude or Codex, and what your agents saved in their settings (30 days;
+  estimate first).
+- Check a repository: files (seconds) and git history (minutes).
+- Make a file safe to share: a masked copy (seconds).
+
+Offer the install ("Protect my secrets: install maisecrets, so a typed password or key no longer reaches the AI,
+2 minutes") as a fifth line only when `protection_status.py` says NOT ACTIVE.
 
 Run only the task the user chose. After that task reports its result, you can offer one other check, in one line.
 The protection check below is not a side check: it says whether this chat is protected. Before the chosen task,

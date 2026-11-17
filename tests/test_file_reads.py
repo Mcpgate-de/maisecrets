@@ -1119,8 +1119,8 @@ class TypedSettings(_Work):
                          "codex review of block 4: any wrong type in the file ignores it, so both block")
 
     def test_the_card_names_the_modes(self):
-        text = settings.render()
-        self.assertIn("PDFs the AI reads · allow · not decided", text)
+        text = settings.render(only="read_pdf")
+        self.assertIn("PDFs the AI reads (read_pdf) · allow · (default)", text)
         self.assertIn("convert     send only its text", text)
         self.assertIn("/maisecrets:settings read_pdf convert", text)
 

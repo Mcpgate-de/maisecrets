@@ -132,9 +132,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 58 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
-python3 harness/codex.py [--real]                      # 18 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 404 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 harness/run.py                                 # 59 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
+python3 harness/codex.py [--real]                      # 19 scenarios through codex exec (five need --real)
+python3 scripts/replay_can_fail.py                     # 411 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -160,9 +160,11 @@ policy.
 
 **Updates.** A new version reaches a member when `version` in
 `.claude-plugin/plugin.json` changes: at the next session start for an
-org-synced plugin, with `claude plugin update` otherwise. Every session starts
-with one line `maisecrets X.Y.Z is on`; its absence means the plugin did not
-load. A rollback is a `git revert` on `main`: the pipeline releases it as the
+org-synced plugin, with `claude plugin update` otherwise. A session start says
+nothing while all is well (only the first start in a maisecrets folder shows a
+welcome), so its silence proves nothing. To check that the plugin loaded, run
+`/maisecrets:status` (Codex: `maisecrets: status`) in the session, or look for
+the `session-start` row of that session in `~/.maisecrets/hooks.log`. A rollback is a `git revert` on `main`: the pipeline releases it as the
 next patch version.
 
 **The guard for synced installs.** An update of an org-synced plugin can leave a
@@ -226,6 +228,19 @@ deleted, the counters continue). `hooks.log` in `~/.maisecrets` records every
 hook run (time, event, client, session, tool, decision, duration; no value and
 no command), so "the plugin did nothing" can be told from "the hook did not
 run".
+
+### Settings in config.json only
+
+- `gateway_servers`: the MCP servers that resolve placeholders themselves (a list of server names).
+- `ssh_host_groups`: hosts that one typed ssh window covers together (`{"web": ["web1", "web2"]}`).
+
+### Settings the panel does not offer
+
+The `/maisecrets` panel and the `/maisecrets:settings` table leave out the settings that only weaken a protection
+when a person changes them: `strip_hidden_characters`, `scrub_transcript`, `block_at_mentions`, `client_header`,
+`ssh_via_sandbox`, `pass_agent_reports`, `max_keys_per_session`, `max_resolves_per_hour`. Set them in
+`config.json` or in the machine policy; a policy value cannot be changed by the person. The typed command still
+changes one, with the checks of C22, so that a person who meets the limiter can raise it.
 
 ## SSH consent (optional)
 
