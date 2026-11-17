@@ -875,7 +875,11 @@ class Vault:
         out: list[Entry | None] = []
         new = 0
         dirty = False
+        from .detection.remote import is_never_stored_name
         for value, type_, kind in items:
+            if type_ == "NAME" and kind.startswith("remote:") and is_never_stored_name(value):
+                out.append(None)        # masked where it stands, never stored: a stored word is masked everywhere
+                continue
             fp = self.fingerprint(value)
             existing = self._index["by_fingerprint"].get(fp)
             if existing and not self._index["entries"][existing].get("purged"):
