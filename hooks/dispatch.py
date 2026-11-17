@@ -310,6 +310,15 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         note = None
     if note:
         out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    if not codex:
+        # once per home: a url or gateway source set before prompts went there too (Codex prompts keep the rules)
+        try:
+            from maisecrets import ner_setup  # noqa: E402
+            ner_note = ner_setup.prompts_note(cfg.get("remote_detector"))
+        except Exception:  # noqa: BLE001 - the session start must not fail on it
+            ner_note = None
+        if ner_note:
+            out["systemMessage"] = out.get("systemMessage", "") + " " + ner_note
     if quieted:
         out["systemMessage"] = (out.get("systemMessage", "") +
                                 f" {len(quieted)} stored word(s) are program code, not secrets "

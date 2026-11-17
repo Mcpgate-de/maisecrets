@@ -665,19 +665,20 @@ class NameServiceTests(_ServiceBase):
         self.assertIn(f"please ask {OPEN}NAME_c", drop)
         self.assertNotIn(NAME, drop)
 
-    def _network(self, prompts: bool):
+    def _network(self, **old):
         cfg = json.loads(CONFIG.read_text())
-        cfg["remote_detector"] = {"url": "https://names.invalid/v1", "format": "hf", "model": "fake@1",
-                                  **({"prompts": True} if prompts else {})}
+        cfg["remote_detector"] = {"url": "https://names.invalid/v1", "format": "hf", "model": "fake@1", **old}
         CONFIG.write_text(json.dumps(cfg))
         with mock.patch("maisecrets.remote_layer.prepare", return_value=None) as asked:
             out = self._mod()
         self.assertIn("maisecrets demo", out["drop"])
         return asked
 
-    def test_a_network_source_gets_the_prompt_only_with_prompts_on(self):
-        self._network(False).assert_not_called()
-        self._network(True).assert_called_once()
+    def test_a_network_source_gets_the_prompt_with_no_switch(self):
+        # the demo of 2026-11-17: a gateway source found no name in a prompt, because prompts needed a switch
+        self._network().assert_called_once()
+        # `"prompts": false` of an older version in the person's own file stops it no more (only a policy does)
+        self._network(prompts=False).assert_called_once()
 
 
 if __name__ == "__main__":
