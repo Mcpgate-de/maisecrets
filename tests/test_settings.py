@@ -547,6 +547,21 @@ class LifetimeAndCountries(unittest.TestCase):
         _prompt("/maisecrets:settings ttl_seconds default")
         self.assertNotIn("ttl_seconds", _user())
 
+    def test_a_lifetime_keeps_the_cards_hour_and_a_lifetime_per_type(self):
+        _reset(ttl_seconds={"default": 86400, "CARD": 3600, "EMAIL": 600})
+        self.assertTrue(settings.apply_typed("ttl_seconds", "7d")[0])
+        self.assertEqual(_user()["ttl_seconds"], {"default": 7 * 86400, "CARD": 3600, "EMAIL": 600})
+
+    def test_a_country_toggle_starts_from_the_old_pii_regions(self):
+        _reset(pii_regions=["generic", "de", "fr"])
+        self.assertEqual(load_config()["regions"], ["de", "fr"], "load_config reads the old name")
+        self.assertTrue(settings.apply_typed("regions", "toggle:de")[0])
+        self.assertEqual(_user()["regions"], ["fr"])
+        self.assertNotIn("pii_regions", _user(), "one name for the setting from now on")
+        _reset(pii_regions=["de"])
+        settings.apply_typed("regions", "default")
+        self.assertEqual(load_config()["regions"], ["auto"], "default removes the old name too")
+
     def test_countries_take_auto_or_a_known_code_and_a_country_taken_out_loosens(self):
         _prompt("/maisecrets:settings regions de")
         self.assertEqual(_user()["regions"], ["de"])

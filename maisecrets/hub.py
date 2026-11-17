@@ -127,14 +127,16 @@ def pane_forget(key: str) -> str:
 
 
 def pane_forget_all() -> str:
-    from .hooks import _run_dir
-    from .vault import wipe_everything
-    try:
-        run_dir = _run_dir()
-    except (OSError, RuntimeError):
-        run_dir = None
-    n, problems = wipe_everything(load_config(), run_dir)
-    return f"Forgot {n} stored value(s)." + (f" Not everything went: {problems[0]}" if problems else "")
+    """Every stored value, one forget each (its index row and its destination record go with it, and each writes its
+    events.log line). The logs, the incidents and the other records stay: the full wipe is `run.sh wipe --yes` in a
+    terminal (docs/USING.md)."""
+    from .vault import Vault
+    v = Vault()
+    keys = [e.key for e in v.list()]
+    refused = [k for k in keys if v.forget(k, route=PANE_ROUTE) == "store"]
+    gone = len(keys) - len(refused)
+    return (f"Forgot {gone} stored value(s). The logs and records stay."
+            + (f" The store refused {len(refused)}; they are still stored." if refused else ""))
 
 
 def _pane_session(session: str) -> str:

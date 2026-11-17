@@ -165,9 +165,17 @@ class ValuesTests(unittest.TestCase):
         self.assertIn("Nothing was forgotten", out["note"])
         self.assertEqual(out["total"], 2)
         self.assertEqual(ask(action="forget_all", confirm="yes")["total"], 2)
+        logs = {name: f"a line of {name}\n" for name in ("audit.log", "hooks.log", "events.log", "allow.txt")}
+        for name, text in logs.items():
+            (hub.HOME / name).write_text(text, encoding="utf-8")
         out = ask(action="forget_all", confirm=hub.WIPE_CONFIRM)
-        self.assertTrue(out["note"].startswith("Forgot"))
+        self.assertEqual(out["note"], "Forgot 2 stored value(s). The logs and records stay.")
         self.assertEqual(out["total"], 0)
+        for name, text in logs.items():
+            self.assertTrue((hub.HOME / name).read_text(encoding="utf-8").startswith(text),
+                            f"{name} stays: the full wipe is the terminal's")
+        self.assertEqual((hub.HOME / "events.log").read_text(encoding="utf-8").count('"forget"'), 2,
+                         "each forgotten value writes its line, as a single forget does")
 
 
 class NameServiceTests(unittest.TestCase):

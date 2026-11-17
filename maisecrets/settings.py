@@ -724,6 +724,8 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
                 user[key] = ner_setup.updated(user.get(key), word[4:])
             elif word == "default":
                 user.pop(key, None)
+                if key == "regions":
+                    user.pop("pii_regions", None)     # the old name of the same setting would read again
             elif hosts_change:
                 verb, host = word.split(":", 1)
                 if key in _PATH_KEYS:
@@ -734,11 +736,17 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
                     hosts = [h for h in user.get(key, []) if h != host]
                 user[key] = hosts + [host] if verb == "add" else hosts
             elif key == "ttl_seconds":
-                user[key] = {"default": TTL_WORDS[word], "CARD": _CARD_TTL}
+                # only the default lifetime: a card's hour and a lifetime per type the file holds stay
+                had = user.get(key) if isinstance(user.get(key), dict) else DEFAULT_CONFIG["ttl_seconds"]
+                user[key] = {**had, "default": TTL_WORDS[word]}
             elif key == "regions":
+                from .home import _old_region_key
+                # the value in effect: a file of 0.4 and older names the countries pii_regions
+                effective = _old_region_key(user).get(key)
+                user.pop("pii_regions", None)
                 if word.startswith("toggle:"):
                     code = word[len("toggle:"):]
-                    now = [r for r in _regions_of(user.get(key)) if r != "auto"]
+                    now = [r for r in _regions_of(effective) if r != "auto"]
                     if code == "auto":
                         now = []
                     elif code in now:

@@ -160,9 +160,11 @@ policy.
 
 **Updates.** A new version reaches a member when `version` in
 `.claude-plugin/plugin.json` changes: at the next session start for an
-org-synced plugin, with `claude plugin update` otherwise. Every session starts
-with one line `maisecrets X.Y.Z is on`; its absence means the plugin did not
-load. A rollback is a `git revert` on `main`: the pipeline releases it as the
+org-synced plugin, with `claude plugin update` otherwise. A session start says
+nothing while all is well (only the first start in a maisecrets folder shows a
+welcome), so its silence proves nothing. To check that the plugin loaded, run
+`/maisecrets:status` (Codex: `maisecrets: status`) in the session, or look for
+the `session-start` row of that session in `~/.maisecrets/hooks.log`. A rollback is a `git revert` on `main`: the pipeline releases it as the
 next patch version.
 
 **The guard for synced installs.** An update of an org-synced plugin can leave a

@@ -172,7 +172,8 @@ opens at once: no model turn, nothing goes to the AI. From top to bottom:
 - **Stored values.** The stored values, the newest 20 first, in their masked
   form with age, uses and expiry; `[ more ]` shows the next 20. Each row has
   `[ forget ]` and `[ not a secret ]`; each asks `[ yes ] [ no ]` first.
-  `[ forget all… ]` deletes every stored value after its own question. The
+  `[ forget all… ]` deletes every stored value after its own question; the logs
+  and records stay (the full wipe is `run.sh wipe --yes` in a terminal). The
   panel never shows a value.
 - **Name service.** The source as buttons: `off`, `local` (it asks first: the
   image is about 690 MB and runs on 127.0.0.1 only; then it starts it and

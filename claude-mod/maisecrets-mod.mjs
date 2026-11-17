@@ -804,7 +804,7 @@ function drawValues($, e, Box, Text, Button) {
   if (v.offset + v.rows.length < v.total) extra.push(btn(Box, Button, 'more', 'more', () => showValues($, v.offset + 20)))
   if (v.total > 0) {
     if (pane.confirm && pane.confirm.action === 'all') {
-      extra.push(h(Box, { marginRight: 1, key: 'qa' }, h(Text, { color: 'yellow' }, 'Forget every stored value?')))
+      extra.push(h(Box, { marginRight: 1, key: 'qa' }, h(Text, { color: 'yellow' }, 'Forget every stored value? The logs and records stay.')))
       extra.push(btn(Box, Button, 'yes:all', 'yes', () => valuesAction($, 'forget_all', ''), { autoFocus: true }))
       extra.push(btn(Box, Button, 'no:all', 'no', () => { pane.confirm = null; $.ui.invalidate('ui.render') }))
     } else {
