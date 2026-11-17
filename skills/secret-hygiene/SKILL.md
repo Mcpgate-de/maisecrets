@@ -148,7 +148,8 @@ my agents already leak?".
 
 1. Ask for the period: the last 30 days (the default) or all sessions. Then get the estimate first:
    `python3 scripts/audit_transcripts.py --estimate` (the last 30 days; add `--all` for all). It prints the size
-   and the estimated time on stderr and scans only a sample. The estimate is no result: it shows no finding. Tell
+   and the estimated time on stderr; it scans a sample of files for 15 seconds at the speed of this computer
+   (if it says that other work slows the scan, say so too). The estimate is no result: it shows no finding. Tell
    the user the estimate before the scan, for example "about 12 minutes for 4.2 GB", and run the scan in the
    background if it is longer than a few minutes. While it runs, say only: "The scan of your AI history runs (about
    <estimate>). I report when it ends." Start no other check; the approvals of step 5 are part of this task.
