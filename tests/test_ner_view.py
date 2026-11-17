@@ -96,7 +96,7 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(lines, [
             "names: gateway gw.example.com · answers (202 ms) with your login", "",
-            " ✓ source      gateway (tool results; prompts: rules alone)",
+            " ✓ source      gateway (tool results and prompts)",
             " ✓ login       has the name scope",
             " ✓ quota       58 of 60 requests this minute",
             " ✓ today       40 of 42 texts checked by the service, 2 rules alone", "",
@@ -166,7 +166,7 @@ class ViewTests(unittest.TestCase):
             code, lines = self.render(conf)
         self.assertEqual(code, 0)
         self.assertEqual(lines[:4], ["names: url 10.0.0.5:8765 · answers (9 ms)", "",
-                                     " ✓ source      url (tool results; prompts: rules alone)",
+                                     " ✓ source      url (tool results and prompts)",
                                      " ✓ reachable   answers (9 ms)"])
         with mock.patch.object(ner_setup, "probe", return_value=(False, "the service: does not answer (URLError)")):
             code, lines = self.render(conf)

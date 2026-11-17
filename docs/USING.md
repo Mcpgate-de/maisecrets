@@ -443,8 +443,7 @@ Please check the token ⟦SECRET_c1⟧ and write to ⟦EMAIL_c1:jo•••@•�
   maisecrets masked something, the full masked text goes to the clipboard,
   where one exists.
 - **Names.** In Claude Code a name service (`/maisecrets:ner`) takes part as
-  for a normal prompt. A service on the network reads a prompt only when you
-  turn its prompts on (`/maisecrets:ner prompts on`).
+  for a normal prompt, also a service on the network.
 - **Only your own commands pass, in their exact form:** `/maisecrets:demo off`,
   the settings, `ms:(…)`, `/maisecrets:term`, `/maisecrets:not-a-secret`, and
   for example `/maisecrets:status`, `/maisecrets:status all` or
