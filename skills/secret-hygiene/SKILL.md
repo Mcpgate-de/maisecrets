@@ -16,11 +16,19 @@ each, in the user's words:
 
 - Protect my secrets: install maisecrets, so a typed password or key no longer reaches the AI (2 minutes).
 - Check a repository: secrets in its files (seconds) and in its git history (minutes on a large repository).
-- Check my AI history: what went to Claude or Codex in past sessions, the last 30 days by default or all of them
-  (long: see the estimate).
-- Check the saved approvals of my agents: secrets in their settings and rules (seconds).
+- Check my AI history: what went to Claude or Codex in past sessions, and what your agents saved in their settings
+  (the last 30 days by default or all of them; long: see the estimate).
 - Something leaked: the steps to contain it, rotation first (no scan, a few minutes).
 - Make a file safe to share: a masked copy of a log, config or export (seconds).
+
+Run only the task the user chose. After that task reports its result, you can offer one other check, in one line.
+The protection check below is not a side check: it says whether this chat is protected. Before the chosen task,
+say only its verdict or its offer, and no other result.
+
+When a scan runs in the background, your message says only what runs, the estimate, and that you report when it
+ends. Write nothing that reads like a result or an end, such as "found nothing" or "done".
+
+When the scan ends, the first line of your answer is the result of the task the user chose.
 
 ## First: is the protection active?
 
@@ -100,12 +108,15 @@ you read the file again.
 
 ## Check a repository
 
-1. Scan the files first: `python3 scripts/scan_secrets.py <repo>`. Add `--pii` when the user
-   also asks about personal data such as e-mail addresses or IBANs.
+1. Scan the files, with all output to a file: `python3 scripts/scan_secrets.py <repo> > <files-file> 2>&1`.
+   Add `--pii` when the user also asks about personal data such as e-mail addresses or IBANs.
+   Do not read that file yet.
 2. Then scan the history: `python3 scripts/scan_secrets.py <repo> --history --out <file>`.
    `--out` writes the full report to a file the user can keep and prints only the summary.
    On a large repository the history scan can take many minutes: tell the user, and run it
-   in the background if your tools allow that.
+   in the background if your tools allow that. While it runs, say only that the scan runs and
+   its estimate. When the history scan ends, read both files and report the files and the
+   history in one answer.
 3. Read the result:
    - `shape` means the value has a provider's token format, `guess` means a keyword such as
      `password =` stands next to it and it can be noise.
@@ -137,8 +148,10 @@ my agents already leak?".
 
 1. Ask for the period: the last 30 days (the default) or all sessions. Then get the estimate first:
    `python3 scripts/audit_transcripts.py --estimate` (the last 30 days; add `--all` for all). It prints the size
-   and the estimated time on stderr and scans only a sample. Tell the user the estimate before the scan, for
-   example "about 12 minutes for 4.2 GB", and run the scan in the background if it is longer than a few minutes.
+   and the estimated time on stderr and scans only a sample. The estimate is no result: it shows no finding. Tell
+   the user the estimate before the scan, for example "about 12 minutes for 4.2 GB", and run the scan in the
+   background if it is longer than a few minutes. While it runs, say only: "The scan of your AI history runs (about
+   <estimate>). I report when it ends." Start no other check; the approvals of step 5 are part of this task.
 2. Run `python3 scripts/audit_transcripts.py --out <file>` (add `--all` for all sessions). Add
    `--claude` or `--codex` for one agent, `--pii` for personal data. It uses the cores minus one (`--workers N` to
    change it), and it prints its progress at least every 30 seconds and its time at the end.
@@ -151,15 +164,18 @@ my agents already leak?".
      than three lines away from it, and a weak shape that needs a word farther away. `--full` reads each record as
      one text, as before, with every rule: it is slower, and the user can ask for it after a fast scan. Neither scan finds a random value
      with no label and no prefix.
-3. Report the values under "REACHED THE PROVIDER" first, `shape` before `guess`: each one was
-   sent to Anthropic or OpenAI and must be rotated ("Contain a leak"). Values only in local
+3. When the scan ends, report it first. Begin with the values under "REACHED THE PROVIDER", `shape` before
+   `guess`: each one was sent to Anthropic or OpenAI and must be rotated ("Contain a leak"). Values only in local
    records did not provably reach a provider.
 4. Only when the user asks, offer to clean the local copies: `--scrub` lists the files, and
    only `--scrub --yes`, after the user's explicit yes, replaces the values. Say every time
    that this cleans only this computer: the provider keeps what it received, so rotation
    comes first.
-5. Next to the transcript audit, check the approvals that the agents saved outside the
-   repository: `python3 scripts/audit_approvals.py --out <file>`. It reads the settings and
+5. The approvals are part of this task. While the scan runs, run them with all output to files:
+   `python3 scripts/audit_approvals.py --out <file> > <summary-file> 2>&1`. Do not read either file until the
+   scan ends. Then report the approvals in the same answer as the scan, after the scan's result. When the user
+   asks only for the approvals, run `python3 scripts/audit_approvals.py --out <file>` and report it at once. It
+   reads the settings and
    the client config of Claude Code and the rules and config of Codex, and it names each file
    it read. Each finding names a file and a place, for example `permissions.allow[3]` or
    `rules/default.rules line 12`, never the value. For each finding, the credential must be
