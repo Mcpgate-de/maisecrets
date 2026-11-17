@@ -1,5 +1,5 @@
 ---
-description: Try maisecrets with real data - /maisecrets:demo on (as your own prompt, in a new session) keeps what you send in this session, with its values locked, and nothing goes to the AI until /clear.
+description: "Try maisecrets on real data; nothing reaches the AI until /clear"
 argument-hint: "on"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status)
 ---
