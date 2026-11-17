@@ -759,13 +759,13 @@ class EstimateLogicTests(unittest.TestCase):
     def test_a_busy_computer_is_named_once_at_the_start(self):
         files = self.files([1000])
         for load, said in ((20.0, True), (1.0, False)):
-            with self.subTest(load=load), mock.patch.object(os, "getloadavg", return_value=(load, 0, 0)), \
+            with self.subTest(load=load), mock.patch.object(os, "getloadavg", return_value=(load, 0, 0), create=True), \
                     mock.patch.object(os, "cpu_count", return_value=10):
                 out = io.StringIO()
                 at.Progress(files, 9, out=out, clock=FakeClock())
                 self.assertEqual("Other work on this computer slows the scan (load 20 on 10 cores)."
                                  in out.getvalue(), said)
-        with mock.patch.object(os, "getloadavg", side_effect=OSError):
+        with mock.patch.object(os, "getloadavg", side_effect=OSError, create=True):
             self.assertIsNone(at.busy_load())
 
     def test_the_files_are_read_in_a_spread_order(self):
