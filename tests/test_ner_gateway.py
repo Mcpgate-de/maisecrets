@@ -95,6 +95,48 @@ class CommandTests(unittest.TestCase):
             forget.assert_called_once()
             self.assertEqual(forget.call_args[0][1], "https://gw.example.com")
 
+    def test_a_login_without_a_name_and_several_servers_lists_one_command_per_server(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from maisecrets import cli, vault_refs
+        servers = {"team-gw": "https://gw.example.com/mcp", "other-gw": "https://other.example.com/mcp"}
+        found = {"team-gw": {"origin": "https://gw.example.com"}, "other-gw": {"origin": "https://other.example.com"}}
+        out = io.StringIO()
+        with mock.patch.object(vault_refs, "user_servers", return_value=servers), \
+                mock.patch.object(S, "discover", side_effect=lambda cfg, url, *a: found[
+                    next(k for k, v in servers.items() if v == url)]), \
+                mock.patch.object(S, "login") as login, \
+                mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
+                                                                    "allow_plaintext_store": True}), \
+                redirect_stdout(out):
+            self.assertEqual(cli.cmd_sref(["login"]), 2)
+        login.assert_not_called()
+        lines = out.getvalue().splitlines()
+        self.assertIn("  /maisecrets:sref login team-gw", lines)
+        self.assertIn("  /maisecrets:sref login other-gw", lines)
+
+    def test_the_ready_command_quotes_a_server_name_as_the_argument_parser_reads_it(self):
+        import io
+        import shlex
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from maisecrets import cli, vault_refs
+        servers = {"team gw": "https://gw.example.com/mcp", "other;gw": "https://other.example.com/mcp"}
+        found = {"team gw": {"origin": "https://gw.example.com"}, "other;gw": {"origin": "https://other.example.com"}}
+        out = io.StringIO()
+        with mock.patch.object(vault_refs, "user_servers", return_value=servers), \
+                mock.patch.object(S, "discover", side_effect=lambda cfg, url, *a: found[
+                    next(k for k, v in servers.items() if v == url)]), \
+                mock.patch.object(S, "login"), \
+                mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
+                                                                    "allow_plaintext_store": True}), \
+                redirect_stdout(out):
+            self.assertEqual(cli.cmd_sref(["login"]), 2)
+        names = [shlex.split(line.split(":sref ", 1)[1])
+                 for line in out.getvalue().splitlines() if ":sref " in line]
+        self.assertEqual(sorted(names), [["login", "other;gw"], ["login", "team gw"]])
+
     def test_a_tool_call_that_carries_the_sentence_is_refused_like_the_others(self):
         import re
         self.assertTrue(re.search(ner_setup.IN_A_COMMAND, "echo '/maisecrets:ner gateway https://gw.example.com'"))

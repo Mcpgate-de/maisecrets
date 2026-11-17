@@ -994,6 +994,7 @@ def cmd_sref(args: list[str]) -> int:
     offers a resolver and whether maisecrets is logged in there; `login [NAME]` logs in in the browser (the person
     gives the consent there; nothing starts without this command); `logout [NAME]` forgets the login. No token, id or
     value is printed."""
+    import shlex
     from urllib.parse import urlsplit
 
     from . import sref_client, vault_refs
@@ -1021,13 +1022,14 @@ def cmd_sref(args: list[str]) -> int:
     if action == "status":
         for server, f in found.items():
             if not sref_client.logged_in(backend, f["origin"]):
-                state = f"not logged in (/maisecrets:sref login {server})"
+                state = f"not logged in (/maisecrets:sref login {shlex.quote(server)})"
             else:
                 now, then = sref_client.allows(backend, f), sref_client.could_allow(f)
                 state = "logged in; values go into " + ", ".join(now)
                 more = [w for w in then if w not in now]
                 if more:
-                    state += f" (log in again to allow {' and '.join(more)}: /maisecrets:sref login {server})"
+                    state += (f" (log in again to allow {' and '.join(more)}: "
+                              f"/maisecrets:sref login {shlex.quote(server)})")
             # the account goes to the person only (sref_hooks.account_notice): the AI reads this output
             who = sref_client.account(backend, f["origin"]) if sref_client.logged_in(backend, f["origin"]) else ""
             print(f"{server} ({urlsplit(f['origin']).hostname}): {state}"
@@ -1041,7 +1043,10 @@ def cmd_sref(args: list[str]) -> int:
         if own in found:
             found = {own: found[own]}
     if len(found) > 1:
-        print("maisecrets: more than one server offers Sensitive References; name one: " + ", ".join(found))
+        # one ready command per server: the person picks one (a login without a name never ends with nothing)
+        print(f"maisecrets: {len(found)} servers offer Sensitive References. Pick one and send its command:")
+        for server in found:
+            print(f"  /maisecrets:sref {action} {shlex.quote(server)}")
         return 2
     server, f = next(iter(found.items()))
     host = urlsplit(f["origin"]).hostname
