@@ -35,6 +35,17 @@ function rows(rehydration: string, mark = '') {
 }
 
 const filled: string[] = []
+
+// the panel draws at once and its status line follows in the background: draw it again until the query finds it
+async function mountWhen($, query) {
+  for (let i = 0; i < 100; i++) {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    if (await ui.find(query)) return ui
+    await ui.unmount()
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  return $.ui.mount({ ...PANE, surface: 'terminal' })
+}
 function engine(on, calls: any[], opened: { placed: boolean }) {
   on('clock.now', () => ({ value: 1_000_000 }))
   on('session.id', () => ({ value: 'sess-1' }))
@@ -45,11 +56,13 @@ function engine(on, calls: any[], opened: { placed: boolean }) {
   on('ui.close', () => ({ value: undefined }))
   on('clock.after', () => ({ value: undefined }))
   on('prompt.fill', ($, e) => { filled.push(e.text); return { isFilled: true } })
-  on('process.run', ($, e) => {
+  on('process.run', async ($, e) => {
     calls.push(e)
     if (e.argv[2] !== ENTRY) return { value: { exitCode: 1, stderr: '', stdout: '' } }
     const q = JSON.parse(e.init.stdin)
     const set = q.action === 'set'
+    // the status comes late, as on a busy CI runner: the panel draws first and the line follows
+    if (q.action === 'status') await new Promise(resolve => setTimeout(resolve, 30))
     if (q.action === 'status') return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({
       maisecrets: ENTRY, line: '🔒 maisecrets 0.9.12 protects this session', ms: 8,
       notes: [{ name: 'store', fact: 'test file, 0 values', next: 'set backend in config.json' }] }) } }
@@ -123,7 +136,7 @@ test('/maisecrets alone opens the same pane: a status line, the views, and the o
   on('command.run', () => ({ text: 'engine' }))
   const r = await $.command.run({ command: 'maisecrets' })
   expect(r.text).toBeUndefined()
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountWhen($, { type: 'Text', text: /protects this session/ })
   expect(await ui.find({ type: 'Text', text: /protects this session/ })).toBeDefined()
   await ui.press({ key: 'stored' })
   await ui.unmount()
@@ -141,7 +154,7 @@ test('the notes of the status are a button that opens and closes them', async ($
   engine(on, [], { placed: true })
   on('command.run', () => ({ text: 'engine' }))
   await $.command.run({ command: 'maisecrets' })
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountWhen($, { key: 'notes' })
   expect((await ui.find({ key: 'notes' }))?.text).toMatch(/1 note/)
   expect(await ui.find({ type: 'Text', text: /store: test file/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Opened in/ })).toBeUndefined()
