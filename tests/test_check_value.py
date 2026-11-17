@@ -561,10 +561,11 @@ class TipTests(_Base):
                                    input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=60)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 return json.loads(r.stdout).get("systemMessage", "")
-            # the first start names ms:(…) in its try-it line; the Codex tip would say it twice, and its hint is used
+            # the first start is the three-line welcome alone; the next start names ms:(…) once
             first = start()
-            self.assertIn("Try it: send ms:(", first)
             self.assertNotIn(check_value.TIP_CODEX, first)
+            self.assertEqual(len(first.splitlines()), 3 + first.count("test store"), first)
+            self.assertIn(check_value.TIP_CODEX, start())
             self.assertIn("check_value", (home / "store" / "hints.json").read_text())
             self.assertNotIn(check_value.TIP_CODEX, start())
             # codex exec prints no start line: the tip is neither shown nor used up there (Gate A of 30fb8d30)
