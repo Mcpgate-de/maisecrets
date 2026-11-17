@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## [0.9.15] - 2026-11-17
+
+### Features
+
+- secret-hygiene offers four steps, the urgent one first, and the install only when protection is off (fe03d75)
+- /maisecrets opens a panel with your settings, stored values and the name service, with no model turn (61e42c2)
+- /maisecrets:settings shows a table you can read at a glance, and value lifetime and countries are settings now (de76224)
+- a quiet session start: three lines the first time, then only warnings and at most one short tip a day (5b937af)
+- the session audit tells real tokens from test values and ends with what to do: which to rotate, with the page to do it (79928c5)
+- your message shows as you typed it, with its values locked, and the AI gets nothing until /clear (82f7baf)
+- a name service you set checks your prompts too, not only tool results (5e4ba39)
+
+### Fixes
+
+- the panel's forget all forgets the stored values only; a lifetime or a country change keeps the rest (c5150d3)
+- the audit estimates its time from the real speed of the scan on your computer (a8b61f1)
+- the skill runs only the check you chose and reports nothing else while your scan still runs (5ed926c)
+- "Code" in "Claude Code", a tool name such as "Bash" and a folder such as "Users" are no longer taken for a person's name (a98156e)
+- a maisecrets hint is one fixed line for you, shown once, not a note the AI words and repeats (8230f18)
+
+### Security
+
+- a tool call cannot reach a mod entry by quoting its name as $'…' or $"…" (408feb9)
+
 ## [0.9.14] - 2026-11-16
 
 ### Features
