@@ -88,6 +88,8 @@ except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         sys.exit(1)       # no traceback: the mod says it could not get the value
     if len(sys.argv) == 2 and sys.argv[1] == "mod-demo":
         sys.exit(1)       # no traceback: the mod keeps what it knew of the demo
+    if len(sys.argv) == 2 and sys.argv[1] == "mod-settings":
+        sys.exit(1)       # no traceback: the pane says the settings cannot be read
     raise
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
@@ -128,6 +130,19 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-values":
     except Exception:  # noqa: BLE001 - no traceback, no value in an error text
         sys.exit(1)
     print(json.dumps({"maisecrets": "mod-values", **answer}))
+    sys.exit(0)
+
+if len(sys.argv) == 2 and sys.argv[1] == "mod-settings":
+    # the settings pane of the mod (maisecrets/settings.py mod_answer): the rows, and a change the person picked there.
+    # A tool call that names this entry is refused (shell_commands.py), so only the mod starts it
+    import json
+    try:
+        from maisecrets.hub import mod_answer  # noqa: E402
+        payload = json.load(sys.stdin)
+        answer = mod_answer(payload if isinstance(payload, dict) else {})
+    except Exception:  # noqa: BLE001 - no traceback
+        sys.exit(1)
+    print(json.dumps({"maisecrets": "mod-settings", **answer}))
     sys.exit(0)
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-reveal":

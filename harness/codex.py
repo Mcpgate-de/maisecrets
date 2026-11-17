@@ -234,6 +234,12 @@ SCENARIOS = {
         "selftest": True,
         "command_home": True,
     },
+    # the settings in Codex: the text view, with Codex's sentence form for a change (no panel, no slash command)
+    "settings_text_view": {
+        "prompt": "maisecrets: settings",
+        "turns": [{"exec": _js('bash "{plugin}/hooks/run.sh" settings')}, {"text": "done"}],
+        "expect_placeholder": "Change: `maisecrets: set KEY VALUE`",
+    },
     # the demo (maisecrets/demo.py, #57): the person types `maisecrets: demo on`, then sends a prompt with a token and
     # an address in the same session (`codex exec resume`): blocked, no request, the values stored as for a sent prompt
     "demo_answers_the_prompt": {

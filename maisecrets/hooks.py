@@ -1361,7 +1361,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 _ARGS_END = "MAISECRETS_ARGS_END"
 _ARGS_CALL_RE = _LazyRx(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
-                           r"(?:audit|forget|guard|put --clipboard|report|settings|shortcut|sref) "
+                           r"(?:audit|forget|guard|list|put --clipboard|report|settings|shortcut|sref) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
 
@@ -1415,7 +1415,7 @@ _SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets setting
                           "user the prompt to send.")
 _HOOK_ENTRY_TEXT_RE = _LazyRx(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
                                  r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt|"
-                                 r"mod-values|mod-reveal)\b", re.I)
+                                 r"mod-values|mod-reveal|mod-settings)\b", re.I)
 _GRANT_RE = _LazyRx(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
 
 

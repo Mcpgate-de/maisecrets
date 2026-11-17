@@ -34,7 +34,7 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     # the mod's question stores values and scrubs a transcript by session id: for the mod, not the agent
     ("the mod's question", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-prompt\b"),
     # the values for the person's screen (show_values.py): for the mod's drawing, never for the agent
-    ("the mod's values", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-(?:values|reveal)\b"),
+    ("the mod's values", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-(?:values|reveal|settings)\b"),
     # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
     ("the maisecrets guard", r"maisecrets-guard\.py"),     # guard.json sits in the home, covered above
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
@@ -902,7 +902,7 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
 
 
 _HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "post-tool-failure", "mod-prompt",
-                 "mod-values", "mod-reveal"}
+                 "mod-values", "mod-reveal", "mod-settings"}
 
 
 def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
@@ -926,7 +926,7 @@ def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
     printers = {"echo", "printf", "grep", "egrep", "rg", "cat", "head", "tail", "less", "git"}
     for m in re.finditer(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
                          r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt|mod-values|"
-                         r"mod-reveal)\b", command):
+                         r"mod-reveal|mod-settings)\b", command):
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
         if seg and seg.get("cmd") in shells:
             return True

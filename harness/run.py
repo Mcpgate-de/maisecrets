@@ -443,6 +443,18 @@ SCENARIOS = {
         "expect_blocked": True,
         "expect_no_home_json": ("config.json", ["ssh_consent"]),
     },
+    # claude -p places no panel: /maisecrets:settings stays the command file, and the model runs its text view, a
+    # Markdown table with the Claude Code forms (the panel itself is tests/hub.test.ts and a pseudo-terminal by hand)
+    "settings_text_view": {
+        "prompt": "/maisecrets:settings",
+        "with_mod": {},
+        "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" settings --args-stdin '
+                                                        "<<'MAISECRETS_ARGS_END'\n\nMAISECRETS_ARGS_END"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_in_requests": ["| Setting | Now | Other choices | Key |", "`rehydration`",
+                               "Change: `/maisecrets:settings KEY VALUE`"],
+    },
     # `claude -p` runs its hooks under the entry point sdk-cli and shows no systemMessage: a one-time hint is neither
     # given nor claimed there, so it is not used up unseen (Gate A of 30fb8d30), and the model gets nothing of it
     # (field report 2026-11-17). The line on the person's screen: harness/hint_screen.py. `|| true`: a command that
