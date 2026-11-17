@@ -261,6 +261,28 @@ class ToolCallTests(unittest.TestCase):
                                           **CLAUDE})
                     self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny", out)
 
+    def test_each_mod_entry_in_a_quoted_form_bash_hands_over_is_refused(self):
+        # ANSI-C ($'…') and locale ($"…") quoting, split quotes and backslashes: bash hands the plain name to
+        # dispatch.py, so the check reads the words as bash does. A name built at run time ($E) is C22's limit
+        for entry in ("mod-prompt", "mod-values", "mod-reveal", "mod-settings", "mod-demo"):
+            head, tail = entry.split("-")
+            for form in (f"$'{entry}'", f'$"{entry}"', f"$'{head}\\x2d{tail}'", f"$'{head}\\055{tail}'",
+                         f"{head[0]}'{head[1:]}-{tail}'", f'"{head}"-{tail}', f"{head}\\-{tail}",
+                         f"$'{head}'-\"{tail}\""):
+                for runner in ("python3 hooks/dispatch.py", 'bash "/p/hooks/run.sh"'):
+                    command = f"echo '{{}}' | {runner} {form}"
+                    with self.subTest(command):
+                        out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": command},
+                                              "session_id": "S1", **CLAUDE})
+                        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny", out)
+        for harmless in ("echo $'mod-settings'", "printf '%s' mod-settings", "python3 tools/other.py $'mod-settings'",
+                         "printf '%s\\n' hooks/dispatch.py \"$'mod-settings'\"",
+                         'printf "%s" "dispatch.py $\'mod-values\'"'):
+            with self.subTest(harmless):
+                out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": harmless}, "session_id": "S1",
+                                      **CLAUDE})
+                self.assertNotEqual((out.get("hookSpecificOutput") or {}).get("permissionDecision"), "deny", out)
+
     def test_a_mention_in_a_text_that_only_prints_is_no_call(self):
         self.assertIsNone(hooks._store_read_match("echo the mod-settings docs"))
 

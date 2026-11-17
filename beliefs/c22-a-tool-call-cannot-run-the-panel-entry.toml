@@ -6,5 +6,5 @@ runner = ["tests/test_hub.py::ToolCallTests::test_each_action_of_the_panel_is_re
 
 [proof]
 file = "maisecrets/shell_commands.py"
-find = "mod-(?:values|reveal|settings)\\b\"),"
-replace = "mod-(?:values|reveal)\\b\"),"
+find = '''r"mod-(?:values|reveal|settings|demo)\b"),'''
+replace = '''r"mod-(?:values|reveal|demo)\b"),'''
