@@ -132,9 +132,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 58 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
-python3 harness/codex.py [--real]                      # 18 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 404 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 harness/run.py                                 # 59 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
+python3 harness/codex.py [--real]                      # 19 scenarios through codex exec (five need --real)
+python3 scripts/replay_can_fail.py                     # 410 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -226,6 +226,19 @@ deleted, the counters continue). `hooks.log` in `~/.maisecrets` records every
 hook run (time, event, client, session, tool, decision, duration; no value and
 no command), so "the plugin did nothing" can be told from "the hook did not
 run".
+
+### Settings in config.json only
+
+- `gateway_servers`: the MCP servers that resolve placeholders themselves (a list of server names).
+- `ssh_host_groups`: hosts that one typed ssh window covers together (`{"web": ["web1", "web2"]}`).
+
+### Settings the panel does not offer
+
+The `/maisecrets` panel and the `/maisecrets:settings` table leave out the settings that only weaken a protection
+when a person changes them: `strip_hidden_characters`, `scrub_transcript`, `block_at_mentions`, `client_header`,
+`ssh_via_sandbox`, `pass_agent_reports`, `max_keys_per_session`, `max_resolves_per_hour`. Set them in
+`config.json` or in the machine policy; a policy value cannot be changed by the person. The typed command still
+changes one, with the checks of C22, so that a person who meets the limiter can raise it.
 
 ## SSH consent (optional)
 

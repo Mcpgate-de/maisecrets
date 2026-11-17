@@ -137,26 +137,92 @@ All options live in `~/.maisecrets/config.json` (next section) and take
 effect on the next hook call. The manifest declares no `userConfig` on
 purpose: Claude Code 2.1.223 rejects a manifest with that key and then loads
 no hook at all, silently. A guard that vanishes on an older client is worse
-than one without a settings dialog. At the first session start, and at every
-start in test mode, a notice names the active store, its path and where to
-change it. `python3 -m maisecrets.cli status` prints the same at any time.
+than one without a settings dialog. `python3 -m maisecrets.cli status` names
+the active store and its path at any time.
+
+### The session start
+
+The first session start in a maisecrets folder shows three lines:
+
+```
+maisecrets is on: passwords, keys and personal data reach the AI only as ⟦…⟧; the value stays on this computer. 🔒 marks such a value.
+Try it: /maisecrets:demo on in a new session · Check: /maisecrets:status
+Names too: /maisecrets:ner local · Old leaks: /maisecrets:secret-hygiene
+```
+
+Codex shows the same with its sentence forms (`maisecrets: status`). After
+that, a start says nothing while all is well. It shows at most one short tip a
+day (`"tips": false` turns them off), and one line for each warning: the
+protection is not active (`⚠️ maisecrets is NOT protecting this session →
+/maisecrets:status`), the test store keeps values as plain text, a
+configuration problem, a rule folder that is missing, or a protection that
+was loosened since the last start. The AI's instructions about placeholders
+come at every start; only the lines for you changed.
+
+### The /maisecrets panel (Claude Code)
+
+`/maisecrets`, typed alone, opens a panel in Claude Code (with the mod, in the
+terminal and the desktop app); `/maisecrets:settings` opens the same panel. It
+opens at once: no model turn, nothing goes to the AI. From top to bottom:
+
+- **The status line.** It starts as `maisecrets: checking…` and becomes the
+  first line of `/maisecrets:status` for this session: 🔒 protects, or ⚠️ NOT
+  protecting with the names of the failed checks. `[ 3 notes ]` opens the
+  notes of the check (name, fact, next step); a second press closes them.
+- **Stored values.** The stored values, the newest 20 first, in their masked
+  form with age, uses and expiry; `[ more ]` shows the next 20. Each row has
+  `[ forget ]` and `[ not a secret ]`; each asks `[ yes ] [ no ]` first.
+  `[ forget all… ]` deletes every stored value after its own question. The
+  panel never shows a value.
+- **Name service.** The source as buttons: `off`, `local` (it asks first: the
+  image is about 690 MB and runs on 127.0.0.1 only; then it starts it and
+  shows `starting…`), `url…` (puts `/maisecrets:ner url ` into the prompt box
+  for you to complete) and `gateway…` (the MCP servers of your configuration
+  that have an https address; after a pick, `[ log in ]` puts
+  `/maisecrets:sref login NAME` into the prompt box). Under them, the checks
+  of `/maisecrets:ner`.
+- **Check old leaks.** Closes the panel and puts `/maisecrets:secret-hygiene`
+  into the prompt box; press Enter to start it.
+- **Your settings**, in groups, each with its choices as buttons: the current
+  one marked `●`, `✎` when you changed it, `⚙` when your administrator's
+  policy sets it (no buttons then). A press applies at once and shows
+  `Saved. …`. The folders, hosts and value files have `[ add… ]` (and
+  `[ remove… ]` when the list has entries), which put the typed command into
+  the prompt box for you to complete. The countries are the last group:
+  `[ choose… ]` opens one button per country code, and `auto` (the country of
+  this computer) clears the others.
+
+Tab or the arrow keys move, Enter or a click picks, Esc closes. A press in the
+panel is your own act: the model cannot press a button, and a tool call that
+names the panel's entry is refused. Each change goes through the same checks
+as the typed command (the policy, the allowed values, the two steps of
+`not a secret` for a key), and a loosened protection is named at the next
+start with the route `settings pane`. In Codex, in `claude -p` and without the
+mod, `/maisecrets:settings` shows the text view below.
 
 ### Settings you decide
 
-`/maisecrets:settings` shows the settings that are yours to decide, grouped
-(Protection, Using stored values, PDFs and images, Your screen), one card each: the value, its state (`not
-decided`, `set by you`, `set by a policy`), what it does, and the command for
-the next step:
+Without the panel (Codex, `claude -p`, a client without the mod),
+`/maisecrets:settings` shows the settings that are yours to decide as a table,
+one row each: the setting, its value (`✎` when you changed it, `⚙` when a
+policy sets it), the other choices and the key. `all` (or `--all`) adds the
+advanced ones. `/maisecrets:settings KEY` shows the card of one setting: the
+value, its state (`(default)`, `set by you`, `set by a policy`), what it does,
+and the command for the next step:
 
 ```
-Protection
-  SSH consent · off · not decided
+  SSH consent (ssh_consent) · off · (default)
     Ask before each ssh command that changes something on a host.
     Turn on: /maisecrets:settings ssh_consent on
 ```
 
-A key that is missing from `config.json` is not decided; `false` written there
-is a decision, with the same effect. `--all` shows the advanced settings too.
+A key that is missing from `config.json` reads the default; `false` written
+there is a decision, with the same effect. Settings that only weaken a
+protection when changed (`scrub_transcript`, `strip_hidden_characters`,
+`block_at_mentions`, `client_header`, `ssh_via_sandbox`,
+`pass_agent_reports`, `max_keys_per_session`, `max_resolves_per_hour`) are
+not in the panel or the table; their card and the typed command still work,
+and `config.json` or a policy sets them (docs/ADMIN.md).
 
 To change one, send the change as your own prompt, alone:
 
@@ -210,8 +276,8 @@ through another event). A hint comes once, also when hooks run at the same
 time; if maisecrets cannot record it, it does not come at all. It does not come again after you decided, and
 it does not come again because time passed: only a real change of the
 feature brings it back, once. `"tips": false` turns hints off with the tips.
-The settings list shows each hint as `not shown yet` or `shown` with its date;
-`/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
+`/maisecrets:settings hints` shows each hint as `not shown yet` or `shown`
+with its date; `/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
 come once more and changes no protection setting.
 
 ### Where your secrets went
