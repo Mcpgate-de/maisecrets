@@ -583,9 +583,29 @@ function registerDemo(on) {
 // there.
 const SETTINGS_PANE = 'maisecrets-settings'
 const SETTINGS_CMD = /^\s*\/maisecrets:settings(?:\s+(?:all|--all))?\s*$/i
+// the names of commands/*.md (tests/test_hub.py compares them): `/maisecrets sref login`, typed with a space, means
+// `/maisecrets:sref login`
+const COMMANDS = ['audit', 'demo', 'forget', 'guard', 'list', 'ner', 'not-a-secret', 'put', 'report', 'rules', 'send',
+  'settings', 'shortcut', 'sref', 'status', 'term']
+const SPACED_CMD = /^\s*\/maisecrets\s+([^\s]+)(.*)$/s
+// the command meant by `/maisecrets WORD REST`: `/maisecrets:WORD REST`, or null for no command of maisecrets
+function meantCommand(text) {
+  const m = SPACED_CMD.exec(typeof text === 'string' ? text : '')
+  if (!m || !COMMANDS.includes(m[1].toLowerCase())) return null
+  return `/maisecrets:${m[1].toLowerCase()}${m[2].replace(/\s+$/, '')}`
+}
+const firstWord = (args) => (typeof args === 'string' ? args.trim().split(/\s+/)[0] : '') || ''
+const unknownLine = (word) => `"${word.slice(0, 40)}" is no maisecrets command. Try: status, settings, ner, ` +
+  'sref login, list, forget, term, audit, rules, put, send.'
 const NARROW = 90       // below this many columns the choices go under the name
 const pane = { sub: null, groups: [], note: null, status: null, statusSession: null, notes: [],
-  showNotes: false, error: null, view: null }
+  showNotes: false, error: null, view: null, hint: null, statusGen: 0, open: false, statusAt: null, statusDue: false, focused: null }
+// while the panel is open its status follows the session: after a tool call, at the end of a turn, when the panel
+// takes the keys again; at most once in STATUS_GAP_MS (each ask starts a Python process)
+const STATUS_GAP_MS = 3000
+// the start (epoch seconds) of the last tool call this mod saw go through, per session id: its PreToolUse hook writes
+// a row in hooks.log within the call, so no row at or after it is a hook that did not run (maisecrets/hub.py)
+const lastToolCall = new Map()
 
 async function runSettings($, stdin) {
   const init = { cwd: $.plugin.root, stdin, timeoutMs: ASK_MS, env: { PYTHONUTF8: '1' } }
@@ -638,14 +658,40 @@ async function refreshStatus($) {
     pane.showNotes = false
   }
   const t0 = await $.clock.now()
-  const a = await askEntry($, { action: 'status', session_id: id })
-  if (pane.statusSession !== id) return
+  pane.statusAt = t0
+  // asks overlap (a tool call, the focus): only the answer of the newest ask is drawn
+  const gen = ++pane.statusGen
+  const a = await askEntry($, { action: 'status', session_id: id, tool_call_at: lastToolCall.get(id) ?? 0 })
+  if (pane.statusSession !== id || gen !== pane.statusGen) return
   pane.status = a && typeof a.line === 'string' ? a.line : 'maisecrets: the status is unknown → /maisecrets:status'
   pane.notes = a && Array.isArray(a.notes) ? a.notes.filter(n => n && typeof n.name === 'string') : []
   if (!pane.notes.length) pane.showNotes = false
   pane.statusMs = Math.round((await $.clock.now()) - t0)
   try { $.ui.log(`maisecrets hub: status in ${pane.statusMs} ms`, { to: 'debug' }) } catch { /* no log */ }
   $.ui.invalidate('ui.render')
+}
+
+// the panel closed by this mod; the engine raises ui.close for the person's close (registerSettingsPane)
+function closePane($) {
+  pane.hint = null
+  pane.open = false
+  pane.focused = null
+  return $.ui.close({ id: SETTINGS_PANE })
+}
+
+// the status again, while the panel is open: now, or once the gap since the last ask has passed (one wait at a time)
+async function statusSoon($) {
+  if (!pane.open || pane.statusDue) return
+  const now = await $.clock.now()
+  const wait = pane.statusAt == null ? 0 : pane.statusAt + STATUS_GAP_MS - now
+  if (wait <= 0) return void refreshStatus($).catch(() => {})
+  pane.statusDue = true
+  try {
+    $.clock.after(wait, () => {
+      pane.statusDue = false
+      if (pane.open) void refreshStatus($).catch(() => {})
+    })
+  } catch { pane.statusDue = false }
 }
 
 async function openSettings($) {
@@ -660,9 +706,11 @@ async function openSettings($) {
   void refreshStatus($).catch(() => {})
   const opened = await $.ui.open(openArgs())
   if (!opened?.isPlaced) {
-    try { await $.ui.close({ id: SETTINGS_PANE }) } catch { /* not open */ }
+    try { await closePane($) } catch { /* not open */ }
     return false
   }
+  pane.open = true
+  pane.focused = true
   $.ui.invalidate('ui.render')
   return true
 }
@@ -732,7 +780,7 @@ async function setNer($, value) {
 }
 
 async function fillPrompt($, text) {
-  try { await $.ui.close({ id: SETTINGS_PANE }) } catch { /* closed already */ }
+  try { await closePane($) } catch { /* closed already */ }
   try { await $.prompt.fill({ text }) } catch { /* the box stays as it is */ }
 }
 
@@ -753,11 +801,11 @@ function drawCountries($, e, Box, Text, Button) {
     h(Box, { flexDirection: 'row', marginTop: 1, key: 'f' },
       h(Box, { marginRight: 2, key: 'back' }, h(Button, { key: 'back', label: 'Back', autoFocus: true,
         onPress: () => { pane.sub = null; $.ui.invalidate('ui.render') } })),
-      h(Button, { key: 'close', label: 'Close', role: 'dismiss', onPress: () => $.ui.close({ id: SETTINGS_PANE }) })))
+      h(Button, { key: 'close', label: 'Close', role: 'dismiss', onPress: () => closePane($) })))
 }
 
 async function checkOldLeaks($) {
-  try { await $.ui.close({ id: SETTINGS_PANE }) } catch { /* closed already */ }
+  try { await closePane($) } catch { /* closed already */ }
   try { await $.prompt.fill({ text: '/maisecrets:secret-hygiene' }) } catch { /* the box stays as it is */ }
 }
 
@@ -765,7 +813,7 @@ function viewFoot($, Box, Button, extra = []) {
   return h(Box, { flexDirection: 'row', flexWrap: 'wrap', marginTop: 1, key: 'vfoot' }, ...extra,
     h(Box, { marginRight: 1, key: 'back' }, h(Button, { key: 'back', label: 'Back',
       onPress: () => { pane.view = null; $.ui.invalidate('ui.render') } })),
-    h(Button, { key: 'close', label: 'Close', role: 'dismiss', onPress: () => $.ui.close({ id: SETTINGS_PANE }) }))
+    h(Button, { key: 'close', label: 'Close', role: 'dismiss', onPress: () => closePane($) }))
 }
 
 const btn = (Box, Button, key, label, onPress, extra = {}) =>
@@ -862,12 +910,17 @@ function drawNer($, e, Box, Text, Button) {
 
 function drawSettings($, e) {
   const { Box, Text, Button } = $.ui.resolve(e)
+  // the panel takes the keys again (a click, the focus chord): its status may be old
+  const focused = e.props?.isFocused === true
+  if (focused && pane.focused === false) void statusSoon($).catch(() => {})
+  pane.focused = focused
   if (pane.view === 'values') return drawValues($, e, Box, Text, Button)
   if (pane.view === 'ner') return drawNer($, e, Box, Text, Button)
   if (pane.sub === 'regions') { const t = drawCountries($, e, Box, Text, Button); if (t) return t }
   const narrow = (e.props?.bodyColumns ?? 100) < NARROW
   const rows = []
   // the top stays in view on a short terminal: the status, the last change, the buttons
+  if (pane.hint) rows.push(h(Text, { color: 'yellow', key: 'hint' }, pane.hint))
   if (pane.status) {
     const line = [h(Text, { bold: true, key: 'status' }, pane.status)]
     if (pane.notes.length) {
@@ -888,7 +941,7 @@ function drawSettings($, e) {
     ['names', 'Name service', () => showNer($)],
     ['leaks', 'Check old leaks', () => checkOldLeaks($)]]
     .map(([key, label, onPress]) => h(Box, { marginRight: 1, flexShrink: 0, key }, h(Button, { key, label, onPress })))
-  foot.push(h(Button, { key: 'close', label: 'Close', role: 'dismiss', onPress: () => $.ui.close({ id: SETTINGS_PANE }) }))
+  foot.push(h(Button, { key: 'close', label: 'Close', role: 'dismiss', onPress: () => closePane($) }))
   rows.push(h(Box, { flexDirection: 'row', flexWrap: 'wrap', marginTop: 1, key: 'foot' }, ...foot))
   let focus = true
   for (const g of pane.groups) {
@@ -964,10 +1017,44 @@ function takeKeysSoon($) {
 
 function registerSettingsPane(on) {
   on('ui.render', { component: 'Pane', requestId: SETTINGS_PANE }, async ($, e) => drawSettings($, e))
+  on('ui.close', ($, e, next) => {
+    if (e.id === SETTINGS_PANE) { pane.open = false; pane.focused = null }
+    return next(e)
+  })
+  // a tool call or a turn of this session runs the hooks: the open panel asks for the status again. Neither hook
+  // changes the call or the answer, and a failure of its own never reaches them
+  on('tool.call', async ($, e, next) => {
+    let start = null
+    try { start = (await $.clock.now()) / 1000 } catch { start = null }
+    const r = await next(e)
+    try {
+      // a call another hook refused may not have reached PreToolUse: it is not kept
+      if (start !== null && (!r || r.deny === undefined)) {
+        // calls run in parallel: one that started earlier and ends later keeps the newer start
+        void $.session.id().then(id => { if (id) lastToolCall.set(id, Math.max(lastToolCall.get(id) ?? 0, start)) })
+          .catch(() => {}).finally(() => statusSoon($).catch(() => {}))
+      } else void statusSoon($).catch(() => {})
+    } catch { /* the line stays */ }
+    return r
+  })
+  on('turn.complete', async ($, e, next) => {
+    const r = await next(e)
+    try { void statusSoon($).catch(() => {}) } catch { /* the line stays */ }
+    return r
+  })
   // /maisecrets: the menu. A mod's own command, served here with no model turn (a typed /maisecrets alone is no
   // command file: the typeahead would turn it into the first /maisecrets:… command on Enter)
-  on('command.run', { command: 'maisecrets' }, async ($) => {
+  on('command.run', { command: 'maisecrets' }, async ($, e) => {
     const t0 = await $.clock.now()
+    // `/maisecrets sref login` that no person's prompt brought (the prompt.submit hook drops a person's): the box
+    // gets the command with its colon
+    const meant = meantCommand(`/maisecrets ${e?.args ?? ''}`)
+    if (meant) {
+      try { await $.prompt.fill({ text: meant }) } catch { /* the line names it */ }
+      return { text: `Did you mean ${meant}? Press Enter.` }
+    }
+    const word = firstWord(e?.args)
+    pane.hint = word ? unknownLine(word) : null
     let opened = false
     try { opened = await openSettings($) } catch { opened = false }
     if (!opened) return { text: '/maisecrets:status shows the protection, /maisecrets:settings the settings.' }
@@ -992,8 +1079,18 @@ export function register(on) {
     }
     if (!PERSON.has(e.origin?.kind)) return next(e)
     afterPrompt($, e.text)
+    const meant = meantCommand(e.text)
+    if (meant) {
+      // the engine puts a dropped prompt back into the box: the corrected command goes there once the drop landed.
+      // The person's Enter sends it, so a command that wants the person's own prompt still gets it
+      try {
+        $.clock.after(60, () => { void $.prompt.fill({ text: meant }).catch(() => {}) })
+      } catch { /* the line names it */ }
+      return { drop: `Did you mean ${meant}? Press Enter.` }
+    }
     const asked = SETTINGS_CMD.exec(e.text)
     if (asked) {
+      pane.hint = null
       // the panel in place of the text view; the command never renders, so the model gets no turn
       let opened = false
       const t0 = await $.clock.now()
