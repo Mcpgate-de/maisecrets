@@ -79,10 +79,10 @@ class State(unittest.TestCase):
     def setUp(self):
         _reset()
 
-    def test_a_missing_key_is_not_decided_and_false_is_a_decision(self):
+    def test_a_missing_key_is_the_default_and_false_is_a_decision(self):
         cfg = load_config()
         self.assertIs(cfg["ssh_consent"], False)
-        self.assertEqual(settings.state("ssh_consent", cfg), "not decided")
+        self.assertEqual(settings.state("ssh_consent", cfg), "default")
         _reset(ssh_consent=False)
         cfg = load_config()
         self.assertIs(cfg["ssh_consent"], False, "the same value")
@@ -92,27 +92,33 @@ class State(unittest.TestCase):
         cfg = {**load_config(), "policy_keys": ["ssh_consent"]}
         self.assertEqual(settings.state("ssh_consent", cfg), "set by a policy")
 
-    def test_the_list_shows_cards_with_value_state_meaning_and_the_next_command(self):
+    def test_the_table_shows_each_setting_with_its_value_and_the_card_its_meaning(self):
         _reset(ssh_consent=False)
-        lines = settings.render().splitlines()
-        at = lines.index("  SSH consent · off · set by you")
-        self.assertEqual(lines[at + 1].strip(), settings.MEANING["ssh_consent"])
-        self.assertEqual(lines[at + 2].strip(), "Turn on: /maisecrets:settings ssh_consent on")
-        text = "\n".join(lines)
-        for mode in ("automatic", "confirm", "block"):
-            self.assertIn(f"    {mode}", text, "rehydration explains its three modes together")
-        self.assertIn("Change: /maisecrets:settings rehydration confirm", text)
+        text = settings.render()
+        self.assertIn("| Ask before ssh changes a host | **off** ✎ | on | `ssh_consent` |", text)
+        self.assertIn("| Put values into tool calls | **automatic** | confirm · block | `rehydration` |", text)
+        self.assertIn("✎ = you changed it", text, "a mark the person set is explained")
+        self.assertNotIn("not decided", text)
         self.assertNotIn("allow_plaintext_store", text, "an internal key is not shown")
-        self.assertNotIn("Block @file mentions", text, "an advanced setting only with --all")
-        self.assertIn(f"More settings ({len(settings.ADVANCED)}): /maisecrets:settings --all", text)
+        self.assertNotIn("`renew_on_use`", text, "an advanced setting only with all")
+        self.assertIn("More: `/maisecrets:settings all`", text)
         full = settings.render(show_all=True)
-        self.assertIn("Block @file mentions", full)
-        self.assertIn("Lifetime of a value · 24 h (CARD 1 h)", full, "a lifetime reads as hours, not JSON")
-        self.assertIn("the hint for it may come once more", text, "default says that it resets the decision")
-        self.assertIn("  SSH consent · not shown yet", text, "the hint state is visible")
+        self.assertIn("`renew_on_use`", full)
+        self.assertIn("| Value lifetime | **24 h** |", full, "a lifetime reads as hours, not JSON")
+        for hidden in settings.NOT_LISTED:
+            self.assertNotIn(f"`{hidden}`", full, "a setting that only weakens protection is not offered")
+        card = settings.render(only="ssh_consent").splitlines()
+        at = card.index("  SSH consent (ssh_consent) · off · set by you")
+        self.assertEqual(card[at + 1].strip(), settings.MEANING["ssh_consent"])
+        self.assertEqual(card[at + 2].strip(), "Turn on: /maisecrets:settings ssh_consent on")
+        rehydration = settings.render(only="rehydration")
+        for mode in ("automatic", "confirm", "block"):
+            self.assertIn(f"    {mode}", rehydration, "rehydration explains its three modes together")
+        self.assertIn("(default)", rehydration)
         with mock.patch.object(settings, "load_config", return_value={**load_config(), "policy_keys": ["ssh_consent"]}):
-            self.assertIn("cannot be changed here", settings.render())
-
+            self.assertIn("| **off** ⚙ | set by your admin |", settings.render())
+            self.assertIn("cannot be changed here", settings.render(only="ssh_consent"))
+        self.assertIn("Change: `maisecrets: set KEY VALUE`", settings.render(codex=True), "Codex gets its own form")
 
 class EveryShownCommandWorks(unittest.TestCase):
     """Every /maisecrets:settings command the list prints runs through the hook and the command without an error.
@@ -122,17 +128,18 @@ class EveryShownCommandWorks(unittest.TestCase):
     def test_each_printed_command_changes_or_shows_without_an_error(self):
         import re as _re
         from maisecrets import cli
+        keys = [k for _t, ks in settings.MAIN_GROUPS + settings.MORE_GROUPS for k in ks]
         _reset(ssh_autonomous_hosts=["ops1"])
-        text = settings.render(show_all=True)
+        text = "\n".join(settings.render(only=k) for k in keys)
         _reset(ssh_autonomous_hosts=["ops1"], secret_destinations="off", ssh_consent=True)
-        text += settings.render(show_all=True)      # the commands a card shows only in another state
-        shown = sorted(set(_re.findall(r"(/maisecrets:settings [^\n(]+?)\s*(?:\(|$)", text, _re.M)))
+        text += "\n".join(settings.render(only=k) for k in keys)   # the commands a card shows only in another state
+        shown = sorted(set(_re.findall(r"(/maisecrets:settings [^\n(]+?)\s*(?:\(|$|  )", text, _re.M)))
         commands = [c.replace("HOST", "ops2").replace("KEY default", "ssh_consent default")
                     .replace(" DIR", " " + str(Path(_isolate.TMP, "team-rules").resolve()))
                     .replace(" FILE", " " + str(Path(_isolate.TMP, "values.jsonl").resolve())).strip() for c in shown]
         self.assertGreater(len(commands), 10, commands)
         for must in ("/maisecrets:settings secret_destinations observe", "/maisecrets:settings ssh_consent off",
-                     "/maisecrets:settings ssh_autonomous_hosts add ops2"):
+                     "/maisecrets:settings ssh_autonomous_hosts add ops2", "/maisecrets:settings ttl_seconds 7d"):
             self.assertIn(must, commands, "a command of a card is missing from the population")
         for command in commands:
             with self.subTest(command):
@@ -145,7 +152,6 @@ class EveryShownCommandWorks(unittest.TestCase):
                 said = "".join(c.args[0] for c in stdout.write.call_args_list)
                 self.assertEqual(rc, 0, said)
                 self.assertNotIn("is no setting", said)
-
 
 class Change(unittest.TestCase):
     def setUp(self):
@@ -172,7 +178,7 @@ class Change(unittest.TestCase):
         with mock.patch("sys.stdout") as stdout:
             self.assertEqual(cli.main(["settings", "ssh_consent", "on"]), 0)
         shown = "".join(c.args[0] for c in stdout.write.call_args_list)
-        self.assertIn("SSH consent · on · set by you", shown)
+        self.assertIn("SSH consent (ssh_consent) · on · set by you", shown)
         self.assertIn("Turn off: /maisecrets:settings ssh_consent off", shown)
         # a mistake still stops: there is nothing to show
         self.assertEqual(_prompt("/maisecrets:settings ssh_consent maybe")["decision"], "block")
@@ -218,9 +224,12 @@ class Change(unittest.TestCase):
         self.assertEqual(load_config()["max_keys_per_session"], 200, "the default")
         _prompt("/maisecrets:settings max_resolves_per_hour default")
         self.assertEqual(load_config()["max_resolves_per_hour"], 1000, "the default")
-        card = settings.render(show_all=True)
-        self.assertIn("Raise: /maisecrets:settings max_keys_per_session 400", card, "the card names the command")
-        self.assertIn("Raise: /maisecrets:settings max_resolves_per_hour 2000", card)
+        # not in the table (it only weakens protection when raised); its card still names the command
+        self.assertNotIn("max_keys_per_session", settings.render(show_all=True))
+        self.assertIn("Raise: /maisecrets:settings max_keys_per_session 400",
+                      settings.render(only="max_keys_per_session"), "the card names the command")
+        self.assertIn("Raise: /maisecrets:settings max_resolves_per_hour 2000",
+                      settings.render(only="max_resolves_per_hour"))
 
     def test_a_tool_call_that_carries_a_limit_change_is_refused(self):
         out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
@@ -246,7 +255,9 @@ class Change(unittest.TestCase):
         self.assertIn("takes on, off or default", _prompt("maisecrets: set ssh_consent maybe")["reason"])
         self.assertIn("takes automatic, confirm, block", _prompt("maisecrets: set rehydration never")["reason"])
         self.assertIn("no setting this command changes", _prompt("maisecrets: set backend jsonfile")["reason"])
-        self.assertIn("edit", _prompt("maisecrets: set regions de")["reason"].lower())
+        self.assertIn("edit", _prompt("maisecrets: set gateway_servers x")["reason"].lower())
+        self.assertIn("takes 1h, 24h, 7d", _prompt("maisecrets: set ttl_seconds 3d")["reason"])
+        self.assertIn("country code", _prompt("maisecrets: set regions xx")["reason"])
         self.assertNotIn("ssh_consent", _user())
         with mock.patch.object(settings, "load_config",
                                return_value={**load_config(), "policy_keys": ["ssh_consent"]}):
@@ -522,3 +533,31 @@ class Hint(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LifetimeAndCountries(unittest.TestCase):
+    def setUp(self):
+        _reset()
+
+    def test_a_lifetime_keeps_a_card_number_at_one_hour_and_a_longer_one_loosens(self):
+        self.assertNotIn("decision", _prompt("/maisecrets:settings ttl_seconds 7d"))
+        self.assertEqual(_user()["ttl_seconds"], {"default": 7 * 86400, "CARD": 3600})
+        self.assertTrue(settings.loosens("ttl_seconds", {"default": 86400}, {"default": 7 * 86400}))
+        self.assertFalse(settings.loosens("ttl_seconds", {"default": 86400}, {"default": 3600}))
+        _prompt("/maisecrets:settings ttl_seconds default")
+        self.assertNotIn("ttl_seconds", _user())
+
+    def test_countries_take_auto_or_a_known_code_and_a_country_taken_out_loosens(self):
+        _prompt("/maisecrets:settings regions de")
+        self.assertEqual(_user()["regions"], ["de"])
+        self.assertTrue(settings.apply_typed("regions", "toggle:fr")[0])
+        self.assertEqual(_user()["regions"], ["de", "fr"])
+        self.assertTrue(settings.apply_typed("regions", "toggle:de")[0])
+        self.assertEqual(_user()["regions"], ["fr"])
+        self.assertTrue(settings.apply_typed("regions", "toggle:auto")[0])
+        self.assertEqual(_user()["regions"], ["auto"])
+        self.assertFalse(settings.apply_typed("regions", "toggle:xx")[0])
+        self.assertIsNone(settings.parse_prompt("/maisecrets:settings regions toggle:de"), "a toggle is no prompt")
+        self.assertTrue(settings.loosens("regions", ["de", "fr"], ["fr"]))
+        self.assertFalse(settings.loosens("regions", ["fr"], ["de", "fr"]))
+

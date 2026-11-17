@@ -596,8 +596,8 @@ class Shown(unittest.TestCase):
     def test_the_settings_card_names_the_mode_and_what_was_seen(self):
         ref = _secret()
         _ran("Bash", {"command": _curl(ref, "api.example.com")})
-        text = settings.render()
-        self.assertIn("Where secrets were sent · observe · not decided", text)
+        text = settings.render(only="secret_destinations")
+        self.assertIn("Where secrets were sent (secret_destinations) · observe · (default)", text)
         self.assertIn("Seen so far: 1 secret(s), 1 destination(s), 0 with more than one.", text)
         self.assertIn("protect would have asked about 0 time(s) in the last 1 day(s), for 0 secret(s): an "
                       "estimate", text)
@@ -605,8 +605,8 @@ class Shown(unittest.TestCase):
         self.assertEqual(settings.parse_prompt("/maisecrets:settings secret_destinations protect"),
                          ("secret_destinations", "protect"))
         self.assertTrue(settings.apply_typed("secret_destinations", "protect")[0])
-        text = settings.render()
-        self.assertIn("Where secrets were sent · protect · set by you", text)
+        text = settings.render(only="secret_destinations")
+        self.assertIn("Where secrets were sent (secret_destinations) · protect · set by you", text)
         self.assertIn("protect would have asked about 0 time(s)", text)
         self.assertNotIn("Ask before a new host:", text)
         self.assertIn("takes observe, protect, off", settings.apply_typed("secret_destinations", "ask")[1])
