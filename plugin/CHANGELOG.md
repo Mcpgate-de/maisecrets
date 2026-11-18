@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.9.16] - 2026-11-18
+
+### Fixes
+
+- when the name service you set cannot be used, you are told once, with the cause and the step to fix it (1a10cb5)
+- a gateway login stays valid when a renewal is cut off, and maisecrets tells you when it ends (1f14aa0)
+- a wrong or missing argument gets one clear line with the next command, and no answer repeats what you typed (9471310)
+- the panel says whether a session is protected without false alarms, and /maisecrets followed by a command puts the right command in your prompt box (3cd3deb)
+
+### Security
+
+- a demo session sends nothing at all, also from client commands such as /btw, /rename and /recap; your own maisecrets commands answer there, and the panel asks with the focus on no (5af00af)
+
 ## [0.9.15] - 2026-11-17
 
 ### Features
