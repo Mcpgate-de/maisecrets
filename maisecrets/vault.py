@@ -356,6 +356,11 @@ class KeychainBackend:
     test_mode = False
 
     MAX_LINE = 3900   # `security -i` line limit is 4096 bytes; the rest would run as a command
+    # A value longer than one line is split over items: each part on its own line of `security -i`, never on the
+    # command line, where `ps` of any process shows it (#75). The add command has no other stdin form: `-w` last
+    # prompts on the terminal (getpass: /dev/tty first, at most 128 characters), `-X` is hex on the command line.
+    MAX_PARTS = 64    # about 160 KB of value; a longer one is refused, never put on the command line
+    _PART_RE = LazyRx(r"\.part\d{1,3}\.[0-9a-f]{12}\Z")
 
     @staticmethod
     def _q(s: str) -> str:
@@ -368,6 +373,38 @@ class KeychainBackend:
         return _run_store("keychain", ["security", "-i"], input=(line + "\n").encode("utf-8"),
                               capture_output=True, timeout=5)
 
+    def _add_line(self, account: str, stored: str, label: str, comment: str | None) -> str:
+        parts = ["add-generic-password", "-U", "-s", self._q(SERVICE), "-a", self._q(account),
+                 "-l", self._q(label), "-D", self._q("maisecrets placeholder"), "-w", self._q(stored)]
+        if comment:
+            parts += ["-j", self._q(comment)]
+        return " ".join(parts)
+
+    def _add(self, line: str) -> None:
+        # no check=True: CalledProcessError prints the argument list, and an error text can reach
+        # the model as a block reason (Codex review, 2026-09-26)
+        r = self._interactive(line)
+        if r.returncode != 0:
+            raise CodedError(f"keychain add failed (rc {r.returncode})", "store.keychain-add", "rc", r.returncode)
+
+    @staticmethod
+    def _part_name(key: str, i: int, gen: str) -> str:
+        return f"{key}.part{i}.{gen}"
+
+    def _raw(self, account: str) -> tuple[int, str]:
+        r = _run_store(
+            "keychain",
+            ["security", "find-generic-password", "-s", SERVICE, "-a", account, "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.returncode, (r.stdout.rstrip("\n") if r.returncode == 0 else "")
+
+    @staticmethod
+    def _split_head(raw: str) -> tuple[int, str, str] | None:
+        """(parts, generation, first part) of a head item `b64p:N:GEN:PART`, or None."""
+        m = re.fullmatch(r"b64p:(\d{1,3}):([0-9a-f]{12}):([A-Za-z0-9+/=]*)", raw)
+        return (int(m.group(1)), m.group(2), m.group(3)) if m else None
+
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         # -l is the "Name" column in Keychain Access, -j the comment shown in the item's info.
         # The item's ACL trusts /usr/bin/security, the tool that created it, so ANY process of
@@ -378,42 +415,66 @@ class KeychainBackend:
         # the value is stored base64-encoded with a marker: `find-generic-password -w` prints a
         # non-ASCII value as hex, so an umlaut never came back equal (measured 2026-09-26)
         import base64
-        stored = "b64:" + base64.b64encode(value.encode("utf-8")).decode("ascii")
-        parts = ["add-generic-password", "-U", "-s", self._q(SERVICE), "-a", self._q(key),
-                 "-l", self._q(label or f"maisecrets {key}"), "-D", self._q("maisecrets placeholder"),
-                 "-w", self._q(stored)]
-        if comment:
-            parts += ["-j", self._q(comment)]
-        # no check=True: CalledProcessError prints the argument list, and an error text can reach
-        # the model as a block reason (Codex review, 2026-09-26)
-        line = " ".join(parts)
+        label = label or f"maisecrets {key}"
+        b64 = base64.b64encode(value.encode("utf-8")).decode("ascii")
+        line = self._add_line(key, "b64:" + b64, label, comment)
+        old = self._raw(key)[1]           # the parts of a long value it replaces go after the new head
+        gen = ""
         if len(line.encode("utf-8")) <= self.MAX_LINE:
-            r = self._interactive(line)
+            self._add(line)
         else:
-            # `security -i` reads at most 4096 bytes per line and runs the rest as a second
-            # command (review, 2026-09-26: a 4096-bit PEM key). A long value goes on the
-            # command line instead: the value is then visible to `ps` of any local user for the
-            # milliseconds of the call, the trade documented in the README
-            r = _run_store("keychain", ["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
-                                "-l", label or f"maisecrets {key}", "-D", "maisecrets placeholder",
-                                "-w", stored] + (["-j", comment] if comment else []),
-                               capture_output=True, timeout=5)
-        if r.returncode != 0:
-            raise CodedError(f"keychain add failed (rc {r.returncode})", "store.keychain-add", "rc", r.returncode)
+            # The parts first, the head last: the head names the parts by a digest of the whole, so a read sees the
+            # old value or the new one, never a mix, and an add that stops halfway leaves the old value whole.
+            gen = hashlib.sha256(b64.encode("ascii")).hexdigest()[:12]
+            room = self.MAX_LINE - max(len(self._add_line(self._part_name(key, self.MAX_PARTS, gen), "",
+                                                          f"maisecrets part of {key}", None).encode("utf-8")),
+                                       len(self._add_line(key, f"b64p:{self.MAX_PARTS}:{gen}:", label,
+                                                          comment).encode("utf-8")))
+            room -= room % 4                 # each part is whole base64 groups
+            n = -(-len(b64) // room) if room >= 512 else self.MAX_PARTS + 1
+            if n > self.MAX_PARTS:
+                # never the command line: refused, and the caller keeps the value out of the store
+                raise CodedError("keychain add refused: the value is too long for the keychain's stdin form",
+                                 "store.keychain-add", "shape")
+            chunks = [b64[i * room:(i + 1) * room] for i in range(n)]
+            for i in range(1, n):
+                self._add(self._add_line(self._part_name(key, i, gen), chunks[i], f"maisecrets part of {key}", None))
+            self._add(self._add_line(key, f"b64p:{n}:{gen}:{chunks[0]}", label, comment))
+        head = self._split_head(old)
+        if head and head[1] != gen:          # the same value again keeps its parts: they are the new ones
+            rc = self._delete_parts(key, head)
+            if rc:
+                raise CodedError(f"keychain add failed (old parts stay, rc {rc})", "store.keychain-add", "rc", rc)
         if self.get(key) != value:
             raise CodedError("keychain add failed (read-back differs)", "store.keychain-readback", "shape")
 
+    def _delete_parts(self, key: str, head: tuple[int, str, str]) -> int:
+        """Delete the parts a head names; the return code of the first that refused, else 0."""
+        for i in range(1, min(head[0], self.MAX_PARTS)):
+            r = _run_store("keychain", ["security", "delete-generic-password", "-s", SERVICE, "-a",
+                                        self._part_name(key, i, head[1])], capture_output=True, timeout=5)
+            if r.returncode not in (0, 44):
+                return r.returncode
+        return 0
+
     def get(self, key: str) -> str | None:
-        r = _run_store(
-            "keychain",
-            ["security", "find-generic-password", "-s", SERVICE, "-a", key, "-w"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode != 0:
+        rc, raw = self._raw(key)
+        if rc != 0:
             return None
-        raw = r.stdout.rstrip("\n")
+        import base64
+        head = self._split_head(raw)
+        if head is not None:
+            n, gen, first = head
+            chunks = [first]
+            for i in range(1, n):
+                rc, part = self._raw(self._part_name(key, i, gen))
+                if rc != 0 or not re.fullmatch(r"[A-Za-z0-9+/=]+", part):
+                    return None
+                chunks.append(part)
+            raw = "b64:" + "".join(chunks)
+            if hashlib.sha256(raw[4:].encode("ascii")).hexdigest()[:12] != gen:
+                return None                  # a part of another value: never a mix
         if raw.startswith("b64:"):
-            import base64
             try:
                 return base64.b64decode(raw[4:]).decode("utf-8")
             except (ValueError, UnicodeDecodeError):
@@ -421,6 +482,13 @@ class KeychainBackend:
         return raw   # an entry written before 0.3.22
 
     def delete(self, key: str) -> None:
+        # the parts of a long value first: a delete that stops halfway leaves a head that reads as nothing, and the
+        # next sweep finds the head and its parts again
+        rc, raw = self._raw(key)
+        head = self._split_head(raw) if rc == 0 else None
+        rc = self._delete_parts(key, head) if head else 0
+        if rc:
+            raise RuntimeError(f"keychain delete failed (rc {rc})")
         r = _run_store(
             "keychain",
             ["security", "delete-generic-password", "-s", SERVICE, "-a", key],
@@ -433,11 +501,12 @@ class KeychainBackend:
 
     def keys(self) -> list[str]:
         """Every account of the service, from the attribute dump (no secrets are printed without
-        -d), so a damaged index can be rebuilt and an orphan item found (review, 2026-09-26)."""
+        -d), so a damaged index can be rebuilt and an orphan item found (review, 2026-09-26).
+        The parts of a long value are no keys of their own."""
         r = _run_store("keychain", ["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
         if r.returncode != 0:
             return []
-        return parse_keychain_dump(r.stdout, SERVICE)
+        return [k for k in parse_keychain_dump(r.stdout, SERVICE) if not self._PART_RE.search(k)]
 
     def wipe(self) -> int:
         """Delete every item of the service, one call per item until none is left: the store is
