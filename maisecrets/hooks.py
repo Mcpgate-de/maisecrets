@@ -1152,10 +1152,11 @@ def _sandbox_guard(py: str | None = None) -> str:
     inside the Claude Code sandbox; otherwise the command stops with exit 97 before the value is read."""
     from pathlib import Path as _P
     probe = _P(__file__).resolve().parent.parent / "hooks" / "sandbox_probe.py"
-    return (f'{shlex_quote(py or sys.executable)} {shlex_quote(str(probe))} || '
-            '{ echo "maisecrets: this command sends a value over ssh and runs only inside the Claude Code '
+    # if/else, not `|| { echo "…"; }`: Claude Code refuses an unquoted { before a quote as expansion obfuscation
+    return (f'if {shlex_quote(py or sys.executable)} {shlex_quote(str(probe))}; then :; else '
+            'echo "maisecrets: this command sends a value over ssh and runs only inside the Claude Code '
             'sandbox (sandbox.enabled with network.allowedDomains). The value was not read; the command '
-            'did not run." >&2; exit 97; }')
+            'did not run." >&2; exit 97; fi')
 
 
 def _proxy_option() -> str:
@@ -1921,9 +1922,10 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             check += (f' && case "${{{var}}}" in {SREF_REFUSED}*) printf \'%s\\n\' "maisecrets: the value for {key} '
                       f'was not given: ${{{var}#{SREF_REFUSED}}}. The command did not run; do not retry, tell the '
                       f'user." >&2; exit 97;; esac')
-        prelude.append(f'{var}="{read}"{check} || {{ echo "maisecrets: the value for {key} was not delivered '
-                       f'(served for 120 s, or read by another process); the command did not run. Run it again '
-                       f'once; if it fails again, stop and tell the user" >&2; exit 97; }}')
+        # if/else, not `|| { echo "…"; }`: Claude Code refuses an unquoted { before a quote as expansion obfuscation
+        prelude.append(f'if {var}="{read}"{check}; then :; else echo "maisecrets: the value for {key} was not '
+                       f'delivered (served for 120 s, or read by another process); the command did not run. Run it '
+                       f'again once; if it fails again, stop and tell the user" >&2; exit 97; fi')
     for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):
         var = var_by_key[key]
         ctx = ctxs[start]
