@@ -195,6 +195,7 @@ class StartTests(Base):
                                              "the login → /maisecrets:sref login"), first)
             self.assertNotIn("names are NOT checked", start(), "once per session")
 
+    @unittest.skipUnless(hasattr(__import__("socket"), "AF_UNIX"), "no Unix sockets here (Windows Python)")
     def test_a_unix_socket_is_probed_at_the_start(self):
         import socket
         import tempfile
