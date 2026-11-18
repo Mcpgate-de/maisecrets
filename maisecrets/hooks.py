@@ -866,6 +866,7 @@ def rewrite_prompt(payload: dict) -> dict:
             return {}           # the hook answers it, and blocks when it cannot record the name either
     matches = _prompt_hits(prompt)
     names, why = _prompt_names(cfg, prompt, matches, session, payload.get("origin") in ("composer", "bridge"))
+    LAST_NAMES_WHY[0] = why         # the demo's line reads it (demo.mod_answer)
     if names:
         matches = sorted(matches + names, key=lambda m: (m.start, m.end))
     # the name check did not run: the person learns it once per session (a silent miss looked like a clean prompt)
@@ -897,6 +898,9 @@ def rewrite_prompt(payload: dict) -> dict:
     if tip:
         answer["tip"] = tip         # the mod shows it next to its line, once (check_value.py)
     return answer
+
+
+LAST_NAMES_WHY: list = [None]     # why the name service did not read the last prompt rewrite_prompt saw ("" it did)
 
 
 def _unchecked_note(session: str | None, why: str) -> str | None:
@@ -1015,7 +1019,9 @@ def user_prompt(payload: dict) -> dict:
             from . import file_reads
             from .user_rules import expand
             file_reads.note_clean_root(session, str(expand(change[1][4:])))   # this session trusts it from now
-        if changed and client_of(payload) != "codex" and slash:
+        from . import demo as _demo
+        if changed and client_of(payload) != "codex" and slash and not _demo.active(
+                session, payload.get("transcript_path")):
             # a success is no refusal: the slash command runs on and shows the new state (a block read as an
             # error, "operation blocked by hook"). The prompt carries no value; the change is already written
             return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": reason}}
