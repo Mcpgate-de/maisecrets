@@ -457,3 +457,54 @@ test('of two tool calls at once, the newer start stays when the older call ends 
   expect(asks().length).toBeGreaterThan(2)
   expect(last.tool_call_at).toBe(newer / 1000)
 })
+
+// the UX test of 2026-11-17: Enter right after /maisecrets changed a setting, and a double Enter on forget deleted
+async function focused(ui) {
+  const all = await ui.findAll({ type: 'Button' })
+  return all.filter(b => b.props?.autoFocus === true).map(b => b.key ?? b.props?.key)
+}
+
+test('the panel opens with the focus on Close, and a forget asks with the focus on no', async ($, on) => {
+  const calls: any[] = []
+  engine(on, calls, { placed: true })
+  on('command.run', () => ({ text: 'engine' }))
+  await $.command.run({ command: 'maisecrets' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await focused(ui)).toEqual(['close'])
+  await ui.press({ key: 'stored' })
+  await ui.unmount()
+  const v = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await focused(v)).toEqual(['back'])
+  await v.press({ key: 'forget:SECRET_c1' })
+  await v.unmount()
+  const ask = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await focused(ask)).toEqual(['no:SECRET_c1'])
+  await ask.press({ key: 'no:SECRET_c1' })
+  await ask.press({ key: 'forget-all' })
+  await ask.unmount()
+  const all = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await focused(all)).toEqual(['no:all'])
+  await all.unmount()
+  expect(calls.some(c => ['forget', 'forget_all'].includes(JSON.parse(c.init.stdin || '{}').action))).toBe(false)
+})
+
+test('the name service questions open on Back: local starts its download only on a press of start', async ($, on) => {
+  const calls: any[] = []
+  engine(on, calls, { placed: true })
+  on('command.run', () => ({ text: 'engine' }))
+  await $.command.run({ command: 'maisecrets' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'names' })
+  await ui.unmount()
+  for (const sub of ['ner:local', 'ner:gateway']) {
+    const n = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await focused(n)).toEqual(['back'])
+    await n.press({ key: sub })
+    await n.unmount()
+    const q = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await focused(q)).toEqual(['back'])
+    await q.press({ key: 'cancel' })
+    await q.unmount()
+  }
+  expect(calls.some(c => JSON.parse(c.init.stdin || '{}').action === 'ner_set')).toBe(false)
+})

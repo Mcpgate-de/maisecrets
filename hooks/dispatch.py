@@ -110,8 +110,10 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
             os.chdir(payload["cwd"])
         answer = rewrite_prompt(payload)
         # whether this session is in the demo: each model step of the mod reads it (maisecrets/demo.py)
-        from maisecrets.demo import active as _in_demo  # noqa: E402
+        from maisecrets.demo import active as _in_demo, damaged as _damaged  # noqa: E402
         answer = {**answer, "inDemo": bool(_in_demo(payload.get("session_id")))}
+        if _damaged():
+            answer["damaged"] = True     # the mod keeps no true of a damaged state (demo off resets it)
     except Exception:  # noqa: BLE001 - no traceback: what passes back goes through other mods
         sys.exit(1)
     # ASCII JSON: ⟦ as \u27e6. A Windows console code page cannot write ⟦, and the answer was a traceback

@@ -475,7 +475,11 @@ async function ask($, prompt, session, cwd, origin) {
   if (!r) return null
   const answer = JSON.parse(r.stdout)
   if (!answer || answer.maisecrets !== MARK) return null
-  if (typeof answer.inDemo === 'boolean') demo.set(session, answer.inDemo)     // what each model step reads below
+  // what each model step reads below; a damaged state is not kept (demo off in another session resets it)
+  if (typeof answer.inDemo === 'boolean') {
+    if (answer.damaged === true) demo.delete(session)
+    else demo.set(session, answer.inDemo)
+  }
   if (typeof answer.text !== 'string' && typeof answer.drop !== 'string') return null
   return answer
 }
@@ -487,6 +491,7 @@ async function ask($, prompt, session, cwd, origin) {
 // last prompt), kept in this module's memory per session id. /clear gives a new session id, which asks again
 const DEMO_LINE = 'Demo mode: nothing was sent to the AI. /clear to switch it off.'
 const demo = new Map()     // session id -> in the demo; the demo command clears its entry
+const namesTold = new Set()   // session ids told once that the demo did not check names
 const DEMO_CMD = /^\s*(?:\/maisecrets:demo|maisecrets:\s*demo)\b/i
 
 async function runDemo($, stdin) {
@@ -506,6 +511,45 @@ async function runDemo($, stdin) {
   return null
 }
 
+// the person's own maisecrets command typed in a session in the demo: Python runs it without the model and the mod
+// drops the prompt with its output (maisecrets/demo.py own_answer). null: no answer, the prompt goes on as before
+const OWN_SLASH = /^\s*\/maisecrets:[a-z]/i
+const OWN_MS = 20000
+async function ownInDemo($, text, origin) {
+  const id = await $.session.id()
+  if (demo.get(id) === false) return null
+  const end = (await $.clock.now()) + OWN_MS
+  const stdin = JSON.stringify({ session_id: id, prompt: text, origin })
+  for (const argv of [['python3', 'hooks/dispatch.py', 'mod-demo'], ['py', '-3', 'hooks/dispatch.py', 'mod-demo'],
+    ['python', 'hooks/dispatch.py', 'mod-demo']]) {
+    const left = end - (await $.clock.now())
+    if (left <= 0) return null
+    let r
+    try {
+      r = await $.process.run(argv, { cwd: $.plugin.root, stdin, timeoutMs: left, env: { PYTHONUTF8: '1' } })
+    } catch { continue }
+    if (r.exitCode !== 0) continue
+    let a = null
+    try { a = JSON.parse(r.stdout) } catch { return null }
+    // not kept in `demo`: the hook of this prompt runs after it and may switch the session (only the steps keep it)
+    if (a?.maisecrets !== 'mod-demo' || typeof a.demo !== 'boolean') return null
+    return typeof a.drop === 'string' ? a.drop : null
+  }
+  return null
+}
+
+// a drop draws one line (Claude Code 2.1.326 shows a newline as a box): a longer output goes above it, a row per line
+const OWN_LINES = 80
+function showOwn($, text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  if (lines.length <= 1) return lines[0] || text
+  try {
+    for (const l of lines.slice(0, OWN_LINES)) $.ui.log(l)
+    if (lines.length > OWN_LINES) $.ui.log(`… ${lines.length - OWN_LINES} more lines`)
+  } catch { return lines.join(' · ') }
+  return 'demo mode: run here without the AI, its output is above.'
+}
+
 // true or false as Python said for this session id, null when Python gave no answer
 async function inDemo($) {
   const id = await $.session.id()
@@ -514,7 +558,7 @@ async function inDemo($) {
   let a = null
   try { a = r ? JSON.parse(r.stdout) : null } catch { a = null }
   if (a?.maisecrets !== 'mod-demo' || typeof a.demo !== 'boolean') return null
-  demo.set(id, a.demo)
+  if (a.damaged !== true) demo.set(id, a.demo)      // a damaged state is asked again: demo off in any session resets it
   return a.demo
 }
 
@@ -546,7 +590,26 @@ async function loudAgain($) {
   } catch { /* stays off for this process */ }
 }
 
+const DEMO_DENY = 'maisecrets demo: nothing goes to the AI. /clear to switch it off.'
+
 function registerDemo(on) {
+  // every request the engine sends raises http.fetch (origin "engine"): the turns, and each side request a client
+  // command makes outside a turn (/btw side_question, /rename, /recap away_summary, the title, the next-prompt guess,
+  // measured on Claude Code 2.1.326). In a session in the demo none goes out, with a body or without (a URL can carry
+  // text too); no answer from Python refuses it too
+  on('http.fetch', async ($, e, next) => {
+    if (next.origin?.plugin !== 'engine') return next(e)
+    if (await inDemo($) === false) return next(e)
+    return { deny: DEMO_DENY }
+  }).catch(async ($, e, next) => {
+    // the request went out and then failed: its failure stands, it is never sent a second time
+    if (next.called) throw next.error ?? new Error('maisecrets: the request failed')
+    if (next.origin?.plugin !== 'engine') return next(e)
+    let id = null
+    try { id = await $.session.id() } catch { id = null }
+    if (id !== null && demo.get(id) === false) return next(e)
+    return { deny: DEMO_DENY }
+  })
   // a compaction is a model request of its own (/compact made 2 in a demo session, Claude Code 2.1.326) and no
   // turn.step: in the demo it is skipped, and the conversation stays as it is
   on('session.compact', async ($, e, next) => {
@@ -809,9 +872,9 @@ async function checkOldLeaks($) {
   try { await $.prompt.fill({ text: '/maisecrets:secret-hygiene' }) } catch { /* the box stays as it is */ }
 }
 
-function viewFoot($, Box, Button, extra = []) {
+function viewFoot($, Box, Button, extra = [], focusBack = true) {
   return h(Box, { flexDirection: 'row', flexWrap: 'wrap', marginTop: 1, key: 'vfoot' }, ...extra,
-    h(Box, { marginRight: 1, key: 'back' }, h(Button, { key: 'back', label: 'Back',
+    h(Box, { marginRight: 1, key: 'back' }, h(Button, { key: 'back', label: 'Back', ...(focusBack ? { autoFocus: true } : {}),
       onPress: () => { pane.view = null; $.ui.invalidate('ui.render') } })),
     h(Button, { key: 'close', label: 'Close', role: 'dismiss', onPress: () => closePane($) }))
 }
@@ -835,8 +898,9 @@ function drawValues($, e, Box, Text, Button) {
       const q = c.action === 'forget' ? `Forget ${r.key}?` : `${r.key} is no secret, never mask it again?`
       rows.push(h(Box, { flexDirection: 'row', marginLeft: 2, key: `c:${r.key}` },
         h(Box, { marginRight: 1, key: 'q' }, h(Text, { color: 'yellow' }, q)),
-        btn(Box, Button, `yes:${r.key}`, 'yes', () => valuesAction($, c.action, r.key), { autoFocus: true }),
-        btn(Box, Button, `no:${r.key}`, 'no', () => { pane.confirm = null; $.ui.invalidate('ui.render') })))
+        btn(Box, Button, `yes:${r.key}`, 'yes', () => valuesAction($, c.action, r.key)),
+        btn(Box, Button, `no:${r.key}`, 'no', () => { pane.confirm = null; $.ui.invalidate('ui.render') },
+          { autoFocus: true })))
     } else if (r.live) {
       rows.push(h(Box, { flexDirection: 'row', marginLeft: 2, key: `a:${r.key}` },
         btn(Box, Button, `forget:${r.key}`, 'forget', () => {
@@ -853,14 +917,15 @@ function drawValues($, e, Box, Text, Button) {
   if (v.total > 0) {
     if (pane.confirm && pane.confirm.action === 'all') {
       extra.push(h(Box, { marginRight: 1, key: 'qa' }, h(Text, { color: 'yellow' }, 'Forget every stored value? The logs and records stay.')))
-      extra.push(btn(Box, Button, 'yes:all', 'yes', () => valuesAction($, 'forget_all', ''), { autoFocus: true }))
-      extra.push(btn(Box, Button, 'no:all', 'no', () => { pane.confirm = null; $.ui.invalidate('ui.render') }))
+      extra.push(btn(Box, Button, 'yes:all', 'yes', () => valuesAction($, 'forget_all', '')))
+      extra.push(btn(Box, Button, 'no:all', 'no', () => { pane.confirm = null; $.ui.invalidate('ui.render') },
+        { autoFocus: true }))
     } else {
       extra.push(btn(Box, Button, 'forget-all', 'forget all…', () => {
         pane.confirm = { action: 'all' }; $.ui.invalidate('ui.render') }, { dimColor: true }))
     }
   }
-  rows.push(viewFoot($, Box, Button, extra))
+  rows.push(viewFoot($, Box, Button, extra, !pane.confirm))
   return h(Box, { flexDirection: 'column' }, ...rows)
 }
 
@@ -874,7 +939,7 @@ function drawNer($, e, Box, Text, Button) {
     rows.push(h(Box, { marginTop: 1, key: 'lq' }, h(Text, { color: 'yellow' },
       'local downloads the image mcpgate/ner (about 690 MB) and runs it on 127.0.0.1 only.')))
     rows.push(h(Box, { flexDirection: 'row', key: 'lb' },
-      btn(Box, Button, 'start', 'start', () => setNer($, 'local'), { autoFocus: true, variant: 'primary' }),
+      btn(Box, Button, 'start', 'start', () => setNer($, 'local'), { variant: 'primary' }),
       btn(Box, Button, 'cancel', 'cancel', () => { pane.nerSub = null; $.ui.invalidate('ui.render') })))
   } else if (pane.nerSub === 'gateway') {
     rows.push(h(Box, { marginTop: 1, key: 'gq' }, h(Text, {}, 'The gateway of which MCP server?')))
@@ -941,9 +1006,9 @@ function drawSettings($, e) {
     ['names', 'Name service', () => showNer($)],
     ['leaks', 'Check old leaks', () => checkOldLeaks($)]]
     .map(([key, label, onPress]) => h(Box, { marginRight: 1, flexShrink: 0, key }, h(Button, { key, label, onPress })))
-  foot.push(h(Button, { key: 'close', label: 'Close', role: 'dismiss', onPress: () => closePane($) }))
+  // the first focus: Close, so an Enter right after /maisecrets changes nothing
+  foot.push(h(Button, { key: 'close', label: 'Close', role: 'dismiss', autoFocus: true, onPress: () => closePane($) }))
   rows.push(h(Box, { flexDirection: 'row', flexWrap: 'wrap', marginTop: 1, key: 'foot' }, ...foot))
-  let focus = true
   for (const g of pane.groups) {
     rows.push(h(Box, { marginTop: 1, key: `g:${g.title}` }, h(Text, { bold: true }, g.title)))
     for (const it of g.items) {
@@ -983,7 +1048,6 @@ function drawSettings($, e) {
             onPress: () => pick($, it.key, c) }
           if (now) props.variant = 'primary'
           else props.dimColor = true
-          if (now && focus) { props.autoFocus = true; focus = false }
           cells.push(h(Box, { marginRight: 1, flexShrink: 0, key: `b:${c}` }, h(Button, props)))
         }
       }
@@ -998,7 +1062,7 @@ function drawSettings($, e) {
     }
   }
   rows.push(h(Box, { marginTop: 1, key: 'help' }, h(Text, { dimColor: true },
-    'Tab or arrows move · Enter picks · Esc closes')))
+    'Tab moves · Enter picks · Esc closes')))
   return h(Box, { flexDirection: 'column' }, ...rows)
 }
 
@@ -1099,8 +1163,13 @@ export function register(on) {
         takeKeysSoon($)
         try { $.ui.log(`maisecrets hub: opened in ${Math.round((await $.clock.now()) - t0)} ms`, { to: 'debug' }) }
         catch { /* no log */ }
-        return { drop: 'maisecrets: the panel is open above. Esc closes it.' }
+        return { drop: 'maisecrets: the panel is open. Esc closes it.' }
       }
+    }
+    if (OWN_SLASH.test(e.text) && !DEMO_CMD.test(e.text)) {
+      let own = null
+      try { own = await ownInDemo($, e.text, e.origin?.kind) } catch { own = null }
+      if (own !== null) return { drop: showOwn($, own) }
     }
     if (SLASH.test(e.text)) return next(e)
     if (CHECK.test(e.text)) {
@@ -1128,6 +1197,14 @@ export function register(on) {
     // the demo: the masked prompt enters as the person's row; its model steps are answered above, none is sent
     if (answer.demo === true) {
       await quietForTheDemo($)
+      // one line: what was masked, and once per session that names were not checked (maisecrets/demo.py)
+      try {
+        const id = await $.session.id()
+        const parts = []
+        if (typeof answer.masked === 'string' && answer.masked) parts.push(answer.masked)
+        if (answer.namesUnchecked === true && !namesTold.has(id)) { parts.push('names: not checked'); namesTold.add(id) }
+        if (parts.length) $.ui.log(`demo · ${parts.join(' · ')}`)     // the client leads it with "maisecrets:"
+      } catch { /* a line for the person only */ }
       return next({ ...e, text: answer.text })
     }
     try {
