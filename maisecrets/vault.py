@@ -19,6 +19,7 @@ import os
 import re
 import platform
 import subprocess
+import threading
 import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -335,10 +336,66 @@ _TIMEOUT_CODES = {"keychain": "store.timeout-keychain", "openssl": "store.timeou
                   "Credential Locker": "store.timeout-locker"}
 
 
+_monotonic = time.monotonic        # the tests replace this module's `time` with a clock that has no monotonic
+_STORE_END: dict = {"hook": None}
+_STORE_LOCAL = threading.local()
+STORE_MARGIN = 1.0                 # seconds before the watchdog: the hook still writes its own answer
+
+
+def hook_deadline(seconds: float | None) -> None:
+    """The hook's watchdog answers `seconds` from now (None: no hook runs). Every store call ends STORE_MARGIN
+    before it, so a keychain that waits (a lock dialog, a busy securityd) fails this hook with its own reason
+    instead of holding it to the watchdog (#76)."""
+    _STORE_END["hook"] = None if seconds is None else _monotonic() + seconds - STORE_MARGIN
+
+
+class store_deadline:
+    """Within the block, the store calls of this thread end at `end` (time.monotonic) or earlier: a caller with a
+    shorter budget than the hook (the token of a gateway). None leaves the limit as it is."""
+
+    def __init__(self, end: float | None) -> None:
+        self.end = end
+
+    def __enter__(self) -> None:
+        self.old = getattr(_STORE_LOCAL, "end", None)
+        if self.end is not None:
+            _STORE_LOCAL.end = self.end if self.old is None else min(self.old, self.end)
+
+    def __exit__(self, *exc) -> None:
+        _STORE_LOCAL.end = self.old
+
+
+def store_time_left() -> float | None:
+    """Seconds a store call may still take, or None without a limit."""
+    ends = [e for e in (_STORE_END["hook"], getattr(_STORE_LOCAL, "end", None)) if e is not None]
+    return min(ends) - _monotonic() if ends else None
+
+
+def is_store_timeout(exc: BaseException) -> bool:
+    return isinstance(exc, CodedError) and exc.incident_cause == "timeout"
+
+
+def timeout_reason(exc: BaseException) -> str:
+    """The fail-closed reason of a hook whose store did not answer in its time; it names no value."""
+    code = getattr(exc, "incident_code", "")
+    store = {"store.timeout-keychain": "the macOS keychain", "store.timeout-openssl": "the encrypted store",
+             "store.timeout-locker": "the Windows Credential Locker"}.get(code, "the store")
+    return (f"{store} did not answer within the hook's time limit, so maisecrets could not read or store a value. "
+            + ("If the computer asks to unlock the keychain, unlock it. " if code == "store.timeout-keychain" else "")
+            + "Then try again.")
+
+
 def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
     """subprocess.run for a store call. A call that hits its timeout raised TimeoutExpired, which
     passed every `except RuntimeError` of the sweep, forget and wipe, and whose text lists the
-    argv, the value included on the keychain's long-value path (CLI test agent, 2026-09-27)."""
+    argv, the value included on the keychain's long-value path (CLI test agent, 2026-09-27).
+    In a hook the timeout is never longer than the hook's time that is left (#76)."""
+    left = store_time_left()
+    if left is not None:
+        if left <= 0.05:
+            raise CodedError(f"{what} call not started: no time left",
+                             _TIMEOUT_CODES.get(what, "store.timeout-keychain"), "timeout")
+        kw["timeout"] = min(kw.get("timeout") or left, left)
     if not kw.get("capture_output"):
         # a store tool must never write to the hook's own stdout or stderr: the client reads the hook's answer there,
         # and a child that keeps them open holds the client (Gate A of 0.6.15)

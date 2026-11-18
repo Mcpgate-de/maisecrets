@@ -1,7 +1,7 @@
 """The keychain store against a fake `security` that runs as a real program first on PATH (tests/fake_security.py).
 
 #75: a value never stands on the command line of `security`, where `ps` of any process of the user shows it, at any
-length.
+length. #76: a keychain that does not answer holds no hook past its own time; the hook fails closed and says why.
 
 The real `security` and the real keychain are never reached: the fake comes first on PATH, before the tripwires of
 tests/_isolate.py.
@@ -15,8 +15,10 @@ import json
 import os
 import secrets
 import shutil
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -26,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
+from maisecrets import vault  # noqa: E402
 from maisecrets.vault import CodedError, KeychainBackend  # noqa: E402
 
 FAKE = Path(__file__).resolve().parent / "fake_security.py"
@@ -53,6 +56,7 @@ class FakeKeychain(unittest.TestCase):
         env = mock.patch.dict(os.environ, make_fake(self.dir))
         env.start()
         self.addCleanup(env.stop)
+        self.addCleanup(vault.hook_deadline, None)
         self.backend = KeychainBackend()
 
     def calls(self) -> list[dict]:
@@ -147,6 +151,107 @@ class NoValueOnTheCommandLineTests(FakeKeychain):
         self.assertNotIn(value[:16], str(cm.exception))
         self.assertEqual(self.items(), {})
         self.assertFalse([c for c in self.calls() if c["argv"][:1] == ["add-generic-password"]])
+
+
+class SlowKeychainTests(FakeKeychain):
+    """#76: a keychain read waited its own 5 s, also when the hook had less time left."""
+
+    def slow(self, name: str, seconds: float) -> None:
+        env = mock.patch.dict(os.environ, {"FAKE_SECURITY_SLEEP": f"{name}:{seconds}"})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_a_read_ends_with_the_hooks_time(self):
+        self.backend.put("SECRET_c1", "fake-value-0001")
+        self.slow("find-generic-password", 30)
+        vault.hook_deadline(vault.STORE_MARGIN + 1.0)
+        started = time.monotonic()
+        with self.assertRaises(CodedError) as cm:
+            self.backend.get("SECRET_c1")
+        self.assertLess(time.monotonic() - started, 2.5)
+        self.assertTrue(vault.is_store_timeout(cm.exception))
+        self.assertNotIn("fake-value-0001", str(cm.exception))
+
+    def test_a_write_ends_with_the_hooks_time(self):
+        self.slow("add-generic-password", 30)
+        vault.hook_deadline(vault.STORE_MARGIN + 1.0)
+        started = time.monotonic()
+        with self.assertRaises(CodedError):
+            self.backend.put("SECRET_c1", "fake-value-0002")
+        self.assertLess(time.monotonic() - started, 2.5)
+
+    def test_no_call_starts_when_no_time_is_left(self):
+        vault.hook_deadline(vault.STORE_MARGIN - 0.5)
+        with mock.patch.object(vault.subprocess, "run") as run, self.assertRaises(CodedError) as cm:
+            self.backend.get("SECRET_c1")
+        run.assert_not_called()
+        self.assertTrue(vault.is_store_timeout(cm.exception))
+
+    def test_a_shorter_budget_of_a_caller_counts_inside_its_block(self):
+        self.slow("find-generic-password", 30)
+        vault.hook_deadline(6.0)
+        started = time.monotonic()
+        with self.assertRaises(CodedError), vault.store_deadline(time.monotonic() + 0.8):
+            self.backend.get("SECRET_c1")
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(vault.store_time_left() > 3, True)   # the block's limit ends with the block
+
+    def test_the_gateway_login_read_of_the_name_service_ends_with_its_deadline(self):
+        from maisecrets import sref_client
+        origin = "https://gateway.example.test"
+        sref_client._keep(self.backend, origin, {"access": "a", "refresh": "r"})
+        self.slow("find-generic-password", 30)
+        found = {"origin": origin, "token_endpoint": origin + "/token"}
+        started = time.monotonic()
+        with self.assertRaisesRegex(sref_client.Refused, "did not answer"):
+            sref_client._access({}, self.backend, found, time.monotonic() + 0.8)
+        self.assertLess(time.monotonic() - started, 2.0)
+
+    def test_the_name_service_of_a_gateway_leaves_the_names_unchecked_as_with_a_slow_service(self):
+        from maisecrets import ner_gateway, sref_client
+        origin = "https://gateway.example.test"
+        sref_client._keep(self.backend, origin, {"access": "a", "refresh": "r", "scope": "ner"})
+        self.slow("find-generic-password", 30)
+        found = {"origin": origin, "ner": {"scope": "ner", "endpoint": origin + "/ner"}}
+        started = time.monotonic()
+        with mock.patch.object(ner_gateway, "found_for", return_value=found), \
+                mock.patch("maisecrets.vault.make_backend", return_value=self.backend):
+            got, why = ner_gateway.detector({}, {"gateway": origin}, lambda *a: "a detector", time.monotonic() + 0.8)
+        self.assertIsNone(got)
+        self.assertIn("did not answer in time", why)
+        self.assertEqual(ner_gateway.LAST["cause"], "slow")
+        self.assertLess(time.monotonic() - started, 2.0)
+
+
+@unittest.skipIf(os.name == "nt", "the fake is a shell script")
+class HookFailsClosedTests(unittest.TestCase):
+    """The whole hook, as the client starts it: a keychain that does not answer ends in the hook's own answer, which
+    names the keychain, before the watchdog."""
+
+    SCRIPT = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets import hooks, vault\n"
+              "vault.make_backend = lambda cfg: vault.KeychainBackend()\n"
+              "sys.exit(hooks.main(['hook', sys.argv[2]]))\n")
+
+    def test_a_prompt_with_a_value_and_a_keychain_that_waits(self):
+        home = Path(tempfile.mkdtemp(prefix="maisecrets-slow-keychain-"))
+        self.addCleanup(shutil.rmtree, home, True)
+        (home / "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_"))}
+        env.update(make_fake(home / "fake"))
+        env.update({"MAISECRETS_HOME": str(home), "MAISECRETS_TEST_HOME_OWNED": str(home),
+                    "MAISECRETS_TEST_WATCHDOG": "4", "PYTHONDONTWRITEBYTECODE": "1",
+                    "FAKE_SECURITY_SLEEP": "find-generic-password:30"})
+        payload = {"session_id": "s1", "hook_event_name": "UserPromptSubmit",
+                   "prompt": "deploy with glpat-" + "abcdefghijKLMNOPQRST"}
+        started = time.monotonic()
+        r = subprocess.run([sys.executable, "-c", self.SCRIPT, str(ROOT), "user-prompt"], input=json.dumps(payload),
+                           capture_output=True, text=True, env=env, timeout=20)
+        took = time.monotonic() - started
+        answer = json.loads(r.stdout)
+        self.assertEqual(answer.get("decision"), "block", r.stdout)
+        self.assertIn("keychain did not answer", answer["reason"])
+        self.assertNotIn("took longer", answer["reason"])
+        self.assertLess(took, 4 + 2)
 
 
 if __name__ == "__main__":

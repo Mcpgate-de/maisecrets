@@ -2760,6 +2760,8 @@ def _failure(event: str, payload: dict, exc: BaseException) -> dict:
             f"no write access to {where}. Another program may hold it open (an antivirus scan, a second copy of "
             "maisecrets), or it belongs to another user. maisecrets blocks until it can write; to work without its "
             "protection meanwhile, switch its hooks off in the client's hook settings."), hint=False)
+    if vault_mod.is_store_timeout(exc):
+        return _fail_closed(event, payload, vault_mod.timeout_reason(exc))
     return _fail_closed(event, payload, f"an internal error ({type(exc).__name__}).")
 
 
@@ -3344,6 +3346,7 @@ def main(argv: list[str]) -> int:
     answered = {"v": False}
     answering = {"v": False}
     seconds = _test_watchdog_seconds(WATCHDOG_SECONDS[event])
+    vault_mod.hook_deadline(seconds)                 # every store call ends before the watchdog (#76)
 
     def answer(obj: dict, how: str) -> bool:
         """Write the one answer of this process; True when this call wrote it. Exactly one JSON object leaves the
@@ -3429,6 +3432,7 @@ def main(argv: list[str]) -> int:
         return 0
     finally:
         _disarm_alarm(alarm)
+        vault_mod.hook_deadline(None)
         # the recorder runs after the answer and never raises out of here: an exception would end the process
         # with exit 1, and a client ignores the JSON answer of a hook that exits 1
         if won:
