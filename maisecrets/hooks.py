@@ -1914,7 +1914,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                              "message comes again, stop and tell the user.")
             served.append(fifo)
             read = f"$(cat {shlex_quote(fifo)})"
-        check = f' && [ -n "${{{var}}}" ]' if key in srefs else ""   # a failed resolve writes nothing
+        # every read: an empty read (a failed resolve, another reader took the FIFO's write) never runs the command
+        check = f' && [ -n "${{{var}}}" ]'
         if key in srefs:
             # a refused resolve writes its reason (fixed text and counts, never a value) after a marker: the person
             # reads why, not a delivery timeout (mcpgate 2.0.3815: a login without the process scope)

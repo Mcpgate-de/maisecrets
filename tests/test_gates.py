@@ -122,7 +122,9 @@ class GrantTests(unittest.TestCase):
         out = _bash_pre("echo " + self.e.ref + " and '" + self.e.ref + "'")["hookSpecificOutput"]
         cmd = out["updatedInput"]["command"]
         self.assertEqual(cmd.count("__ms_1="), 1)
-        self.assertEqual(cmd.count("${__ms_1}"), 2)
+        # the one read refuses an empty value, and both places get the value
+        self.assertEqual(cmd.count('[ -n "${__ms_1}" ]'), 1)
+        self.assertEqual(cmd.count("${__ms_1}"), 3)
         if BASH:
             self.assertEqual(_run(cmd).stdout, NASTY + " and " + NASTY + "\n")
 
@@ -517,8 +519,9 @@ class ScannerEdgeTests(unittest.TestCase):
         self.assertNotIn("permissionDecision", out, out)
         got = out["updatedInput"]["command"]
         prelude = re.escape('if __ms_1="$(cat ') + r"[^)\s]+" + re.escape(
-            ')"; then :; else echo "maisecrets: the value for ' + self.e.key + ' was not delivered (served for 120 s, '
-            'or read by another process); the command did not run. Run it again once; if it fails again, stop and '
+            ')" && [ -n "${__ms_1}" ]; then :; else echo "maisecrets: the value for ' + self.e.key
+            + ' was not delivered (served for 120 s, or read by another process); the command did not run. '
+            'Run it again once; if it fails again, stop and '
             'tell the user" >&2; exit 97; fi; ')
         from maisecrets import exit_wrap        # Claude Code: the exit-0 trap after the reads (0.9.1)
         prelude += re.escape(exit_wrap.trap() + "; ")
@@ -629,6 +632,16 @@ class ClientCheckTests(unittest.TestCase):
                     again = _run(new)
                     self.assertEqual((again.returncode, again.stdout), (97, ""), again.stderr)
                     self.assertIn("not delivered", again.stderr)
+
+    @unittest.skipIf(BASH is None or os.name == "nt", "POSIX rewrite through bash")
+    def test_a_read_that_succeeds_with_zero_bytes_ends_with_97_and_runs_nothing(self):
+        # another reader took the FIFO's write, or a resolver answered nothing: cat exits 0 with no bytes (Gate A)
+        out = _bash_pre("echo RAN; printf '%s' " + self.e.ref)["hookSpecificOutput"]
+        new = out["updatedInput"]["command"]
+        fifo = re.search(r"\$\(cat (\S+)\)", new).group(1)
+        r = _run(new.replace(fifo, "/dev/null"))
+        self.assertEqual((r.returncode, r.stdout), (97, ""), r.stderr)
+        self.assertIn("not delivered", r.stderr)     # stdout "" above: not even the echo before the value ran
 
 
 class FailClosedTests(unittest.TestCase):

@@ -580,6 +580,12 @@ a shape needs a label or the vault command:
 A bare password in prose, such as "use Sommer2026 for the login", is not
 detected. That is a limit of pattern detection, not a setting.
 
+**A Bash command with a placeholder asks in Claude Code.** maisecrets never
+approves a tool call itself. The command reads the value when it runs, so Claude
+Code cannot check the words of the command first. It asks you, and under prefix
+rules such as `Bash(curl:*)` alone (and in `claude -p`) it refuses the command.
+In `--permission-mode auto` or with a plain `Bash` allow rule, the command runs.
+
 **The mod.** Claude Code 2.1.287 and later loads JavaScript middleware from a
 plugin ("mods"). maisecrets ships one in its own folder: `claude-mod/maisecrets-mod.mjs`,
 named by the manifest (`"hooks": "./claude-mod/maisecrets-mod.json"`). Nothing else in
