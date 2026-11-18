@@ -408,6 +408,24 @@ def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
                          "timeout") from None
 
 
+PARTS_PENDING = HOME / "keychain-parts.pending"
+
+
+def _parts_pending(on: bool | None = None) -> bool:
+    """A marker that a put of a long value began and has not finished: the next full sweep looks for orphan parts.
+    With no argument: whether the marker is there."""
+    if on is None:
+        return PARTS_PENDING.exists()
+    try:
+        if on:
+            PARTS_PENDING.touch()
+        else:
+            PARTS_PENDING.unlink()
+    except OSError:
+        pass
+    return on
+
+
 class KeychainBackend:
     """macOS login keychain via the ``security`` CLI. No sync flag is set."""
     test_mode = False
@@ -431,18 +449,28 @@ class KeychainBackend:
                               capture_output=True, timeout=5)
 
     def _add_line(self, account: str, stored: str, label: str, comment: str | None) -> str:
+        # `security -i` reads one command per line: a line break in a name, a label or a comment (a gateway origin)
+        # would end the command and start another one (Gate A, #75)
+        for arg in (account, stored, label, comment or ""):
+            if any(c in arg for c in "\0\r\n"):
+                raise CodedError("keychain add refused: a line break in a name, a label or a comment",
+                                 "store.keychain-add", "shape")
         parts = ["add-generic-password", "-U", "-s", self._q(SERVICE), "-a", self._q(account),
                  "-l", self._q(label), "-D", self._q("maisecrets placeholder"), "-w", self._q(stored)]
         if comment:
             parts += ["-j", self._q(comment)]
         return " ".join(parts)
 
-    def _add(self, line: str) -> None:
+    def _add(self, line: str, account: str | None = None, stored: str | None = None) -> None:
+        """One add through `security -i`. Its exit code is not proof: the interactive mode can exit 0 when its
+        command failed (Gate A, #75). With `account`, the item is read back and must hold `stored`."""
         # no check=True: CalledProcessError prints the argument list, and an error text can reach
         # the model as a block reason (Codex review, 2026-09-26)
         r = self._interactive(line)
         if r.returncode != 0:
             raise CodedError(f"keychain add failed (rc {r.returncode})", "store.keychain-add", "rc", r.returncode)
+        if account is not None and self._raw(account) != (0, stored):
+            raise CodedError("keychain add failed (read-back differs)", "store.keychain-readback", "shape")
 
     @staticmethod
     def _part_name(key: str, i: int, gen: str) -> str:
@@ -475,7 +503,9 @@ class KeychainBackend:
         label = label or f"maisecrets {key}"
         b64 = base64.b64encode(value.encode("utf-8")).decode("ascii")
         line = self._add_line(key, "b64:" + b64, label, comment)
-        old = self._raw(key)[1]           # the parts of a long value it replaces go after the new head
+        rc, old = self._raw(key)          # the parts of a long value it replaces go after the new head is proven
+        if rc not in (0, 44):
+            raise CodedError(f"keychain read failed (rc {rc})", "store.keychain-readback", "rc", rc)
         gen = ""
         if len(line.encode("utf-8")) <= self.MAX_LINE:
             self._add(line)
@@ -494,16 +524,21 @@ class KeychainBackend:
                 raise CodedError("keychain add refused: the value is too long for the keychain's stdin form",
                                  "store.keychain-add", "shape")
             chunks = [b64[i * room:(i + 1) * room] for i in range(n)]
+            _parts_pending(True)             # a put that stops before its head leaves parts for the sweep
             for i in range(1, n):
-                self._add(self._add_line(self._part_name(key, i, gen), chunks[i], f"maisecrets part of {key}", None))
+                name = self._part_name(key, i, gen)
+                self._add(self._add_line(name, chunks[i], f"maisecrets part of {key}", None), name, chunks[i])
             self._add(self._add_line(key, f"b64p:{n}:{gen}:{chunks[0]}", label, comment))
+        # the new value is proven before anything of the old one goes: a failed add keeps the old value whole
+        if self.get(key) != value:
+            raise CodedError("keychain add failed (read-back differs)", "store.keychain-readback", "shape")
         head = self._split_head(old)
         if head and head[1] != gen:          # the same value again keeps its parts: they are the new ones
             rc = self._delete_parts(key, head)
             if rc:
                 raise CodedError(f"keychain add failed (old parts stay, rc {rc})", "store.keychain-add", "rc", rc)
-        if self.get(key) != value:
-            raise CodedError("keychain add failed (read-back differs)", "store.keychain-readback", "shape")
+        if gen:
+            _parts_pending(False)
 
     def _delete_parts(self, key: str, head: tuple[int, str, str]) -> int:
         """Delete the parts a head names; the return code of the first that refused, else 0."""
@@ -542,6 +577,9 @@ class KeychainBackend:
         # the parts of a long value first: a delete that stops halfway leaves a head that reads as nothing, and the
         # next sweep finds the head and its parts again
         rc, raw = self._raw(key)
+        if rc not in (0, 44):
+            # unknown whether the item has parts: deleting the head alone would hide them (Gate A, #75)
+            raise RuntimeError(f"keychain delete failed (rc {rc})")
         head = self._split_head(raw) if rc == 0 else None
         rc = self._delete_parts(key, head) if head else 0
         if rc:
@@ -564,6 +602,35 @@ class KeychainBackend:
         if r.returncode != 0:
             return []
         return [k for k in parse_keychain_dump(r.stdout, SERVICE) if not self._PART_RE.search(k)]
+
+    def remove_orphan_parts(self) -> int:
+        """Delete every part that no readable head names (a put that stopped between its parts and its head, a
+        head deleted without its parts). A key whose head cannot be read keeps its parts. Returns the count."""
+        r = _run_store("keychain", ["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
+        if r.returncode != 0:
+            raise CodedError(f"keychain dump failed (rc {r.returncode})", "store.expire", "rc", r.returncode)
+        by_key: dict = {}
+        for acct in parse_keychain_dump(r.stdout, SERVICE):
+            m = self._PART_RE.search(acct)
+            if m:
+                by_key.setdefault(acct[:m.start()], []).append(acct)
+        n = 0
+        for key, parts in by_key.items():
+            rc, raw = self._raw(key)
+            if rc not in (0, 44):
+                continue
+            head = self._split_head(raw) if rc == 0 else None
+            keep = {self._part_name(key, i, head[1]) for i in range(1, head[0])} if head else set()
+            for part in parts:
+                if part in keep:
+                    continue
+                d = _run_store("keychain", ["security", "delete-generic-password", "-s", SERVICE, "-a", part],
+                               capture_output=True, timeout=5)
+                if d.returncode not in (0, 44):
+                    raise CodedError(f"keychain delete failed (rc {d.returncode})", "store.expire", "rc", d.returncode)
+                n += d.returncode == 0
+        _parts_pending(False)
+        return n
 
     def wipe(self) -> int:
         """Delete every item of the service, one call per item until none is left: the store is
@@ -668,6 +735,8 @@ class EncryptedFileBackend:
         try:
             return self._openssl(["-d"], blob).decode()
         except RuntimeError as exc:
+            if is_store_timeout(exc):
+                raise                        # no answer is no "expired": the caller fails closed (Gate A)
             from . import incidents
             incidents.note("store.decrypt", exc)
             return None
@@ -915,6 +984,8 @@ class Vault:
             try:
                 value = self.backend.get(key)
             except RuntimeError as exc:
+                if is_store_timeout(exc):
+                    raise                    # a store that does not answer fails the hook, never a skip (Gate A)
                 from . import incidents
                 incidents.note("store.mark-weak", exc)
                 continue
@@ -938,6 +1009,8 @@ class Vault:
             try:
                 value = self.backend.get(key)
             except RuntimeError as exc:
+                if is_store_timeout(exc):
+                    raise                    # a store that does not answer fails the hook, never a skip (Gate A)
                 from . import incidents
                 incidents.note("store.mark-weak", exc)
                 continue
@@ -961,6 +1034,8 @@ class Vault:
             try:
                 value = self.backend.get(key)
             except RuntimeError as exc:
+                if is_store_timeout(exc):
+                    raise                    # a store that does not answer fails the hook, never a skip (Gate A)
                 from . import incidents
                 incidents.note("store.mark-weak", exc)
                 continue
@@ -1351,6 +1426,8 @@ class Vault:
                 try:
                     self.backend.delete(key)
                 except RuntimeError as exc:
+                    if is_store_timeout(exc):
+                        raise                # a store that does not answer fails the hook, never a skip (Gate A)
                     from . import incidents
                     incidents.note("store.expire", exc)
                     # one item that refuses to go (a locked keychain over SSH) must not block
@@ -1378,6 +1455,14 @@ class Vault:
             from . import destinations
             # where a value went goes with the value: the list shows no purged entry (codex review of 0.6.7)
             destinations.forget(old + purged_now)
+        if limit is None and hasattr(self.backend, "remove_orphan_parts") and _parts_pending():
+            try:
+                self.backend.remove_orphan_parts()   # a put of a long value that stopped before its head
+            except RuntimeError as exc:
+                if is_store_timeout(exc):
+                    raise
+                from . import incidents
+                incidents.note("store.expire", exc)
         return n
 
     @_mutating
@@ -1458,6 +1543,8 @@ class Vault:
         except (ValueError, AttributeError):
             pass
         deleted = 0
+        if hasattr(self.backend, "remove_orphan_parts"):
+            deleted += self.backend.remove_orphan_parts()   # parts no head names (Gate A, #75)
         for key in keys:
             # the fingerprint key and the vault reference keys (vault_refs.py) are no values: a new key would unlink
             # every server

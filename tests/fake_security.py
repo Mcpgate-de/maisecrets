@@ -4,9 +4,14 @@ It records the argv and the stdin of each call in calls.jsonl, and keeps its ite
 $FAKE_SECURITY_DIR. Like the real one, `-i` reads at most 4096 bytes per line and runs the rest as another
 command, and `find-generic-password -w` prints a non-ASCII password as hex. FAKE_SECURITY_SLEEP ("NAME:SECONDS")
 makes the command NAME wait first, as a keychain that waits for an unlock dialog does. It never calls the real tool.
+
+`-i` exits 0 also when its command failed (the real tool may; Gate A of #75), unless FAKE_SECURITY_I_RC is set.
+FAKE_SECURITY_FAIL_ADD (a regex) makes each add of a matching account fail without a write; FAKE_SECURITY_FIND_FAIL
+("REGEX:RC") makes each find of a matching account fail with RC.
 """
 import json
 import os
+import re
 import sys
 import time
 
@@ -84,12 +89,18 @@ def run(argv):
         if opts.get("-w") is True:
             return 1, ""        # the prompt form: this fake has no terminal
         k = opts["-s"] + "\0" + opts["-a"]
+        fail = os.environ.get("FAKE_SECURITY_FAIL_ADD")
+        if fail and re.search(fail, opts["-a"]):
+            return 25, ""
         if k in items and "-U" not in opts:
             return 45, ""
         items[k] = opts["-w"]
         save(items)
         return 0, ""
     if name == "find-generic-password":
+        fail, _, rc = os.environ.get("FAKE_SECURITY_FIND_FAIL", "").rpartition(":")
+        if fail and re.search(fail, opts["-a"]):
+            return int(rc), ""
         pw = items.get(opts["-s"] + "\0" + opts["-a"])
         if pw is None:
             return 44, ""
@@ -129,7 +140,7 @@ def main():
                 if argv:
                     r, _out = run(argv)
                     rc = rc or r
-        return rc
+        return rc if os.environ.get("FAKE_SECURITY_I_RC") else 0
     rc, out = run(args)
     sys.stdout.write(out)
     return rc

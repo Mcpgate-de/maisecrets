@@ -153,6 +153,117 @@ class NoValueOnTheCommandLineTests(FakeKeychain):
         self.assertFalse([c for c in self.calls() if c["argv"][:1] == ["add-generic-password"]])
 
 
+class ExitZeroOnFailureTests(FakeKeychain):
+    """Gate A of #75: `security -i` can exit 0 although its command failed. The fake does so by default; only a
+    read-back proves an add, and a failed add never costs the old value."""
+
+    def env(self, **kw) -> None:
+        p = mock.patch.dict(os.environ, kw)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_failed_part_or_head_keeps_the_old_long_value(self):
+        for fail in (r"\.part2\.", r"^SECRET_c1$"):
+            with self.subTest(fail=fail):
+                old = random_text(9000)
+                os.environ.pop("FAKE_SECURITY_FAIL_ADD", None)
+                self.backend.put("SECRET_c1", old)
+                with mock.patch.dict(os.environ, {"FAKE_SECURITY_FAIL_ADD": fail}):
+                    with self.assertRaises(CodedError):
+                        self.backend.put("SECRET_c1", random_text(12000))
+                self.assertEqual(self.backend.get("SECRET_c1"), old)
+
+    def test_a_failed_short_add_keeps_the_old_value(self):
+        for old in (random_text(30), random_text(9000)):
+            with self.subTest(length=len(old)):
+                self.backend.put("SECRET_c2", old)
+                with mock.patch.dict(os.environ, {"FAKE_SECURITY_FAIL_ADD": r"^SECRET_c2$"}):
+                    with self.assertRaisesRegex(CodedError, "read-back"):
+                        self.backend.put("SECRET_c2", random_text(30))
+                self.assertEqual(self.backend.get("SECRET_c2"), old)
+
+    def test_a_line_break_in_a_name_a_label_or_a_comment_is_refused_before_any_call(self):
+        for kw in ({"key": "SECRET_c3\ndelete-generic-password -s x"}, {"label": "a\r\nlabel"},
+                   {"comment": "a\0comment"}):
+            with self.subTest(kw=kw):
+                with self.assertRaisesRegex(CodedError, "line break"):
+                    self.backend.put(kw.get("key", "SECRET_c3"), "fake-value-0003", label=kw.get("label"),
+                                     comment=kw.get("comment"))
+        self.assertFalse([c for c in self.calls() if c["argv"] == ["-i"]])
+        self.backend.put("SECRET_c4", "a value\nwith a line break")     # the value itself goes as base64
+        self.assertEqual(self.backend.get("SECRET_c4"), "a value\nwith a line break")
+
+    def test_orphan_parts_are_removed_and_the_parts_of_a_readable_head_stay(self):
+        keep = random_text(9000)
+        self.backend.put("SECRET_c5", keep)
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_FAIL_ADD": r"^SECRET_c6$"}):
+            with self.assertRaises(CodedError):
+                self.backend.put("SECRET_c6", random_text(9000))     # its parts stay without a head
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_FAIL_ADD": r"\.part3\."}):
+            with self.assertRaises(CodedError):
+                self.backend.put("SECRET_c5", random_text(12000))    # a new generation stopped halfway
+        self.assertTrue(vault._parts_pending())
+        orphans = [k for k in self.items() if ".part" in k and ("SECRET_c6" in k or "SECRET_c5" in k)]
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_FIND_FAIL": r"^SECRET_c7$:51"}):
+            self.backend.put("SECRET_c8", random_text(9000))
+            items = self.items()
+            items[vault.SERVICE + "\0SECRET_c7.part1.0123456789ab"] = "QUJD"   # its head cannot be read: kept
+            (self.dir / "items.json").write_text(json.dumps(items), encoding="utf-8")
+            removed = self.backend.remove_orphan_parts()
+        left = self.items()
+        self.assertEqual(self.backend.get("SECRET_c5"), keep)
+        self.assertEqual(removed, len(orphans) - (int(left[vault.SERVICE + "\0SECRET_c5"].split(":")[1]) - 1))
+        self.assertFalse([k for k in left if "SECRET_c6" in k])
+        self.assertIn(vault.SERVICE + "\0SECRET_c7.part1.0123456789ab", left)
+        self.assertFalse(vault._parts_pending())
+
+    def test_the_full_sweep_and_the_repair_remove_orphan_parts(self):
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_FAIL_ADD": r"^SECRET_c9$"}):
+            with self.assertRaises(CodedError):
+                self.backend.put("SECRET_c9", random_text(9000))
+        for run in ("expire", "repair"):
+            with self.subTest(run=run):
+                if run == "repair":
+                    with mock.patch.dict(os.environ, {"FAKE_SECURITY_FAIL_ADD": r"^SECRET_c9$"}):
+                        with self.assertRaises(CodedError):
+                            self.backend.put("SECRET_c9", random_text(9000))
+                self.assertTrue([k for k in self.items() if "SECRET_c9.part" in k])
+                v = open_vault(self, self.backend)
+                v.expire(limit=None) if run == "expire" else v.repair()
+                self.assertFalse([k for k in self.items() if "SECRET_c9.part" in k])
+
+    def test_a_put_whose_old_head_cannot_be_read_writes_nothing(self):
+        # the parts of the old value would be lost from sight under a new head
+        self.backend.put("SECRET_c11", random_text(9000))
+        before = self.items()
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_FIND_FAIL": r"^SECRET_c11$:51"}):
+            with self.assertRaisesRegex(CodedError, "rc 51"):
+                self.backend.put("SECRET_c11", random_text(30))
+        self.assertEqual(self.items(), before)
+
+    def test_a_delete_whose_head_read_fails_keeps_the_head_and_its_parts(self):
+        self.backend.put("SECRET_c10", random_text(9000))
+        before = self.items()
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_FIND_FAIL": r"^SECRET_c10$:51"}):
+            with self.assertRaisesRegex(RuntimeError, "rc 51"):
+                self.backend.delete("SECRET_c10")
+        self.assertEqual(self.items(), before)
+
+
+def open_vault(test: unittest.TestCase, backend):
+    """A Vault of the test home on this backend; the index goes at the end of the test."""
+    def clean():
+        for f in ("index.json", "audit.log", "events.log"):
+            try:
+                (vault.HOME / f).unlink()
+            except FileNotFoundError:
+                pass
+    clean()
+    test.addCleanup(clean)
+    with mock.patch.object(vault, "make_backend", return_value=backend):
+        return vault.Vault({"backend": "jsonfile", "allow_plaintext_store": True})
+
+
 class SlowKeychainTests(FakeKeychain):
     """#76: a keychain read waited its own 5 s, also when the hook had less time left."""
 
@@ -186,6 +297,42 @@ class SlowKeychainTests(FakeKeychain):
             self.backend.get("SECRET_c1")
         run.assert_not_called()
         self.assertTrue(vault.is_store_timeout(cm.exception))
+
+    def test_a_sweep_and_the_word_checks_do_not_swallow_a_store_timeout(self):
+        # Gate A of #76: each of them caught every RuntimeError, so a keychain that did not answer read as "skip"
+        v = open_vault(self, self.backend)
+        e = v.put("fake-value-0004", "SECRET", "generic-secret-shape", session="S1")
+        f = v.put("fake-value-0005", "SECRET", "label-password", session="S1")
+        meta, label = v._index["entries"][e.key], v._index["entries"][f.key]
+        meta.update(wordcheck=False, quiet=True, weak=False)
+        label.pop("weak", None)
+        v._save_index()                                          # each check reads the index again
+        self.slow("find-generic-password", 30)
+        for name in ("weaken_quiet_words", "weaken_word_hits", "mark_weak_entries", "expire"):
+            with self.subTest(name=name):
+                if name == "expire":
+                    meta["expires"] = 0                          # expired: the sweep deletes it
+                    v._index["entries"][e.key] = meta
+                    v._save_index()
+                vault.hook_deadline(vault.STORE_MARGIN + 0.6)
+                with self.assertRaises(CodedError) as cm:
+                    getattr(v, name)()
+                self.assertTrue(vault.is_store_timeout(cm.exception))
+
+    def test_the_encrypted_store_does_not_read_a_timeout_as_an_expired_value(self):
+        from maisecrets.vault import EncryptedFileBackend
+        home = Path(tempfile.mkdtemp(prefix="enc-store-"))
+        self.addCleanup(shutil.rmtree, home, True)
+        with mock.patch.dict(os.environ, {"MAISECRETS_KEY_FILE": str(home / "key")}), \
+                mock.patch.object(vault, "HOME", home):
+            b = EncryptedFileBackend()
+            b.put("SECRET_c1", "fake-value-0006")
+            late = CodedError("openssl call timed out", "store.timeout-openssl", "timeout")
+            with mock.patch.object(b, "_openssl", side_effect=late), self.assertRaises(CodedError):
+                b.get("SECRET_c1")
+            refused = CodedError("openssl failed", "store.openssl", "rc", 1)
+            with mock.patch.object(b, "_openssl", side_effect=refused):
+                self.assertIsNone(b.get("SECRET_c1"))
 
     def test_a_shorter_budget_of_a_caller_counts_inside_its_block(self):
         self.slow("find-generic-password", 30)
