@@ -149,7 +149,7 @@
  },
  {
   "id": "jina-api-key",
-  "regex": "jina_(?:(?<![A-Za-z0-9_]jina_)|(?<=\\\\[nrt]jina_))(?=[A-Za-z]{0,59}[0-9])[A-Za-z0-9]{60}(?![A-Za-z0-9_])"
+  "regex": "jina_(?:(?<![A-Za-z0-9_-]jina_)|(?<=\\\\[nrt]jina_))(?=[A-Za-z_-]{0,59}[0-9])[A-Za-z0-9_-]{60}(?![A-Za-z0-9_-])"
  },
  {
   "id": "aws-appsync-api-key",
@@ -1530,5 +1530,9 @@
  {
   "id": "serval-secret-key",
   "regex": "svl_secret_(?:(?<![A-Za-z0-9_-]svl_secret_)|(?<=\\\\[nrt]svl_secret_))(?:pk|wk|mk)_[0-9A-Za-z]{49}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "cal-api-key",
+  "regex": "cal_(?:(?<![A-Za-z0-9_-]cal_)|(?<=\\\\[nrt]cal_))(?:live_|test_)?[0-9a-f]{32}(?![A-Za-z0-9_-])"
  }
 ]

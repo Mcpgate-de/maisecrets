@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## [0.9.17] - 2026-11-18
+
+### Features
+
+- ms:(value) inside a prompt stores the value and the AI gets its placeholder; in Claude Code your own maisecrets commands answer in one line, not as "blocked by hook", and every Codex form works (10ec5c5)
+- detects Cal.com API keys and Jina AI keys that contain _ or - (87de122)
+
+### Fixes
+
+- /maisecrets:put stores a short value and says where maisecrets finds it (2225411)
+- a value you delete yourself no longer shows as "protection was loosened" at the next session start (e857e5b)
+- /maisecrets:sref status without a gateway exits 0 and names the next step; a failed server is always named (361ffd1)
+- passes the plugin directory check again, and the README says what the Claude Code mod reads, starts and sends (1971c04)
+- Claude Code no longer flags a command with a stored value as "expansion obfuscation" (dce501f)
+
+### Security
+
+- a command never runs when the read of its value comes back empty (cedd53d)
+
 ## [0.9.16] - 2026-11-18
 
 ### Fixes
