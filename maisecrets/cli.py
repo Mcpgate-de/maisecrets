@@ -1151,14 +1151,24 @@ def cmd_sref(args: list[str]) -> int:
         if not servers:
             print(f"maisecrets: no MCP server named {name} in your user configuration.")
             return 1
-    found = {}
+    found, failed = {}, []
     for server, url in servers.items():
         f = sref_client.discover(cfg, url)
         if f:
             found[server] = f
+        elif sref_client.discovery_failed():
+            failed.append(f"{server} ({sref_client.DISCOVERY.get('why')})")
+    for server in failed:
+        # each failure is said, also next to a server that works: a status that hid it exited 0 (Gate A)
+        print(f"maisecrets: the discovery of Sensitive References failed for {server}. Check that the server answers, "
+              "then send this command again.")
     if not found:
-        print("maisecrets: no MCP server of your user configuration offers Sensitive References.")
-        return 1
+        if failed:
+            return 1
+        print("maisecrets: no MCP server of your user configuration offers Sensitive References. Next step: add your "
+              "gateway as an MCP server of your user configuration, then send /maisecrets:sref login.")
+        # no server with references is a state, not a failure; a login or logout cannot start without one
+        return 0 if action == "status" else 1
     if action == "status":
         for server, f in found.items():
             if not sref_client.logged_in(backend, f["origin"]):
@@ -1174,7 +1184,7 @@ def cmd_sref(args: list[str]) -> int:
             who = sref_client.account(backend, f["origin"]) if sref_client.logged_in(backend, f["origin"]) else ""
             print(f"{server} ({urlsplit(f['origin']).hostname}): {state}"
                   + ("; account shown to you only" if who else ""))
-        return 0
+        return 1 if failed else 0
     if len(found) > 1 and name is None:
         # the gateway that /maisecrets:ner gateway URL names is the one meant (live test of #33)
         from .ner_setup import gateway_server
