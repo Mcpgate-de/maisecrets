@@ -605,7 +605,10 @@ const COMPACT_SKIP = 'maisecrets demo: the conversation stays as it is, nothing 
 
 // the client's guess at the next prompt is a model request of its own (a forked agent, source prompt_suggestion,
 // measured on Claude Code 2.1.326), with no hook of the mods API before it: in a session in the demo it is switched off
-// for this process, and back on once a prompt of a session out of the demo comes (only when this module switched it)
+// for this process. Once a prompt of a session out of the demo comes, it is set to '' (only when this module switched
+// it): the client's env parser reads '' as not set, so the Claude Code default applies. A value set before the demo is
+// not kept (no env read next to a program start, directory review). If that reset fails, suggestions stay off until
+// the next session
 let quieted = false
 async function quietForTheDemo($) {
   if (quieted) return
@@ -617,9 +620,9 @@ async function quietForTheDemo($) {
 async function loudAgain($) {
   if (!quieted) return
   try {
-    await $.env.set('CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', undefined)
+    await $.env.set('CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', '')
     quieted = false
-  } catch { /* stays off for this process */ }
+  } catch { /* suggestions stay off until the next session */ }
 }
 
 const DEMO_DENY = 'maisecrets demo: nothing goes to the AI. /clear to switch it off.'
@@ -883,9 +886,9 @@ function drawCountries($, e, Box, Text, Button) {
   const it = pane.groups.flatMap(g => g.items).find(i => i.key === 'regions')
   if (!it) { pane.sub = null; return null }
   const toggles = it.choices.map(c => {
-    const on = Array.isArray(it.values) && it.values.includes(c)
+    const chosen = Array.isArray(it.values) && it.values.includes(c)
     return h(Box, { marginRight: 1, flexShrink: 0, key: `b:${c}` }, h(Button, { key: `set:regions:${c}`,
-      label: on ? `● ${c}` : c, variant: on ? 'primary' : undefined, dimColor: !on,
+      label: chosen ? `● ${c}` : c, variant: chosen ? 'primary' : undefined, dimColor: !chosen,
       onPress: () => pick($, 'regions', c) }))
   })
   return h(Box, { flexDirection: 'column' },
