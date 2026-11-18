@@ -138,14 +138,10 @@ def cmd_forget(args: list[str]) -> int:
         print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
         return 2
     v, rc = Vault(), 0
-    # keys as a person types them: a comma or a semicolon between them, a full stop after the last, a key twice (#44)
-    # a placeholder in brackets is one key, also when its shown form holds a space or a comma: only the part before
-    # its first colon counts (codex review of #44)
-    text = " ".join(args)
-    keys = [m.group(1) for m in re.finditer(r"⟦([^⟦⟧:\s]+)(?::[^⟦⟧]*)?⟧", text)]
-    rest = re.sub(r"⟦[^⟦⟧]*⟧", " ", text)
-    keys += [k.strip("⟦⟧.").split(":", 1)[0].strip("⟦⟧.") for k in re.split(r"[\s,;]+", rest)]
-    for key in dict.fromkeys(k for k in keys if k):
+    # keys as a person types them (events.forget_keys, #44)
+    from . import events
+    from .selftest import sessions_of_this_command
+    for key in events.forget_keys(" ".join(args)):
         if key.lower() in ("all", "--all"):
             # `forget all` said "There is no all" (UX test, 2026-11-17)
             print("forget takes keys, not all. To delete every stored value: the [ forget all… ] button of the "
@@ -161,7 +157,10 @@ def cmd_forget(args: list[str]) -> int:
             print(f"That key is not stored in this spelling (see /maisecrets:list). Did you mean {same[0]}?")
             rc = 1
             continue
-        status = v.forget(key, route=_ROUTE["v"])
+        # the person typed /maisecrets:forget with this key in the session that runs this command (the prompt hook
+        # noted it; the client gives the command its session id): no start notice for it
+        typed = _ROUTE["v"] == "slash command" and events.take_typed_forget(key, sessions_of_this_command())
+        status = v.forget(key, route=_ROUTE["v"], typed=typed)
         if getattr(v, "destinations_kept", False):
             print(f"The destination record of {key} could not be deleted now; send /maisecrets:forget {key} later.")
         if status == "ok":
