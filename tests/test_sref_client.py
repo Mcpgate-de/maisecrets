@@ -44,6 +44,26 @@ def _cert() -> tuple:
     return _CERT
 
 
+def _drop_new_store_entries(case: unittest.TestCase) -> None:
+    """The entries a test adds to the temp home go when it ends: the values in the store and their rows in the vault
+    index. A later module counts the rows (`test_status_verdict`, #79); the store keys alone left them."""
+    from maisecrets import vault
+    backend = JsonFileBackend()
+    before = set(backend.keys())
+    index = vault.INDEX.read_bytes() if vault.INDEX.exists() else None
+
+    def drop() -> None:
+        for k in set(backend.keys()) - before:
+            backend.delete(k)
+        if index is None:
+            vault.INDEX.unlink(missing_ok=True)
+        else:
+            vault.INDEX.write_bytes(index)
+        if "maisecrets.hooks" in sys.modules:
+            sys.modules["maisecrets.hooks"]._live_cache.clear()   # the values it read from the rows
+    case.addCleanup(drop)
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **kw):
         return None
@@ -446,9 +466,7 @@ class SrefClientTests(unittest.TestCase):
         self.assertTrue(got[0].startswith("srefr_"), got)
 
     def _drop_new_store_entries(self) -> None:
-        """The entries a test adds to the store of the temp home go when it ends: a later module counts them."""
-        before = set(self.backend.keys())
-        self.addCleanup(lambda: [self.backend.delete(k) for k in set(self.backend.keys()) - before])
+        _drop_new_store_entries(self)
 
     def _race_a_raw_writer(self, write) -> None:
         """`write(backend)` writes the store without the Vault (no lock of its own): it reads the file, a renewal
@@ -924,6 +942,7 @@ class StoredIdIsNotReplacedTests(unittest.TestCase):
         from maisecrets import hooks
         from maisecrets.vault import Vault
         rid = "reference-id-of-plain-words"   # no shape the detector finds: the exact replacement alone
+        _drop_new_store_entries(self)
         Vault().put(rid + "⟧", "SECRET", "manual", session="s1")
         ref = f"\u27e6sref:secret:{rid}\u27e7"
         from maisecrets import sref_notes
