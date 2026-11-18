@@ -327,6 +327,9 @@ function demoWorld(on, opts: { demo?: boolean | null, sent?: number[], asked?: s
   on('session.cwd', () => ({ value: '/work' }))
   on('ui.log', ($, e) => { opts.logged?.push(e.text); return { value: undefined } })
   on('env.set', ($, e) => { (opts as any).env?.push([e.name, e.value]); return { value: {} } })
+  // the mod reads no environment variable (the directory review flagged the read next to a program start): each
+  // read is counted, also one that a try/catch of the mod would hide
+  on('env.get', ($, e) => { (opts as any).envReads?.push(e.name); return { value: undefined } })
   on('process.run', ($, e) => {
     opts.asked?.push(e.argv[2])
     if (e.argv[2] === 'mod-demo') {
@@ -454,7 +457,8 @@ test('a demo prompt switches the next-prompt guess of the client off, once per p
 
 test('a prompt out of the demo switches the next-prompt guess back on, only after the demo switched it off', async ($, on) => {
   const env: any[] = []
-  const opts: any = { env, inDemo: false }
+  const envReads: string[] = []
+  const opts: any = { env, envReads, inDemo: false }
   demoWorld(on, opts)
   await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
   expect(env).toEqual([])                     // never switched: nothing to switch back
@@ -462,7 +466,10 @@ test('a prompt out of the demo switches the next-prompt guess back on, only afte
   await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
   opts.inDemo = false
   await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
-  expect(env).toEqual([['CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', 'false'], ['CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', undefined]])
+  // '' brings the client's default back (its env parser reads '' as not set), with no undefined argument
+  expect(env).toEqual([['CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', 'false'], ['CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', '']])
+  expect(env.flat()).not.toContain(undefined)
+  expect(envReads).toEqual([])
 })
 
 // ---- the UX test of 2026-11-17
