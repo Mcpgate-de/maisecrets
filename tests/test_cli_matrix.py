@@ -795,6 +795,28 @@ class StateMatrixTests(unittest.TestCase):
         r = sb.run("put", stdin=fake_value())
         self.assertRegex(r.stdout, r"placeholder (?:is )?\u27e6SECRET_c2\b", "the counter continues past the old key")
 
+    def test_put_stores_a_short_value_and_says_where_maisecrets_finds_it(self):
+        # literal lengths: the limits of 4 and 8 characters are what the person reads, not a copy of the constants
+        sb = base_state("empty").copy()
+        self.addCleanup(sb.remove)
+        said = {}
+        for n in (3, 4, 7, 8):
+            r = sb.run("put", stdin=fake_value()[:n] + "\n")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("Stored.", r.stdout)
+            said[n] = r.stdout
+        for n in (3,):
+            self.assertIn("fewer than 4 characters. Stored-value matching masks it where its placeholder is used in "
+                          "a session, but only where no letter or digit stands next to it", said[n])
+        for n in (4, 7):
+            self.assertIn("fewer than 8 characters. Stored-value matching masks it where its placeholder is used",
+                          said[n])
+            self.assertIn("does not find it in other text", said[n])
+        for n in (3, 4, 7):
+            self.assertIn("The rules can still find it after a label such as password=.", said[n])
+        self.assertNotIn("Note:", said[8], "a value of 8 characters gets no note")
+        self.assertEqual(len(json.loads((sb.home / "index.json").read_text())["entries"]), 4, "all four are stored")
+
     def test_a_configuration_error_names_the_file_and_changes_nothing(self):
         for state, where in (("policy-wrong-type", "policy.json: keep_purged_days has the wrong type"),
                              ("jsonfile-not-allowed", "backend jsonfile is the TEST store")):

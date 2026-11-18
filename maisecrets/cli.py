@@ -276,6 +276,17 @@ def cmd_put(args: list[str]) -> int:
     copied = _clipboard(e.ref)
     print(f"Stored. Its placeholder {e.ref} is in your clipboard: paste it where the value is needed." if copied
           else f"Stored. Its placeholder is {e.ref}: paste it where the value is needed.")
+    from .tool_output import _EXACT_MIN_LEN, _RESOLVED_MIN_LEN
+    # the floors of tool_output._resolved_forms and of the fingerprint search: a short value would mask ordinary words
+    if len(value) < _RESOLVED_MIN_LEN:
+        print(f"Note: the value has fewer than {_RESOLVED_MIN_LEN} characters. Stored-value matching masks it where "
+              "its placeholder is used in a session, but only where no letter or digit stands next to it, and does "
+              "not find it in other text, because so short a value would mask ordinary words. The rules can still "
+              "find it after a label such as password=.")
+    elif len(value) < _EXACT_MIN_LEN:
+        print(f"Note: the value has fewer than {_EXACT_MIN_LEN} characters. Stored-value matching masks it where its "
+              "placeholder is used in a session, but does not find it in other text, because so short a value would "
+              "mask ordinary words. The rules can still find it after a label such as password=.")
     return 0
 
 
