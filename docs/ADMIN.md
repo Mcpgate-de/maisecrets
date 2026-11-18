@@ -1030,9 +1030,14 @@ and keeps its other keys. Written by hand, the setting looks like this:
   `"mask": false`; any other host always gets the filler. A slow, dead or
   confused service changes nothing: the rules' result stays as it is. A result
   longer than `max_chars` is not sent.
-- Each tool result whose names the service did not check shows a line on your screen, for example
-  `⚠ names not checked: the name service did not answer in time; the rules masked this result.` A name the AI then
-  writes in clear text came through that result; it is not made up. With `/maisecrets:ner unavailable withhold`
+- When a source is set and cannot be used, you see one line with the cause and the step, for example
+  `⚠️ maisecrets: names are NOT checked — the gateway ended the login → /maisecrets:sref login NAME`. The session
+  start checks the source (the gateway: a login in the store; a url or the local container: an answer within a
+  second; a Unix socket: a connection within a second), and a tool result names it once per session, again only when the cause changes. `/maisecrets:status`
+  and the panel show it as a `names` note, and the head line then says "protects secrets in this session; names
+  are not checked". The AI is told at each such result that names may stand in clear text; a name it then
+  writes in clear text came through that result; it is not made up. A text longer than the service takes still
+  gets its own line under that result. With `/maisecrets:ner unavailable withhold`
   such a result does not reach the AI at all (a text longer than the service takes is named, not withheld). The
   output of a failed command (Bash with an exit code other than 0) is neither checked by the service nor
   withheld: Claude Code does not let a hook replace it (threat model, PostToolUseFailure).
