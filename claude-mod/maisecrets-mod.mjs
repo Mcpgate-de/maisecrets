@@ -473,7 +473,11 @@ async function ask($, prompt, session, cwd, origin) {
   // origin: the hook takes a {{name}} marker only from a prompt the person typed (composer, bridge)
   const r = await runDispatch($, JSON.stringify({ prompt, session_id: session, cwd, origin }))
   if (!r) return null
-  const answer = JSON.parse(r.stdout)
+  return takeAnswer(JSON.parse(r.stdout), session)
+}
+
+// a parsed answer of mod-prompt for this session: what the steps below read, or null
+function takeAnswer(answer, session) {
   if (!answer || answer.maisecrets !== MARK) return null
   // what each model step reads below; a damaged state is not kept (demo off in another session resets it)
   if (typeof answer.inDemo === 'boolean') {
@@ -540,14 +544,42 @@ async function ownInDemo($, text, origin) {
 
 // a drop draws one line (Claude Code 2.1.326 shows a newline as a box): a longer output goes above it, a row per line
 const OWN_LINES = 80
-function showOwn($, text) {
+function showOwn($, text, last = 'demo mode: run here without the AI, its output is above.') {
   const lines = text.split(/\r?\n/).filter(l => l.trim())
   if (lines.length <= 1) return lines[0] || text
   try {
     for (const l of lines.slice(0, OWN_LINES)) $.ui.log(l)
     if (lines.length > OWN_LINES) $.ui.log(`… ${lines.length - OWN_LINES} more lines`)
   } catch { return lines.join(' · ') }
-  return 'demo mode: run here without the AI, its output is above.'
+  return last
+}
+
+// ---- the person's own maisecrets commands (prompt_commands.mod_command): the mod answers them, so none reaches the
+// model and none reads as "blocked by hook". The prompt hook's answer to a command (term add, not-a-secret, demo, the
+// incident report, a settings change) and each Codex form `maisecrets: NAME` are dropped with Python's text, and the
+// box is emptied (the engine puts a dropped prompt back into it: once, a name in it merged into the next prompt and
+// went to the AI). A Codex form that needs the model puts its slash form into the box. No answer from Python drops the
+// prompt all the same (fail closed); the settings hook blocks these without the mod. The self-test value is not here:
+// the real prompt hook must stop it, so its pass proves that hook ran
+const OWN_CMD = /^\s*(?:maisecrets\s*:\s*[a-z]|\/maisecrets:(?:term\s+\S|not-a-secret\b|demo\b|forget\s+import:|report\s+incident\b))/i
+const OWN_FAILED = 'maisecrets could not answer this command. Nothing was sent; send it again.'
+const OWN_ABOVE = 'maisecrets: answered without the AI, the output is above.'
+
+// Python's answer to a prompt, or null when none came (a failed start, a timeout, no JSON, another program's answer)
+async function askOwn($, text, origin) {
+  const r = await runDispatch($, JSON.stringify({ prompt: text, session_id: await $.session.id(),
+    cwd: await $.session.cwd(), origin }))
+  if (!r) return null
+  let a = null
+  try { a = JSON.parse(r.stdout) } catch { return null }
+  return a && a.maisecrets === MARK ? a : null
+}
+
+// once the drop landed: the box gets `text` ('' empties it)
+function fillSoon($, text) {
+  try {
+    $.clock.after(60, () => { void $.prompt.fill({ text }).catch(() => {}) })
+  } catch { /* the text stays in the box */ }
 }
 
 // true or false as Python said for this session id, null when Python gave no answer
@@ -1171,6 +1203,16 @@ export function register(on) {
       try { own = await ownInDemo($, e.text, e.origin?.kind) } catch { own = null }
       if (own !== null) return { drop: showOwn($, own) }
     }
+    let ownAnswer = null      // Python's answer to an own-command shape: the steps below use it, not a second ask
+    if (OWN_CMD.test(e.text)) {
+      try { ownAnswer = await askOwn($, e.text, e.origin?.kind) } catch { ownAnswer = null }
+      if (ownAnswer === null) return { drop: OWN_FAILED }
+      if (typeof ownAnswer.drop === 'string') {
+        fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
+        return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE) }
+      }
+      // no command of the mod's: the steps below, as for any prompt
+    }
     if (SLASH.test(e.text)) return next(e)
     if (CHECK.test(e.text)) {
       // a check of a value is never passed on: the verdict, or this sentence when Python gives none in time
@@ -1185,7 +1227,8 @@ export function register(on) {
     }
     let answer = null
     try {
-      answer = await ask($, e.text, await $.session.id(), await $.session.cwd(), e.origin?.kind)
+      answer = ownAnswer !== null ? takeAnswer(ownAnswer, await $.session.id())
+        : await ask($, e.text, await $.session.id(), await $.session.cwd(), e.origin?.kind)
     } catch {
       // the hook decides it
     }
