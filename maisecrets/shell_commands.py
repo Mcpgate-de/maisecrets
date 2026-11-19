@@ -1045,6 +1045,117 @@ def _only_prints(command: str, ctxs: list[str], segs: list[dict], seg: dict | No
     return not re.search(r"[<>|]", unquoted)
 
 
+# programs that run a text they get (an argument, stdin, a file they read) as code or as a prompt: a shell, an
+# interpreter, an AI client, a maisecrets entry, a wrapper that runs its arguments, a terminal or a tool that types
+# keys. A weakening command in quotes or in a heredoc body reaches a client or a writer only through one of them (#84)
+TEXT_RUNNERS = SHELLS | INLINE_INTERPRETERS | REMOTE_OR_EVAL | ARG_RUNNERS | WRAPPERS | {
+    "claude", "codex", "maisecrets", "run.sh", "run.cmd", "dispatch.py", "source", ".", "csh", "tcsh", "pwsh",
+    "powershell", "cmd", "py", "tclsh", "awk", "gawk", "mawk", "nawk", "find", "npx", "bunx", "uv", "uvx", "pipx",
+    "npm", "pnpm", "yarn", "docker", "podman", "kubectl", "xdotool", "ydotool", "wtype", "kitty", "wezterm", "zellij"}
+_PYTHON_NAME_RE = _LazyRx(r"(?:python|pypy)[\d.]*w?")
+# a substitution runs its text, also inside "…" and in an unquoted heredoc
+_SUBSTITUTION_RE = _LazyRx(r"\$\(|[<>]\(")
+
+
+def _runs_text(word: str) -> bool:
+    name = os.path.basename(word.replace("\\", "/")).lower()
+    name = name[:-4] if name.endswith(".exe") else name
+    return name in TEXT_RUNNERS or bool(_PYTHON_NAME_RE.fullmatch(name))
+
+
+def only_mentions(command: str, found) -> bool:
+    """Whether a Bash command only mentions a text that `found` matches, and does not run it (#84). A mention: each
+    match stands in data the shell hands over and never runs (inside '…' or "…", in a heredoc body or a comment the
+    parser reads for sure), the line has no substitution, and no word of the line runs a text (TEXT_RUNNERS; and a
+    path, a variable or a quoted name as the command word). `gh issue comment --body-file - <<'EOF'` with the
+    command in its body is a mention; `codex exec - <<'EOF'` with the same body, `bash -c '…'`, `eval`, `env`,
+    `$c exec '…'` and `python3 - <<'EOF'` are calls. False when unsure: the caller then refuses as before.
+
+    A text match, as the guards it serves (C22): a program that runs its argument under another name (a git alias, a
+    script of the user called by its bare name) is not seen."""
+    if "\r" in command:
+        return False
+    ctxs = _shell_contexts(command)
+    if any(cx in ("backtick", "arith", "hdx") for cx in ctxs):
+        return False
+    if any(ctxs[m.start()] not in ("sq", "hdq", "comment") for m in _SUBSTITUTION_RE.finditer(command)):
+        return False
+    data = [False] * len(command)
+    i = 0
+    while i < len(command):
+        cx = ctxs[i]
+        j = i
+        while j < len(command) and ctxs[j] == cx:
+            j += 1
+        sure = (cx in ("sq", "dq", "ansi") or (cx == "comment" and comment_is_sure(command, ctxs, i))
+                or (cx in ("hd", "hdq") and heredoc_is_sure(command, ctxs, i)))
+        for k in range(i, j):
+            data[k] = sure
+        i = j
+    code = "".join(" " if d and ch != "\n" else ch for ch, d in zip(command, data))
+    if found(code):
+        return False                    # a match in the code itself: the shell reads it as words of the command
+    # the words of the line, with quotes taken out; a heredoc body and a comment end a word and give none
+    words: list[tuple[str, bool, bool]] = []      # (word, in the command position, had a quote)
+    cur: list[str] = []
+    quoted = False
+    command_pos, target = True, False
+
+    def flush() -> None:
+        nonlocal cur, quoted, command_pos, target
+        if cur or quoted:
+            w = "".join(cur)
+            if target:
+                target = False
+            elif command_pos and (_ASSIGN_RE.match(w) or w in SHELL_KEYWORDS) and not quoted:
+                pass
+            else:
+                words.append((w, command_pos, quoted))
+                command_pos = False
+        cur, quoted = [], False
+
+    escaped, prev = False, ""
+    for ch, cx in zip(command, ctxs):
+        if cx in ("hd", "hdq", "comment"):
+            flush()
+            continue
+        if cx == "" and escaped:
+            escaped = False
+            if ch != "\n":              # a backslash before a line break continues the line
+                cur.append(ch)
+            continue
+        if cx == "":
+            prev, last = ch, prev
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch in " \t\n":
+                flush()
+                command_pos = command_pos or ch == "\n"
+                continue
+            if ch == "&" and last in "<>":
+                continue                # 2>&1, <&3: a redirection, no separator
+            if ch in ";&|()":
+                flush()
+                command_pos, target = True, False
+                continue
+            if ch in "<>":
+                flush()
+                target = True
+                continue
+            if ch in "'\"":
+                quoted = True
+                continue
+        cur.append(ch)
+    flush()
+    for w, at_command, had_quote in words:
+        if at_command and (_runs_text(w) or "/" in w or "\\" in w or w.startswith(("$", "~")) or had_quote):
+            return False
+        if not at_command and not re.search(r"\s", w) and _runs_text(w):
+            return False
+    return True
+
+
 def _parse_for_consent(text: str):
     ctxs = _shell_contexts(text)
     return _segments(text, ctxs), ctxs
