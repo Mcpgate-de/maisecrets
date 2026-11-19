@@ -1,6 +1,7 @@
 # c22-only-a-typed-prompt-switches-the-demo: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c22-only-a-typed-prompt-switches-the-demo"
 control = "C22"
+serves = ["M4.2"]
 statement = "The demo (/maisecrets:demo on|off) is switched only by the person's typed prompt; a subagent, a program, a scheduled prompt or a loop changes nothing."
 runner = ["tests/test_demo.py::SwitchTests::test_the_command_from_anywhere_but_the_persons_typed_prompt_changes_nothing"]
 

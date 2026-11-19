@@ -1,6 +1,7 @@
 # c1-a-passport-or-licence-number-after-an-eu-label-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c1-a-passport-or-licence-number-after-an-eu-label-is-a-hit"
 control = "C1"
+serves = ["M1.3"]
 statement = "In a tool result, a number after a passport or driving licence label of an EU language (Führerscheinnummer, Pass-Nr., permis de conduire, número de pasaporte, carnet de conducir, numero di passaporto, patente di guida, paspoortnummer, rijbewijsnummer, passaporte, körkortsnummer, numer paszportu, driving licence) is masked with the value checks of the other ID labels; a patent, a password and a label without a number stay text."
 runner = ["tests/test_personal_after_its_label.py::TravelIdLabelTests::test_a_passport_or_licence_number_after_its_label_in_an_eu_language_is_masked"]
 

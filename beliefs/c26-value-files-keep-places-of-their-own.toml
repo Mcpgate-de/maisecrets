@@ -1,6 +1,7 @@
 # c26-value-files-keep-places-of-their-own: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-value-files-keep-places-of-their-own"
 control = "C26"
+serves = ["M1.3"]
 statement = "The imports of commands take at most MAX_RUN_IMPORTS of the MAX_IMPORTS places, so a value file of the person is imported also after many imports of commands."
 runner = ["tests/test_values.py::ReviewRoundOne::test_imports_of_commands_leave_places_for_the_value_files"]
 

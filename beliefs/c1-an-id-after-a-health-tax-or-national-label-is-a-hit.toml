@@ -1,6 +1,7 @@
 # c1-an-id-after-a-health-tax-or-national-label-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c1-an-id-after-a-health-tax-or-national-label-is-a-hit"
 control = "C1"
+serves = ["M1.3"]
 statement = "In a tool result, an ID number of five digits or more after a health, tax or national label (health plan beneficiary number, medical record number, national ID, tax ID number, social security number) is masked with the value checks of the other ID labels; the label alone, a type or a variable stays text."
 runner = ["tests/test_personal_after_its_label.py::HealthIdLabelTests::test_an_id_after_a_health_tax_or_national_label_is_masked"]
 

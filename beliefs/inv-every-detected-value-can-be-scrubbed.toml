@@ -2,6 +2,7 @@
 belief = "inv-every-detected-value-can-be-scrubbed"
 kind = "invariant"
 control = "I4"
+serves = ["M2.1"]
 statement = "Every value the detector finds is masked in a transcript in every record shape Claude Code and Codex write, in a UTF-8 and an ASCII JSON writer, escaped once and twice, across the scrub's read window, and through the hooks that own the scrub; every line stays valid JSON, the rest of each record stays, and the file keeps its size and inode."
 runner = [
   "tests/test_invariant_transcript_scrub.py::ScrubTests::test_the_population_covers_every_placeholder_type_and_the_hard_shapes",

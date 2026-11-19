@@ -1,6 +1,7 @@
 # c28-a-cut-text-never-ends-inside-a-key: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c28-a-cut-text-never-ends-inside-a-key"
 control = "C28"
+serves = ["M1.4"]
 statement = "A converted text cut at 32K characters ends at a line and before an unclosed BEGIN block, so no part of a key reaches the model unmasked."
 runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_a_cut_text_ends_at_a_line_and_never_inside_a_key"]
 

@@ -1,6 +1,7 @@
 # c1-an-address-rule-that-is-off-frees-no-postcode: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c1-an-address-rule-that-is-off-frees-no-postcode"
 control = "C1"
+serves = ["M1.3"]
 statement = "Only an address rule that runs makes the company decision: when `enabled` leaves it out, the postcode and the VAT ID keep their hits."
 runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_an_address_rule_that_is_off_decides_nothing"]
 

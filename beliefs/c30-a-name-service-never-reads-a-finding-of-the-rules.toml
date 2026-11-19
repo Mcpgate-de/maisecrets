@@ -2,6 +2,7 @@
 belief = "c30-a-name-service-never-reads-a-finding-of-the-rules"
 kind = "invariant"
 control = "C30"
+serves = ["M1.3", "M6.4"]
 statement = "With the default mask, each finding of the rules and each stored value goes to the service as filler of the same length."
 runner = [
   "tests/test_remote_detector.py::RemoteDetectorTests::test_the_service_never_sees_a_deterministic_finding_and_offsets_still_fit",

@@ -1,6 +1,7 @@
 # c26-an-import-file-of-another-user-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-an-import-file-of-another-user-is-refused"
 control = "C26"
+serves = ["M4.2"]
 statement = "An import file that another user owns is refused, checked on the opened descriptor."
 runner = ["tests/test_values.py::FileChecks::test_a_file_of_another_user_is_refused"]
 

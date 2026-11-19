@@ -2,6 +2,7 @@
 belief = "c30-no-text-leaves-the-computer-without-allow-network"
 kind = "invariant"
 control = "C30"
+serves = ["M6.4"]
 statement = "Without allow_network the remote detector takes only a loopback address or a Unix socket, every address a host name resolves to must be loopback, and nothing is sent to an address that is not."
 runner = [
   "tests/test_remote_detector.py::RemoteDetectorTests::test_only_a_loopback_or_unix_address_without_allow_network",
