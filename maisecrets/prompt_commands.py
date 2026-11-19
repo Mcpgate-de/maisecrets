@@ -252,7 +252,7 @@ def mod_command(payload: dict) -> dict | None:
             plan["note"] = context
         if plan.get("view") == "ner":
             from . import ner_setup
-            plan["starting"] = bool(ner_setup.start_pid())
+            plan["starting"] = ner_setup.start_running()
         return {"run": plan}
     m = _TYPED_FORM_RE.match(prompt)
     name = m.group("name").lower() if m else ""

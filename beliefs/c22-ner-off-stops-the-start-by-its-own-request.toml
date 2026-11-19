@@ -1,0 +1,10 @@
+# c22-ner-off-stops-the-start-by-its-own-request: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-ner-off-stops-the-start-by-its-own-request"
+control = "C22"
+statement = "The off command of the name service signals no process: it writes a stop request with the nonce of the start, and the start ends its own docker child, removes its own labelled container and its record."
+runner = ["tests/test_ner_typed_start.py::TypedStartTests::test_typed_local_starts_without_a_question_and_off_ends_it_with_its_own_container"]
+
+[proof]
+file = "maisecrets/ner_setup.py"
+find = "        if not self.stopped and _read(STOP_FILE).get(\"nonce\") == self.nonce:"
+replace = "        if False:"

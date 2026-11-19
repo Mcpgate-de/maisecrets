@@ -1118,11 +1118,8 @@ def cmd_ner(args: list[str]) -> int:
     for the service, after a start."""
     from . import ner_setup
     if args[:1] == ["start"]:
-        ner_setup.note_start("child", "")        # a start of start_typed: its nonce, which ner off checks
-        try:
-            code, lines = ner_setup.start_local(load_config())
-        finally:
-            ner_setup._end_start_file(os.getpid())     # a start in the background (start_typed) is over
+        # with a record, a label and a stop request (/maisecrets:ner off), also from the command file
+        code, lines = ner_setup.run_start(load_config())
         print("\n".join(lines))
         return code
     wait = 0.0

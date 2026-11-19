@@ -196,7 +196,7 @@ def pane_ner() -> dict:
     lines = [ln for ln in lines if not ln.startswith(("all details:", "to turn it on:"))]
     # answers: the source can be used now; starting: a start of the local service runs in the background
     return {"source": source, "locked": "remote_detector" in (cfg.get("policy_keys") or []),
-            "servers": servers, "lines": lines, "answers": code == 0, "starting": bool(ner_setup.start_pid()),
+            "servers": servers, "lines": lines, "answers": code == 0, "starting": ner_setup.start_running(),
             "gateway_name": next(
                 (n for n, u in ner_setup._servers().items() if url and str(u).rstrip("/") == str(url).rstrip("/")),
                 None)}
@@ -213,7 +213,7 @@ def pane_ner_set(value: str) -> dict:
     # the press is the person's typed choice: apply_typed started the service (ner_setup.start_typed)
     if changed and value == "local":
         from . import ner_setup
-        out["starting"] = bool(ner_setup.start_pid())
+        out["starting"] = ner_setup.start_running()
     if changed and value.startswith("gateway:"):
         out["login"] = value[len("gateway:"):]
     return out

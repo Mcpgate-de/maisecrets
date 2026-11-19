@@ -1,7 +1,13 @@
 """`ner local`, typed by the person, starts the name service at once (no question first, 0.9.19); a setting of a policy
-or of an earlier session never starts a download; `ner off` stops a start that runs. Docker is a fake shell script on
-PATH (POSIX only: on Windows the fake would need a .cmd of its own), and the probe of 127.0.0.1:8765 is a fake too, so
-a real container of the person on that port changes nothing."""
+or of an earlier session never starts a download; `ner off` stops a start that runs.
+
+The lifecycle (ner_setup.start_typed, run_start, stop_local): the start owns a nonce. Its container carries the label
+`maisecrets.start=<nonce>`, and `ner off` removes only a container with that label. `ner off` signals no process: it
+writes a stop request, and the start ends its own docker child, removes its own labelled container and its record. A
+record whose start ended without its cleanup goes, and no process is touched.
+
+Docker is a fake shell script on PATH (POSIX only: on Windows the fake would need a .cmd of its own), and the probe of
+127.0.0.1:8765 is a fake too, so a real container of the person on that port changes nothing."""
 from __future__ import annotations
 
 import json
@@ -24,44 +30,52 @@ from maisecrets.vault import HOME  # noqa: E402
 
 CONFIG = {"backend": "jsonfile", "allow_plaintext_store": True}
 CID = "feed" * 16
-# the fake docker: every call goes into the log; `run` marks a container made halfway, then waits (the download)
-FAKE = """#!/bin/sh
+# the fake docker: every call goes into the log. `run` makes the container (the file `made`, and `label` with the value
+# of its --label) and waits (the download): FAKE_RUN=late waits first and makes it after. `ps --filter label=…` lists it
+# only when its label is that value. A wait ends when the test writes the file `die` (no fake outlives the test)
+FAKE = r"""#!/bin/sh
 echo "$*" >> "$FAKE_DOCKER_LOG"
+D="$FAKE_DOCKER_DIR"
+pause() { i=0; while [ $i -lt 600 ]; do [ -f "$D/die" ] && exit 0; sleep 0.1; i=$((i+1)); done; }
 case "$1" in
   info) exit 1 ;;
   container)
-    [ -f "$FAKE_DOCKER_DIR/made" ] || { echo "no such container" >&2; exit 1; }
+    [ -f "$D/made" ] || { echo "no such container" >&2; exit 1; }
     case "$*" in
       *State.Running*) echo "%(cid)s true sha256:abc mcpgate/ner:v2.0.3916" ;;
       *) echo "%(cid)s mcpgate/ner:v2.0.3916" ;;
     esac ;;
-  run) touch "$FAKE_DOCKER_DIR/made"; sleep 60; echo "%(cid)s" ;;
-  start) [ -n "$FAKE_SLOW_START" ] && sleep 60 ;;
-  rm) rm -f "$FAKE_DOCKER_DIR/made" ;;
+  ps)
+    [ -f "$D/made" ] || exit 0
+    case "$*" in
+      *label=maisecrets.start=*)
+        all="$*"; want="${all##*label=maisecrets.start=}"
+        [ -f "$D/label" ] && [ "$(cat "$D/label")" = "$want" ] && echo "%(cid)s" ;;
+      *) echo "%(cid)s" ;;
+    esac ;;
+  run)
+    label=""; prev=""
+    for a in "$@"; do [ "$prev" = "--label" ] && label="${a#maisecrets.start=}"; prev="$a"; done
+    [ "$FAKE_RUN" = "late" ] && pause
+    touch "$D/made"; [ -n "$label" ] && printf %%s "$label" > "$D/label"
+    pause
+    echo "%(cid)s" ;;
+  start) [ -n "$FAKE_SLOW_START" ] && pause ;;
+  rm) rm -f "$D/made" "$D/label" ;;
 esac
 exit 0
 """ % {"cid": CID}
 
 
-def _gone(pid: int) -> bool:
-    """The start ended: reaped here when this test process is its parent (a zombie still answers kill 0)."""
-    try:
-        os.waitpid(pid, os.WNOHANG)
-    except ChildProcessError:
-        pass
-    return not ner_setup._alive(pid)
-
-
-def _kill_group(pid: int) -> None:
-    import signal
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except OSError:
-        pass
-
-
 def _prompt(text: str) -> dict:
     return hooks.user_prompt({"prompt": text, "session_id": "S1", **CLAUDE})
+
+
+def _record() -> dict:
+    try:
+        return json.loads(Path(HOME, ner_setup.START_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 @unittest.skipIf(os.name == "nt", "the fake docker is a shell script")
@@ -80,21 +94,17 @@ class TypedStartTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         os.environ.pop(ner_setup.NO_START_ENV, None)
-        self.addCleanup(self._stop)
+        self.addCleanup(self._clean)
 
-    def _stop(self):
-        pid = ner_setup.start_pid()
-        if pid:
-            import signal
-            try:
-                os.killpg(pid, signal.SIGKILL)
-            except OSError:
-                pass
-        for name in (ner_setup.START_PID, ner_setup.START_LOG):
-            try:
-                os.unlink(Path(HOME, name))
-            except FileNotFoundError:
-                pass
+    def _clean(self):
+        # a start that still runs gets the stop request; every fake wait ends
+        d = _record()
+        if d.get("nonce"):
+            Path(HOME, ner_setup.STOP_FILE).write_text(json.dumps({"nonce": d["nonce"]}), encoding="utf-8")
+            self.wait_for(lambda: not Path(HOME, ner_setup.START_FILE).exists(), 5)
+        Path(self.dir, "die").write_text("", encoding="utf-8")
+        for name in (ner_setup.START_FILE, ner_setup.STOP_FILE, ner_setup.START_LOG):
+            Path(HOME, name).unlink(missing_ok=True)
         Path(HOME, "config.json").write_text(json.dumps(CONFIG), encoding="utf-8")
 
     def calls(self) -> list:
@@ -105,99 +115,93 @@ class TypedStartTests(unittest.TestCase):
         while time.monotonic() < end:
             if cond():
                 return True
-            time.sleep(0.1)
+            time.sleep(0.05)
         return False
 
-    def test_typed_local_starts_without_a_question_and_off_stops_it(self):
+    def started(self) -> str:
+        """The nonce of the start, once its docker run began."""
+        self.assertTrue(self.wait_for(lambda: any(c.startswith("run ") for c in self.calls())), self.calls())
+        return _record().get("nonce", "")
+
+    def test_typed_local_starts_without_a_question_and_off_ends_it_with_its_own_container(self):
         out = _prompt("/maisecrets:ner local")
         # a success: the slash command runs on (the hook path of Codex and claude -p), with the note of the start
-        context = out["hookSpecificOutput"]["additionalContext"]
-        self.assertIn(ner_setup.START_NOTE, context)
-        pid = ner_setup.start_pid()
-        self.assertTrue(pid)
-        self.assertTrue(self.wait_for(lambda: any(c.startswith("run ") for c in self.calls())), self.calls())
-        self.assertIn("mcpgate/ner", [c for c in self.calls() if c.startswith("run ")][0])
+        self.assertIn(ner_setup.START_NOTE, out["hookSpecificOutput"]["additionalContext"])
+        self.assertTrue(ner_setup.start_running())
+        nonce = self.started()
+        run = [c for c in self.calls() if c.startswith("run ")][0]
+        self.assertIn(f"--label maisecrets.start={nonce}", run)
+        self.assertIn("mcpgate/ner", run)
+        self.assertTrue(self.wait_for(lambda: Path(self.dir, "label").exists()))
         # a second typed choice while it runs starts no second one
         _prompt("/maisecrets:ner local")
-        self.assertEqual(ner_setup.start_pid(), pid)
-        # off stops the start (the docker client of the pull goes with its process group) and the half-made container
+        self.assertEqual(_record().get("nonce"), nonce)
+        # off: a stop request; the start ends its own docker child and removes its own labelled container
         out = _prompt("/maisecrets:ner off")
-        self.assertIn("stopped", json.dumps(out))
-        self.assertTrue(self.wait_for(lambda: _gone(pid), 10), "the start still runs")
-        self.assertEqual(ner_setup.start_pid(), 0)
+        self.assertIn("download and start of the name service stopped", json.dumps(out).lower())
+        self.assertFalse(Path(HOME, ner_setup.START_FILE).exists())
+        self.assertFalse(ner_setup.start_running())
         self.assertIn(f"rm -f {CID}", self.calls())
         self.assertFalse(Path(self.dir, "made").exists())
+        self.assertTrue(self.wait_for(lambda: "stopped:" in Path(HOME, ner_setup.START_LOG).read_text()))
 
-    def test_a_setting_alone_never_starts_a_download(self):
-        # the setting is local (a policy or an earlier session), and no container exists
-        Path(HOME, "config.json").write_text(json.dumps({**CONFIG, "remote_detector": {"url": ner_setup.LOCAL_URL}}),
-                                             encoding="utf-8")
-        tool = ner_setup.container_tool()
-        self.assertEqual(ner_setup.follow_pin(tool), "none")       # what the session start runs in the background
-        with mock.patch.object(ner_setup.subprocess, "Popen") as popen:
-            # the session start says that nothing starts: the start line names /maisecrets:ner local
-            self.assertFalse(ner_setup.restart_local({"url": ner_setup.LOCAL_URL}))
-        popen.assert_called_once()
-        # only a typed route starts it
-        for route in ("session start", "policy", "cli", ""):
-            self.assertFalse(ner_setup.start_typed(route), route)
-        self.assertEqual(ner_setup.start_pid(), 0)
-        self.assertFalse([c for c in self.calls() if c.startswith(("run ", "pull "))], self.calls())
-
-    def test_off_never_removes_a_container_the_person_made_by_hand(self):
-        # a container ner of the image, made by hand before the start (no secret of maisecrets); the start starts it
-        Path(self.dir, "made").write_text("", encoding="utf-8")
-        with mock.patch.dict(os.environ, {"FAKE_SLOW_START": "1"}):
+    def test_a_container_made_by_hand_after_the_start_survives_off(self):
+        with mock.patch.dict(os.environ, {"FAKE_RUN": "late"}):
             _prompt("/maisecrets:ner local")
-            pid = ner_setup.start_pid()
-            self.assertTrue(pid)
-            self.assertTrue(self.wait_for(lambda: "start ner" in self.calls()), self.calls())
-            self.assertEqual(json.loads(Path(HOME, ner_setup.START_PID).read_text())["pre"], CID)
+            self.started()
+            # while the start downloads, the person makes a container ner of the image by hand: it has no label
+            Path(self.dir, "made").write_text("", encoding="utf-8")
             out = _prompt("/maisecrets:ner off")
         self.assertIn("stopped", json.dumps(out))
-        self.assertTrue(self.wait_for(lambda: _gone(pid), 10), "the start still runs")
         self.assertFalse([c for c in self.calls() if c.startswith("rm ")], self.calls())
         self.assertTrue(Path(self.dir, "made").exists())
 
-    def test_a_pid_the_os_gave_to_another_process_gets_no_signal(self):
-        import subprocess
-        other = subprocess.Popen(["sleep", "60"], start_new_session=True)
-        self.addCleanup(other.wait)
-        self.addCleanup(other.kill)
-        # the record of an old start whose pid now belongs to another live process: another OS start time
-        Path(HOME, ner_setup.START_PID).write_text(json.dumps(
-            {"pid": other.pid, "t": time.time(), "start": "ps:Mon Jan  1 00:00:00 2001", "nonce": "a" * 32}))
-        self.assertEqual(ner_setup.start_pid(), 0)
+    def test_a_container_made_by_hand_before_the_start_survives_off(self):
+        Path(self.dir, "made").write_text("", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"FAKE_SLOW_START": "1"}):
+            _prompt("/maisecrets:ner local")
+            self.assertTrue(self.wait_for(lambda: "start ner" in self.calls()), self.calls())
+            out = _prompt("/maisecrets:ner off")
+        self.assertIn("stopped", json.dumps(out))
+        self.assertFalse([c for c in self.calls() if c.startswith("rm ")], self.calls())
+        self.assertTrue(Path(self.dir, "made").exists())
+
+    def test_a_record_that_a_crashed_start_left_is_cleared_with_no_process_touched(self):
+        old = "c" * 32
+        # the start crashed after its docker run: its labelled container is there, its beat is old
+        Path(self.dir, "made").write_text("", encoding="utf-8")
+        Path(self.dir, "label").write_text(old, encoding="utf-8")
+        stale = {"nonce": old, "t": time.time() - 600, "beat": time.time() - 600}
+        Path(HOME, ner_setup.START_FILE).write_text(json.dumps(stale), encoding="utf-8")
+        self.assertFalse(ner_setup.start_running())
         lines = ner_setup.stop_local()
-        time.sleep(0.3)
-        self.assertIsNone(other.poll(), "the other process got a signal")
-        self.assertFalse(Path(HOME, ner_setup.START_PID).exists(), "the stale record stays")
-        self.assertNotIn("stopped", " ".join(lines))
-        # with its real start time the same record is the start, and off stops it
-        Path(HOME, ner_setup.START_PID).write_text(json.dumps(
-            {"pid": other.pid, "t": time.time(), "start": ner_setup._proc_start(other.pid), "nonce": "a" * 32}))
-        self.assertEqual(ner_setup.start_pid(), other.pid)
-        ner_setup.stop_local()
-        self.assertTrue(self.wait_for(lambda: other.poll() is not None, 5))
+        # no process is asked or signalled: the code of ner off has no signal, and a stale record gets no stop request
+        self.assertFalse(Path(HOME, ner_setup.STOP_FILE).exists())
+        self.assertFalse(Path(HOME, ner_setup.START_FILE).exists())
+        self.assertIn(f"rm -f {CID}", self.calls())
+        self.assertIn("the container that the start made was removed", lines)
+        # the next typed start clears such a record too, and removes only that start's labelled container
+        Path(self.dir, "made").write_text("", encoding="utf-8")
+        Path(self.dir, "label").write_text(old, encoding="utf-8")
+        Path(HOME, ner_setup.START_FILE).write_text(json.dumps(stale), encoding="utf-8")
+        import subprocess
+        real, spawned = subprocess.Popen, []
 
-    def test_a_record_that_cannot_be_written_ends_the_start_it_spawned(self):
-        with mock.patch.object(ner_setup, "_write_start", side_effect=OSError("disk full")), \
-                mock.patch.object(ner_setup.subprocess, "Popen") as popen, \
-                mock.patch.object(ner_setup.os, "killpg") as killpg:
-            popen.return_value.pid = 4242
+        def popen(argv, *a, **k):
+            if "maisecrets.cli" in argv:
+                spawned.append(argv)
+                return mock.Mock(pid=1)
+            return real(argv, *a, **k)
+        with mock.patch.object(ner_setup.subprocess, "Popen", popen):
+            self.assertTrue(ner_setup.start_typed("slash command"))
+        self.assertEqual(len(spawned), 1)
+        self.assertNotEqual(_record().get("nonce"), old)
+        self.assertEqual(self.calls().count(f"rm -f {CID}"), 2)
+
+    def test_a_spawn_that_fails_leaves_no_record(self):
+        with mock.patch.object(ner_setup.subprocess, "Popen", side_effect=OSError("no python")):
             self.assertFalse(ner_setup.start_typed("slash command"))
-        killpg.assert_called_once()
-        self.assertEqual(killpg.call_args.args[0], 4242)
-        popen.return_value.wait.assert_called_once()
-
-    def test_a_kill_that_fails_keeps_the_record_and_says_so(self):
-        Path(HOME, ner_setup.START_PID).write_text(json.dumps({"pid": 4242, "t": time.time(), "start": "ps:x",
-                                                               "nonce": "b" * 32}))
-        with mock.patch.object(ner_setup, "_verified", return_value=4242), \
-                mock.patch.object(ner_setup.os, "killpg", side_effect=PermissionError("not permitted")):
-            lines = ner_setup.stop_local()
-        self.assertIn("could not be stopped", " ".join(lines))
-        self.assertTrue(Path(HOME, ner_setup.START_PID).exists())
+        self.assertFalse(Path(HOME, ner_setup.START_FILE).exists())
 
     def test_two_sessions_at_once_start_one_download(self):
         import subprocess
@@ -227,11 +231,25 @@ class TypedStartTests(unittest.TestCase):
         time.sleep(0.5)
         gate.write_text("", encoding="utf-8")
         outs = [r.communicate(timeout=60)[0].split("\n") for r in runs]
-        spawned = [int(line.split()[1]) for out in outs for line in out if line.startswith("spawned ")]
-        for pid in spawned:
-            self.addCleanup(_kill_group, pid)
+        spawned = [line for out in outs for line in out if line.startswith("spawned ")]
         self.assertEqual([out[-2] for out in outs], ["True", "True"])
         self.assertEqual(len(spawned), 1, "two sessions started two downloads")
+
+    def test_a_setting_alone_never_starts_a_download(self):
+        # the setting is local (a policy or an earlier session), and no container exists
+        Path(HOME, "config.json").write_text(json.dumps({**CONFIG, "remote_detector": {"url": ner_setup.LOCAL_URL}}),
+                                             encoding="utf-8")
+        tool = ner_setup.container_tool()
+        self.assertEqual(ner_setup.follow_pin(tool), "none")       # what the session start runs in the background
+        with mock.patch.object(ner_setup.subprocess, "Popen") as popen:
+            # the session start says that nothing starts: the start line names /maisecrets:ner local
+            self.assertFalse(ner_setup.restart_local({"url": ner_setup.LOCAL_URL}))
+        popen.assert_called_once()
+        # only a typed route starts it
+        for route in ("session start", "policy", "cli", ""):
+            self.assertFalse(ner_setup.start_typed(route), route)
+        self.assertFalse(ner_setup.start_running())
+        self.assertFalse([c for c in self.calls() if c.startswith(("run ", "pull "))], self.calls())
 
     def test_the_start_line_names_the_command_that_starts_it(self):
         from maisecrets import ner_health

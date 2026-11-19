@@ -205,14 +205,11 @@ class NameServiceTests(unittest.TestCase):
 
     def test_local_starts_the_container_in_the_background_with_a_fixed_command(self):
         from maisecrets import ner_setup
-        self.addCleanup(lambda: Path(HOME, ner_setup.START_PID).unlink(missing_ok=True))
+        self.addCleanup(lambda: Path(HOME, ner_setup.START_FILE).unlink(missing_ok=True))
         with mock.patch("subprocess.Popen") as popen, mock.patch.dict(os.environ, {ner_setup.NO_START_ENV: "0"}), \
                 mock.patch.object(ner_setup, "container_tool", return_value="/usr/bin/docker"), \
                 mock.patch.object(ner_setup, "probe", return_value=(False, "")), \
-                mock.patch.object(ner_setup, "_alive", return_value=True), \
-                mock.patch.object(ner_setup, "_proc_start", return_value="ps:fake start"), \
                 mock.patch.object(ner_setup, "stop_local", return_value=[]):
-            popen.return_value.pid = 4242
             out = ask(action="ner_set", value="local")
             self.assertTrue(out.get("starting"))
         # no question first: the press is the person's choice, and the note says what happens and how to stop it

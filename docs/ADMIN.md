@@ -939,12 +939,15 @@ maisecrets does not verify that it is `mcpgate/ner`.
   `local` in the panel, maisecrets starts it at once in the background with docker or podman, with no
   question first, and says so (about 690 MB to download, 1 to 2 GB on disk, about 250 MB of memory
   while it runs, at most 1.5 GB and half the cores, 2 to 4). One start runs at a time, also for two
-  sessions (a lock across processes). `/maisecrets:ner off` stops a start that runs: it signals the recorded
-  process only when that process still has the recorded OS start time (a process id that the system gave
-  again gets no signal, and the old record goes). It removes a container `ner` only when the record proves that
-  this start made it (its docker run gave that id, or no container `ner` was there when the start began), and
-  it stops the container that maisecrets set up. A container `ner` that you made by hand is never removed. If
-  the start cannot be stopped, the answer says so and a second `/maisecrets:ner off` tries again. Only that typed choice starts a
+  sessions (a lock across processes, held only for its file steps). The start has a random nonce, and its
+  container carries the label `maisecrets.start=<nonce>`. `/maisecrets:ner off` signals no process: it asks
+  the start to stop (a request file with the nonce). The start then ends its own docker call, removes its own
+  labelled container and its record. `ner off` waits up to 3 seconds and says `stopped`, `stopping`, or that
+  the start did not answer (then send `/maisecrets:ner off` again). It removes only a container with the label
+  of the recorded start, and it stops the container that maisecrets set up. A container `ner` that you made by
+  hand has no such label and is never removed, also when it appears while the start runs. A start that ended
+  without its cleanup (a crash) leaves a record with no fresh beat: the next start or `ner off` removes that
+  record and the containers with its label, and touches no process. Only that typed choice starts a
   download: a source set by a policy or in an earlier session does not, and the session start then says that
   the service is not running and names `/maisecrets:ner local`. The start is
   `run.sh ner start`, which runs the container `ner` with a secret of its own
