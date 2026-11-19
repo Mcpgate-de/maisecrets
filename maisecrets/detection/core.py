@@ -77,6 +77,7 @@ from .own_rules import (  # noqa: F401
     OWN_RULES, FALLBACK_RULES,
 )
 from .value_checks import (  # noqa: F401
+    RESERVED_WORD_RULES, is_reserved_word, reserved_word_spellings, unquoted_reserved_word, _unquoted_reserved_word,
     _a_version, _a_dotted_date_time, _LABEL_WORDS_TAIL_RE, _bitlocker_key_ok,
     _re2_to_python, _POSIX_CLASSES, shannon_entropy, ENTROPY_BY_ALPHABET, ENTROPY_BY_ALPHABET_RULES, _B62, _ALPHABETS,
     alphabet_of, _base64_of_text, _entropy_ok, _luhn_ok, IBAN_LENGTH, _iban_ok, _RESOLVER_IPS, _public_ip,
@@ -1905,15 +1906,6 @@ _CODE_WORDS = frozenset({"break", "continue", "return", "pass", "raise", "throw"
 # the word after a label in an error message or a log line: "pwd: expected bytes, got str" (Python standard library,
 # 2026-09-29), "token: invalid", "password: required". None is a password anyone chooses
 _MESSAGE_WORDS = _words("passwords/error-message-words")
-# a reserved word of a language or of SQL as the whole value: `const secret = readonly;` (#29). Only unquoted (a quoted
-# string is a string, not a keyword), only after the rules that read an unquoted value of code (RESERVED_WORD_RULES:
-# the two keyword rules, and the literal and key rules that take the word when those skip it), and only as code
-# writes it:
-# ASCII lower case, capitals (SQL), or True, False and None (Python). `Readonly` and `readonly7` stay values
-_RESERVED_WORDS = _words("passwords/reserved-words")
-_PYTHON_CONSTANTS = frozenset({"True", "False", "None"})
-RESERVED_WORD_RULES = frozenset({"ds-keyword-equal-signs", "ds-keyword-colon", "label-pw-literal",
-                                 "label-secret-literal", "password-after-key"})
 
 
 def is_code_word(value: str) -> bool:
@@ -1925,32 +1917,6 @@ def is_code_word(value: str) -> bool:
 def code_words() -> frozenset:
     """The statement keywords and the words of error messages that a keyword rule never takes as a value."""
     return _CODE_WORDS | _MESSAGE_WORDS
-
-
-def is_reserved_word(value: str) -> bool:
-    """A reserved word of a programming language or of SQL, as code writes it (RESERVED_WORD_RULES skip it when it
-    stands unquoted)."""
-    w = value.strip().rstrip(";")
-    if not w.isascii():
-        return False   # Unicode casing must not turn a value into a listed word
-    return (w if w.islower() else w.lower() if w.isupper() else "") in _RESERVED_WORDS or w in _PYTHON_CONSTANTS
-
-
-def reserved_word_spellings() -> list:
-    """Each spelling that is_reserved_word accepts without blanks: lower case and capitals, each also with `;`."""
-    words = sorted({b for w in _RESERVED_WORDS for b in (w, w.upper())} | _PYTHON_CONSTANTS)
-    return [s for b in words for s in (b, b + ";")]
-
-
-def unquoted_reserved_word(text: str, start: int, value: str) -> bool:
-    """A reserved word as the bare value at `start`: `secret = readonly;`; a quoted word is a string and stays."""
-    return text[start - 1:start] not in ("'", '"', "`") and is_reserved_word(value)
-
-
-def _unquoted_reserved_word(rule, text: str, start: int, secret: str) -> bool:
-    """unquoted_reserved_word for a hit of a rule of RESERVED_WORD_RULES; a URL parameter (url-query-secret) and the
-    other rules keep the word."""
-    return rule.id in RESERVED_WORD_RULES and unquoted_reserved_word(text, start, secret)
 
 
 # the index of a text (_text_index, _newlines, _line_start, _line_end, _positions) is in text_index.py

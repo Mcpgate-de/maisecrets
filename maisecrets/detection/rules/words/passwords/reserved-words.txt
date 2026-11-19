@@ -5,7 +5,7 @@
 # TypeScript, Python, Java, C#, Go and C, and a set of SQL keywords of queries, tables and transactions;
 # tests/test_reserved_words.py holds each table and the words left out (an everyday English word such as map, range,
 # set or record). C keywords that start with `_` and a capital (_Atomic) are not here: the list is lower case.
-# Read as _RESERVED_WORDS in maisecrets/detection/core.py (ds-keyword-equal-signs and ds-keyword-colon only).
+# Read as _RESERVED_WORDS in maisecrets/detection/value_checks.py, for the rules of RESERVED_WORD_RULES only.
 abstract
 accessor
 alignas

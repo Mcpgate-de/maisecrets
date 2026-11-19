@@ -5,6 +5,6 @@ statement = "A quoted reserved word after a secret label is a string and a hit a
 runner = ["tests/test_reserved_words.py::ScanTests::test_a_quoted_listed_word_is_still_a_hit", "tests/test_reserved_words.py::ScanTests::test_the_check_changes_only_unquoted_values_of_the_listed_rules"]
 
 [proof]
-file = "maisecrets/detection/core.py"
+file = "maisecrets/detection/value_checks.py"
 find = '''    return text[start - 1:start] not in ("'", '"', "`") and is_reserved_word(value)'''
 replace = '''    return is_reserved_word(value)'''

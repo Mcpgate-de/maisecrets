@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import detect, vault  # noqa: E402
-from maisecrets.detection import core, wordlists  # noqa: E402
+from maisecrets.detection import core, value_checks, wordlists  # noqa: E402
 
 LISTED = wordlists.words("passwords/reserved-words")
 
@@ -67,7 +67,7 @@ def kinds(text: str) -> list:
 
 
 def kinds_without_the_check(text: str) -> list:
-    with mock.patch.object(core, "is_reserved_word", lambda value: False):
+    with mock.patch.object(value_checks, "is_reserved_word", lambda value: False):   # its own module
         return kinds(text)
 
 
