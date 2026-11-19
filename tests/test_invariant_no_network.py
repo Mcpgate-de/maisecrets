@@ -6,8 +6,11 @@ place that starts a program (a reference to a starting call, or a call of a loca
 one, at any depth), fails,
 and so does an entry that no longer matches its module, so the lists cannot rot.
 tests/test_promises.py NoNetworkTests checks the other side at run time: with the default settings no hook connects.
-What this check cannot see: a library that another module imports for it, a name built at run time
-(`__import__(name)`, `getattr`), a module or `$` handed on under another name, and what a started program does."""
+It guards against ordinary drift, not against an author who evades it. What it cannot see: a library that another
+module imports for it, a network library outside NETWORK, a name built at run time (`__import__(name)`, `getattr`), a
+call between modules, a public wrapper method called through an instance (only self and cls count; a private `_name`
+counts through any receiver), an alias in a class body, a module or `$` handed on under another name, and what a
+started program does. In the mod, `x++ / 2` reads the / as a regex literal."""
 import ast
 import re
 import sys
