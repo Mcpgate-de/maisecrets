@@ -4,8 +4,9 @@
     results  every path is a measurement result or the format-watch snapshot: the job baseline_only runs the tests
              that read those files, and the other test jobs do not run
     ci       .gitlab-ci.yml changed, and at most docs/REPO-STANDARDS.md beside it: the job ci_only runs the tests
-             that read those files, and one smoke job per runner image shows that the image starts
-    code     anything else, and a mix of two classes: every test job runs
+             that read those files, and one smoke job per runner image shows that the image starts. A changed line
+             with a pinned version or image (PIN) makes it code: ci_only fails and asks for the label full-ci
+    code     anything else, and a mix of two classes: every test job runs (the label full-ci runs them always)
 
 GitLab cannot say "only these paths changed", so the rules in .gitlab-ci.yml name every other path
 (`code_globs()`, written into the list .code_paths). The light jobs check the class again with `check`; a path set
@@ -52,15 +53,33 @@ def is_result(path: str) -> bool:
     return _plain(path) and (path in RESULT_FILES or any(path.startswith(d + "/") for d in RESULT_DIRS))
 
 
-def classify(paths: list[str]) -> str:
-    """results, ci or code. No path, an odd path or a mix of classes is code: every test job runs."""
+# a changed line of .gitlab-ci.yml with a pinned version or image: a test job uses it, so the merge request is code
+# (a new client version is what the harness tests). GitLab rules cannot read diff lines; the guard of ci_only fails
+# and asks for the label full-ci
+PIN = re.compile(r"CLAUDE_CODE_VERSION|CODEX_VERSION|\bimage:|@sha256:|[A-Za-z0-9_.-]==\d")
+
+
+def pinned(ci_lines: list[str]) -> list[str]:
+    """The added or removed lines of a diff of .gitlab-ci.yml that hold a pinned version or image."""
+    return [line for line in ci_lines if line[:1] in "+-" and not line.startswith(("+++", "---"))
+            and PIN.search(line)]
+
+
+def classify(paths: list[str], ci_lines: list[str] = ()) -> str:
+    """results, ci or code. No path, an odd path, a mix of classes or a changed pin in .gitlab-ci.yml (`ci_lines`:
+    the diff of that file) is code: every test job runs."""
     if not paths or not all(_plain(p) for p in paths):
         return "code"
     if all(is_result(p) for p in paths):
         return "results"
-    if set(paths) <= set(CI_FILES) and CI_FILE in paths:
+    if set(paths) <= set(CI_FILES) and CI_FILE in paths and not pinned(list(ci_lines)):
         return "ci"
     return "code"
+
+
+def ci_diff(base: str, head: str = "HEAD") -> list[str]:
+    return subprocess.run(["git", "diff", "-U0", "--no-renames", base, head, "--", CI_FILE], capture_output=True,
+                          text=True, check=True).stdout.splitlines()
 
 
 def changed(base: str, head: str = "HEAD") -> list[str]:
@@ -163,14 +182,20 @@ def main(argv: list[str]) -> int:
         print(" ".join(TESTS[argv[1]]))
         return 0
     if argv[:1] == ["classify"] and len(argv) == 2 and argv[1]:
-        print(classify(changed(argv[1])))
+        print(classify(changed(argv[1]), ci_diff(argv[1])))
         return 0
     if argv[:1] == ["check"] and len(argv) == 3 and argv[1] in TESTS and argv[2]:
-        paths = changed(argv[2])
-        got = classify(paths)
+        paths, lines = changed(argv[2]), ci_diff(argv[2])
+        got = classify(paths, lines)
         if got == argv[1]:
             print(f"mr_scope: {len(paths)} changed paths, class {got}")
             return 0
+        if pins := pinned(lines):
+            print("mr_scope: a pinned version or image changed in .gitlab-ci.yml. A test job uses it, so this merge "
+                  "request needs the full pipeline. Add the label full-ci and run a new pipeline. Changed lines:")
+            for line in pins:
+                print(f"  {line}")
+            return 1
         print(f"mr_scope: this job tests the class {argv[1]}, but the merge request is of the class {got}. "
               f"The pipeline rules (.code_paths) ran the short jobs only. Changed paths:")
         for p in paths or ["(none)"]:

@@ -54,8 +54,12 @@ and OpenAI plugin directories.
     runs its first setup step (`smoke_unit_python39`, `smoke_harness_claude`, `smoke_harness_codex`; `ci_only` itself
     for `python:3.12-slim`; `commit_format` and `plugin_validate` for `alpine:3.20` and `node:22-slim`). The suites,
     the replay, the harnesses and the matrix do not run: they test no new code, and the pipeline on `main` runs every
-    job before each release.
-  - **code**: anything else, an unknown path included. Every test job runs as before. Documentation alone stays here,
+    job before each release. A changed line with a pinned version or image (`CLAUDE_CODE_VERSION`, `CODEX_VERSION`,
+    `image:`, a `@sha256:` digest, a `==` package pin) makes the merge request code: a test job uses it, and a new
+    client version is what the harness tests. GitLab rules cannot read diff lines, so `ci_only` fails with the
+    message "add the label full-ci".
+  - **code**: anything else, an unknown path included. Every test job runs as before. The merge request label
+    `full-ci` runs every test job in any merge request (from the next pipeline on), and the light jobs stay off. Documentation alone stays here,
     because tests read the docs (README length, derived counts, doc claims).
 
   Each light job checks its class again on `CI_MERGE_REQUEST_DIFF_BASE_SHA..HEAD` and fails for any other path. A mix

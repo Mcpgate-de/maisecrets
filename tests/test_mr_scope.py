@@ -55,6 +55,24 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(S.classify([".gitlab-ci.yml"]), "ci")
         self.assertEqual(S.classify([".gitlab-ci.yml", STANDARDS]), "ci")
 
+    def test_a_changed_pin_in_the_ci_file_is_code(self):
+        # a test job uses it: a new client version is what the harness tests (CLAUDE.md, watch list)
+        for line in ('+    CLAUDE_CODE_VERSION: "2.1.330"', '-    CODEX_VERSION: "0.155.1"', "+  image: node:24",
+                     "-  image: python:3.9-slim", "+  image: renovate/renovate:39-full@sha256:0123abcd",
+                     "+    - pip install --quiet pyyaml==6.0.4", '+    - npm install "@openai/codex@${CODEX_VERSION}"'):
+            with self.subTest(line=line):
+                self.assertEqual(S.pinned(["@@ -1 +1 @@", line]), [line])
+                self.assertEqual(S.classify([".gitlab-ci.yml"], ["--- a/.gitlab-ci.yml", "+++ b/.gitlab-ci.yml",
+                                                                  line]), "code")
+        # a rule, a comment or a script line without a pin keeps the class
+        for line in ('+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"', "+# the image starts",
+                     "-    - python scripts/mr_scope.py check ci BASE", "+  timeout: 50m"):
+            with self.subTest(line=line):
+                self.assertEqual(S.pinned([line]), [])
+                self.assertEqual(S.classify([".gitlab-ci.yml", STANDARDS], [line]), "ci")
+        # the diff header names the file only, and context lines do not count
+        self.assertEqual(S.pinned(["--- a/.gitlab-ci.yml", "+++ b/.gitlab-ci.yml", "   image: node:22"]), [])
+
     def test_every_other_path_set_is_code(self):
         for paths in ([], [STANDARDS], [DOC], [CODE], [RESULT, CODE], [RESULT, ".gitlab-ci.yml"],
                       [".gitlab-ci.yml", DOC], [SNAPSHOT, STANDARDS], ["bench/run.py"], ["bench/results"],
@@ -71,10 +89,17 @@ class CheckTests(unittest.TestCase):
     def test_the_guard_passes_its_class_and_refuses_the_others(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            def git(*args):
+            def git(*args, check=True):
                 return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
                                        "-c", "commit.gpgsign=false", *args], cwd=tmp, capture_output=True,
-                                      text=True, check=True).stdout.strip()
+                                      text=True, check=check).stdout.strip()
+
+            def commit(msg):
+                # plumbing: a commit hook of the machine (one that reads .gitlab-ci.yml) has no say in a test repository
+                git("add", "-A")
+                parent = ["-p", git("rev-parse", "HEAD")] if git("rev-parse", "--verify", "-q", "HEAD^{commit}",
+                                                                 check=False) else []
+                git("update-ref", "HEAD", git("commit-tree", git("write-tree"), *parent, "-m", msg))
 
             def check(cls, base):
                 return subprocess.run([sys.executable, str(ROOT / "scripts" / "mr_scope.py"), "check", cls, base],
@@ -84,21 +109,28 @@ class CheckTests(unittest.TestCase):
             for rel in (RESULT, CODE, ".gitlab-ci.yml"):
                 (Path(tmp) / rel).parent.mkdir(parents=True, exist_ok=True)
                 (Path(tmp) / rel).write_text("a\n", encoding="utf-8")
-            git("add", "-A")
-            git("commit", "-q", "-m", "base")
+            commit("base")
             base = git("rev-parse", "HEAD")
             self.assertEqual(check("results", base).returncode, 1, "no change is no class")
             (Path(tmp) / RESULT).write_text("b\n", encoding="utf-8")
-            git("commit", "-q", "-am", "result")
+            commit("result")
             self.assertEqual(check("results", base).returncode, 0)
             self.assertEqual(check("ci", base).returncode, 1)
             (Path(tmp) / ".gitlab-ci.yml").write_text("b\n", encoding="utf-8")
-            git("commit", "-q", "-am", "ci")
+            commit("ci")
             done = check("results", base)
             self.assertEqual(done.returncode, 1, "a mix of two classes")
             self.assertIn(".gitlab-ci.yml", done.stdout)
             self.assertEqual(check("ci", base).returncode, 1)
             self.assertEqual(check("ci", git("rev-parse", "HEAD~1")).returncode, 0)
+            ci_base = git("rev-parse", "HEAD")
+            (Path(tmp) / ".gitlab-ci.yml").write_text('b\nvariables:\n  CLAUDE_CODE_VERSION: "2.1.330"\n',
+                                                     encoding="utf-8")
+            commit("pin")
+            done = check("ci", ci_base)
+            self.assertEqual(done.returncode, 1, "a changed pin needs the full pipeline")
+            self.assertIn("full-ci", done.stdout)
+            self.assertIn("CLAUDE_CODE_VERSION", done.stdout)
 
 
 class GlobTests(unittest.TestCase):
@@ -248,6 +280,15 @@ class RuleTests(unittest.TestCase):
         # a hotfix into main: every job, the CI file included
         self.assertEqual(self.mr([".gitlab-ci.yml"], target="main", source="fix/x"), self.LONG)
         self.assertEqual(self.mr([RESULT], target="main", source="fix/x"), self.SUITES | {"windows_macos"})
+
+    def test_the_label_full_ci_runs_every_test_job(self):
+        for labels in ("full-ci", "docs,full-ci", "full-ci,public-ci"):
+            for paths in ([".gitlab-ci.yml"], [RESULT], [DOC], [CODE]):
+                with self.subTest(labels=labels, paths=paths):
+                    self.assertEqual(self.mr(paths, labels=labels), self.LONG)
+        self.assertEqual(self.mr([".gitlab-ci.yml"], labels="no-full-ci"), self.SMOKE, "the whole label only")
+        # no-public-ci keeps the merge request off GitHub, the label full-ci too
+        self.assertEqual(self.mr([CODE], labels="full-ci,no-public-ci"), self.LONG - {"windows_macos"})
 
     def test_a_baseline_branch_runs_baseline_only_as_before(self):
         self.assertEqual(self.mr([RESULT], source="chore/baseline-0.9.19"), {"baseline_only"})

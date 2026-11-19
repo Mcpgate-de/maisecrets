@@ -172,6 +172,9 @@ lint:
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
+    # the label full-ci runs every test job, for example when .gitlab-ci.yml changes a pinned version or image
+    # (ci_only refuses such a merge request and asks for the label)
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_LABELS =~ /(^|,)full-ci(,|$)/
     # a baseline merge request holds measurement results only: baseline_only checks that and runs the tests that read
     # them; the pipeline on main after the release merge request runs every job on the same code
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
@@ -208,6 +211,9 @@ lint:
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
+    # the label full-ci runs every test job, for example when .gitlab-ci.yml changes a pinned version or image
+    # (ci_only refuses such a merge request and asks for the label)
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_LABELS =~ /(^|,)full-ci(,|$)/
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
@@ -250,6 +256,8 @@ baseline_only:
     GIT_DEPTH: "0"
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_LABELS =~ /(^|,)full-ci(,|$)/
+      when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
       changes: *code_paths
       when: never
@@ -280,6 +288,8 @@ ci_only:
   rules: &ci_only_rules
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
       when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_LABELS =~ /(^|,)full-ci(,|$)/
+      when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
       changes: *code_paths
       when: never
@@ -304,6 +314,8 @@ smoke_unit_python39:
 # the harnesses read .gitlab-ci.yml no more: when their own paths changed they run in full, and this smoke stays off
 .smoke_harness_rules: &smoke_harness_rules
   - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
+    when: never
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_LABELS =~ /(^|,)full-ci(,|$)/
     when: never
   - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
     changes: *replay_paths
@@ -450,7 +462,7 @@ windows_macos:
       when: never
     # a release merge request always runs it, so the release reuses that run of the same tree
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_LABELS =~ /(^|,)public-ci(,|$)/
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_LABELS =~ /(^|,)(public-ci|full-ci)(,|$)/
     # a merge request into next runs it unless it changes documentation alone: the matrix runs the whole unit suite,
     # and a test imports the plugin, the detection core, the benchmark and the scripts. The first list (2026-10-21)
     # named platform paths only, and a test that imported a POSIX-only module reached next untested on Windows (!194)
