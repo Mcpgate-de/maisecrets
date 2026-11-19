@@ -145,6 +145,21 @@ lint:
     # the plugin files as a directory check reads them (frontmatter YAML, manifests, hook paths)
     - python scripts/lint_plugin.py
 
+# Every path outside the measurement results, the format-watch snapshot, .gitlab-ci.yml and docs/REPO-STANDARDS.md
+# (scripts/mr_scope.py). GitLab cannot say "only these paths changed", so a merge request into next that changes one of
+# these paths runs every test job, and one that changes none runs the short jobs of its class (baseline_only, ci_only).
+# Generated: python3 scripts/mr_scope.py globs (tests/test_mr_scope.py compares).
+.code_paths: &code_paths
+  - '{[!.bd]*,.,.[!g]*,.g,.g[!i]*,.gi,.gi[!t]*,.git,.git[!l]*,.gitl,.gitl[!a]*,.gitla,.gitla[!b]*,.gitlab,.gitlab[!-]*,.gitlab-,.gitlab-[!c]*,.gitlab-c,.gitlab-c[!i]*,.gitlab-ci,.gitlab-ci[!.]*,.gitlab-ci.,.gitlab-ci.[!y]*,.gitlab-ci.y,.gitlab-ci.y[!m]*,.gitlab-ci.ym,.gitlab-ci.ym[!l]*,.gitlab-ci.yml?*,b,b[!e]*,be,be[!n]*,ben,ben[!c]*,benc,benc[!h]*,bench?*,d,d[!o]*,do,do[!c]*,doc,doc[!s]*,docs?*}'
+  - '{[!.bd]*,.,.[!g]*,.g,.g[!i]*,.gi,.gi[!t]*,.git,.git[!l]*,.gitl,.gitl[!a]*,.gitla,.gitla[!b]*,.gitlab,.gitlab[!-]*,.gitlab-,.gitlab-[!c]*,.gitlab-c,.gitlab-c[!i]*,.gitlab-ci,.gitlab-ci[!.]*,.gitlab-ci.,.gitlab-ci.[!y]*,.gitlab-ci.y,.gitlab-ci.y[!m]*,.gitlab-ci.ym,.gitlab-ci.ym[!l]*,.gitlab-ci.yml?*,b,b[!e]*,be,be[!n]*,ben,ben[!c]*,benc,benc[!h]*,bench?*,d,d[!o]*,do,do[!c]*,doc,doc[!s]*,docs?*}/**/*'
+  - '{.gitlab-ci.yml/**/*,bench,docs}'
+  - 'bench/{[!Hr]*,H,H[!O]*,HO,HO[!L]*,HOL,HOL[!D]*,HOLD,HOLD[!O]*,HOLDO,HOLDO[!U]*,HOLDOU,HOLDOU[!T]*,HOLDOUT,HOLDOUT[!-]*,HOLDOUT-,HOLDOUT-[!L]*,HOLDOUT-L,HOLDOUT-L[!O]*,HOLDOUT-LO,HOLDOUT-LO[!G]*,HOLDOUT-LOG,HOLDOUT-LOG[!.]*,HOLDOUT-LOG.,HOLDOUT-LOG.[!m]*,HOLDOUT-LOG.m,HOLDOUT-LOG.m[!d]*,HOLDOUT-LOG.md?*,r,r[!e]*,re,re[!s]*,res,res[!u]*,resu,resu[!l]*,resul,resul[!t]*,result,result[!s]*,results?*}'
+  - 'bench/{[!Hr]*,H,H[!O]*,HO,HO[!L]*,HOL,HOL[!D]*,HOLD,HOLD[!O]*,HOLDO,HOLDO[!U]*,HOLDOU,HOLDOU[!T]*,HOLDOUT,HOLDOUT[!-]*,HOLDOUT-,HOLDOUT-[!L]*,HOLDOUT-L,HOLDOUT-L[!O]*,HOLDOUT-LO,HOLDOUT-LO[!G]*,HOLDOUT-LOG,HOLDOUT-LOG[!.]*,HOLDOUT-LOG.,HOLDOUT-LOG.[!m]*,HOLDOUT-LOG.m,HOLDOUT-LOG.m[!d]*,HOLDOUT-LOG.md?*,r,r[!e]*,re,re[!s]*,res,res[!u]*,resu,resu[!l]*,resul,resul[!t]*,result,result[!s]*,results?*}/**/*'
+  - 'bench/{HOLDOUT-LOG.md/**/*,results}'
+  - 'docs/{[!Rcf]*,R,R[!E]*,RE,RE[!P]*,REP,REP[!O]*,REPO,REPO[!-]*,REPO-,REPO-[!S]*,REPO-S,REPO-S[!T]*,REPO-ST,REPO-ST[!A]*,REPO-STA,REPO-STA[!N]*,REPO-STAN,REPO-STAN[!D]*,REPO-STAND,REPO-STAND[!A]*,REPO-STANDA,REPO-STANDA[!R]*,REPO-STANDAR,REPO-STANDAR[!D]*,REPO-STANDARD,REPO-STANDARD[!S]*,REPO-STANDARDS,REPO-STANDARDS[!.]*,REPO-STANDARDS.,REPO-STANDARDS.[!m]*,REPO-STANDARDS.m,REPO-STANDARDS.m[!d]*,REPO-STANDARDS.md?*,c,c[!o]*,co,co[!v]*,cov,cov[!e]*,cove,cove[!r]*,cover,cover[!a]*,covera,covera[!g]*,coverag,coverag[!e]*,coverage,coverage[!.]*,coverage.,coverage.[!j]*,coverage.j,coverage.j[!s]*,coverage.js,coverage.js[!o]*,coverage.jso,coverage.jso[!n]*,coverage.json?*,f,f[!o]*,fo,fo[!r]*,for,for[!m]*,form,form[!a]*,forma,forma[!t]*,format,format[!-]*,format-,format-[!w]*,format-w,format-w[!a]*,format-wa,format-wa[!t]*,format-wat,format-wat[!c]*,format-watc,format-watc[!h]*,format-watch,format-watch[!.-]*,format-watch-,format-watch-[!f]*,format-watch-f,format-watch-f[!p]*,format-watch-fp,format-watch-fp[!.]*,format-watch-fp.,format-watch-fp.[!t]*,format-watch-fp.t,format-watch-fp.t[!x]*,format-watch-fp.tx,format-watch-fp.tx[!t]*,format-watch-fp.txt?*,format-watch.,format-watch.[!t]*,format-watch.t,format-watch.t[!x]*,format-watch.tx,format-watch.tx[!t]*,format-watch.txt?*}'
+  - 'docs/{[!Rcf]*,R,R[!E]*,RE,RE[!P]*,REP,REP[!O]*,REPO,REPO[!-]*,REPO-,REPO-[!S]*,REPO-S,REPO-S[!T]*,REPO-ST,REPO-ST[!A]*,REPO-STA,REPO-STA[!N]*,REPO-STAN,REPO-STAN[!D]*,REPO-STAND,REPO-STAND[!A]*,REPO-STANDA,REPO-STANDA[!R]*,REPO-STANDAR,REPO-STANDAR[!D]*,REPO-STANDARD,REPO-STANDARD[!S]*,REPO-STANDARDS,REPO-STANDARDS[!.]*,REPO-STANDARDS.,REPO-STANDARDS.[!m]*,REPO-STANDARDS.m,REPO-STANDARDS.m[!d]*,REPO-STANDARDS.md?*,c,c[!o]*,co,co[!v]*,cov,cov[!e]*,cove,cove[!r]*,cover,cover[!a]*,covera,covera[!g]*,coverag,coverag[!e]*,coverage,coverage[!.]*,coverage.,coverage.[!j]*,coverage.j,coverage.j[!s]*,coverage.js,coverage.js[!o]*,coverage.jso,coverage.jso[!n]*,coverage.json?*,f,f[!o]*,fo,fo[!r]*,for,for[!m]*,form,form[!a]*,forma,forma[!t]*,format,format[!-]*,format-,format-[!w]*,format-w,format-w[!a]*,format-wa,format-wa[!t]*,format-wat,format-wat[!c]*,format-watc,format-watc[!h]*,format-watch,format-watch[!.-]*,format-watch-,format-watch-[!f]*,format-watch-f,format-watch-f[!p]*,format-watch-fp,format-watch-fp[!.]*,format-watch-fp.,format-watch-fp.[!t]*,format-watch-fp.t,format-watch-fp.t[!x]*,format-watch-fp.tx,format-watch-fp.tx[!t]*,format-watch-fp.txt?*,format-watch.,format-watch.[!t]*,format-watch.t,format-watch.t[!x]*,format-watch.tx,format-watch.tx[!t]*,format-watch.txt?*}/**/*'
+  - 'docs/{REPO-STANDARDS.md/**/*,coverage.json/**/*,format-watch-fp.txt/**/*,format-watch.txt/**/*}'
+
 # A release tag sits on the release commit: the tested main commit plus the four release files.
 # verify_release proves exactly that (file list, subject, author, on main, version), and the
 # release job that made the commit needs every test job of the main pipeline. The tag pipeline
@@ -169,6 +184,19 @@ lint:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
         && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "next"
       when: never
+    # a merge request into next by its changed paths (scripts/mr_scope.py): a code path runs the suites; a change of
+    # .gitlab-ci.yml without one runs ci_only and the smoke jobs; docs/REPO-STANDARDS.md alone is documentation, which
+    # tests read; measurement results and the format-watch snapshot alone run baseline_only. 38 such merge requests
+    # used 477 runner minutes in 14 days (maintainer, 2026-11-19); the pipeline on main runs every job before a release
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: *code_paths
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: [.gitlab-ci.yml]
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: [docs/REPO-STANDARDS.md]
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      when: never
     - when: on_success
 
 # The replay and the two harnesses in a merge request into next: only when a path they read changed. A change of
@@ -186,7 +214,7 @@ lint:
         && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "next"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
+      changes: &replay_paths
         - maisecrets/**/*
         - hooks/**/*
         - claude-mod/**/*
@@ -202,7 +230,9 @@ lint:
         - scripts/lint_plugin.py
         - scripts/build_release_tree.py
         - bench/bank/**/*
-        - .gitlab-ci.yml
+    # .gitlab-ci.yml into next runs the smoke jobs instead (smoke_harness_claude, smoke_harness_codex)
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME != "next"
+      changes: [.gitlab-ci.yml]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: never
     - when: on_success
@@ -211,6 +241,8 @@ lint:
 # bench/HOLDOUT-LOG.md and docs/coverage.json, nothing else. It ran the whole suite (11 to 19 minutes,
 # about 54 CPU minutes on the runner) for files only three test modules read. This job refuses any other
 # changed path, so the branch name cannot carry code past the tests, and runs those three modules.
+# Any other merge request into next whose paths are all measurement results or the format-watch snapshot runs it too
+# (no path of .code_paths): scripts/mr_scope.py refuses any other path and names the modules that read those files.
 baseline_only:
   stage: test
   needs: []
@@ -218,10 +250,84 @@ baseline_only:
     GIT_DEPTH: "0"
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: *code_paths
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: [.gitlab-ci.yml, docs/REPO-STANDARDS.md]
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
   script:
     - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git >/dev/null
-    - python scripts/baseline_only.py "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - python -m unittest tests.test_extended_baseline tests.test_release_tree tests.test_release_gate
+    - pip install --quiet --disable-pip-version-check pyyaml==6.0.3
+    - |
+      case "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" in
+        chore/baseline-*) python scripts/baseline_only.py "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ;;
+      esac
+    - python scripts/mr_scope.py check results "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - python -m unittest -v $(python scripts/mr_scope.py tests results) > light.log 2>&1 || { cat light.log; exit 1; }
+    - tail -n 3 light.log && python scripts/no_unexpected_skips.py light.log
+
+# A merge request into next that changes .gitlab-ci.yml and no path of .code_paths (docs/REPO-STANDARDS.md may change
+# beside it): the validate stage, the tests that read the two files, and one smoke job per test image below, which
+# shows that the image starts and its first setup step runs. Not the suites, the replay, the harnesses or the matrix:
+# they test no new code, and the pipeline on main runs each of them before every release.
+ci_only:
+  stage: test
+  needs: []
+  variables:
+    GIT_DEPTH: "0"
+  rules: &ci_only_rules
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: *code_paths
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: [.gitlab-ci.yml]
+  script:
+    # the first setup steps of unit and beliefs_can_fail_replay, on the same image
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
+    - pip install --quiet --disable-pip-version-check pyyaml==6.0.3
+    - python scripts/mr_scope.py check ci "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - python -m unittest -v $(python scripts/mr_scope.py tests ci) > light.log 2>&1 || { cat light.log; exit 1; }
+    - tail -n 3 light.log && python scripts/no_unexpected_skips.py light.log
+
+smoke_unit_python39:
+  extends: unit_python39
+  rules: *ci_only_rules
+  script:
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
+    - pip install --quiet --disable-pip-version-check pyyaml==6.0.3
+    - python --version
+
+# the harnesses read .gitlab-ci.yml no more: when their own paths changed they run in full, and this smoke stays off
+.smoke_harness_rules: &smoke_harness_rules
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
+    when: never
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+    changes: *replay_paths
+    when: never
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+    changes: [.gitlab-ci.yml]
+
+smoke_harness_claude:
+  extends: harness_claude
+  rules: *smoke_harness_rules
+  script:
+    - npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+    - claude --version
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends python3-pyte >/dev/null
+    - python3 --version
+
+smoke_harness_codex:
+  extends: harness_codex
+  rules: *smoke_harness_rules
+  script:
+    - npm install --global --no-fund --no-audit "@openai/codex@${CODEX_VERSION}"
+    - codex --version
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends python3-zstandard >/dev/null
+    - python3 --version
 
 unit:
   stage: test
@@ -348,6 +454,8 @@ windows_macos:
     # a merge request into next runs it unless it changes documentation alone: the matrix runs the whole unit suite,
     # and a test imports the plugin, the detection core, the benchmark and the scripts. The first list (2026-10-21)
     # named platform paths only, and a test that imported a POSIX-only module reached next untested on Windows (!194)
+    # bench/ without the measurement results (the bench part of .code_paths), and no .gitlab-ci.yml: baseline_only and
+    # ci_only test those, and a change of this job's script reaches the matrix on main before the release
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         - maisecrets/**/*
@@ -360,12 +468,12 @@ windows_macos:
         - .codex-plugin/**/*
         - .github/**/*
         - tests/**/*
-        - bench/**/*
+        - 'bench/{[!Hr]*,H,H[!O]*,HO,HO[!L]*,HOL,HOL[!D]*,HOLD,HOLD[!O]*,HOLDO,HOLDO[!U]*,HOLDOU,HOLDOU[!T]*,HOLDOUT,HOLDOUT[!-]*,HOLDOUT-,HOLDOUT-[!L]*,HOLDOUT-L,HOLDOUT-L[!O]*,HOLDOUT-LO,HOLDOUT-LO[!G]*,HOLDOUT-LOG,HOLDOUT-LOG[!.]*,HOLDOUT-LOG.,HOLDOUT-LOG.[!m]*,HOLDOUT-LOG.m,HOLDOUT-LOG.m[!d]*,HOLDOUT-LOG.md?*,r,r[!e]*,re,re[!s]*,res,res[!u]*,resu,resu[!l]*,resul,resul[!t]*,result,result[!s]*,results?*}'
+        - 'bench/{[!Hr]*,H,H[!O]*,HO,HO[!L]*,HOL,HOL[!D]*,HOLD,HOLD[!O]*,HOLDO,HOLDO[!U]*,HOLDOU,HOLDOU[!T]*,HOLDOUT,HOLDOUT[!-]*,HOLDOUT-,HOLDOUT-[!L]*,HOLDOUT-L,HOLDOUT-L[!O]*,HOLDOUT-LO,HOLDOUT-LO[!G]*,HOLDOUT-LOG,HOLDOUT-LOG[!.]*,HOLDOUT-LOG.,HOLDOUT-LOG.[!m]*,HOLDOUT-LOG.m,HOLDOUT-LOG.m[!d]*,HOLDOUT-LOG.md?*,r,r[!e]*,re,re[!s]*,res,res[!u]*,resu,resu[!l]*,resul,resul[!t]*,result,result[!s]*,results?*}/**/*'
         - scripts/**/*
         - beliefs/**/*
         - examples/**/*
         - pyproject.toml
-        - .gitlab-ci.yml
   variables:
     GIT_DEPTH: "0"
   script:

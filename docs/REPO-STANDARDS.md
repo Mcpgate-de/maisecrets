@@ -43,9 +43,31 @@ and OpenAI plugin directories.
   (Windows, macOS; Linux runs on GitLab) is green for the tested SHA on the public mirror
   (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
   red across four releases on 2026-09-26 because nothing waited for it.
+- The scope of a merge request into `next` comes from its changed paths (`scripts/mr_scope.py`). GitLab cannot
+  say "only these paths changed". The list `.code_paths` in `.gitlab-ci.yml` names every other path, and the script
+  writes it (`mr_scope.py globs`). There are three classes:
+  - **results**: every path is a measurement result (`bench/results/**`, `bench/HOLDOUT-LOG.md`, `docs/coverage.json`)
+    or the format-watch snapshot (`docs/format-watch.txt`, `docs/format-watch-fp.txt`). Only the job `baseline_only`
+    runs. It runs the test modules that read those files (`mr_scope.py tests results`).
+  - **ci**: `.gitlab-ci.yml` changed, and at most `docs/REPO-STANDARDS.md` beside it. The validate stage runs, the job
+    `ci_only` runs the test modules that read the two files, and one smoke job per test image starts the image and
+    runs its first setup step (`smoke_unit_python39`, `smoke_harness_claude`, `smoke_harness_codex`; `ci_only` itself
+    for `python:3.12-slim`; `commit_format` and `plugin_validate` for `alpine:3.20` and `node:22-slim`). The suites,
+    the replay, the harnesses and the matrix do not run: they test no new code, and the pipeline on `main` runs every
+    job before each release.
+  - **code**: anything else, an unknown path included. Every test job runs as before. Documentation alone stays here,
+    because tests read the docs (README length, derived counts, doc claims).
+
+  Each light job checks its class again on `CI_MERGE_REQUEST_DIFF_BASE_SHA..HEAD` and fails for any other path. A mix
+  of two classes (results and `.gitlab-ci.yml`) is code, and its guard turns red: split such a merge request.
+  `tests/test_mr_scope.py` reads the rules as GitLab does and checks each class, the precision of `.code_paths` on
+  every file of the tree, and that each test module that reads a light file is in its job's list. Main, tags,
+  schedules and the release merge request (`next` into `main`) are unchanged. Why: in the 14 days to 2026-11-19, 111
+  code merge requests into `next` used 8303 runner minutes in test jobs, and 38 merge requests without code used
+  477, about 13 each, for files that a few test modules read.
 - Matrix in a merge request: the job `windows_macos` runs beside the Linux tests
   (`scripts/github_matrix.py mr`) in every merge request into `main`, and in a merge request into `next` unless it
-  changes documentation alone (the list in `.gitlab-ci.yml`: every folder a test reads, since the matrix runs the
+  changes documentation, measurement results or `.gitlab-ci.yml` alone (the list in `.gitlab-ci.yml`: every folder a test reads, since the matrix runs the
   whole unit suite; a first list of platform paths let a POSIX-only import reach `next` untested, !194).
   The label `public-ci` runs it in any merge request (from the next pipeline on). The git hooks run no tests, so these jobs together are
   the test gate of a merge request: Linux on GitLab, Windows and macOS on GitHub. It merges the MR head into the current target branch (the
@@ -164,7 +186,8 @@ and OpenAI plugin directories.
   same code, and the repository had it one release late (2026-10-22).
 - **A baseline merge request runs only the checks of its files.** Its branch is `chore/baseline-<version>`, and the
   job `baseline_only` passes it only when every changed path is `bench/results/<run>/…`, `bench/HOLDOUT-LOG.md` or
-  `docs/coverage.json` (`scripts/baseline_only.py`). Then it runs the three test modules that read those files.
+  `docs/coverage.json` (`scripts/baseline_only.py`). Then it runs the test modules that read those files (the class
+  results above).
   The long jobs (unit, Python 3.9, the replay, both harnesses, the Windows and macOS matrix) skip it; the release
   merge request after it runs them on the same code. Why: a baseline ran the whole suite, 11 to 19 minutes and about
   54 CPU minutes on the runner, three times on 2026-11-05.
