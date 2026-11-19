@@ -216,8 +216,35 @@ class NameServiceTests(unittest.TestCase):
         self.assertIn("To turn it off: /maisecrets:ner off", out["note"])
         (call,) = [c for c in popen.call_args_list if "maisecrets.cli" in c.args[0]]
         self.assertEqual(call.args[0][1:], ["-m", "maisecrets.cli", "ner", "start"])
-        self.assertTrue(call.kwargs.get("start_new_session"))
+        self._detached(call, os.name)
+        # no bytecode from the detached start, and no cache folder of the caller
+        self.assertEqual(call.kwargs["env"].get("PYTHONDONTWRITEBYTECODE"), "1")
+        self.assertNotIn("PYTHONPYCACHEPREFIX", call.kwargs["env"])
         ask(action="ner_set", value="off")
+
+    def _detached(self, call, name: str) -> None:
+        """The start outlives the hook: its own session on POSIX, a detached process group on Windows (as in 0.9.18)."""
+        if name == "nt":
+            flags = call.kwargs.get("creationflags")
+            self.assertIsInstance(flags, int)
+            self.assertNotIn("start_new_session", call.kwargs)
+            if os.name == "nt":
+                self.assertEqual(flags & (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP),
+                                 subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        else:
+            self.assertTrue(call.kwargs.get("start_new_session"))
+            self.assertNotIn("creationflags", call.kwargs)
+
+    def test_the_start_is_detached_on_windows_too(self):
+        from maisecrets import ner_setup
+        with mock.patch("subprocess.Popen") as popen, mock.patch.dict(os.environ, {ner_setup.NO_START_ENV: "0"}), \
+                mock.patch.object(ner_setup, "container_tool", return_value="C:/docker.exe"), \
+                mock.patch.object(ner_setup, "probe", return_value=(False, "")), \
+                mock.patch.object(ner_setup, "start_running", return_value=False), \
+                mock.patch.object(ner_setup.os, "name", "nt"):
+            self.assertTrue(ner_setup.start_typed("slash command"))
+        (call,) = [c for c in popen.call_args_list if "maisecrets.cli" in c.args[0]]
+        self._detached(call, "nt")
 
     def test_a_policy_source_is_locked(self):
         with mock.patch.object(settings, "load_config",
