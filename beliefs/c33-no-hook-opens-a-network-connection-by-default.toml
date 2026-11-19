@@ -2,7 +2,8 @@
 belief = "c33-no-hook-opens-a-network-connection-by-default"
 control = "C33"
 statement = "No hook opens a network connection unless the person set up a name service: with the default settings, the prompt, pre-tool and post-tool hooks try no connect, no name lookup and no URL fetch (PRIVACY.md)."
-runner = ["tests/test_promises.py::NoNetworkTests::test_no_hook_reaches_for_the_network_in_process"]
+runner = ["tests/test_promises.py::NoNetworkTests::test_no_hook_reaches_for_the_network_in_process",
+          "tests/test_promises.py::NoNetworkTests::test_no_hook_entry_point_reaches_for_the_network_as_a_subprocess"]
 
 [proof]
 file = "maisecrets/home.py"
