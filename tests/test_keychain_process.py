@@ -49,6 +49,7 @@ def random_text(n: int) -> str:
     return secrets.token_urlsafe(n)[:n]
 
 
+@unittest.skipIf(os.name == "nt", "the fake is a shell script; the keychain is macOS only")
 class FakeKeychain(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix="fake-security-"))
