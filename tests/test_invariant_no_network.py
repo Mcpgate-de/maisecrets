@@ -55,8 +55,8 @@ MAY_START = {
     "maisecrets/file_reads.py": (27, "a text extractor for a PDF, ps and ldd"),
     "maisecrets/hooks.py": (58, "the clipboard tool (read, write), and Python children: a later transcript scrub, "
                                "the server of a value through a FIFO, the scrub of a failed prompt"),
-    "maisecrets/hub.py": (2, "maisecrets.cli ner start, for the name service the person set up"),
-    "maisecrets/ner_setup.py": (35, "the container tool of the name service the person set up, and its keeper"),
+    "maisecrets/ner_setup.py": (36, "the container tool of the name service the person set up, its keeper, and its "
+                                    "typed start"),
     "maisecrets/sref_client.py": (5, "a Python child that serves a gateway value through a FIFO"),
     "maisecrets/user_rules.py": (6, "a Python child that checks a rule of the person"),
     "maisecrets/vault.py": (54, "the tool of the operating system's store"),
@@ -67,15 +67,16 @@ MAY_START = {
 }
 # modules that import a process library and start nothing with it
 NAMES_ONLY = {"maisecrets/incidents.py": "names subprocess.TimeoutExpired"}
-# the members of `$` the mod may use, and of globalThis; none of them reaches the network. $.process starts a program:
-# the mod has MOD_PROCESS_RUNS places that do (tests/mod.test.ts checks their command lines), and a new one fails.
+# the members of `$` the mod may use, and of globalThis; none of them reaches the network. $.process starts a program
+# (run, or spawn for a streamed answer): the mod has MOD_PROCESS_RUNS places that do (tests/mod.test.ts checks their
+# command lines), and a new one fails.
 MOD_MEMBERS = {"clock", "command", "env", "plugin", "process", "prompt", "session", "state", "store", "ui"}
 MOD_GLOBALS = {"crypto"}
-MOD_PROCESS_RUNS = 8     # each a reference $.process.run(; any other use of $.process is a finding
+MOD_PROCESS_RUNS = 9     # each $.process.run( or $.process.spawn(; any other use of $.process is a finding
 MOD_FORBIDDEN = (r"\bfetch\b", r"\bXMLHttpRequest\b", r"\bWebSocket\b", r"\bEventSource\b", r"\bnavigator\b",
                  r"\bwindow\b", r"\bimport\s*\(", r"\brequire\s*\(", r"^\s*import\s", r"\bchild_process\b",
                  r"\$\s*\[", r"(?:^|[^}\s])\s*=\s*\$\s*(?:[;\n,)]|$)", r"\bglobalThis\s*\[",
-                 r"\$\.process(?!\.run\s*\()", r"\}\s*\}\s*=\s*\$(?![\w.])")
+                 r"\$\.process(?!\.(?:run|spawn)\s*\()", r"\}\s*\}\s*=\s*\$(?![\w.])")
 
 
 def modules():
