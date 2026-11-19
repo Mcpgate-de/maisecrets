@@ -951,6 +951,90 @@ class SrefClientTests(unittest.TestCase):
         self.assertIn("no matching answer from the browser in time", str(cm.exception))
         self.assertLess(time.monotonic() - t0, 3.5, "the wait ended `budget` seconds before the end")
 
+    # ------------------------------------------------ the time of a whole /maisecrets:sref command (Gate A) --
+    def silent_server(self) -> tuple:
+        """An https URL whose server accepts the connection and never starts the TLS handshake, and a function that
+        says whether any client connected."""
+        import socket
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(8)
+        self.addCleanup(sock.close)
+
+        def reached() -> bool:
+            sock.setblocking(False)
+            try:
+                sock.accept()[0].close()
+                return True
+            except BlockingIOError:
+                return False
+        return f"https://127.0.0.1:{sock.getsockname()[1]}/mcp", reached
+
+    def sref_command(self, args: list, servers: dict, **consts) -> tuple:
+        import io
+        from contextlib import ExitStack, redirect_stdout
+        from maisecrets import cli, ner_gateway, vault_refs
+        self.addCleanup(ner_gateway.CACHE.unlink, missing_ok=True)
+        out = io.StringIO()
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(vault_refs, "user_servers", return_value=servers))
+            stack.enter_context(mock.patch.object(cli, "load_config", return_value={
+                **self.cfg, "backend": "jsonfile", "allow_plaintext_store": True}))
+            for k, v in consts.items():
+                stack.enter_context(mock.patch.object(cli, k, v))
+            stack.enter_context(redirect_stdout(out))
+            t0 = time.monotonic()
+            code = cli.cmd_sref(args)
+            took = time.monotonic() - t0
+        return code, out.getvalue(), took
+
+    def test_a_slow_server_takes_only_its_share_and_the_gateway_after_it_is_still_asked(self):
+        slow, _reached = self.silent_server()
+        code, text, took = self.sref_command(["status"], {"slow": slow, "gw": self.srv.url + "/mcp"},
+                                             SREF_DISCOVERY_S=4.0)
+        self.assertLess(took, 4.6, "the discovery of the command ends at its deadline")
+        self.assertEqual(code, 1, text)
+        self.assertIn("failed for slow (the gateway did not answer within 2 s)", text)
+        self.assertIn("gw (127.0.0.1): not logged in", text)
+
+    def test_no_request_goes_out_after_the_deadline_and_each_server_not_asked_is_named(self):
+        slow, reached = self.silent_server()
+        before = self.srv.discovery_gets
+        code, text, took = self.sref_command(["status"], {"slow": slow, "gw": self.srv.url + "/mcp"},
+                                             SREF_DISCOVERY_S=0.0)
+        self.assertLess(took, 0.5)
+        self.assertEqual(code, 1, text)
+        for server in ("slow", "gw"):
+            self.assertIn(f"failed for {server} (not checked: no time left)", text)
+        self.assertEqual(self.srv.discovery_gets, before)
+        self.assertFalse(reached())
+
+    def test_a_login_with_a_name_asks_only_that_server_and_ends_inside_the_two_minutes(self):
+        slow, reached = self.silent_server()
+        calls = []
+        t0 = time.monotonic()
+        with mock.patch.object(S, "login", side_effect=lambda *a, **kw: calls.append((a[2]["origin"], kw))):
+            code, text, took = self.sref_command(["login", "gw"], {"slow": slow, "gw": self.srv.url + "/mcp"})
+        self.assertEqual(code, 0, text)
+        self.assertLess(took, 2.0)
+        self.assertFalse(reached(), "a login with a name never waits for another server")
+        self.assertEqual(len(calls), 1)
+        origin, kw = calls[0]
+        self.assertEqual(origin, self.found["origin"])
+        self.assertEqual((kw["budget"], kw["patient"], kw["wait"]), (15.0, True, 110.0))
+        # the login ends 115 s after the command started: inside the 2 minutes of the client
+        self.assertAlmostEqual(kw["end"] - t0, 115.0, delta=took + 0.1)
+
+    def test_the_discovery_of_a_login_has_less_time_than_a_status_so_the_browser_keeps_its_time(self):
+        slow, _reached = self.silent_server()
+        with mock.patch.object(S, "login") as login:
+            code, text, took = self.sref_command(["login", "slow"], {"slow": slow}, SREF_DISCOVERY_S=4.0,
+                                                 SREF_LOGIN_DISCOVERY_S=2.0)
+        self.assertEqual(code, 1, text)
+        self.assertIn("failed for slow (the gateway did not answer within 2 s)", text)
+        self.assertLess(took, 3.0)
+        login.assert_not_called()
+
     def test_the_fresh_name_source_cache_takes_only_a_record_of_its_own_url(self):
         from maisecrets import ner_gateway
         self.addCleanup(ner_gateway.CACHE.unlink, missing_ok=True)
@@ -1212,26 +1296,6 @@ class StatusWithoutReferencesTests(unittest.TestCase):
         self.assertIn("discovery of Sensitive References failed for slow-mcp (the gateway did not answer within "
                       "30 s, twice)", text)
         self.assertIn("good-gw (gw.example.com): not logged in", text)
-
-    def test_a_typed_login_ends_inside_the_two_minutes_of_the_client(self):
-        import io
-        import types
-        from contextlib import redirect_stdout
-        from maisecrets import cli, vault_refs
-        origin = "https://gw.example.com"
-        waits, ends = [], []
-        with mock.patch.object(vault_refs, "user_servers", return_value={"gw": origin + "/mcp"}), \
-                mock.patch.object(S, "discover_typed", side_effect=lambda *a, end: ends.append(end)
-                                  or ({"origin": origin}, "")), \
-                mock.patch.object(S, "login", side_effect=lambda *a, **kw: waits.append(kw)), \
-                mock.patch.object(S, "account", return_value=""), \
-                mock.patch.object(cli, "time", types.SimpleNamespace(monotonic=lambda: 100.0)), \
-                mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
-                                                                    "allow_plaintext_store": True}), \
-                redirect_stdout(io.StringIO()):
-            self.assertEqual(cli.cmd_sref(["login", "gw"]), 0)
-        self.assertEqual(ends, [140.0], "the discovery of a login ends after 40 s")
-        self.assertEqual(waits, [{"wait": 110.0, "budget": 15.0, "patient": True, "end": 215.0}])
 
     def test_a_silent_gateway_with_a_good_discovery_of_this_week_is_used_and_said(self):
         import io

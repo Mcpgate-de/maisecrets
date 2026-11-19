@@ -205,6 +205,9 @@ def _seconds(budgets: list) -> str:
     return " and ".join(words)
 
 
+NO_TIME = "not checked: no time left"
+
+
 def discover_typed(cfg: dict, mcp_url: str, budget: float = TYPED_BUDGET, tries: int = TYPED_TRIES,
                    end: float | None = None, keep: float = LAST_GOOD_KEEP) -> tuple:
     """discover() for a command the person typed: (found, note). Each try gets `budget` seconds (never past `end`,
@@ -212,15 +215,18 @@ def discover_typed(cfg: dict, mcp_url: str, budget: float = TYPED_BUDGET, tries:
     failed that way, the last good discovery of this MCP URL (ner_gateway's cache, younger than `keep`) stands in,
     checked again as discover() checks a fresh one; `note` then says so. A failure that is no timeout and no lost
     connection (no document, an HTTP error, a broken answer) never uses it. found None: `note` names the failure for
-    a timeout or no connection, else it is "" and DISCOVERY names why. A login with a record from the cache still
-    runs the whole OAuth flow against its endpoints."""
+    a timeout or no connection, else it is "" and DISCOVERY names why. `end` is hard: with less than 1 s left
+    before it, no request goes out, and the note is NO_TIME. A login with a record from the cache still runs the
+    whole OAuth flow against its endpoints."""
     from . import ner_gateway
     budgets: list = []
     for _ in range(max(1, tries)):
         left = budget if end is None else min(budget, end - time.monotonic())
-        if budgets and left < 1.0:
-            break                                  # no time left for one more try
-        left = max(1.0, left)
+        if left < 1.0:
+            if budgets:
+                break                              # no time left for one more try
+            DISCOVERY.update(why="", status=None, named=False)
+            return None, NO_TIME
         budgets.append(left)
         found = discover(cfg, mcp_url, time.monotonic() + left, True)
         if found:

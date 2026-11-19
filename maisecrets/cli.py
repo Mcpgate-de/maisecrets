@@ -1170,17 +1170,20 @@ def cmd_sref(args: list[str]) -> int:
             print(f"maisecrets: no MCP server named {name} in your user configuration.")
             return 1
     start = time.monotonic()
+    # the whole discovery ends after this, however many servers are slow: the client ends a command after 2 minutes,
+    # and a login waits for the browser after it. Each server gets an equal share of the time that is left, so a slow
+    # server never takes the time of the gateway after it (a login with a NAME asks that server only)
+    phase_end = start + (SREF_LOGIN_DISCOVERY_S if action == "login" else SREF_DISCOVERY_S)
     found, failed = {}, []
-    for server, url in servers.items():
-        # the whole discovery ends after SREF_DISCOVERY_S, however many servers are slow: the client ends a command
-        # after 2 minutes, and a login waits for the browser after it
-        f, note = sref_client.discover_typed(
-            cfg, url, end=start + (SREF_LOGIN_DISCOVERY_S if action == "login" else SREF_DISCOVERY_S))
+    for i, (server, url) in enumerate(servers.items()):
+        now = time.monotonic()
+        share = max(0.0, phase_end - now) / (len(servers) - i)
+        f, note = sref_client.discover_typed(cfg, url, end=now + share)
         if f:
             found[server] = f
             if note:
                 print(f"maisecrets: {server}: {note}.")
-        elif sref_client.discovery_failed():
+        elif note or sref_client.discovery_failed():
             failed.append(f"{server} ({note or sref_client.DISCOVERY.get('why')})")
     for server in failed:
         # each failure is said, also next to a server that works: a status that hid it exited 0 (Gate A)
