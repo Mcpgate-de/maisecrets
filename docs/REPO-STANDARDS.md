@@ -11,7 +11,10 @@ and OpenAI plugin directories.
   `tests/` unit tests, `docs/` concept and decisions, `scripts/` tooling.
 - Everything a hook runs lives inside the plugin folder. No symlink, no
   submodule, no binary, no package install at runtime (Claude directory
-  checklist).
+  checklist). The CI job `tree_types` (`scripts/tree_types.py`) refuses a
+  symlink, a submodule and a binary in the whole tree. It allows data only: the
+  gzip results in `bench/results/` and the PNG icons in `assets/`, each with
+  the magic bytes of its type.
 - `.gitignore` excludes caches and harness output. Nothing under
   `~/.maisecrets/` is ever committed.
 - `LICENSE` Apache-2.0, `README.md` and `docs/HOW-IT-WORKS.md` describe what the plugin runs, writes,
@@ -43,35 +46,24 @@ and OpenAI plugin directories.
   (Windows, macOS; Linux runs on GitLab) is green for the tested SHA on the public mirror
   (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
   red across four releases on 2026-09-26 because nothing waited for it.
-- The scope of a merge request into `next` comes from its changed paths (`scripts/mr_scope.py`). GitLab cannot
-  say "only these paths changed". The list `.code_paths` in `.gitlab-ci.yml` names every other path, and the script
-  writes it (`mr_scope.py globs`). There are three classes:
-  - **results**: every path is a measurement result (`bench/results/**`, `bench/HOLDOUT-LOG.md`, `docs/coverage.json`)
-    or the format-watch snapshot (`docs/format-watch.txt`, `docs/format-watch-fp.txt`). Only the job `baseline_only`
-    runs. It runs the test modules that read those files (`mr_scope.py tests results`).
-  - **ci**: `.gitlab-ci.yml` changed, and at most `docs/REPO-STANDARDS.md` beside it. The validate stage runs, the job
-    `ci_only` runs the test modules that read the two files, and one smoke job per test image starts the image and
-    runs its first setup step (`smoke_unit_python39`, `smoke_harness_claude`, `smoke_harness_codex`; `ci_only` itself
-    for `python:3.12-slim`; `commit_format` and `plugin_validate` for `alpine:3.20` and `node:22-slim`). The suites,
-    the replay, the harnesses and the matrix do not run: they test no new code, and the pipeline on `main` runs every
-    job before each release. A changed line with a pinned version or image (`CLAUDE_CODE_VERSION`, `CODEX_VERSION`,
-    `image:`, a `@sha256:` digest, a `==` package pin) makes the merge request code: a test job uses it, and a new
-    client version is what the harness tests. GitLab rules cannot read diff lines, so `ci_only` fails with the
-    message "add the label full-ci".
-  - **code**: anything else, an unknown path included. Every test job runs as before. The merge request label
-    `full-ci` runs every test job in any merge request (from the next pipeline on), and the light jobs stay off. Documentation alone stays here,
-    because tests read the docs (README length, derived counts, doc claims).
-
-  Each light job checks its class again on `CI_MERGE_REQUEST_DIFF_BASE_SHA..HEAD` and fails for any other path. A mix
-  of two classes (results and `.gitlab-ci.yml`) is code, and its guard turns red: split such a merge request.
-  `tests/test_mr_scope.py` reads the rules as GitLab does and checks each class, the precision of `.code_paths` on
-  every file of the tree, and that each test module that reads a light file is in its job's list. Main, tags,
-  schedules and the release merge request (`next` into `main`) are unchanged. Why: in the 14 days to 2026-11-19, 111
-  code merge requests into `next` used 8303 runner minutes in test jobs, and 38 merge requests without code used
-  477, about 13 each, for files that a few test modules read.
+- A merge request into `next` that changes only measurement results (`bench/results/**`, `bench/HOLDOUT-LOG.md`,
+  `docs/coverage.json`) or the format-watch snapshot (`docs/format-watch.txt`, `docs/format-watch-fp.txt`) runs the
+  validate stage and the job `baseline_only` alone. That job runs the test modules that read those files
+  (`scripts/mr_scope.py tests`). Every other change runs every test job as before. This includes `.gitlab-ci.yml`,
+  because it holds the commands of each gate and the versions the harnesses test, and documentation, because tests
+  read it. GitLab cannot say "only these paths changed", so the list `.code_paths` in `.gitlab-ci.yml` names every
+  other path (`mr_scope.py globs` writes it). The guard of `baseline_only` (`mr_scope.py check`) reads the diff
+  again: each changed entry must be a result path, a regular file (no symlink, no submodule, no executable), of a
+  type that a baseline holds (`.json.gz`, `.json`, `.jsonl`, `.log`, `.md`, `.txt`, `SHA256SUMS`), and a binary
+  only as gzip. Else the job fails. Its base is `CI_MERGE_REQUEST_TARGET_BRANCH_SHA` in a merged-results pipeline,
+  else `CI_MERGE_REQUEST_DIFF_BASE_SHA`, fetched before the check. `tests/test_mr_scope.py` reads the rules as GitLab
+  does, checks `.code_paths` against every file of the tree, and checks that each test module that reads a result
+  file is in the list. Why: in the 14 days to 2026-11-19, 111 code merge requests into `next` used 8303 runner
+  minutes in test jobs, and 38 merge requests without code used 477, about 13 each. Most of them changed only
+  measurement results or the snapshot.
 - Matrix in a merge request: the job `windows_macos` runs beside the Linux tests
   (`scripts/github_matrix.py mr`) in every merge request into `main`, and in a merge request into `next` unless it
-  changes documentation, measurement results or `.gitlab-ci.yml` alone (the list in `.gitlab-ci.yml`: every folder a test reads, since the matrix runs the
+  changes documentation or measurement results alone (the list in `.gitlab-ci.yml`: every folder a test reads, since the matrix runs the
   whole unit suite; a first list of platform paths let a POSIX-only import reach `next` untested, !194).
   The label `public-ci` runs it in any merge request (from the next pipeline on). The git hooks run no tests, so these jobs together are
   the test gate of a merge request: Linux on GitLab, Windows and macOS on GitHub. It merges the MR head into the current target branch (the
@@ -190,8 +182,7 @@ and OpenAI plugin directories.
   same code, and the repository had it one release late (2026-10-22).
 - **A baseline merge request runs only the checks of its files.** Its branch is `chore/baseline-<version>`, and the
   job `baseline_only` passes it only when every changed path is `bench/results/<run>/…`, `bench/HOLDOUT-LOG.md` or
-  `docs/coverage.json` (`scripts/baseline_only.py`). Then it runs the test modules that read those files (the class
-  results above).
+  `docs/coverage.json` (`scripts/baseline_only.py`). Then it runs the test modules that read those files.
   The long jobs (unit, Python 3.9, the replay, both harnesses, the Windows and macOS matrix) skip it; the release
   merge request after it runs them on the same code. Why: a baseline ran the whole suite, 11 to 19 minutes and about
   54 CPU minutes on the runner, three times on 2026-11-05.

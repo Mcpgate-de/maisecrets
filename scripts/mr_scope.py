@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""The scope of a merge request into next: which test jobs its changed paths need (.gitlab-ci.yml).
+"""The scope of a merge request into next: does it need the test suites (.gitlab-ci.yml)?
 
-    results  every path is a measurement result or the format-watch snapshot: the job baseline_only runs the tests
-             that read those files, and the other test jobs do not run
-    ci       .gitlab-ci.yml changed, and at most docs/REPO-STANDARDS.md beside it: the job ci_only runs the tests
-             that read those files, and one smoke job per runner image shows that the image starts. A changed line
-             with a pinned version or image (PIN) makes it code: ci_only fails and asks for the label full-ci
-    code     anything else, and a mix of two classes: every test job runs (the label full-ci runs them always)
+    results  every changed entry is a measurement result or the format-watch snapshot, a regular file of a known
+             type: the job baseline_only runs the tests that read those files, and the other test jobs do not run
+    code     anything else, .gitlab-ci.yml included: every test job runs
 
 GitLab cannot say "only these paths changed", so the rules in .gitlab-ci.yml name every other path
-(`code_globs()`, written into the list .code_paths). The light jobs check the class again with `check`; a path set
-that the rules let through but that is not of their class turns the job red, so no path skips the tests unseen.
+(`code_globs()`, written into the list .code_paths). A merge request that changes none of them runs only
+baseline_only, and its guard (`check`) reads the diff again: the names, the file modes and the binary files. A change
+that is not of the class results turns the job red, so no path skips the tests unseen.
 
-    python3 scripts/mr_scope.py classify BASE      # prints results, ci or code for BASE..HEAD
-    python3 scripts/mr_scope.py check CLASS BASE   # exit 1 and the other paths when BASE..HEAD is not CLASS
-    python3 scripts/mr_scope.py tests CLASS        # the test modules that read the files of CLASS
-    python3 scripts/mr_scope.py globs              # the patterns of .code_paths in .gitlab-ci.yml
+    python3 scripts/mr_scope.py classify BASE   # prints results or code for BASE..HEAD
+    python3 scripts/mr_scope.py check BASE      # exit 1 and the refused entries when BASE..HEAD is not results
+    python3 scripts/mr_scope.py tests           # the test modules that read the result files
+    python3 scripts/mr_scope.py globs           # the patterns of .code_paths in .gitlab-ci.yml
 """
 from __future__ import annotations
 
@@ -24,24 +22,29 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
+from typing import NamedTuple
 
 # what scripts/release_gate.py --keep writes, the other measurement runs, and the snapshot of scripts/watch_formats.py
 RESULT_DIRS = ("bench/results",)
 RESULT_FILES = ("bench/HOLDOUT-LOG.md", "docs/coverage.json", "docs/format-watch.txt", "docs/format-watch-fp.txt")
-CI_FILE = ".gitlab-ci.yml"
-CI_FILES = (CI_FILE, "docs/REPO-STANDARDS.md")
+# the file types of the runs in bench/results that a baseline merge request adds (2026-11: .json.gz, .json.log,
+# .json, .jsonl, .md, .txt, SHA256SUMS); an older run also holds .csv, .diff and .jsonl.gz, which go through the suites
+RESULT_SUFFIXES = (".json.gz", ".json", ".jsonl", ".log", ".md", ".txt")
+RESULT_NAMES = ("SHA256SUMS",)
+GZIP = b"\x1f\x8b"
 
-# the modules that read the files of a class, or run a script that reads them (tests/test_mr_scope.py finds them
-# with grep and fails when one is missing here)
-TESTS = {
-    "results": ("tests.test_mr_scope", "tests.test_baseline_only", "tests.test_extended_baseline",
-                "tests.test_format_intake", "tests.test_readme_moved_sections", "tests.test_release_gate",
-                "tests.test_release_tools", "tests.test_release_tree", "tests.test_tree_size",
-                "tests.test_watch_formats"),
-    "ci": ("tests.test_mr_scope", "tests.test_baseline_only", "tests.test_readme_moved_sections",
-           "tests.test_release_gate", "tests.test_release_tools", "tests.test_release_tree", "tests.test_tree_size",
-           "tests.test_user_rules"),
-}
+# the modules that read the result files, or run a script that reads them (tests/test_mr_scope.py finds them with grep
+# and fails when one is missing here)
+TESTS = ("tests.test_mr_scope", "tests.test_baseline_only", "tests.test_extended_baseline", "tests.test_format_intake",
+         "tests.test_readme_moved_sections", "tests.test_release_gate", "tests.test_release_tools",
+         "tests.test_release_tree", "tests.test_tree_size", "tests.test_tree_types", "tests.test_watch_formats")
+
+
+class Entry(NamedTuple):
+    path: str
+    mode: str            # the new mode; 000000 for a deleted entry
+    binary: bool         # git diff --numstat shows "-"
+    head: bytes = b""    # the first bytes of the new blob of a binary entry
 
 
 def _plain(path: str) -> bool:
@@ -53,39 +56,54 @@ def is_result(path: str) -> bool:
     return _plain(path) and (path in RESULT_FILES or any(path.startswith(d + "/") for d in RESULT_DIRS))
 
 
-# a changed line of .gitlab-ci.yml with a pinned version or image: a test job uses it, so the merge request is code
-# (a new client version is what the harness tests). GitLab rules cannot read diff lines; the guard of ci_only fails
-# and asks for the label full-ci
-PIN = re.compile(r"CLAUDE_CODE_VERSION|CODEX_VERSION|\bimage:|@sha256:|[A-Za-z0-9_.-]==\d")
-
-
-def pinned(ci_lines: list[str]) -> list[str]:
-    """The added or removed lines of a diff of .gitlab-ci.yml that hold a pinned version or image."""
-    return [line for line in ci_lines if line[:1] in "+-" and not line.startswith(("+++", "---"))
-            and PIN.search(line)]
-
-
-def classify(paths: list[str], ci_lines: list[str] = ()) -> str:
-    """results, ci or code. No path, an odd path, a mix of classes or a changed pin in .gitlab-ci.yml (`ci_lines`:
-    the diff of that file) is code: every test job runs."""
-    if not paths or not all(_plain(p) for p in paths):
-        return "code"
-    if all(is_result(p) for p in paths):
+def classify(paths: list[str]) -> str:
+    """results or code. No path or an odd path is code: every test job runs."""
+    if paths and all(is_result(p) for p in paths):
         return "results"
-    if set(paths) <= set(CI_FILES) and CI_FILE in paths and not pinned(list(ci_lines)):
-        return "ci"
     return "code"
 
 
-def ci_diff(base: str, head: str = "HEAD") -> list[str]:
-    return subprocess.run(["git", "diff", "-U0", "--no-renames", base, head, "--", CI_FILE], capture_output=True,
-                          text=True, check=True).stdout.splitlines()
+def refused(entries: list[Entry]) -> list[str]:
+    """The entries a results merge request may not hold, each with the reason. A deleted result is allowed."""
+    out = []
+    for e in entries:
+        if not is_result(e.path):
+            out.append(f"{e.path}: no measurement result")
+        elif e.mode == "000000":
+            continue
+        elif e.mode != "100644":
+            out.append(f"{e.path}: mode {e.mode}, only a regular file (no symlink, no submodule, no executable)")
+        elif e.path.startswith(tuple(d + "/" for d in RESULT_DIRS)) and not (
+                e.path.endswith(RESULT_SUFFIXES) or e.path.rsplit("/", 1)[-1] in RESULT_NAMES):
+            out.append(f"{e.path}: a file type that no baseline holds ({', '.join(RESULT_SUFFIXES + RESULT_NAMES)})")
+        elif e.binary and not (e.path.endswith(".gz") and e.head.startswith(GZIP)):
+            out.append(f"{e.path}: a binary file that is no gzip result")
+    return out
 
 
-def changed(base: str, head: str = "HEAD") -> list[str]:
-    out = subprocess.run(["git", "diff", "--name-only", "--no-renames", base, head], capture_output=True,
-                         text=True, check=True).stdout
-    return [line for line in out.splitlines() if line]
+def _git(*args: str) -> bytes:
+    return subprocess.run(["git", *args], capture_output=True, check=True).stdout
+
+
+def entries(base: str, head: str = "HEAD") -> list[Entry]:
+    """The changed entries of BASE..HEAD with their new mode, from git diff --raw and --numstat."""
+    raw = _git("diff", "--raw", "-z", "--no-renames", "--no-abbrev", base, head).split(b"\0")
+    binary = set()
+    for rec in _git("diff", "--numstat", "-z", "--no-renames", base, head).split(b"\0"):
+        added, _, rest = rec.partition(b"\t")
+        if added == b"-":
+            binary.add(rest.partition(b"\t")[2].decode("utf-8", "replace"))
+    out = []
+    for meta, path in zip(raw[0::2], raw[1::2]):
+        if not meta.startswith(b":"):
+            continue
+        _, new_mode, _, new_sha, _ = meta[1:].decode().split(" ")
+        name = path.decode("utf-8", "replace")
+        blob = b""
+        if name in binary and new_mode != "000000":
+            blob = _git("cat-file", "blob", new_sha)[:4]
+        out.append(Entry(name, new_mode, name in binary, blob))
+    return out
 
 
 # --- the patterns of .code_paths -------------------------------------------------------------------------------
@@ -116,9 +134,9 @@ def _brace(alts: list[str]) -> str:
 
 
 def code_globs() -> list[str]:
-    """Patterns for GitLab rules:changes that match every path outside RESULT_* and CI_FILES."""
+    """Patterns for GitLab rules:changes that match every path outside RESULT_DIRS and RESULT_FILES."""
     spec: dict[str, dict[str, set[str]]] = defaultdict(lambda: {"files": set(), "dirs": set(), "via": set()})
-    for path, kind in [(f, "files") for f in RESULT_FILES + CI_FILES] + [(d, "dirs") for d in RESULT_DIRS]:
+    for path, kind in [(f, "files") for f in RESULT_FILES] + [(d, "dirs") for d in RESULT_DIRS]:
         parts = path.split("/")
         for i in range(len(parts) - 1):
             spec["/".join(parts[:i])]["via"].add(parts[i])
@@ -174,32 +192,26 @@ def glob_match(pattern: str, path: str) -> bool:
 
 
 def main(argv: list[str]) -> int:
-    if argv[:1] == ["globs"] and len(argv) == 1:
+    if argv == ["globs"]:
         for g in code_globs():
             print(g)
         return 0
-    if argv[:1] == ["tests"] and len(argv) == 2 and argv[1] in TESTS:
-        print(" ".join(TESTS[argv[1]]))
+    if argv == ["tests"]:
+        print(" ".join(TESTS))
         return 0
-    if argv[:1] == ["classify"] and len(argv) == 2 and argv[1]:
-        print(classify(changed(argv[1]), ci_diff(argv[1])))
+    if len(argv) == 2 and argv[0] == "classify" and argv[1]:
+        print(classify([e.path for e in entries(argv[1])]))
         return 0
-    if argv[:1] == ["check"] and len(argv) == 3 and argv[1] in TESTS and argv[2]:
-        paths, lines = changed(argv[2]), ci_diff(argv[2])
-        got = classify(paths, lines)
-        if got == argv[1]:
-            print(f"mr_scope: {len(paths)} changed paths, class {got}")
+    if len(argv) == 2 and argv[0] == "check" and argv[1]:
+        found = entries(argv[1])
+        bad = refused(found) if found else ["(no change)"]
+        if not bad:
+            print(f"mr_scope: {len(found)} changed entries, all measurement results")
             return 0
-        if pins := pinned(lines):
-            print("mr_scope: a pinned version or image changed in .gitlab-ci.yml. A test job uses it, so this merge "
-                  "request needs the full pipeline. Add the label full-ci and run a new pipeline. Changed lines:")
-            for line in pins:
-                print(f"  {line}")
-            return 1
-        print(f"mr_scope: this job tests the class {argv[1]}, but the merge request is of the class {got}. "
-              f"The pipeline rules (.code_paths) ran the short jobs only. Changed paths:")
-        for p in paths or ["(none)"]:
-            print(f"  {p}")
+        print("mr_scope: the pipeline rules (.code_paths) ran baseline_only alone, but this merge request holds more "
+              "than measurement results. Refused:")
+        for line in bad:
+            print(f"  {line}")
         print("Split the merge request, or fix .code_paths (python3 scripts/mr_scope.py globs).")
         return 1
     print(__doc__)
