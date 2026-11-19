@@ -14,6 +14,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | Claude Code harness | `python3 harness/run.py` | GitLab `harness_claude`; locally `scripts/check_all.sh` (needs `claude`) |
 | Codex harness | `python3 harness/codex.py` | GitLab `harness_codex` |
 | the demo mode in the interactive client | `python3 harness/demo_screen.py` (needs pyte) | by hand after a change of `maisecrets/demo.py` or the mod, and on a new Claude Code version: the real client in a pseudo-terminal with its optional traffic on; every model request in a demo session (two prompts, 100 s idle, Tab, /compact) fails it, with its source (a title, the next-prompt guess, a compaction) |
+| commands the mod runs, in the interactive client | `python3 harness/login_screen.py` (needs pyte and openssl) | by hand after a change of the mod's command runs (`claude-mod/maisecrets-mod.mjs`, `prompt_commands.run_plan`) and on a new Claude Code version: the real client in a pseudo-terminal, the fake gateway of `harness/sref_server.py` and a browser script that gives the consent after 12 s. It types `/maisecrets:sref login team-gw`, a second prompt while the login waits, and `/maisecrets:list`; it fails when the status line does not show the wait, when the second prompt gets its answer only after the consent (the client was blocked), when the login does not end with its toast, or when a command makes a model request. It prints the times |
 | Codex harness on the `release-codex` tree | `python3 harness/codex.py --tree=codex` (the tree that `scripts/build_release_tree.py --flavor codex` builds from HEAD, installed as a Git source with `path: plugin`) | GitLab `harness_codex` |
 | vault references, end to end | `python3 harness/vault_refs_e2e.py` | by hand before a release that touches `maisecrets/vault_refs.py` (needs `claude` and `openssl`): the real client, a client profile of its own and the fake server of `harness/vault_server.py`; the resolve and the `client_header: false` run |
 | native store and clipboard | `MAISECRETS_NATIVE_BACKEND_TEST=1`, `MAISECRETS_NATIVE_CLIPBOARD_TEST=1` | GitHub runners only: they use the real keychain and clipboard |
@@ -44,20 +45,22 @@ on the same git tree exists (the release then reuses it). A merge without a rele
 ## What makes a test count
 
 - **A belief per control.** `beliefs/*.toml` names, per control of `docs/THREAT-MODEL.md`,
-  the tests that own it and one mutation of the guarded code. The replay runs the tests green,
+  the tests that own it, one mutation of the guarded code, and in `serves` the parts of the
+  product promises (`mission/*.toml`) that it proves. The replay runs the tests green,
   applies the mutation, demands red, and restores the file. A skipped test is no evidence.
 - **An invariant over every path.** A mechanism belief proves one guard; an invariant belief
   (`beliefs/inv-*.toml`, `kind = "invariant"`) proves one goal over every path to it. It names
   several tests and a mutation per path (`[[proof]]`, each with a `path`). The replay runs the
   tests green once, then each mutation, and demands that every mutation turns at least one test
   red and that every test is red under at least one mutation; a test that no mutation reaches is
-  named as ballast. The four invariants:
+  named as ballast. The five invariants:
 
   | invariant | module | the population it covers |
   |---|---|---|
   | I1 a stored value never reaches output the model or the person reads | `test_invariant_model_output.py` | every hook event, both clients, six tool-response shapes, the encodings of an own oracle for a resolved value and for another session's value as its own token, every refusal, the fail-closed answers, the prompt that goes on, the session-start message; every output field is classified |
   | I2 a rewrite never grants more than the call (Claude Code; Codex is the named exception) | `test_invariant_rewrite_grants_no_more.py` | 20 Bash command shapes (quotes, heredoc, assignments, loops, subshells, ssh with sudo), MCP inputs nested and as JSON text, Write and Edit; an own checker that knows the delivery forms as text; a call without a placeholder gets no grant |
   | I3 no agent tool reads vault material | `test_invariant_store_reads.py` | every tool that reads a path, from `tests/client_tools.json` (the harness checks that list against the real client's tool list on every run; checked against the matcher), twelve spellings of a store path, searches over a parent, MCP paths and file URIs, Bash with the default and the configured home; and the other side, a path next to the store passes |
+  | I5 a network connection starts only in a service the person set up | `test_invariant_no_network.py` | every Python module of the plugin and the skill, each spelling of an import of a network library (also `__import__` and `import_module` with a constant), each place that starts a program, counted per module, through any import alias; the mod's code without comments, every member of `$` and `globalThis` it uses, and no `$` handed on by destructuring; an allowed module that no longer needs its entry fails too |
   | I4 every detected value can be scrubbed from a transcript | `test_invariant_transcript_scrub.py` | every value the detector returns on the matrix, the token corpus and one PII value per type, in ten record shapes and two JSON writers, across the read window, and through the hooks |
 
   Each oracle is the test's own: it builds the encodings and escapes without the product's

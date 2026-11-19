@@ -2,29 +2,29 @@
 mission = "M6"
 promise = "maisecrets sends nothing off the computer on its own: no telemetry, no network connection of its hooks or its mod; text goes only to a service the person set up."
 actors = ["A5"]
-controls = ["C33", "C24", "C30"]
-invariants = []
-ends = "A command that the person or the agent runs; an MCP server, a name service or a gateway that the person added."
+controls = ["C33", "C24", "C30", "C22"]
+invariants = ["I5"]
+ends = "A command that the person or the agent runs; an MCP server, a name service or a gateway that the person added; the Windows Credential Locker may roam through a Microsoft account (PRIVACY.md)."
 
 [[part]]
-says = "No hook opens a network connection unless the person set up a name service."
-beliefs = ["c33-no-hook-opens-a-network-connection-by-default"]
+id = "M6.1"
+says = "No hook opens a network connection unless the person set up a service for it (a name service, a gateway, a vault server) or runs an ssh command with a value in the sandbox."
 
 [[part]]
+id = "M6.2"
 says = "In the demo, Claude Code sends no request; when the plugin gives no answer, the request is refused."
-beliefs = ["c33-the-demo-sends-no-request", "c33-no-answer-from-the-plugin-sends-no-request"]
 
 [[part]]
+id = "M6.3"
 says = "Diagnostics stay on the computer until the person sends them."
-beliefs = ["c24-*"]
 
 [[part]]
-says = "The name service gets text only when the person set one up."
-beliefs = ["c30-*"]
+id = "M6.4"
+says = "The name service gets text only when the person set one up, and by default the values the rules found go to it as filler."
 
 [[part]]
+id = "M6.5"
 says = "The mod starts only hooks/dispatch.py, with a fixed command line and no shell, and makes no network request."
-beliefs = ["c33-the-mod-starts-only-the-plugins-dispatcher"]
 
 [measure]
-none = "the count of connections is zero or the promise is broken; the C33 beliefs check it"
+none = "the count of connections is zero or the promise is broken; the C33 beliefs and invariant I5 check it"

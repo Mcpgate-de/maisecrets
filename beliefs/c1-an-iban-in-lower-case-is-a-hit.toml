@@ -1,6 +1,7 @@
 # c1-an-iban-in-lower-case-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c1-an-iban-in-lower-case-is-a-hit"
 control = "C1"
+serves = ["M1.3"]
 statement = "An IBAN in lower case, plain or in groups of four with spaces or hyphens, is an IBAN hit when its checksum passes and it has its country's length."
 runner = ["tests/test_bank_and_company_numbers.py::IbanFormTests::test_an_iban_in_lower_case_is_found_plain_and_in_groups"]
 

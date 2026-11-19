@@ -1,6 +1,7 @@
 # c27-a-parallel-answer-never-takes-bound-back: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c27-a-parallel-answer-never-takes-bound-back"
 control = "C27"
+serves = ["M3.3"]
 statement = "A state write reads the record again under the lock: an unknown_key answer whose first read came before a parallel 200 still sees the binding and records lost."
 runner = ["tests/test_vault_states.py::States::test_a_parallel_answer_never_takes_bound_back"]
 

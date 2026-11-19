@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `/maisecrets:ner local`, typed by you, starts the local name service at once, with a note on its size (about 690 MB) and how to turn the source off; a setting from a policy or an earlier session never starts a download.
+- While a start of the name service still runs, `/maisecrets:ner off` says so; the start ends by itself.
+
 ## [0.9.18] - 2026-11-19
 
 ### Features

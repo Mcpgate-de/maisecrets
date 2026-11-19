@@ -1,6 +1,7 @@
 # c23-observing-never-changes-the-answer: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c23-observing-never-changes-the-answer"
 control = "C23"
+serves = ["M3.6"]
 statement = "Noting where a secret goes never changes the hook's answer: with the record off or failing, the call gets the same answer and its value."
 runner = ["tests/test_destinations.py::Recording::test_observing_never_changes_the_answer_and_a_failing_record_never_stops_the_call"]
 

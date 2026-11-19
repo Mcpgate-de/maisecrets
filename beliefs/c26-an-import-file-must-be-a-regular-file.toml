@@ -1,6 +1,7 @@
 # c26-an-import-file-must-be-a-regular-file: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-an-import-file-must-be-a-regular-file"
 control = "C26"
+serves = ["M1.3"]
 statement = "A FIFO, a device or a folder in place of an import file is refused on the opened descriptor, without waiting for a writer."
 runner = ["tests/test_values.py::FileChecks::test_a_fifo_is_refused_without_waiting_for_a_writer"]
 

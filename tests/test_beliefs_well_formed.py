@@ -27,8 +27,12 @@ class BeliefsWellFormedTests(unittest.TestCase):
         for path in BELIEFS:
             with self.subTest(path.name):
                 b = tomllib.loads(path.read_text(encoding="utf-8"))
-                for key in ("belief", "control", "statement", "runner", "proof"):
+                for key in ("belief", "control", "serves", "statement", "runner", "proof"):
                     self.assertIn(key, b)
+                # the mission parts it proves (mission/*.toml); [] when it serves no promise
+                self.assertIsInstance(b["serves"], list, f"{path.name}: serves is a list of part ids")
+                for part in b["serves"]:
+                    self.assertRegex(part, r"^M\d+\.\d+$", f"{path.name}: serves names a part id such as M1.3")
                 self.assertEqual(b["belief"], path.stem)
                 self.assertTrue(b["runner"], "a belief without an owning test is prose")
                 mod = [t for t in b["runner"] if t.partition("::")[0].endswith(".test.ts")]

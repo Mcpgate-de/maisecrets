@@ -2,6 +2,7 @@
 belief = "c1-a-typed-prompt-never-takes-the-tool-channel-rule"
 kind = "invariant"
 control = "C1"
+serves = ["M1.1"]
 statement = "A password of letters after a password label is a hit in a tool result or a file (the tool channel) and never in a typed prompt: the prompt hook scans with the prompt rule of 0.6.16, the tool hook with the tool rule, and the per-text cache of one channel never answers the other."
 runner = [
   "tests/test_tool_channel.py::ToolChannelTests::test_letters_after_a_password_label_are_a_hit_in_a_tool_result_only",

@@ -2,6 +2,7 @@
 belief = "inv-no-agent-tool-reads-vault-material"
 kind = "invariant"
 control = "I3"
+serves = ["M4.1"]
 statement = "No tool of the agent reads a file of the vault home or the value run directory: every reading and editing tool refuses every spelling of such a path (absolute, relative, tilde, dot-dot, doubled slash, symlink, hard link, another case), a search that covers the store, an MCP argument or an MCP resource read with the path or a file URI, and a Bash or PowerShell command that names the default or the configured home (in PowerShell also in another case or with the other slash). A path outside the store still passes."
 runner = [
   "tests/test_invariant_store_reads.py::FileToolTests::test_every_reading_tool_refuses_every_spelling_of_a_store_path",
