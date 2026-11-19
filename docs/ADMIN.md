@@ -200,6 +200,8 @@ resolve (time, session, key, tool, the command with placeholders; capped at
 type). `pending/` holds a blocked prompt with placeholders for 15 minutes.
 `incidents.json` holds maisecrets' own internal failures as closed codes (at most
 50 groups; see ["Reporting an internal failure"](USING.md#reporting-an-internal-failure)).
+`versions.json` holds, per plugin version, the time of its first and last session start and of its last gateway
+renewal (no value, no session id): the newest version warns when an older one still runs in another session.
 `hooks.log` holds one line per hook run (capped at 2000); the client column names
 the entry point, `claude/local-agent` for a Cowork session. The FIFOs a value
 is delivered through live in `$XDG_RUNTIME_DIR/maisecrets` or
