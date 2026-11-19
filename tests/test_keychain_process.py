@@ -326,6 +326,88 @@ class AfterTheHeadTests(FakeKeychain):
         self.assertEqual(len(self.parts_of("SECRET_c17")), 1, "one generation of parts is left")
 
 
+class Stopped(BaseException):
+    """A process stopped at one step: the tests also switch off _pending_stale, as a kill runs no handler."""
+
+
+class StoppedPutTests(FakeKeychain):
+    """Gate A round 3 of #75: a put stopped after its head was proven and before the marker of the old parts left
+    those parts with no marker, and no later sweep looked for them. And a marker that could not be written was
+    ignored while the write went on."""
+
+    def orphans(self, key: str) -> list:
+        raw = self.items().get(vault.SERVICE + "\0" + key, "")
+        head = KeychainBackend._split_head(raw)
+        named = {KeychainBackend._part_name(key, i, head[1]) for i in range(1, head[0])} if head else set()
+        return [k.split("\0")[1] for k in self.items() if f"\0{key}.part" in k and k.split("\0")[1] not in named]
+
+    def stop_at(self, step: str):
+        """Stop the put at `step`: after the head add, at the marker of the old parts, or before the old parts go."""
+        real_add, real_mark = KeychainBackend._add, vault._pending_mark
+
+        def add(backend, line, account=None, stored=None):
+            real_add(backend, line, account, stored)
+            if step == "head" and account is not None and ".part" not in account:
+                raise Stopped()
+
+        def mark(key, gen, stale=False):
+            path = real_mark(key, gen, stale)
+            if step == "old-marker" and stale:
+                raise Stopped()
+            return path
+
+        def delete_parts(backend, key, head):
+            raise Stopped()
+        patches = [mock.patch.object(vault, "_pending_stale", lambda path: None),
+                   mock.patch.object(KeychainBackend, "_add", add), mock.patch.object(vault, "_pending_mark", mark)]
+        if step == "old-parts":
+            patches.append(mock.patch.object(KeychainBackend, "_delete_parts", delete_parts))
+        return patches
+
+    def test_a_put_stopped_at_any_step_leaves_no_part_without_a_marker(self):
+        for step in ("head", "old-marker", "old-parts"):
+            for new_len in (12000, 30):                 # long to long, long to short
+                with self.subTest(step=step, new=new_len):
+                    shutil.rmtree(vault.PARTS_PENDING, True)
+                    key = f"SECRET_c3{len(step)}{new_len % 7}"
+                    old, new = random_text(9000), random_text(new_len)
+                    self.backend.put(key, old)
+                    patches = self.stop_at(step)
+                    for p in patches:
+                        p.start()
+                    try:
+                        with self.assertRaises(Stopped):
+                            self.backend.put(key, new)
+                    finally:
+                        for p in reversed(patches):
+                            p.stop()
+                    self.assertIn(self.backend.get(key), (old, new))
+                    for path, _k, _g, _fresh in vault._pending_marks():
+                        os.utime(path, (0, 0))           # long after the stop: no put runs any more
+                    if self.orphans(key):
+                        self.assertTrue(vault._parts_pending(), "parts without a head and without a marker")
+                    self.backend.remove_orphan_parts()
+                    self.assertEqual(self.orphans(key), [])
+                    self.assertIn(self.backend.get(key), (old, new))
+
+    def test_a_marker_that_cannot_be_written_refuses_the_put_before_any_write(self):
+        self.backend.put("SECRET_c40", random_text(9000))
+        blocker = self.dir / "not-a-folder"
+        blocker.write_text("x", encoding="utf-8")
+        for new in (random_text(12000), random_text(30)):    # a long value; a short one over a long one
+            with self.subTest(length=len(new)):
+                before = self.items()
+                with mock.patch.object(vault, "PARTS_PENDING", blocker / "keychain-parts"):
+                    with self.assertRaisesRegex(CodedError, "marker"):
+                        self.backend.put("SECRET_c40", new)
+                self.assertEqual(self.items(), before)
+        self.backend.put("SECRET_c41", random_text(9000))
+        with mock.patch.object(vault, "PARTS_PENDING", blocker / "keychain-parts"):
+            with self.assertRaisesRegex(CodedError, "marker"):
+                self.backend.put("SECRET_c42", random_text(9000))
+        self.assertFalse([k for k in self.items() if "SECRET_c42" in k])
+
+
 class FailedDumpTests(FakeKeychain):
     """Gate A round 3 of #75: `keys()` read a failed `dump-keychain` as an empty store, and repair then wrote an
     index with no entries over the good one."""

@@ -413,10 +413,11 @@ PENDING_FRESH = 600.0       # seconds: a marker this young belongs to a put that
 _wall = time.time           # the tests replace this module's `time`
 
 
-def _pending_mark(key: str, gen: str, stale: bool = False) -> Path | None:
+def _pending_mark(key: str, gen: str, stale: bool = False) -> Path:
     """A marker that parts of `key` (generation `gen`, "" for any) may stand without their head. A fresh marker is a
     put that runs: the sweep keeps its parts. A stale one is left for the sweep. One file per put, so one writer
-    never clears the marker of another."""
+    never clears the marker of another. Raises when the file cannot be written: parts without a marker would stay
+    in the keychain for good (Gate A round 3, #75)."""
     import secrets as _secrets
     try:
         PARTS_PENDING.mkdir(mode=0o700, exist_ok=True)
@@ -426,7 +427,8 @@ def _pending_mark(key: str, gen: str, stale: bool = False) -> Path | None:
             os.utime(path, (0, 0))
         return path
     except OSError:
-        return None
+        raise CodedError("keychain add refused: the marker of a long value cannot be written",
+                         "store.keychain-add", "permission") from None
 
 
 def _pending_stale(path: Path | None) -> None:
@@ -554,12 +556,10 @@ class KeychainBackend:
         label = label or f"maisecrets {key}"
         b64 = base64.b64encode(value.encode("utf-8")).decode("ascii")
         line = self._add_line(key, "b64:" + b64, label, comment)
-        _rc, old = self._read(key)        # the parts of a long value it replaces go after the new head is proven
+        _rc, old = self._read(key)
+        head = self._split_head(old)         # a long value it replaces: its parts go after the new head is proven
         gen = ""
-        if len(line.encode("utf-8")) <= self.MAX_LINE:
-            # the read-back is the proof: a failed add keeps the old value whole
-            self._add(line, key, "b64:" + b64)
-        else:
+        if len(line.encode("utf-8")) > self.MAX_LINE:
             # The parts first, the head last: the head names the parts by a digest of the whole, so a read sees the
             # old value or the new one, never a mix, and an add that stops halfway leaves the old value whole.
             gen = hashlib.sha256(b64.encode("ascii")).hexdigest()[:12]
@@ -574,8 +574,17 @@ class KeychainBackend:
                 raise CodedError("keychain add refused: the value is too long for the keychain's stdin form",
                                  "store.keychain-add", "shape")
             chunks = [b64[i * room:(i + 1) * room] for i in range(n)]
-            mark = _pending_mark(key, gen)   # a put that stops before its head leaves parts for the sweep
-            try:
+        # Each marker is written before the head changes, so a process stopped at any step leaves no part without a
+        # marker, and a marker that cannot be written refuses the put before anything is written (Gate A round 3).
+        # The marker of the old parts is stale at once: the sweep keeps the parts that the head still names.
+        later = _pending_mark(key, head[1], stale=True) if head and head[1] != gen else None
+        mark = None
+        try:
+            if not gen:
+                # the read-back is the proof: a failed add keeps the old value whole
+                self._add(line, key, "b64:" + b64)
+            else:
+                mark = _pending_mark(key, gen)   # a put that stops before its head leaves parts for the sweep
                 for i in range(1, n):
                     name = self._part_name(key, i, gen)
                     self._add(self._add_line(name, chunks[i], f"maisecrets part of {key}", None), name, chunks[i])
@@ -583,23 +592,24 @@ class KeychainBackend:
                 # digest, and each part was read back
                 head_line = f"b64p:{n}:{gen}:{chunks[0]}"
                 self._add(self._add_line(key, head_line, label, comment), key, head_line)
-            except BaseException:
-                _pending_stale(mark)
-                raise
-            _pending_clear(mark)
-        head = self._split_head(old)
-        if head and head[1] != gen:          # the same value again keeps its parts: they are the new ones
-            # The new value is stored now. A part of the old one that does not go is left to the full sweep; it is
-            # never a failed put, which the caller would read as "the old value stays" (Gate A round 2, #75).
-            later = _pending_mark(key, head[1], stale=True)
-            try:
-                rc = self._delete_parts(key, head)
-            except RuntimeError as exc:      # a timeout too: the next store call of the hook fails it closed
-                from . import incidents
-                incidents.note("store.expire", exc)
-                return
-            if rc == 0:
-                _pending_clear(later)
+        except BaseException:
+            # The head add may have taken or not (a read-back that failed): a read gives the old value or the new
+            # one, whole. The markers stay for the full sweep.
+            _pending_stale(mark)
+            raise
+        _pending_clear(mark)
+        if later is None:
+            return
+        # The new value is stored now. A part of the old one that does not go is left to the full sweep; it is never
+        # a failed put, which the caller would read as "the old value stays" (Gate A round 2, #75).
+        try:
+            rc = self._delete_parts(key, head)
+        except RuntimeError as exc:          # a timeout too: the next store call of the hook fails it closed
+            from . import incidents
+            incidents.note("store.expire", exc)
+            return
+        if rc == 0:
+            _pending_clear(later)
 
     def _delete_parts(self, key: str, head: tuple[int, str, str]) -> int:
         """Delete the parts a head names; the return code of the first that refused, else 0."""
