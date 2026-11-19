@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .vault import _DEFAULT_HOME, HOME, LockTimeout, _lock_for, atomic_write
+from .vault import _DEFAULT_HOME, HOME, LockTimeout, _lock_for, atomic_write, is_store_timeout
 
 OPEN, CLOSE = "⟦", "⟧"
 # the server range: no `c`, a counter from 1 (PROTOCOL.md section 1); the display part is for humans only
@@ -1344,7 +1344,9 @@ def _prune(backend, data: dict, now: float) -> dict:
             elif isinstance(item, dict) and isinstance(item.get("name"), str):
                 try:
                     backend.delete(item["name"])
-                except (RuntimeError, OSError):
+                except (RuntimeError, OSError) as exc:
+                    if is_store_timeout(exc):
+                        raise                    # a store that does not answer fails the hook, never a skip (C12)
                     keep.append(item)            # tried again at the next prune
         if keep:
             out[sess] = keep
@@ -1434,8 +1436,10 @@ def end_session(backend, session: str | None) -> int:
         try:
             backend.delete(name)
             gone.add(name)
-        except (RuntimeError, OSError):
-            pass                                  # expired and indexed: the next prune tries the delete again
+        except (RuntimeError, OSError) as exc:
+            if is_store_timeout(exc):
+                raise                             # no wait per name: the next prune deletes them (C12)
+            # expired and indexed: the next prune tries the delete again
     with _lock_for(DIR / ".lock"):
         data = _read_json(RELEASED) or {}
         keep = [i for i in data.get(session) or [] if not (isinstance(i, dict) and i.get("name") in gone)]

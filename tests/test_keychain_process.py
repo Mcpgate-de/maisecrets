@@ -471,6 +471,71 @@ class SlowKeychainTests(FakeKeychain):
         self.assertLess(time.monotonic() - started, 2.0)
 
 
+class HookPathCatchesTests(unittest.TestCase):
+    """Gate A round 2 of #76: catches on hook paths that took every RuntimeError also took a store timeout, so a
+    keychain that did not answer read as "skip". A timeout goes on; any other store refusal stays best effort."""
+
+    LATE = CodedError("keychain call timed out", "store.timeout-keychain", "timeout")
+    REFUSED = CodedError("keychain delete failed (rc 51)", "store.expire", "rc", 51)
+
+    def backend(self, exc):
+        b = mock.Mock()
+        b.delete.side_effect = exc
+        return b
+
+    def test_the_prune_of_server_values(self):
+        from maisecrets import vault_refs
+        data = {"s1": [{"name": "_maisecrets_vrel_a", "t": 0}, {"name": "_maisecrets_vrel_b", "t": 0}]}
+        with self.assertRaises(CodedError):
+            vault_refs._prune(self.backend(self.LATE), json.loads(json.dumps(data)), time.time())
+        b = self.backend(self.REFUSED)
+        self.assertEqual(vault_refs._prune(b, json.loads(json.dumps(data)), time.time()), data)
+        self.assertEqual(b.delete.call_count, 2)
+
+    def test_the_session_end(self):
+        from maisecrets import vault_refs
+        from maisecrets.home import atomic_write
+        self.addCleanup(lambda: vault_refs.RELEASED.unlink() if vault_refs.RELEASED.exists() else None)
+        for exc in (self.LATE, self.REFUSED):
+            with self.subTest(exc=exc.incident_cause):
+                vault_refs.DIR.mkdir(parents=True, exist_ok=True)
+                atomic_write(vault_refs.RELEASED, json.dumps(
+                    {"s1": [{"name": "_maisecrets_vrel_a", "t": time.time()},
+                            {"name": "_maisecrets_vrel_b", "t": time.time()}]}))
+                b = self.backend(exc)
+                if exc is self.LATE:
+                    with self.assertRaises(CodedError):
+                        vault_refs.end_session(b, "s1")
+                    self.assertEqual(b.delete.call_count, 1, "no wait for each name")
+                else:
+                    self.assertEqual(vault_refs.end_session(b, "s1"), 0)
+                    self.assertEqual(b.delete.call_count, 2)
+                left = json.loads(vault_refs.RELEASED.read_text(encoding="utf-8"))["s1"]
+                self.assertEqual([i["t"] for i in left], [0, 0], "expired and indexed: the next prune deletes them")
+
+    def test_the_notes_of_a_tool_result(self):
+        from maisecrets import hooks, sref_hooks, vault_refs
+        mcp = {"hook_event_name": "PostToolUse", "tool_name": "mcp__fake__read", "session_id": "S1",
+               "tool_input": {}, "tool_response": "fake output"}
+        bash = {**mcp, "tool_name": "Bash", "tool_input": {"command": "true"}}
+        for name, target, payload in (("note_result", mock.patch.object(vault_refs, "note_result"), mcp),
+                                      ("sref note", mock.patch.object(hooks, "_sref_note"), bash),
+                                      ("account", mock.patch.object(sref_hooks, "account_notice"), bash)):
+            with self.subTest(name=name):
+                with target as fake:
+                    fake.side_effect = self.LATE
+                    with self.assertRaises(CodedError):
+                        if name == "account":
+                            sref_hooks.note(bash)
+                        else:
+                            hooks._post_tool_guarded(payload)
+                    fake.side_effect = self.REFUSED                  # best effort: the output goes on
+                    if name == "account":
+                        self.assertIsNone(sref_hooks.note(bash))
+                    else:
+                        self.assertIsInstance(hooks._post_tool_guarded(payload), dict)
+
+
 @unittest.skipIf(os.name == "nt", "the fake is a shell script")
 class HookFailsClosedTests(unittest.TestCase):
     """The whole hook, as the client starts it: a keychain that does not answer ends in the hook's own answer, which
