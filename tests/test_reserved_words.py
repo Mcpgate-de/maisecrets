@@ -2,9 +2,10 @@
 
 `const secret = readonly;` gave a SECRET hit, and the vault masked the word in every later file. The rules that read
 an unquoted value of code (core.RESERVED_WORD_RULES: two keyword rules, two literal rules and a key rule) skip a
-value that is exactly a listed word as code writes it: unquoted, in ASCII lower case or capitals, or True, False
-and None. Everything else is as before the fix: a quoted value, the other keyword rules, a longer value and another
-case. Each comparison here runs the same text with the check switched off.
+value that is exactly a listed word as code writes it: unquoted, in ASCII lower case or capitals. The list holds only
+words a person would not choose as a password (Gate A round 2). Everything else is as before the fix: a quoted value,
+the other keyword rules, a word a person may choose, a longer value and another case. Each comparison here runs the
+same text with the check switched off.
 """
 from __future__ import annotations
 
@@ -53,8 +54,20 @@ TABLES = {
         primary procedure recursive references returning rollback savepoint select session_user transaction
         truncate union unique unsigned update varchar""",
 }
-# an everyday English word: a person writes it after a label in prose (`password: not set`), so it stays out
-LEFT_OUT = frozenset("any base event fixed from get go if lock map not out range record ref set type with".split())
+# a keyword that a person may choose as a password, or write after a label in prose: an everyday English word or a
+# short one. It stays a value, `PASSWORD=unique` in a .env file is a string (Gate A of #29, round 2)
+LEFT_OUT = frozenset("""
+    alter and any as asc assert asserts auto await base between bool break byte cascade case catch chan char
+    checked class collate constraint constructor continue create debugger decimal declare def default defer
+    del delegate delete desc do double else event except exists explicit export extends false fetch final
+    finally fixed float for foreign from get global go having if implicit import in infer inline insert int
+    interface internal intersect iota is lambda lateral let lock long map module native never new nil not null
+    nulls number object of operator or out override package params partition pass permits primary private
+    protected public raise range record recursive ref references register require restrict return returning
+    rollback satisfies sealed select set short signed static string super switch symbol synchronized this
+    thread_local throw throws transaction transient true truncate try type unchecked undefined union unique
+    unknown unsafe update using var virtual void volatile while with yield
+""".split())
 
 # the labels are split by `§`, as in tests/test_detect_rules.py
 UNQUOTED = ("const sec§ret = {v};", "let pass§word = {v}", "api§_key={v}", "pass§word: {v}", "sec§ret: {v}")
@@ -89,15 +102,15 @@ class SpellingTests(unittest.TestCase):
             for v in (w, w.upper(), w + ";", w.upper() + ";", " " + w + " "):
                 with self.subTest(value=v):
                     self.assertTrue(core.is_reserved_word(v))
-        for v in ("True", "False", "None", "None;"):
-            self.assertTrue(core.is_reserved_word(v))
+        for v in ("True", "False", "None", "Readonly"):
+            self.assertFalse(core.is_reserved_word(v), "as origin/next: older filters decide on these")
 
     def test_another_case_a_longer_value_and_unicode_are_no_reserved_word(self):
         for w in sorted(LISTED):
             spellings = {w.capitalize(), w[:1].upper() + w[1:].upper().lower(), w + "7", "x" + w, w + "_", w + ",",
                          w[:-1], w.swapcase()[:1] + w[1:]}
             for v in spellings - {w, w.upper()}:
-                if v in LISTED or v.upper() == v and v.lower() in LISTED or v in ("True", "False", "None"):
+                if v in LISTED or v.upper() == v and v.lower() in LISTED:
                     continue   # asc without its last letter is the listed `as`
                 with self.subTest(value=v):
                     self.assertFalse(core.is_reserved_word(v))
@@ -105,12 +118,12 @@ class SpellingTests(unittest.TestCase):
         for v in ("true", "\uff34\uff32\uff35\uff25", "\u0130MPORT", "true\u00a0;", "TRUE\u0131", "none", "NONE",
                   "\u212aEYOF", "BREA\u212a"):
             with self.subTest(value=ascii(v)):
-                self.assertEqual(core.is_reserved_word(v), v == "true")
+                self.assertFalse(core.is_reserved_word(v))
 
     def test_the_vault_quiets_the_same_spellings_the_detector_skips(self):
         # a stored `Readonly` is still a value for the detector, so the vault must not quiet it (Gate A of #29)
         made = set(vault.reserved_word_spellings())
-        candidates = {s for w in LISTED | {"true", "false", "none"}
+        candidates = {s for w in LISTED | LEFT_OUT | {"true", "false", "none"}
                       for b in (w, w.capitalize(), w.upper()) for s in (b, b + ";")}
         self.assertEqual(made, {s for s in candidates if core.is_reserved_word(s)})
 
@@ -149,6 +162,18 @@ class ScanTests(unittest.TestCase):
                 self.assertTrue(kinds(text))
                 self.assertEqual(kinds(text), kinds_without_the_check(text))
 
+    def test_a_word_a_person_may_choose_is_found_as_before(self):
+        # Gate A round 2: `PASSWORD=unique` gave no hit. Each left-out word finds what it found before #29, also in a
+        # .env line and after a colon; these gave a hit before and must still give one
+        for w in sorted(LEFT_OUT):
+            for form in ("PASS§WORD={v}", "pass§word: {v}", "const sec§ret = {v};"):
+                text = form.format(v=w)
+                with self.subTest(text=text):
+                    self.assertEqual(kinds(text), kinds_without_the_check(text))
+        for w in ("unique", "select", "update", "create", "delete", "global"):
+            with self.subTest(word=w):
+                self.assertTrue(kinds("PASS§WORD=" + w), "a .env value is a string")
+
     def test_a_listed_word_as_a_url_parameter_is_still_a_hit(self):
         # a URL parameter is a value, not code: only the rules of RESERVED_WORD_RULES skip the word
         for w in ("procedure", "readonly", "volatile"):
@@ -159,7 +184,7 @@ class ScanTests(unittest.TestCase):
     def test_another_case_or_a_longer_value_is_found_as_before(self):
         for w in sorted(LISTED):
             for v in (w.capitalize(), w + "7", "x" + w):
-                if v in (w, "True", "False", "None"):
+                if v == w:
                     continue
                 text = "const sec§ret = {v};".format(v=v)
                 with self.subTest(text=text):

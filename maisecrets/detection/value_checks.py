@@ -1174,13 +1174,12 @@ def looks_like_placeholder(value: str) -> bool:
     return low in PLACEHOLDER_VALUES or bool(_PLACEHOLDER_PART_RE.search(low)) or bool(_TEMPLATE_NAME.match(v))
 
 
-# a reserved word of a language or of SQL as the whole value: `const secret = readonly;` (#29). Only unquoted (a quoted
-# string is a string, not a keyword), only after the rules that read an unquoted value of code (RESERVED_WORD_RULES:
-# the two keyword rules, and the literal and key rules that take the word when those skip it), and only as code
-# writes it:
-# ASCII lower case, capitals (SQL), or True, False and None (Python). `Readonly` and `readonly7` stay values
+# a reserved word of a language or of SQL that a person would not choose as a password, as the whole value:
+# `const secret = readonly;` (#29). Only unquoted (a quoted string is a string, not a keyword), only after the rules
+# that read an unquoted value of code (RESERVED_WORD_RULES: the two keyword rules, and the literal and key rules that
+# take the word when those skip it), and only as code writes it: ASCII lower case or capitals (SQL). `Readonly` and
+# `readonly7` stay values
 _RESERVED_WORDS = _words("passwords/reserved-words")
-_PYTHON_CONSTANTS = frozenset({"True", "False", "None"})
 RESERVED_WORD_RULES = frozenset({"ds-keyword-equal-signs", "ds-keyword-colon", "label-pw-literal",
                                  "label-secret-literal", "password-after-key"})
 
@@ -1191,12 +1190,12 @@ def is_reserved_word(value: str) -> bool:
     w = value.strip().rstrip(";")
     if not w.isascii():
         return False   # Unicode casing must not turn a value into a listed word
-    return (w if w.islower() else w.lower() if w.isupper() else "") in _RESERVED_WORDS or w in _PYTHON_CONSTANTS
+    return (w if w.islower() else w.lower() if w.isupper() else "") in _RESERVED_WORDS
 
 
 def reserved_word_spellings() -> list:
     """Each spelling that is_reserved_word accepts without blanks: lower case and capitals, each also with `;`."""
-    words = sorted({b for w in _RESERVED_WORDS for b in (w, w.upper())} | _PYTHON_CONSTANTS)
+    words = sorted({b for w in _RESERVED_WORDS for b in (w, w.upper())})
     return [s for b in words for s in (b, b + ";")]
 
 
