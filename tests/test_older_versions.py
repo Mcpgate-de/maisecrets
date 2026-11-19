@@ -51,9 +51,9 @@ class _Base(unittest.TestCase):
 
 class MarkerTests(_Base):
     def test_a_session_start_and_a_renewal_write_the_version_and_times_only(self):
-        ov.note("start", NOW)
-        ov.note("refresh", NOW + 5)
-        ov.note("prompt", NOW + 9)                         # no other kind is written
+        ov.mark_run("start", NOW)
+        ov.mark_run("refresh", NOW + 5)
+        ov.mark_run("prompt", NOW + 9)                         # no other kind is written
         data = json.loads(ov.MARKER.read_text(encoding="utf-8"))
         self.assertEqual(data, {"versions": {CUR: {"first": NOW, "start": NOW, "refresh": NOW + 5}}})
         self.assertEqual(ov.start(NOW + 10), None, "the first start of a version sees nothing older")
@@ -66,7 +66,7 @@ class MarkerTests(_Base):
 
     def test_a_version_with_no_run_for_30_days_leaves_the_marker(self):
         self.marker({"0.9.10": {"first": NOW - 40 * 86400, "start": NOW - 31 * 86400}})
-        ov.note("start", NOW)
+        ov.mark_run("start", NOW)
         self.assertEqual(list(json.loads(ov.MARKER.read_text())["versions"]), [CUR])
 
 
@@ -79,8 +79,9 @@ class WarningTests(_Base):
         self.marker({CUR: {"first": NOW - 5 * HOUR, "start": NOW - 5 * HOUR},
                      "0.9.15": {"first": NOW - 9 * 86400, "start": NOW - 3 * 86400, "refresh": NOW - HOUR}})
         day = time.strftime("%Y-%m-%d %H:%M", time.localtime(NOW - 5 * HOUR))
-        line = ("maisecrets: An older maisecrets (0.9.15) runs in another session. Its gateway renewals can end your "
-                f"login. Restart the sessions that started before {day}.")
+        line = ("maisecrets: An older maisecrets (0.9.15) ran in the last day and may still be open in another "
+                "session. Its gateway renewals can end your login. Restart the sessions that started before "
+                f"{day}.")
         self.assertEqual(ov.start(NOW), line)
         self.assertIsNone(ov.start(NOW + HOUR), "once a day")
         self.assertEqual(ov.status(NOW + HOUR), ("0.9.15", line[len("maisecrets: "):]), "the status says it each time")
@@ -94,7 +95,7 @@ class WarningTests(_Base):
         self.assertIsNone(ov.start(NOW), "a line before the update says nothing")
         self.events(("0.9.14", NOW - 6 * HOUR), ("0.9.13", NOW - 3 * HOUR), ("0.9.14", NOW - 2 * HOUR))
         self.marker({CUR: {"first": NOW - 5 * HOUR}})
-        self.assertIn("An older maisecrets (0.9.13) runs", ov.start(NOW), "the oldest one is named")
+        self.assertIn("An older maisecrets (0.9.13) ran", ov.start(NOW), "the oldest one is named")
 
     def test_nothing_is_said_without_a_reason(self):
         cases = [
@@ -123,10 +124,36 @@ class WarningTests(_Base):
         self.marker({CUR: {"first": NOW - 5 * HOUR}, "0.9.15": {"refresh": NOW - HOUR}})
         with mock.patch.object(ov.time, "time", lambda: NOW):
             check = sv.older_verdict()
-        self.assertEqual((check.state, check.name, check.fact), ("warn", "older", "0.9.15 still runs"))
+        self.assertEqual((check.state, check.name, check.fact), ("warn", "older", "0.9.15 ran in 24 h"))
         self.assertIn("Restart the sessions that started before", check.detail)
         self.assertLessEqual(len(check.fact), sv.FACT_COL)
         self.assertNotIn("told", json.loads(ov.MARKER.read_text()), "the status marks nothing")
+
+
+class RaceTests(unittest.TestCase):
+    """An old version's renewal and a new version's start at once: neither erases the other (Gate A of !591)."""
+
+    def test_two_processes_that_mark_at_once_keep_both_times(self):
+        import subprocess
+        ov.MARKER.unlink(missing_ok=True)
+        self.addCleanup(ov.MARKER.unlink, missing_ok=True)
+        code = ("import sys\nsys.path.insert(0, sys.argv[1])\nfrom maisecrets import older_versions as ov\n"
+                "ov._current = lambda: sys.argv[2]\nfor i in range(150):\n    ov.mark_run(sys.argv[3], 1000.0 + i)\n")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CODEX_", "CLAUDE"))}
+        procs = [subprocess.Popen([sys.executable, "-c", code, str(ROOT), version, kind], env=env)
+                 for version, kind in (("0.9.15", "refresh"), ("0.9.20", "start"))]
+        for proc in procs:
+            self.assertEqual(proc.wait(timeout=120), 0)
+        versions = json.loads(ov.MARKER.read_text(encoding="utf-8"))["versions"]
+        self.assertEqual(versions["0.9.15"].get("refresh"), 1149.0, "the old renewal is kept")
+        self.assertEqual(versions["0.9.20"].get("start"), 1149.0, "the new start is kept")
+
+    def test_a_time_another_process_wrote_later_stays(self):
+        ov.MARKER.write_text(json.dumps({"versions": {"0.9.15": {"first": 10.0, "refresh": 500.0}}}), encoding="utf-8")
+        self.addCleanup(ov.MARKER.unlink, missing_ok=True)
+        with mock.patch.object(ov, "_current", lambda: "0.9.15"):
+            ov.mark_run("refresh", 400.0)
+        self.assertEqual(json.loads(ov.MARKER.read_text())["versions"]["0.9.15"], {"first": 10.0, "refresh": 500.0})
 
 
 class SessionStartTests(unittest.TestCase):
@@ -153,7 +180,7 @@ class SessionStartTests(unittest.TestCase):
                                capture_output=True, text=True, env=env, timeout=60, cwd=tempfile.gettempdir())
                 for _ in range(2)]
         first, second = (json.loads(r.stdout) for r in runs)
-        self.assertIn(f"An older maisecrets ({older}) runs in another session.", first.get("systemMessage", ""))
+        self.assertIn(f"An older maisecrets ({older}) ran in the last day", first.get("systemMessage", ""))
         self.assertNotIn("An older maisecrets", second.get("systemMessage", ""), "once a day")
         self.assertNotIn("older maisecrets", first["hookSpecificOutput"]["additionalContext"], "for the person only")
         self.assertIn("start", json.loads(ov.MARKER.read_text())["versions"][cur], "the start is noted")

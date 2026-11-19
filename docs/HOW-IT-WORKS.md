@@ -164,8 +164,10 @@ command, and the prompt hook must stop it when you send it. A pass counts for
 this version, in this session or for 4 hours. If the AI wrote the test value
 into a tool call, it had the value: start a new session and test again.
 
-**older.** This line shows only while an older maisecrets still runs in
-another session and a gateway login is in use. A session keeps the version it
+**older.** This line shows when an older maisecrets ran in the last day,
+after this version first started, and a gateway login was used on this
+computer. maisecrets cannot see whether that session is still open, so the
+line says it may be. A session keeps the version it
 started with until it restarts, and an old renewal logic can end the login (a
 version before 0.9.16 did). Each session start and each gateway renewal write
 their version and a time to `versions.json`. A version up to 0.9.17 writes no

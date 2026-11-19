@@ -5,14 +5,15 @@ and ended the login (0.9.16, commit 1f14aa0f, fixed the logic).
 
 versions.json in the maisecrets home holds, per plugin version, three times: `first` (the first session start of that
 version), `start` (its last session start) and `refresh` (its last gateway renewal). No value, no session id, no
-session text. It is written at a session start and after a gateway renewal (note), never on a prompt or a tool call.
+session text. It is written at a session start and after a gateway renewal (mark_run), never on a prompt or a tool call.
 
 The session start and /maisecrets:status of the newest version read it. An older version that started a session or
-renewed a login after the newest version's first start, within WINDOW, still runs somewhere. A version before this
+renewed a login after the newest version's first start, within WINDOW, may still be open somewhere: the marker
+cannot see a session end. A version before this
 module writes no marker; its trace is its lines in events.log, each of which names the version that wrote it (one per
 detection). So an old session that detects nothing and only renews a login is not seen: the limit of this check.
 
-The session start says it once a day, and only where a gateway login is in use (sref-inflight.json, which each
+The session start says it once a day, and only where a gateway login was used (sref-inflight.json, which each
 renewal since 0.9.16 writes, or a renewal in the marker), because the risk is the renewal.
 """
 from __future__ import annotations
@@ -78,19 +79,35 @@ def _mark(data: dict, kind: str, now: float) -> None:
     if _tuple(v) is None:
         return
     times = data["versions"].setdefault(v, {})
-    times.setdefault("first", now)
-    times[kind] = now
+    times["first"] = min(times.get("first", now), now)
+    times[kind] = max(times.get(kind, now), now)      # a later time another process wrote stays
 
 
-def note(kind: str, now: float | None = None) -> None:
+LOCK_WAIT = 2.0
+
+
+def _locked():
+    """The lock of versions.json: a read, a mark and a write of two processes never cross, so neither loses the other's
+    time (an old version's renewal and a new start at once, Gate A of !591). Raises LockTimeout or OSError."""
+    from .home import _lock_for
+    lock = _lock_for(HOME / ".versions.lock")
+    lock.enter(LOCK_WAIT)
+    return lock
+
+
+def mark_run(kind: str, now: float | None = None) -> None:
     """This version ran: a session start ("start") or a gateway renewal ("refresh"). Never raises."""
     if kind not in KINDS:
         return
     try:
         now = time.time() if now is None else now
-        data = _read()
-        _mark(data, kind, now)
-        _write(data, now)
+        lock = _locked()
+        try:
+            data = _read()
+            _mark(data, kind, now)
+            _write(data, now)
+        finally:
+            lock.__exit__(None, None, None)
     except Exception:  # noqa: BLE001 - a marker never stops a hook
         pass
 
@@ -118,9 +135,9 @@ def _from_events(since: float) -> dict:
 
 
 def finding(data: dict, now: float) -> tuple | None:
-    """(the oldest version that still runs, the first start of this version) or None. An older version counts when it
+    """(the oldest version that ran recently, the first start of this version) or None. An older version counts when it
     started a session, renewed a login or wrote an events.log line after this version's first start, within WINDOW;
-    and only where a gateway login is in use."""
+    and only where a gateway login was used."""
     cur = _current()
     mine = _tuple(cur)
     if mine is None:
@@ -147,23 +164,27 @@ def finding(data: dict, now: float) -> tuple | None:
 
 def text(version: str, first: float) -> str:
     day = time.strftime("%Y-%m-%d %H:%M", time.localtime(first))
-    return (f"An older maisecrets ({version}) runs in another session. Its gateway renewals can end your login. "
-            f"Restart the sessions that started before {day}.")
+    return (f"An older maisecrets ({version}) ran in the last day and may still be open in another session. Its "
+            f"gateway renewals can end your login. Restart the sessions that started before {day}.")
 
 
 def start(now: float | None = None) -> str | None:
     """At a session start: note this version, and the warning once a day (None otherwise). One read, one write."""
     try:
         now = time.time() if now is None else now
-        data = _read()
-        _mark(data, "start", now)
-        found = finding(data, now)
-        day = time.strftime("%Y-%m-%d", time.localtime(now))
-        line = None
-        if found and data.get("told") != day:
-            data["told"] = day
-            line = "maisecrets: " + text(*found)
-        _write(data, now)
+        lock = _locked()
+        try:
+            data = _read()
+            _mark(data, "start", now)
+            found = finding(data, now)
+            day = time.strftime("%Y-%m-%d", time.localtime(now))
+            line = None
+            if found and data.get("told") != day:
+                data["told"] = day
+                line = "maisecrets: " + text(*found)
+            _write(data, now)
+        finally:
+            lock.__exit__(None, None, None)
         return line
     except Exception:  # noqa: BLE001 - a warning never stops a session start
         return None
