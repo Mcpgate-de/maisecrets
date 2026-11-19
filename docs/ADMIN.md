@@ -938,8 +938,9 @@ maisecrets does not verify that it is `mcpgate/ner`.
   image). When the person types `/maisecrets:ner local` (in Codex `maisecrets: ner local`) or presses
   `local` in the panel, maisecrets starts it at once in the background with docker or podman, with no
   question first, and says so (about 690 MB to download, 1 to 2 GB on disk, about 250 MB of memory
-  while it runs, at most 1.5 GB and half the cores, 2 to 4). A start that runs holds the lock of the start,
-  so a second typed choice starts no second one. `/maisecrets:ner off` turns the source off, as before; it
+  while it runs, at most 1.5 GB and half the cores, 2 to 4). No second download or container start runs at
+  the same time: a start holds the lock of the start, and a second one that comes while it runs waits for
+  it or ends with a note. `/maisecrets:ner off` turns the source off, as before; it
   does not stop a download or a start that runs. While one runs, the answer says that the start ends by itself
   and to send `/maisecrets:ner off` again after it. Only that typed choice starts a
   download: a source set by a policy or in an earlier session does not, and the session start then says that

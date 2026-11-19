@@ -785,8 +785,10 @@ function runSetup(on, opts: any = {}) {
   on('process.spawn', async function * ($, e) {
     st.spawns.push(e)
     if (opts.spawnFails) return { deny: 'cannot start' }
+    const pick = (v, d) => (typeof v === 'function' ? v(e) : v) ?? d
+    for (const text of pick(opts.early, [])) yield { stream: 'stdout', text }
     if (opts.gate) await opts.gate
-    for (const text of opts.chunks ?? ['Stored values: 0\n']) yield { stream: 'stdout', text }
+    for (const text of pick(opts.chunks, ['Stored values: 0\n'])) yield { stream: 'stdout', text }
     st.ended += 1
     return { value: { code: opts.code ?? 0, signal: null } }
   })
@@ -796,7 +798,8 @@ function runSetup(on, opts: any = {}) {
 
 const LIST = { run: { argv: ['list', '--args-stdin'], stdin: '' } }
 const LOGIN = { run: { argv: ['sref', '--args-stdin'], stdin: 'login team-gw', long: true, server: 'team-gw' } }
-const OUTPUT = { plugin: 'maisecrets', component: 'Pane', requestId: 'maisecrets-output', surface: 'terminal',
+const paneOf = (flight: string) => 'maisecrets-out-' + flight.replace(/[^a-z0-9-]/g, '-')
+const OUTPUT = { plugin: 'maisecrets', component: 'Pane', requestId: paneOf('cmd:list'), surface: 'terminal',
   props: { title: 'maisecrets', isFocused: true, bodyColumns: 100, placement: 'dock', scroll: { offset: 0, bodyRows: 30 },
     view: {} } }
 const BUSY = 'maisecrets: a login runs already; the status line shows it. Nothing else was started.'
@@ -812,7 +815,7 @@ test('a command the person typed runs without a model turn: the prompt is droppe
     const check = st.checks.find(c => c.argv[2] === 'mod-prompt')
     expect(JSON.parse(check.init.stdin)).toEqual({ prompt: '/maisecrets:list', session_id: 'sess-1', cwd: '/work',
       origin: 'composer' })
-    expect(await until(() => st.opens.some(o => o.id === 'maisecrets-output'))).toBe(true)
+    expect(await until(() => st.opens.some(o => o.id.startsWith('maisecrets-out-')))).toBe(true)
     // the entry of the command file, by the Python that answered, the arguments on stdin, the session in the env
     expect(st.spawns[0].argv).toEqual(['python3', 'hooks/dispatch.py', 'list', '--args-stdin'])
     expect(st.spawns[0].input).toBe('')
@@ -982,7 +985,7 @@ for (const [typed, argv, input] of [
       const r = await $.prompt.submit({ text: typed, wait: false, origin: { kind: 'composer' } })
       expect(typeof r.drop).toBe('string')
       expect(st.downstream).toBe(0)
-      expect(await until(() => st.opens.some(o => o.id === 'maisecrets-output'))).toBe(true)
+      expect(await until(() => st.opens.some(o => o.id.startsWith('maisecrets-out-')))).toBe(true)
       expect(st.spawns[0].argv).toEqual(['python3', 'hooks/dispatch.py', ...argv])
       expect(st.spawns[0].input).toBe(input)
       const other = await $.prompt.submit({ text: typed, wait: false, origin: { kind: 'peer' } })
@@ -1010,3 +1013,57 @@ test('ner: the change of the prompt hook shows in the panel\'s name-service view
     expect(st.spawns.length).toBe(0)
     expect(st.downstream).toBe(0)
   })
+
+test('without a pane the login writes each line above the prompt as it comes: the URL before the consent',
+  async ($, on) => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const URL_LINE = 'https://gw.example/auth/authorize?client_id=c1&state=s1'
+    const st = runSetup(on, { answer: LOGIN, gate, placed: false,
+      early: ['maisecrets: log in to gw.example in your browser and give the consent. If no browser opened, open:\n',
+        URL_LINE + '\n'],
+      chunks: ['maisecrets: logged in to gw.example.\n'] })
+    await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+    expect(await until(() => st.logs.includes(URL_LINE))).toBe(true)
+    expect(st.ended).toBe(0)                       // the consent is not given yet
+    release()
+    expect(await until(() => st.toasts.length > 0)).toBe(true)
+    expect(st.logs.filter(l => l === URL_LINE).length).toBe(1)
+    expect(st.logs).toContain('maisecrets: logged in to gw.example.')
+  })
+
+test('a login that waits and a list keep their own panes, titles and lines', async ($, on) => {
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const st = runSetup(on, { answer: (q, e) => (q.prompt ?? '').includes('sref') ? LOGIN : LIST, gate,
+    early: (e) => e.argv.includes('sref') ? ['LOGIN-LINE\n'] : [],
+    chunks: (e) => e.argv.includes('sref') ? ['LOGIN-END\n'] : ['LIST-LINE\n'] })
+  await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.opens.some(o => o.id === paneOf('sref-login')))).toBe(true)
+  expect(await until(() => st.spawns.length === 1)).toBe(true)
+  // the list's run waits for the same gate, so both run at once
+  await $.prompt.submit({ text: '/maisecrets:list', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.spawns.length === 2)).toBe(true)
+  release()
+  expect(await until(() => st.opens.some(o => o.id === paneOf('cmd:list')))).toBe(true)
+  const login = st.opens.filter(o => o.id === paneOf('sref-login')).pop()
+  const list = st.opens.filter(o => o.id === paneOf('cmd:list')).pop()
+  expect(login.title).toBe('maisecrets: /maisecrets:sref login')
+  expect(list.title).toBe('maisecrets: /maisecrets:list')
+  const props = { title: 'maisecrets', isFocused: true, bodyColumns: 100, placement: 'dock',
+    scroll: { offset: 0, bodyRows: 30 }, view: {} }
+  const a = await $.ui.mount({ plugin: 'maisecrets', component: 'Pane', requestId: paneOf('sref-login'),
+    surface: 'terminal', props } as any)
+  expect(await a.find({ type: 'Text', text: 'LOGIN-LINE' })).toBeDefined()
+  await a.unmount()
+  const b = await $.ui.mount({ plugin: 'maisecrets', component: 'Pane', requestId: paneOf('cmd:list'),
+    surface: 'terminal', props } as any)
+  expect(await b.find({ type: 'Text', text: 'LOGIN-LINE' })).toBeUndefined()
+  expect(await b.find({ type: 'Text', text: 'LIST-LINE' })).toBeDefined()
+  const c = await $.ui.mount({ plugin: 'maisecrets', component: 'Pane', requestId: paneOf('sref-login'),
+    surface: 'terminal', props } as any)
+  expect(await c.find({ type: 'Text', text: 'LIST-LINE' })).toBeUndefined()
+  expect(await c.find({ type: 'Text', text: 'LOGIN-END' })).toBeDefined()
+  await c.unmount()
+  await b.unmount()
+})

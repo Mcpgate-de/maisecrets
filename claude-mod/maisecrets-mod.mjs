@@ -1228,14 +1228,17 @@ const RUN_WORD = /^(?:[a-z]+|--[a-z-]+)$/
 const RUN_MS = 30000
 const LONG_MS = 130000          // the login waits up to 110 s for the consent (cli.cmd_sref)
 const PYTHONS = [['python3'], ['py', '-3'], ['python']]
-const OUTPUT_PANE = 'maisecrets-output'
+const OUTPUT_PANE = 'maisecrets-out'      // the start of each run's own pane id (paneOf)
 const OUTPUT_LINES = 400
 const SESSION_RE = /^[A-Za-z0-9_-]{1,128}$/
 const SERVER_RE = /^[\w.-]{1,64}$/
 // the notes of `run.sh pending` (hooks.NOTHING_WAITING, TWO_WAITING): any other output is the prompt
 const PENDING_NOTES = ['(maisecrets: no blocked prompt is waiting', '(maisecrets: blocked prompts of two sessions']
 const running = new Map()       // one run per flight at a time: flight -> the command
-const out = { title: '', lines: [], markdown: false, done: true, note: null, waiting: null }
+// the output of each flight in a pane of its own: a login that waits and a list keep their own titles and lines
+const outputs = new Map()       // pane id -> { title, lines, markdown, done, note, waiting, placed }
+const FLIGHTS = ['sref-login', ...RUN_NAMES.map(n => 'cmd:' + n)]
+const paneOf = (flight) => `${OUTPUT_PANE}-${flight.replace(/[^a-z0-9-]/g, '-')}`
 
 // what may not run twice at once: a login or logout of a gateway (one browser flow), else the same command
 function flightOf(text) {
@@ -1261,28 +1264,35 @@ const busyLine = (flight) => flight === 'sref-login'
   ? 'maisecrets: a login runs already; the status line shows it. Nothing else was started.'
   : 'maisecrets: this command runs already. Nothing else was started.'
 
-const outputArgs = () => ({ id: OUTPUT_PANE, title: out.title, focus: true, closeOnEscape: true,
-  rows: Math.min(out.lines.length + 6, 40), columns: 100 })
+const outputArgs = (id) => () => {
+  const out = outputs.get(id) ?? { title: 'maisecrets', lines: [] }
+  return { id, title: out.title, focus: true, closeOnEscape: true, rows: Math.min(out.lines.length + 6, 40),
+    columns: 100 }
+}
 
-function drawOutput($, e) {
+function drawOutput($, e, id) {
   const { Box, Text, Markdown, Button } = $.ui.resolve(e)
+  const out = outputs.get(id) ?? { lines: [], done: true }
   const rows = []
   if (out.note) rows.push(h(Text, { color: 'green', key: 'note' }, out.note))
   if (out.markdown && out.done && Markdown) rows.push(h(Markdown, { key: 'md', text: out.lines.join('\n') }))
   else rows.push(...out.lines.map((l, i) => h(Text, { key: `l${i}` }, l || ' ')))
   if (!out.done && out.waiting) rows.push(h(Text, { color: 'yellow', key: 'wait' }, out.waiting))
   rows.push(h(Box, { marginTop: 1, key: 'foot' }, h(Button, { key: 'close', label: 'Close', role: 'dismiss',
-    autoFocus: true, onPress: () => $.ui.close({ id: OUTPUT_PANE }) })))
+    autoFocus: true, onPress: () => $.ui.close({ id }) })))
   return h(Box, { flexDirection: 'column' }, ...rows)
 }
 
-// the output on the person's screen: the pane, or rows above the prompt where no pane is placed. Never to the model
-async function showOutput($) {
+// the output on the person's screen: the run's own pane, or rows above the prompt where no pane is placed (`placed`
+// remembers which, so a login that streams writes its lines above the prompt then). Never to the model
+async function showOutput($, id) {
+  const out = outputs.get(id)
   let placed = false
-  try { placed = (await $.ui.open(outputArgs()))?.isPlaced === true } catch { placed = false }
+  try { placed = (await $.ui.open(outputArgs(id)()))?.isPlaced === true } catch { placed = false }
+  out.placed = placed
   if (placed) {
     $.ui.invalidate('ui.render')
-    takeKeysSoon($, outputArgs)
+    takeKeysSoon($, outputArgs(id))
     return true
   }
   try {
@@ -1322,9 +1332,12 @@ async function spawnOwn($, run, env, onText, ms) {
 
 function startOwn($, run, flight, title) {
   const server = typeof run.server === 'string' && SERVER_RE.test(run.server) ? run.server : null
+  const id = paneOf(flight)
   void (async () => {
     let text = ''
+    let logged = 0                  // the complete lines of a login already written above the prompt
     let result = null
+    let out = null
     try {
       if (run.view === 'ner') {
         // the change is made: the panel's name-service view shows the source, the login button and the start
@@ -1339,28 +1352,31 @@ function startOwn($, run, flight, title) {
           return
         }
       }
-      out.title = `maisecrets: ${title}`
-      out.lines = []
-      out.markdown = run.markdown === true
-      out.note = typeof run.note === 'string' ? run.note : null
-      out.done = false
-      out.waiting = null
+      out = { title: `maisecrets: ${title}`, lines: [], markdown: run.markdown === true,
+        note: typeof run.note === 'string' ? run.note : null, done: false, waiting: null, placed: null }
+      outputs.set(id, out)
       if (run.long) {
         out.waiting = `waiting for your consent in the browser (${server ?? 'your gateway'}), up to 110 s`
         try { $.ui.status(`maisecrets: waiting for your consent in the browser (${server ?? 'your gateway'})`) }
         catch { /* the pane says it */ }
-        void showOutput($)
+        await showOutput($, id)
       }
       if (run.starting === true) watchNerStart($)
-      const id = await $.session.id()
+      const sid = await $.session.id()
       const env = { PYTHONUTF8: '1' }
       // the session of the command, as Claude Code gives it to a command file's shell (status names it; a typed
       // forget and /maisecrets:send find their record by it)
-      if (typeof id === 'string' && SESSION_RE.test(id)) env.CLAUDE_CODE_SESSION_ID = id
+      if (typeof sid === 'string' && SESSION_RE.test(sid)) env.CLAUDE_CODE_SESSION_ID = sid
       result = await spawnOwn($, run, env, (t) => {
         text += t
         if (run.long) {
           out.lines = text.split(/\r?\n/).slice(0, OUTPUT_LINES)
+          if (out.placed === false) {
+            // no pane: each complete line goes above the prompt as it comes (the URL for a browser that did not open)
+            const done = text.split(/\r?\n/).slice(0, -1)
+            try { for (const l of done.slice(logged)) if (l.trim()) $.ui.log(l) } catch { /* no rows */ }
+            logged = Math.max(logged, done.length)
+          }
           $.ui.invalidate('ui.render')
         }
       }, run.long ? LONG_MS : RUN_MS)
@@ -1372,6 +1388,10 @@ function startOwn($, run, flight, title) {
     }
     const lines = text.replace(/\s+$/, '').split(/\r?\n/).slice(0, OUTPUT_LINES)
     const last = lines.filter(l => l.trim()).pop() ?? ''
+    if (run.long && out?.placed === false) {
+      try { for (const l of lines.slice(logged)) if (l.trim()) $.ui.log(l) } catch { /* no rows */ }
+    }
+    out = out ?? { lines: [], done: true }
     if (result === null) {
       out.done = true
       return toast($, `maisecrets could not run ${title}. Send it again.`)
@@ -1400,7 +1420,7 @@ function startOwn($, run, flight, title) {
       $.ui.invalidate('ui.render')
       return
     }
-    await showOutput($)
+    await showOutput($, id)
   })().catch(() => { running.delete(flight) })
 }
 
@@ -1410,7 +1430,11 @@ const startedLine = (run, title) => run.long
 
 function registerSettingsPane(on) {
   on('ui.render', { component: 'Pane', requestId: SETTINGS_PANE }, async ($, e) => drawSettings($, e))
-  on('ui.render', { component: 'Pane', requestId: OUTPUT_PANE }, async ($, e) => drawOutput($, e))
+  // one pane per flight (paneOf): a fixed list, each with its own matched hook
+  for (const flight of FLIGHTS) {
+    const id = paneOf(flight)
+    on('ui.render', { component: 'Pane', requestId: id }, async ($, e) => drawOutput($, e, id))
+  }
   on('ui.close', ($, e, next) => {
     if (e.id === SETTINGS_PANE) { pane.open = false; pane.focused = null }
     return next(e)
