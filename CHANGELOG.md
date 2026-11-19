@@ -5,6 +5,153 @@
 - `/maisecrets:ner local`, typed by you, starts the local name service at once, with a note on its size (about 690 MB) and how to turn the source off; a setting from a policy or an earlier session never starts a download.
 - While a start of the name service still runs, `/maisecrets:ner off` says so; the start ends by itself.
 
+## [0.9.18] - 2026-11-19
+
+### Features
+
+- maisecrets warns when an older version still runs in another session and can end your gateway login (8ccba34)
+- /maisecrets demo on, typed with a space, runs as /maisecrets:demo on (446c102)
+
+### Fixes
+
+- a slow MCP server no longer takes the time of your gateway in /maisecrets:sref (7d283a5)
+- /maisecrets:sref login also registers and gets its token on a slow network (f072fe4)
+- /maisecrets:sref login and status work on a slow network (bb9eb9b)
+- a command that maisecrets cannot check is removed from the input box (8ba4cf8)
+- the warning about an older maisecrets keeps every session's time and says only what it knows (0d3c317)
+- a command that maisecrets puts into the input box has its values masked, and a typo suggests only a command that shows (0ea36ea)
+- an everyday word after a password key in a .env or YAML file stays masked; only code words are skipped (3bc67a8)
+- a mistyped command after /maisecrets goes into the input box with a note that says what happened (77cf77a)
+- the demo start tells that an organization-managed Claude Code can still send /compact and side requests (2c8ecde)
+- a late answer for the old server key no longer keeps an unsettled new key for good (586298c)
+- a quoted reserved word after a secret name is still found, and no other rule takes an unquoted one (5b74416)
+- a new server key whose save did not answer no longer leaves the server's values unreadable (6da96ee)
+- a reserved word of a language or of SQL after a secret name is no longer masked as a secret (08bb919)
+- on macOS a save of a long value that is stopped halfway no longer leaves parts that no cleanup finds (8f231b6)
+- a command that only mentions a maisecrets command in a comment or a message runs again (348f2b1)
+- on macOS a keychain that cannot list its items no longer looks empty to repair and wipe (513da8a)
+- a keychain that does not answer now fails the tool-result hook closed also when it deletes server values or reads a gateway login (c10b92b)
+- on macOS a long value that replaces another no longer reports a failed save after it was saved (0b32783)
+- on macOS two writes of long values at the same time no longer remove the parts of each other (184ac4a)
+- on macOS a locked or busy keychain no longer reads as a missing value, so the fingerprint key is never made again (d20674a)
+- a keychain add that fails no longer loses the value it replaces on macOS (067c802)
+- a keychain that does not answer no longer holds a hook to its watchdog; the hook stops in time and names the keychain (32ebfdb)
+
+### Security
+
+- a mention that writes a startup file or signs a tag is refused (8305edc)
+- a mention passes only with programs that print or store text (049dc6a)
+- on macOS a long value (a private key, a gateway login) no longer appears on the command line of `security` (24d3ade)
+
+### Other
+
+- Merge origin/next into fix/ux-0918 (c0769cf)
+- Merge origin/next into fix/ux-0918 (50f3748)
+
+## [0.9.17] - 2026-11-18
+
+### Features
+
+- ms:(value) inside a prompt stores the value and the AI gets its placeholder; in Claude Code your own maisecrets commands answer in one line, not as "blocked by hook", and every Codex form works (10ec5c5)
+- detects Cal.com API keys and Jina AI keys that contain _ or - (87de122)
+
+### Fixes
+
+- /maisecrets:put stores a short value and says where maisecrets finds it (2225411)
+- a value you delete yourself no longer shows as "protection was loosened" at the next session start (e857e5b)
+- /maisecrets:sref status without a gateway exits 0 and names the next step; a failed server is always named (361ffd1)
+- passes the plugin directory check again, and the README says what the Claude Code mod reads, starts and sends (1971c04)
+- Claude Code no longer flags a command with a stored value as "expansion obfuscation" (dce501f)
+
+### Security
+
+- a command never runs when the read of its value comes back empty (cedd53d)
+
+## [0.9.16] - 2026-11-18
+
+### Fixes
+
+- when the name service you set cannot be used, you are told once, with the cause and the step to fix it (1a10cb5)
+- a gateway login stays valid when a renewal is cut off, and maisecrets tells you when it ends (1f14aa0)
+- a wrong or missing argument gets one clear line with the next command, and no answer repeats what you typed (9471310)
+- the panel says whether a session is protected without false alarms, and /maisecrets followed by a command puts the right command in your prompt box (3cd3deb)
+
+### Security
+
+- a demo session sends nothing at all, also from client commands such as /btw, /rename and /recap; your own maisecrets commands answer there, and the panel asks with the focus on no (5af00af)
+
+## [0.9.15] - 2026-11-17
+
+### Features
+
+- secret-hygiene offers four steps, the urgent one first, and the install only when protection is off (fe03d75)
+- /maisecrets opens a panel with your settings, stored values and the name service, with no model turn (61e42c2)
+- /maisecrets:settings shows a table you can read at a glance, and value lifetime and countries are settings now (de76224)
+- a quiet session start: three lines the first time, then only warnings and at most one short tip a day (5b937af)
+- the session audit tells real tokens from test values and ends with what to do: which to rotate, with the page to do it (79928c5)
+- your message shows as you typed it, with its values locked, and the AI gets nothing until /clear (82f7baf)
+- a name service you set checks your prompts too, not only tool results (5e4ba39)
+
+### Fixes
+
+- the panel's forget all forgets the stored values only; a lifetime or a country change keeps the rest (c5150d3)
+- the audit estimates its time from the real speed of the scan on your computer (a8b61f1)
+- the skill runs only the check you chose and reports nothing else while your scan still runs (5ed926c)
+- "Code" in "Claude Code", a tool name such as "Bash" and a folder such as "Users" are no longer taken for a person's name (a98156e)
+- a maisecrets hint is one fixed line for you, shown once, not a note the AI words and repeats (8230f18)
+
+### Security
+
+- a tool call cannot reach a mod entry by quoting its name as $'…' or $"…" (408feb9)
+
+## [0.9.14] - 2026-11-16
+
+### Features
+
+- /maisecrets:demo on answers each prompt of the session with what maisecrets masks, and no prompt reaches the AI until /maisecrets:demo off (#57) (3f51f89)
+- /maisecrets:ner fits on one screen, with the details under /maisecrets:ner all (010331b)
+- a blocked prompt names /ms first, then the paste key, and a wrong hit's command; a blocked subagent report says how to pass it on (deeaca5)
+- checks the approvals Claude Code and Codex saved outside the repository for credentials (#56) (b377891)
+- /maisecrets:status fits on one screen: a lock in the head line says whether this session is protected, one short line per check, the details under /maisecrets:status all (813a203)
+
+### Fixes
+
+- the session audit of your past AI sessions is about 7 times faster, says how long it will take and shows its progress; --full reads as thoroughly as before (#59) (0d45f1d)
+- a scan with a rule selection runs only the personal-data steps whose kinds it selected (#59) (71a4450)
+- /maisecrets:ner answers an argument it does not know, and takes a server name for the gateway (123856e)
+- a session that is not protected starts with the warning sign, not an open lock that looked like the closed one (19fa0ef)
+- the approvals check numbers your own rule ids, the backups of the client config and MCP servers with a setting's name (#56) (6b4ab48)
+- the approvals check prints only the setting and file names that the clients themselves use (#56) (623b2e2)
+- the approvals check never prints a folder or file name that a person or a client chose, and it reads Codex projects whose path holds a TOML escape (#56) (7d268c5)
+- a subagent's report that Claude Code flagged as instruction-shaped passes again, instead of blocking the session (7ef4d10)
+- the approvals check never prints a token from a project folder or a file name, and it stops with an error on a pipe, a huge or a broken file (#56) (791dc63)
+- Codex no longer warns about the hook timeout of the session end (it allows at most 3 s); the guide says that a ChatGPT workspace import of 0.9.13 delivered the hooks (4519be2)
+- when a hook did not run, /maisecrets:status names a new session as the step; /reload-plugins keeps the old plugin folder after a synced update (f6209c0)
+- every arrow of /maisecrets:status stands in one column, and the store line of /maisecrets:status all is one short line (aac2c87)
+
+### Security
+
+- a value typed into the header of a flagged subagent report is blocked again (6dad437)
+
+### Dependencies
+
+- update dependency betterleaks/betterleaks to v1.10.1 (7bd2500)
+
+## [0.9.13] - 2026-11-15
+
+### Features
+
+- /maisecrets:status starts with a verdict per check (hooks of this session, version, Codex trust, store, incidents, self-test) and the next step; /maisecrets:status test proves the tool-result and the prompt path in the client (66c07fd)
+- /maisecrets:not-a-secret KEY forgets a wrong hit and keeps that exact value unmasked; undo takes it back, /maisecrets:list shows each one, and "found by" says ner for a name the name service found (8862b78)
+
+### Fixes
+
+- the Windows form of /maisecrets:status keeps the sentence its run test finds, and a check on every runner now catches a changed sentence (c0176f6)
+- the self-test hides its test value only after maisecrets has masked the output, so a secret next to the value is masked exactly as without a self-test (9ca139a)
+- the self-test no longer cuts a secret that is glued to a value of its shape, counts only the call and the prompt that belong to it, and the status verdict says ok only for what it checked (b2deab0)
+- /maisecrets:not-a-secret undo removes only the line it wrote and says so when it cannot tell; a value you allowed yourself keeps its line, a key type never goes through a link out of the maisecrets folder, and the hint names no key type (0822c60)
+- a value on your allow list is no longer masked when the name service names it; a longer value that contains it still is (12f7e84)
+
 ## [0.9.12] - 2026-11-15
 
 ### Features
