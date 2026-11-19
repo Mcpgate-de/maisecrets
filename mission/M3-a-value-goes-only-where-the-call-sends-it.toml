@@ -1,0 +1,7 @@
+# M3: a product promise. See M1 for what checks it.
+mission = "M3"
+promise = "An agent under injection cannot send a value, or use the person's keys, anywhere the person's own session did not put it: a placeholder resolves only in its session, only inside the call that names it, and never grants more than that call."
+actors = ["A2"]
+controls = ["C4", "C5", "C6", "C7", "C14", "C18", "C20", "C21", "C23", "C27", "C31"]
+invariants = ["I2"]
+ends = "The destination of an allowed call, which may pass the value on; a person who pastes a reference into a session that the injection controls."

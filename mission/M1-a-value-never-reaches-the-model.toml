@@ -1,0 +1,8 @@
+# M1: a product promise. scripts/mission_coverage.py checks that each control named here exists in
+# docs/THREAT-MODEL.md and has beliefs that can fail; replay_can_fail.py proves each belief.
+mission = "M1"
+promise = "A value the person stored, or one a rule finds, never reaches the AI in clear text: not in a prompt, not in a tool result, not in a file or an image the AI reads, not from the person's screen."
+actors = ["A1"]
+controls = ["C1", "C2", "C17", "C19", "C26", "C28", "C29", "C30", "C32"]
+invariants = ["I1"]
+ends = "A value with no known shape that is not stored and on no list; an agent that evades (THREAT-MODEL.md, Purpose)."

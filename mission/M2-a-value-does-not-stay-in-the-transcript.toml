@@ -1,0 +1,7 @@
+# M2: a product promise. See M1 for what checks it.
+mission = "M2"
+promise = "A value that a blocked prompt or a tool result carried does not stay in the session transcript on disk."
+actors = ["A1", "A4"]
+controls = ["C3"]
+invariants = ["I4"]
+ends = "A transcript of a client maisecrets does not scrub; a record written after the scrub window."

@@ -1,0 +1,7 @@
+# M4: a product promise. See M1 for what checks it.
+mission = "M4"
+promise = "The agent cannot read the store or loosen the protection: no tool of the agent reads the vault, a setting changes only from the person's own prompt, and a copy of the disk does not reveal short values."
+actors = ["A2", "A4"]
+controls = ["C8", "C10", "C11", "C12", "C15", "C22", "C25"]
+invariants = ["I3"]
+ends = "Not A3: every store hands a value to any process of the same user; an agent that builds the store path at run time (C8 is text matching)."
