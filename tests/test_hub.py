@@ -205,15 +205,15 @@ class NameServiceTests(unittest.TestCase):
 
     def test_local_starts_the_container_in_the_background_with_a_fixed_command(self):
         from maisecrets import ner_setup
-        self.addCleanup(lambda: Path(HOME, ner_setup.START_FILE).unlink(missing_ok=True))
+        # the lock of the start is free before the spawn, and held by the start after it
         with mock.patch("subprocess.Popen") as popen, mock.patch.dict(os.environ, {ner_setup.NO_START_ENV: "0"}), \
                 mock.patch.object(ner_setup, "container_tool", return_value="/usr/bin/docker"), \
                 mock.patch.object(ner_setup, "probe", return_value=(False, "")), \
-                mock.patch.object(ner_setup, "stop_local", return_value=[]):
+                mock.patch.object(ner_setup, "start_running", side_effect=[False, True, True, True]):
             out = ask(action="ner_set", value="local")
             self.assertTrue(out.get("starting"))
-        # no question first: the press is the person's choice, and the note says what happens and how to stop it
-        self.assertIn("To stop it: /maisecrets:ner off", out["note"])
+        # no question first: the press is the person's choice, and the note says what happens and how to turn it off
+        self.assertIn("To turn it off: /maisecrets:ner off", out["note"])
         (call,) = [c for c in popen.call_args_list if "maisecrets.cli" in c.args[0]]
         self.assertEqual(call.args[0][1:], ["-m", "maisecrets.cli", "ner", "start"])
         self.assertTrue(call.kwargs.get("start_new_session"))

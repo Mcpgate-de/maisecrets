@@ -560,35 +560,13 @@ def _engine_cpus(tool: str) -> int:
         return 0
 
 
-def _own_docker(ctl, tool: str, *args: str, timeout: float = 120, env=None):
-    """`_docker` for a start with a watch (run_start): the docker child is the start's own (ctl.proc), so its watch can
-    end it on a stop request. Without `ctl`, `_docker` as it is."""
-    if ctl is None:
-        return _docker(tool, *args, timeout=timeout, env=env)
-    p = subprocess.Popen([tool, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
-                         text=True, env=env, **_quiet())
-    ctl.proc = p
-    ctl.asked()                         # a stop that came before the child was known ends it now
-    try:
-        out, err = p.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        p.kill()
-        out, err = p.communicate()
-    finally:
-        ctl.proc = None
-    return subprocess.CompletedProcess([tool, *args], p.returncode, out, err)
-
-
-def _run_container(tool: str, secret: str, image: str, ctl=None) -> tuple[int, str, str]:
+def _run_container(tool: str, secret: str, image: str) -> tuple[int, str, str]:
     """(exit code, container id, last error line) of a new container `ner` from `image` with `secret`. The secret goes
-    to docker in the environment, never on the command line, where `ps` shows it. With `ctl` (run_start), the
-    container carries the label of the start's nonce, and the docker child is the start's own, which its watch ends on
-    a stop request."""
+    to docker in the environment, never on the command line, where `ps` shows it."""
     env = dict(os.environ, NER_CLIENT_SECRET=secret)
-    label = ["--label", f"{LABEL}={ctl.nonce}"] if ctl is not None else []
-    args = ["run", "-d", "--name", "ner", "--restart", "unless-stopped", "-e", "NER_CLIENT_SECRET", *label,
-            "--cpus", str(cpu_limit(_engine_cpus(tool))), "--memory", MEMORY_LIMIT, "-p", "127.0.0.1:8765:8765", image]
-    r = _own_docker(ctl, tool, *args, timeout=900, env=env)
+    r = _docker(tool, "run", "-d", "--name", "ner", "--restart", "unless-stopped", "-e", "NER_CLIENT_SECRET",
+                "--cpus", str(cpu_limit(_engine_cpus(tool))), "--memory", MEMORY_LIMIT,
+                "-p", "127.0.0.1:8765:8765", image, timeout=900, env=env)
     cid = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
     return r.returncode, cid, (r.stderr.strip().splitlines() or ["no reason given"])[-1][:200]
 
@@ -701,7 +679,7 @@ def follow_pin(tool: str, conf=None) -> str:
         return "busy"
 
 
-def start_local(cfg: dict, ctl=None) -> tuple[int, list]:
+def start_local(cfg: dict) -> tuple[int, list]:
     """`run.sh ner start` (#1699), run by the AI after the person said yes: the container `ner` on 127.0.0.1:8765 with
     a secret it must prove before each text. The secret goes to docker in the environment (never on the command line,
     where `ps` shows it) and into the store; the container id beside it. An existing container `ner` that maisecrets
@@ -716,322 +694,86 @@ def start_local(cfg: dict, ctl=None) -> tuple[int, list]:
     lock.LOCK_DEADLINE = START_WAIT_S
     try:
         with lock:
-            return _start_local(cfg, tool, ctl)
+            return _start_local(cfg, tool)
     except LockTimeout:
         return 1, ["maisecrets is updating the image of the local service right now (a download can take a few "
                    "minutes). Run /maisecrets:ner again in a minute."]
 
 
-# the person's typed choice `ner local` starts the service at once, in the background (no question first, maintainer
-# decision for 0.9.19). Only a typed route does it: a setting of a policy or of an earlier session never starts a
-# download (the session start only starts a container that exists, follow_pin)
+# the person's typed choice `ner local` starts the service at once, in the background, by the start of
+# `run.sh ner start` (no question first, 0.9.19). Only a typed route does it: a setting of a policy or of an earlier
+# session never starts a download (the session start only starts a container that exists, follow_pin)
 TYPED_ROUTES = ("typed prompt", "slash command", "settings pane")
 START_NOTE = ("maisecrets: I am loading the name service mcpgate/ner (about 690 MB, 1 to 2 GB on disk) and starting "
-              "it on 127.0.0.1:8765 only. That takes a few minutes. To stop it: /maisecrets:ner off (it stops the "
-              "download and the service).")
-START_FILE = "ner-start.json"       # the record of the background start: its nonce and its beat
-STOP_FILE = "ner-stop.json"         # /maisecrets:ner off asks the start with this nonce to stop
+              "it on 127.0.0.1:8765 only. That takes a few minutes. To turn it off: /maisecrets:ner off (a download "
+              "that runs ends by itself first).")
+STILL_RUNS = ("The start of the name service still runs and ends by itself; send /maisecrets:ner off again after "
+              "it.")
 START_LOG = "ner-start.log"
-START_LOCK = ".ner-start.lock"      # only the fast file steps: the check, the record, the spawn
-START_LOCK_WAIT = 5.0
-LABEL = "maisecrets.start"          # docker run --label maisecrets.start=<nonce>: the container is this start's
-WATCH_S = 0.25                      # the start reads the stop request this often
-BEAT_S = 2.0                        # and writes its beat this often
-STALE_S = 20.0                      # a record with no beat for this long is a start that ended without its cleanup
-STOP_WAIT_S = 3.0                   # /maisecrets:ner off waits this long for the start to end (a prompt hook waits)
-NONCE_ENV = "MAISECRETS_NER_START_NONCE"
-_NONCE_RE = re.compile(r"\A[0-9a-f]{32}\Z")
-# the test suite sets it (tests/_isolate.py): a test that types `ner local` or `ner off` never starts or stops a real
-# container (docker may run on the machine of the tests)
+# the test suite sets it (tests/_isolate.py): a test that types `ner local` never starts a real container (docker may
+# run on the machine of the tests)
 NO_START_ENV = "MAISECRETS_NO_CONTAINER_START"
 
 
-def _home(name: str):
-    from .vault import HOME
-    return HOME / name
-
-
-def _start_lock():
-    from .home import _lock_for
-    return _lock_for(_home(START_LOCK)).held(START_LOCK_WAIT)
-
-
-def _read(name: str) -> dict:
-    try:
-        d = json.loads(_home(name).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return d if isinstance(d, dict) else {}
-
-
-def _write(name: str, d: dict) -> None:
-    from .home import atomic_write
-    atomic_write(_home(name), json.dumps(d) + "\n")
-
-
-def _remove(name: str, nonce: str | None = None) -> None:
-    """The file goes; with `nonce`, only when it names that nonce (a newer start keeps its own)."""
-    try:
-        if nonce is None or _read(name).get("nonce") == nonce:
-            _home(name).unlink()
-    except OSError:
-        pass
-
-
-def _nonce_of(d: dict) -> str:
-    n = d.get("nonce")
-    return n if isinstance(n, str) and _NONCE_RE.fullmatch(n) else ""
-
-
-def _live(d: dict) -> bool:
-    """A record of a start that runs: its beat is younger than STALE_S."""
-    beat = d.get("beat")
-    return bool(_nonce_of(d)) and isinstance(beat, (int, float)) and not isinstance(beat, bool) \
-        and 0 <= time.time() - beat <= STALE_S
-
-
 def start_running() -> bool:
-    """Whether a background start of the local service runs now."""
-    return _live(_read(START_FILE))
-
-
-def _labelled(tool: str, nonce: str) -> list:
-    """The ids of the containers that carry this start's label: only these are its own."""
-    if not _NONCE_RE.fullmatch(nonce or ""):
-        return []
-    r = _docker(tool, "ps", "-aq", "--filter", f"label={LABEL}={nonce}", timeout=30)
-    return [x for x in r.stdout.split() if re.fullmatch(r"[0-9a-f]{6,64}", x)] if r.returncode == 0 else []
-
-
-def _remove_labelled(tool: str, nonce: str) -> int:
-    ids = _labelled(tool, nonce)
-    for cid in ids:
-        _docker(tool, "rm", "-f", cid, timeout=60)
-    return len(ids)
-
-
-def _claim(nonce: str) -> tuple:
-    """Under the lock, only file steps: (True, "") when this nonce is now the record of the start; (False, "") when
-    a start runs already; the nonce of a record that a start left without its cleanup goes back as the second item,
-    for the removal of its labelled containers after the lock."""
-    with _start_lock():
-        d = _read(START_FILE)
-        if _live(d):
-            return False, ""
-        old = _nonce_of(d)
-        now = time.time()
-        _write(START_FILE, {"nonce": nonce, "t": now, "beat": now})
-        _remove(STOP_FILE)
-        return True, old
+    """Whether a start or an update of the local service runs now: it holds the lock of start_local and follow_pin."""
+    from .home import LockTimeout, _Lock
+    from .vault import HOME
+    lock = _Lock(HOME / ".ner-update.lock")
+    try:
+        lock.enter(0)
+    except (LockTimeout, OSError):
+        return True
+    lock.__exit__(None, None, None)
+    return False
 
 
 def start_typed(route: str) -> bool:
-    """The start after the person typed `ner local` (settings.apply_typed): `run.sh ner start` in the background, with
-    a nonce of its own. True when a start runs now (this one or one before). Nothing starts for a route that is not
-    the person's typed choice, without docker or podman, or when the service answers already. Two sessions start one:
-    the check, the record and the spawn are under one lock across processes, and no other command runs under it."""
+    """The start after the person typed `ner local` (settings.apply_typed): `run.sh ner start` in the background, as
+    the panel started it in 0.9.18. True when a start runs now. Nothing starts for a route that is not the person's
+    typed choice, without docker or podman, when the service answers already, or while a start runs."""
     if route not in TYPED_ROUTES or os.environ.get(NO_START_ENV) == "1":
         return False
-    tool = container_tool()
-    if not tool:
+    if not container_tool():
         return False
+    if start_running():
+        return True
     ok, _line = probe({"url": LOCAL_URL}, timeout=0.3)
     if ok:
         return False
-    import secrets
-    from .home import LockTimeout
-    nonce = secrets.token_hex(16)
+    from .vault import HOME
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     flags = ({"creationflags": getattr(subprocess, "DETACHED_PROCESS", 0)
               | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
              else {"start_new_session": True})
     try:
-        _home("").mkdir(mode=0o700, parents=True, exist_ok=True)
-        with _start_lock():
-            d = _read(START_FILE)
-            if _live(d):
-                return True
-            old = _nonce_of(d)
-            now = time.time()
-            _write(START_FILE, {"nonce": nonce, "t": now, "beat": now})
-            _remove(STOP_FILE)
-            try:
-                with open(_home(START_LOG), "w", encoding="utf-8") as f:
-                    subprocess.Popen([sys.executable, "-m", "maisecrets.cli", "ner", "start"], cwd=root, stdout=f,
-                                     stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                     env=dict(os.environ, **{NONCE_ENV: nonce}), **flags)
-            except OSError:
-                _remove(START_FILE, nonce)
-                return False
-    except (OSError, LockTimeout):
+        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with open(HOME / START_LOG, "w", encoding="utf-8") as f:
+            subprocess.Popen([sys.executable, "-m", "maisecrets.cli", "ner", "start"], cwd=root, stdout=f,
+                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **flags)
+    except OSError:
         return False
-    if old:
-        _remove_labelled(tool, old)      # a start that ended without its cleanup: its own containers only
     return True
 
 
-class _Control:
-    """The start's own watch, in its own process: it writes the beat of the record, reads the stop request of
-    /maisecrets:ner off, and on a request ends the start's own docker child. It signals no other process."""
-
-    def __init__(self, nonce: str) -> None:
-        import threading
-        self.nonce = nonce
-        self.stopped = False
-        self.proc = None
-        self._end = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def asked(self) -> bool:
-        if not self.stopped and _read(STOP_FILE).get("nonce") == self.nonce:
-            self.stopped = True
-        if self.stopped:
-            p = self.proc
-            if p is not None and p.poll() is None:
-                try:
-                    p.kill()
-                except OSError:
-                    pass
-        return self.stopped
-
-    def _beat(self) -> None:
-        try:
-            from .home import _lock_for
-            with _lock_for(_home(START_LOCK)).held(0.5):
-                d = _read(START_FILE)
-                if d.get("nonce") == self.nonce:
-                    d["beat"] = time.time()
-                    _write(START_FILE, d)
-        except Exception:  # noqa: BLE001 - a missed beat only; STALE_S is many beats
-            pass
-
-    def _run(self) -> None:
-        last = 0.0
-        while not self._end.wait(WATCH_S):
-            if self.asked():
-                continue
-            if time.monotonic() - last >= BEAT_S:
-                self._beat()
-                last = time.monotonic()
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def end(self) -> None:
-        self._end.set()
-        self._thread.join(5)
-
-
-def run_start(cfg: dict) -> tuple[int, list]:
-    """`run.sh ner start`: the start with a record, a label and a stop request. The child of start_typed takes its
-    nonce from the environment and finds its record; a start from the command file makes its own record (or answers
-    that one runs already). The container gets the label of the nonce; on a stop request the start ends its own docker
-    child, removes its own labelled container and its record."""
-    tool = container_tool()
-    if not tool:
-        return 1, ["Neither docker nor podman is installed. Install one of them (Docker Desktop, OrbStack, Podman)."]
-    nonce = os.environ.get(NONCE_ENV) or ""
-    if nonce:
-        if not _NONCE_RE.fullmatch(nonce) or _read(START_FILE).get("nonce") != nonce:
-            return 1, ["maisecrets: this start is no longer the current one; nothing was started."]
-    else:
-        import secrets
-        from .home import LockTimeout
-        nonce = secrets.token_hex(16)
-        try:
-            claimed, old = _claim(nonce)
-        except (OSError, LockTimeout):
-            return 1, ["maisecrets could not record the start; nothing was started. Run /maisecrets:ner again."]
-        if not claimed:
-            return 0, ["starting: a start of the name service runs already; /maisecrets:ner off stops it."]
-        if old:
-            _remove_labelled(tool, old)
-    ctl = _Control(nonce)
-    ctl.start()
-    try:
-        code, lines = start_local(cfg, ctl)
-    finally:
-        ctl.end()
-        stopped = ctl.asked()
-        if stopped:
-            _remove_labelled(tool, nonce)
-        _remove(START_FILE, nonce)
-        _remove(STOP_FILE, nonce)
-    if stopped:
-        return 0, ["stopped: /maisecrets:ner off stopped the download and start of the name service."]
-    return code, lines
-
-
-def stop_local() -> list:
-    """`ner off` typed by the person. A start that runs gets a stop request (its nonce) and ends by itself: its own
-    docker child, its own labelled container, its record; this waits STOP_WAIT_S for that. A record that a start left
-    without its cleanup goes. A container is removed only when it carries the label of the recorded start: a container
-    `ner` that the person made, also one that appeared after the start, never carries it. The container that
-    maisecrets set up (its secret is kept) stops. No process is signalled from here. The lines say what happened."""
-    lines = []
-    d = _read(START_FILE)
-    nonce = _nonce_of(d)
-    tool = container_tool() if os.environ.get(NO_START_ENV) != "1" else ""
-    if nonce and _live(d):
-        try:
-            _write(STOP_FILE, {"nonce": nonce, "t": time.time()})
-        except OSError:
-            return ["the download and start of the name service could not be asked to stop; send /maisecrets:ner off "
-                    "again"]
-        end = time.monotonic() + STOP_WAIT_S
-        while time.monotonic() < end and _read(START_FILE).get("nonce") == nonce:
-            time.sleep(0.05)
-        now = _read(START_FILE)
-        if now.get("nonce") != nonce:
-            lines.append("the download and start of the name service stopped")
-        elif _live(now):
-            lines.append("the download and start of the name service is stopping; /maisecrets:ner shows when it is "
-                         "over")
-        else:
-            lines.append("the start of the name service did not answer; send /maisecrets:ner off again")
-    elif nonce:
-        # a start that ended without its cleanup (a crash): no process to ask; its record goes
-        _remove(START_FILE, nonce)
-        _remove(STOP_FILE)
-    if not tool:
-        return lines
-    if nonce and _remove_labelled(tool, nonce):
-        lines.append("the container that the start made was removed")
-    from . import ner_secret
-    cid, running, image, _image_id = _inspect(tool, "ner")
-    if cid and _ours_image(image) and cid == ner_secret.container_of(ner_secret.endpoint(LOCAL_URL)) \
-            and running == "true":
-        _docker(tool, "stop", cid, timeout=60)
-        lines.append("the container ner stopped (/maisecrets:ner local starts it again)")
-    return lines
-
-
-def _start_local(cfg: dict, tool: str, ctl=None) -> tuple[int, list]:
+def _start_local(cfg: dict, tool: str) -> tuple[int, list]:
     from . import ner_secret
     from .vault import make_backend
     ep = ner_secret.endpoint(LOCAL_URL)
     backend = make_backend(cfg)
-    if ctl is not None and ctl.asked():
-        return 1, ["stopped before the start."]
-    r = _own_docker(ctl, tool, "container", "inspect", "-f", "{{.Id}} {{.Config.Image}}", "ner", timeout=30)
+    r = _docker(tool, "container", "inspect", "-f", "{{.Id}} {{.Config.Image}}", "ner", timeout=30)
     if r.returncode == 0:
         cid, _, image = r.stdout.strip().partition(" ")
         if not _ours_image(image):
             return 1, ["A container named ner exists with another image. maisecrets leaves it alone; remove or rename "
                        "it to let maisecrets start its own."]
-        _own_docker(ctl, tool, "start", "ner")
-        if ctl is not None and ctl.asked():
-            return 1, ["stopped during the start."]
+        _docker(tool, "start", "ner")
         if ner_secret.secret_of(backend, ep) and ner_secret.container_of(ep) == cid:
             return 0, ["started: the container ner that maisecrets set up; it proves its secret before each text."]
-        # not this start's container (no label of it): /maisecrets:ner off never removes it
-        return 0, ["started: the container ner, which was not set up by maisecrets, so it is not checked; "
-                   "/maisecrets:ner off leaves it in place. To have it checked: "
-                   f"{os.path.basename(tool)} rm -f ner, then /maisecrets:ner again."]
+        return 0, ["started: the container ner, which was not set up by maisecrets, so it is not checked. To have it "
+                   f"checked: {os.path.basename(tool)} rm -f ner, then /maisecrets:ner again."]
     secret = ner_secret.new_secret()
-    rc, cid, err = _run_container(tool, secret, SECRET_IMAGE, ctl)
-    if ctl is not None and ctl.asked():
-        return 1, ["stopped during the start."]     # run_start removes the labelled container
+    rc, cid, err = _run_container(tool, secret, SECRET_IMAGE)
     if rc != 0:
         return 1, ["The container did not start: " + err]
     try:
@@ -1125,13 +867,13 @@ def report(conf, wait: float = 0.0, facts: dict | None = None) -> tuple[int, lis
         tool = container_tool()
         facts["tool"] = os.path.basename(tool) if tool else ""
         if tool and start_running():
-            # the person's typed `ner local` started it (start_typed): no second start
+            # a start runs (it holds the lock of start_local): no second start
             facts["starting"] = True
             lines.append("starting: maisecrets loads the image mcpgate/ner and starts it in the background; that takes "
-                         "a few minutes. /maisecrets:ner off stops it.")
+                         "a few minutes.")
             return 1, lines
         if tool:
-            # exit code 3: no start runs; only the person's typed `ner local` starts one (commands/ner.md)
+            # exit code 3: only the person's typed `ner local` starts it (commands/ner.md)
             lines.append(f"start: /maisecrets:ner local (with {os.path.basename(tool)})")
             return 3, lines
         lines.append("Neither docker nor podman is installed. Install one of them (Docker Desktop, OrbStack, Podman), "

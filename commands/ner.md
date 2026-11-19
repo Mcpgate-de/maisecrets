@@ -24,7 +24,7 @@ When the user typed `local` (or `on`), the prompt hook has already started the l
 
 If the command exits with code 3, the local service is not running, no start runs, and docker or podman is installed. Then:
 
-1. If `$ARGUMENTS` is `local` or `on`, do not ask first. Tell the user this note: "maisecrets: I am loading the name service mcpgate/ner (about 690 MB, 1 to 2 GB on disk) and starting it on 127.0.0.1:8765 only. That takes a few minutes. To stop it: /maisecrets:ner off (it stops the download and the service)." Then run exactly this command (on Windows the `run.cmd` form, as above), and show its output: it starts the container with a secret that the container must prove before it gets any text, or starts the existing container `ner` again.
+1. If `$ARGUMENTS` is `local` or `on`, do not ask first. Tell the user this note: "maisecrets: I am loading the name service mcpgate/ner (about 690 MB, 1 to 2 GB on disk) and starting it on 127.0.0.1:8765 only. That takes a few minutes. To turn it off: /maisecrets:ner off (a download that runs ends by itself first)." Then run exactly this command (on Windows the `run.cmd` form, as above), and show its output: it starts the container with a secret that the container must prove before it gets any text, or starts the existing container `ner` again.
    ```
    bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" ner start
    ```

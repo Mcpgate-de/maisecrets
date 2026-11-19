@@ -134,7 +134,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 60 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 19 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 440 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 437 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -938,16 +938,10 @@ maisecrets does not verify that it is `mcpgate/ner`.
   image). When the person types `/maisecrets:ner local` (in Codex `maisecrets: ner local`) or presses
   `local` in the panel, maisecrets starts it at once in the background with docker or podman, with no
   question first, and says so (about 690 MB to download, 1 to 2 GB on disk, about 250 MB of memory
-  while it runs, at most 1.5 GB and half the cores, 2 to 4). One start runs at a time, also for two
-  sessions (a lock across processes, held only for its file steps). The start has a random nonce, and its
-  container carries the label `maisecrets.start=<nonce>`. `/maisecrets:ner off` signals no process: it asks
-  the start to stop (a request file with the nonce). The start then ends its own docker call, removes its own
-  labelled container and its record. `ner off` waits up to 3 seconds and says `stopped`, `stopping`, or that
-  the start did not answer (then send `/maisecrets:ner off` again). It removes only a container with the label
-  of the recorded start, and it stops the container that maisecrets set up. A container `ner` that you made by
-  hand has no such label and is never removed, also when it appears while the start runs. A start that ended
-  without its cleanup (a crash) leaves a record with no fresh beat: the next start or `ner off` removes that
-  record and the containers with its label, and touches no process. Only that typed choice starts a
+  while it runs, at most 1.5 GB and half the cores, 2 to 4). A start that runs holds the lock of the start,
+  so a second typed choice starts no second one. `/maisecrets:ner off` turns the source off, as before; it
+  does not stop a download or a start that runs. While one runs, the answer says that the start ends by itself
+  and to send `/maisecrets:ner off` again after it. Only that typed choice starts a
   download: a source set by a policy or in an earlier session does not, and the session start then says that
   the service is not running and names `/maisecrets:ner local`. The start is
   `run.sh ner start`, which runs the container `ner` with a secret of its own

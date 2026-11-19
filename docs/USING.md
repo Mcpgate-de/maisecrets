@@ -178,7 +178,8 @@ opens at once: no model turn, nothing goes to the AI. From top to bottom:
   panel never shows a value.
 - **Name service.** The source as buttons: `off`, `local` (it starts the
   service at once and says so: the image is about 690 MB, 1 to 2 GB on disk,
-  and runs on 127.0.0.1 only; `off` stops the download and the service), `url…` (puts `/maisecrets:ner url ` into the prompt box
+  and runs on 127.0.0.1 only; `off` turns the source off, and a download
+  that runs ends by itself first), `url…` (puts `/maisecrets:ner url ` into the prompt box
   for you to complete) and `gateway…` (the MCP servers of your configuration
   that have an https address; after a pick, `[ log in ]` puts
   `/maisecrets:sref login NAME` into the prompt box). Under them, the checks

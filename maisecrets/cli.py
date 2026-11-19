@@ -1118,8 +1118,7 @@ def cmd_ner(args: list[str]) -> int:
     for the service, after a start."""
     from . import ner_setup
     if args[:1] == ["start"]:
-        # with a record, a label and a stop request (/maisecrets:ner off), also from the command file
-        code, lines = ner_setup.run_start(load_config())
+        code, lines = ner_setup.start_local(load_config())
         print("\n".join(lines))
         return code
     wait = 0.0
