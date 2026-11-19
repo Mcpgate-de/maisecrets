@@ -1,16 +1,27 @@
 # Effect: a word here makes maisecrets mask LESS. Add one when a value is masked wrongly.
 # Format: one entry per line, lower case; a comment line opens a block; each block sorted.
-# a reserved word of a programming language or of SQL, as the whole value after a secret label: `const secret =
-# readonly;`, `let password = function;` (Mcpgate-de/maisecrets#29). JavaScript, TypeScript, SQL, Python, Java,
-# C#, Go and C. In lower case or, for SQL, in capitals; True, False and None as Python writes them.
-# Read as _RESERVED_WORDS in maisecrets/detection/core.py.
+# a reserved word of a programming language, as the whole unquoted value after a secret label: `const secret =
+# readonly;`, `let password = function;` (Mcpgate-de/maisecrets#29). The lower-case keywords of JavaScript,
+# TypeScript, Python, Java, C#, Go and C, and a set of SQL keywords of queries, tables and transactions;
+# tests/test_reserved_words.py holds each table and the words left out (an everyday English word such as map, range,
+# set or record). C keywords that start with `_` and a capital (_Atomic) are not here: the list is lower case.
+# Read as _RESERVED_WORDS in maisecrets/detection/core.py (ds-keyword-equal-signs and ds-keyword-colon only).
 abstract
+accessor
+alignas
+alignof
 alter
+and
+as
 asc
 assert
+asserts
 async
+auto
 await
 between
+bigint
+bool
 boolean
 break
 byte
@@ -21,7 +32,9 @@ chan
 char
 checked
 class
+collate
 const
+constexpr
 constraint
 constructor
 continue
@@ -41,6 +54,7 @@ delete
 desc
 distinct
 do
+double
 elif
 else
 enum
@@ -57,6 +71,7 @@ fetch
 final
 finally
 float
+for
 foreach
 foreign
 func
@@ -64,9 +79,13 @@ function
 global
 goto
 having
+ilike
 implements
 implicit
 import
+in
+infer
+inline
 insert
 instanceof
 int
@@ -74,35 +93,52 @@ interface
 internal
 intersect
 interval
+iota
+is
 keyof
 lambda
+lateral
 let
+long
+module
 nameof
 namespace
 native
 never
 new
 nil
-none
 nonlocal
 null
 nullptr
+nulls
+number
+object
+of
 operator
+or
 override
 package
 params
+partition
 pass
+permits
 primary
 private
+procedure
 protected
 public
 raise
 readonly
+recursive
 references
+register
+require
+restrict
 return
 returning
 rollback
 satisfies
+savepoint
 sbyte
 sealed
 select
@@ -112,30 +148,38 @@ signed
 sizeof
 stackalloc
 static
+static_assert
 strictfp
+string
 struct
 super
 switch
+symbol
 synchronized
 this
+thread_local
 throw
 throws
+transaction
 transient
 true
 truncate
 try
 typedef
 typeof
+typeof_unqual
 uint
 ulong
 unchecked
 undefined
 union
 unique
+unknown
 unsafe
 unsigned
 update
 ushort
+using
 var
 varchar
 virtual

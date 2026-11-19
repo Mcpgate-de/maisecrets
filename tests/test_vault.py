@@ -980,8 +980,12 @@ class LifeCycleTests(unittest.TestCase):
         old = self.v().put("readonly", "SECRET", "ds-keyword-equal-signs", session="A")
         upper = self.v().put("DISTINCT", "SECRET", "ds-keyword-colon", session="A")
         real = self.v().put("readonly" + "Xk9mQ2", "SECRET", "ds-keyword-equal-signs", session="A")
+        # the detector still takes `Readonly` as a value, so a stored one stays hunted (Gate A of #29)
+        mixed = self.v().put("Readonly", "SECRET", "ds-keyword-equal-signs", session="A")
+        # a rule that needs quotes took the word as a string, and the detector still does
+        quoted = self.v().put("function", "SECRET", "ds-keyword-arrow-function-sign-quotes-required", session="A")
         self.assertEqual(sorted(self.v().quiet_code_words()), sorted([old.key, upper.key]))
-        self.assertEqual(list(self.v().live_fingerprints().values()), [real.key])
+        self.assertEqual(sorted(self.v().live_fingerprints().values()), sorted([real.key, mixed.key, quoted.key]))
 
     def test_the_plugins_own_name_is_never_hunted_whoever_stored_it(self):
         # #53: the plugin's name stored as a value masked its own commands and paths, and blocked the forget prompt
