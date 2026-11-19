@@ -6,5 +6,5 @@ runner = ["tests/test_keychain_process.py::ExitZeroOnFailureTests::test_a_failed
 
 [proof]
 file = "maisecrets/vault.py"
-find = "        # the new value is proven before anything of the old one goes: a failed add keeps the old value whole\n        if self.get(key) != value:\n"
-replace = "        if False:\n"
+find = "                self._add(self._add_line(key, head_line, label, comment), key, head_line)\n"
+replace = "                self._add(self._add_line(key, head_line, label, comment))\n"

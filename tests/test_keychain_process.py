@@ -281,6 +281,51 @@ class ExitZeroOnFailureTests(FakeKeychain):
         self.assertEqual(self.items(), before)
 
 
+class AfterTheHeadTests(FakeKeychain):
+    """Gate A round 2 of #75: once the new head is read back, the new value is stored. A failure in the removal of the
+    old parts after that raised, and the caller read it as "the old value stays"."""
+
+    def parts_of(self, key: str) -> set:
+        return {k.split(".")[-1] for k in self.items() if f"\0{key}.part" in k}
+
+    def test_old_parts_that_do_not_go_are_left_to_the_sweep_and_the_put_succeeds(self):
+        old, new = random_text(9000), random_text(12000)
+        self.backend.put("SECRET_c15", old)
+        old_gen = self.parts_of("SECRET_c15")
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_DELETE_FAIL": r"^SECRET_c15\.part:51"}):
+            self.backend.put("SECRET_c15", new)                       # no raise: the new value is stored
+        self.assertEqual(self.backend.get("SECRET_c15"), new)
+        self.assertTrue(old_gen < self.parts_of("SECRET_c15"), "the old parts wait for the sweep")
+        self.assertTrue(vault._parts_pending())
+        self.backend.remove_orphan_parts()
+        self.assertFalse(old_gen & self.parts_of("SECRET_c15"))
+        self.assertEqual(self.backend.get("SECRET_c15"), new)
+        self.assertFalse(vault._parts_pending())
+
+    def test_a_removal_of_old_parts_that_runs_out_of_time_is_no_failed_put(self):
+        old, new = random_text(9000), random_text(12000)
+        self.backend.put("SECRET_c16", old)
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_SLEEP": "delete-generic-password:30"}):
+            vault.hook_deadline(vault.STORE_MARGIN + 3.0)
+            self.backend.put("SECRET_c16", new)
+            vault.hook_deadline(None)
+        self.assertEqual(self.backend.get("SECRET_c16"), new)
+        self.assertTrue(vault._parts_pending())
+
+    def test_a_head_whose_read_back_fails_leaves_one_whole_value_and_the_sweep_pending(self):
+        # the head add may have taken or not: the put raises, and a read gives one whole value, never a mix
+        old, new = random_text(9000), random_text(12000)
+        self.backend.put("SECRET_c17", old)
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_FIND_ONCE": "^SECRET_c17$:36:2"}):   # 1: the read before
+            with self.assertRaises(CodedError):
+                self.backend.put("SECRET_c17", new)
+        self.assertIn(self.backend.get("SECRET_c17"), (old, new))
+        self.assertTrue(vault._parts_pending())
+        self.backend.remove_orphan_parts()
+        self.assertIn(self.backend.get("SECRET_c17"), (old, new))
+        self.assertEqual(len(self.parts_of("SECRET_c17")), 1, "one generation of parts is left")
+
+
 class FailedFindTests(FakeKeychain):
     """Gate A round 2 of #75: a find that failed for another reason than "no such item" (rc 44) read as absent. The
     fingerprint key was then made again over the old one, and every fingerprint in the index was lost."""
