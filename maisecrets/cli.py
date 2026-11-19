@@ -1139,7 +1139,12 @@ def cmd_ner(args: list[str]) -> int:
     return code
 
 
+# a command ends inside the 2 minutes a client gives it: the discovery of all servers (less for a login, which also
+# registers, waits for the browser and exchanges the code, each request with SREF_LOGIN_REQUEST_S)
 SREF_DISCOVERY_S = 60.0
+SREF_LOGIN_DISCOVERY_S = 40.0
+SREF_LOGIN_REQUEST_S = 15.0
+SREF_LOGIN_END_S = 115.0
 
 
 def cmd_sref(args: list[str]) -> int:
@@ -1169,7 +1174,8 @@ def cmd_sref(args: list[str]) -> int:
     for server, url in servers.items():
         # the whole discovery ends after SREF_DISCOVERY_S, however many servers are slow: the client ends a command
         # after 2 minutes, and a login waits for the browser after it
-        f, note = sref_client.discover_typed(cfg, url, end=start + SREF_DISCOVERY_S)
+        f, note = sref_client.discover_typed(
+            cfg, url, end=start + (SREF_LOGIN_DISCOVERY_S if action == "login" else SREF_DISCOVERY_S))
         if f:
             found[server] = f
             if note:
@@ -1232,8 +1238,9 @@ def cmd_sref(args: list[str]) -> int:
         except Exception:  # noqa: BLE001 - the printed URL is the way then
             pass
     try:
-        # 110 s: inside the 2 minutes a client gives a command, less the time of a slow discovery
-        sref_client.login(cfg, backend, f, open_browser, wait=min(110.0, 115.0 - (time.monotonic() - start)))
+        # the browser gets up to 110 s, less the time of a slow discovery and registration
+        sref_client.login(cfg, backend, f, open_browser, wait=110.0, budget=SREF_LOGIN_REQUEST_S, patient=True,
+                          end=start + SREF_LOGIN_END_S)
     except sref_client.Refused as exc:
         print(f"maisecrets: the login to {host} did not complete: {exc}")
         return 1

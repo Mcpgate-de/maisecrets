@@ -332,16 +332,29 @@ def pkce() -> tuple:
     return verifier, challenge
 
 
-def register(cfg: dict, found: dict, redirect: str, deadline: float) -> str:
-    """A client id from the gateway's registration endpoint (RFC 7591) for this loopback redirect."""
+def _unsent(exc: BaseException) -> bool:
+    """The request surely never reached the gateway: no connection, no address, a certificate refused in the
+    handshake. Anything else (a timeout, a connection that broke) may have reached it."""
+    return isinstance(exc, (ConnectionRefusedError, _gaierror(), _cert_error()))
+
+
+def register(cfg: dict, found: dict, redirect: str, deadline: float, patient: bool = False) -> str:
+    """A client id from the gateway's registration endpoint (RFC 7591) for this loopback redirect. `patient` (a
+    typed login): only the deadline bounds the request, and a request that surely never reached the gateway is sent
+    once more inside the same deadline."""
     body = json.dumps({"client_name": "maisecrets resolver", "redirect_uris": [redirect],
                        "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"],
                        "token_endpoint_auth_method": "none", "scope": found["scope"]}).encode()
-    try:
-        status, headers, raw = _request(cfg, "POST", found["register"], {"Content-Type": "application/json",
-                                                                         "Accept": "application/json"}, body, deadline)
-    except _net_errors() as exc:
-        raise Refused(f"the gateway could not be reached ({type(exc).__name__})") from None
+    for attempt in (0, 1):
+        try:
+            status, headers, raw = _request(cfg, "POST", found["register"],
+                                            {"Content-Type": "application/json", "Accept": "application/json"},
+                                            body, deadline, **({"patient": True} if patient else {}))
+            break
+        except _net_errors() as exc:
+            if patient and attempt == 0 and _unsent(exc) and deadline - time.monotonic() > 0.5:
+                continue
+            raise Refused(f"the gateway could not be reached ({type(exc).__name__})") from None
     try:
         client_id = json.loads(raw.decode("utf-8")).get("client_id") if _is_json(headers) else None
     except (ValueError, RecursionError, AttributeError):
@@ -375,16 +388,15 @@ def _cert_error():
     return ssl.SSLCertVerificationError
 
 
-def _token(cfg: dict, found: dict, form: dict, deadline: float) -> dict:
+def _token(cfg: dict, found: dict, form: dict, deadline: float, patient: bool = False) -> dict:
     try:
         status, headers, raw = _request(cfg, "POST", found["token"],
                                         {"Content-Type": "application/x-www-form-urlencoded",
-                                         "Accept": "application/json"}, urlencode(form).encode(), deadline)
+                                         "Accept": "application/json"}, urlencode(form).encode(), deadline,
+                                        **({"patient": True} if patient else {}))
     except _net_errors() as exc:
         err = Refused(f"the gateway could not be reached ({type(exc).__name__})")
-        # the request surely never reached the gateway: no connection, no address, a certificate refused in the
-        # handshake. Anything else (a timeout, a connection that broke) may have reached it
-        err.unsent = isinstance(exc, (ConnectionRefusedError, _gaierror(), _cert_error()))
+        err.unsent = _unsent(exc)
         raise err from None
     try:
         data = json.loads(raw.decode("utf-8")) if _is_json(headers) else None
@@ -402,11 +414,19 @@ def _token(cfg: dict, found: dict, form: dict, deadline: float) -> dict:
 
 
 def finish_login(cfg: dict, backend, found: dict, client_id: str, redirect: str, code: str, verifier: str,
-                 deadline: float | None = None) -> None:
-    """The code from the loopback redirect, exchanged for the tokens, which go into the store."""
+                 deadline: float | None = None, patient: bool = False) -> None:
+    """The code from the loopback redirect, exchanged for the tokens, which go into the store. `patient` (a typed
+    login): only the deadline bounds the request. The code is good for one use: the exchange is sent once more only
+    when the first request surely never reached the gateway, never after a lost answer."""
     deadline = deadline if deadline is not None else time.monotonic() + BUDGET
-    data = _token(cfg, found, {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect,
-                               "client_id": client_id, "code_verifier": verifier}, deadline)
+    form = {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect, "client_id": client_id,
+            "code_verifier": verifier}
+    try:
+        data = _token(cfg, found, form, deadline, patient)
+    except Refused as exc:
+        if not (patient and getattr(exc, "unsent", False) and deadline - time.monotonic() > 0.5):
+            raise
+        data = _token(cfg, found, form, deadline, patient)
     # the pair and the end of the "login ended" mark in one section under the refresh lock: a renewal that ends a
     # login marks it under the same lock, so a newer "ended" is never erased by an older login
     with _refresh_lock_held(LOCK_WAIT):
@@ -963,10 +983,13 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
     raise Refused(f"{host} gave no usable answer (HTTP {status})")
 
 
-def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) -> None:
+def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0, budget: float = BUDGET,
+          patient: bool = False, end: float | None = None) -> None:
     """The whole login: a loopback listener on 127.0.0.1 (a free port), the registration for its redirect, the
     browser at the authorize URL (`open_browser(url)`), the code back from the redirect (its state must match), and
-    the tokens into the store. The listener answers one request and closes."""
+    the tokens into the store. The listener answers one request and closes. The registration and the token exchange
+    get `budget` seconds each (`patient`: only that deadline bounds them). `end`: the whole login ends by then, so the
+    wait for the browser leaves `budget` seconds for the token exchange."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import parse_qs
@@ -1030,12 +1053,13 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
     # review, 2026-11-02, two rounds)
     t = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
     try:
-        deadline = time.monotonic() + BUDGET
-        client_id = register(cfg, found, redirect, deadline)
+        client_id = register(cfg, found, redirect, time.monotonic() + budget, patient)
+        if end is not None:
+            wait = min(wait, end - budget - time.monotonic())
         verifier, challenge = pkce()
         t.start()
         open_browser(authorize_url(found, client_id, redirect, challenge, state))
-        done.wait(wait)
+        done.wait(max(0.0, wait))
     finally:
         if t.is_alive():
             httpd.shutdown()
@@ -1043,4 +1067,4 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0) ->
     if "code" not in box:
         raise Refused("the login did not complete: " + ("the person declined it" if box.get("denied") else
                                                          "no matching answer from the browser in time"))
-    finish_login(cfg, backend, found, client_id, redirect, box["code"], verifier)
+    finish_login(cfg, backend, found, client_id, redirect, box["code"], verifier, time.monotonic() + budget, patient)

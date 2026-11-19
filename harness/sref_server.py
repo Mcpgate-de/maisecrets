@@ -69,6 +69,11 @@ class SrefServer:
         self.discovery_delays: list = []
         self.discovery_drops = 0
         self.discovery_gets = 0
+        # POST /register and the exchange of a code: each takes the next delay of its list (seconds) before it
+        # answers; every code exchange is counted (a code is spent at once, as on the gateway)
+        self.register_delays: list = []
+        self.code_delays: list = []
+        self.code_exchanges = 0
         # GET /sensitive-references/ner/status (ai-gateway v2.0.3913): the load, the client slot and the quota
         self.ner_status = {"service": {"workers": 4, "busy_workers": 1, "waiting_requests": 0, "in_use_share": 0.25},
                            "client_path": {"free": True, "gateway_lookups_running": False},
@@ -154,6 +159,8 @@ class SrefServer:
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length) if length else b""
                 if self.path == "/register":
+                    if server.register_delays:
+                        time.sleep(server.register_delays.pop(0))
                     body = json.loads(raw or b"{}")
                     uris = body.get("redirect_uris") or []
                     target = urlsplit(uris[0]) if len(uris) == 1 else None
@@ -171,7 +178,10 @@ class SrefServer:
                 if self.path == "/auth/token":
                     form = {k: v[0] for k, v in parse_qs(raw.decode()).items()}
                     if form.get("grant_type") == "authorization_code":
+                        server.code_exchanges += 1
                         got = server.codes.pop(form.get("code", ""), None)
+                        if server.code_delays:
+                            time.sleep(server.code_delays.pop(0))
                         verifier = form.get("code_verifier", "")
                         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()) \
                             .rstrip(b"=").decode()

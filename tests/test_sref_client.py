@@ -886,6 +886,71 @@ class SrefClientTests(unittest.TestCase):
                 self.assertIsNone(found_now)
                 self.assertTrue(note.startswith("the gateway did not answer within"), note)
 
+    def test_a_typed_login_waits_for_a_slow_registration_and_a_slow_code_exchange(self):
+        from maisecrets import vault_refs
+        # each answer stalls longer than the read timeout of a hook: only the deadline bounds a typed login
+        with mock.patch.object(vault_refs, "SOCKET_TIMEOUT", 0.3):
+            self.srv.register_delays, self.srv.code_delays = [0.8], [0.8]
+            S.login(self.cfg, self.backend, self.found, self.browser, wait=10, budget=3.0, patient=True)
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+        self.assertEqual(self.srv.code_exchanges, 1)
+
+    def test_a_login_with_the_hook_limits_fails_on_a_slow_registration(self):
+        from maisecrets import vault_refs
+        with mock.patch.object(vault_refs, "SOCKET_TIMEOUT", 0.3):
+            self.srv.register_delays = [0.8]
+            with self.assertRaises(S.Refused):
+                S.login(self.cfg, self.backend, self.found, self.browser, wait=10, budget=3.0)
+        self.assertFalse(S.logged_in(self.backend, self.found["origin"]))
+
+    def test_a_code_exchange_whose_answer_is_lost_is_never_sent_again(self):
+        # the gateway spent the code, and its answer came too late: a second exchange would only get invalid_grant
+        self.srv.code_delays = [1.6]
+        with self.assertRaises(S.Refused) as cm:
+            S.login(self.cfg, self.backend, self.found, self.browser, wait=10, budget=1.0, patient=True)
+        self.assertIn("could not be reached", str(cm.exception))
+        self.assertEqual(self.srv.code_exchanges, 1)
+        self.assertFalse(S.logged_in(self.backend, self.found["origin"]))
+
+    def test_a_request_of_a_typed_login_that_never_left_is_sent_once_more(self):
+        real, calls = S._request, []
+
+        def first_refused(cfg, method, url, headers, body, deadline, **kw):
+            calls.append(url)
+            if method == "POST" and calls.count(url) == 1:
+                raise ConnectionRefusedError()
+            return real(cfg, method, url, headers, body, deadline, **kw)
+        with mock.patch.object(S, "_request", side_effect=first_refused):
+            S.login(self.cfg, self.backend, self.found, self.browser, wait=10, budget=3.0, patient=True)
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+        self.assertEqual(calls.count(self.found["register"]), 2)
+        self.assertEqual(calls.count(self.found["token"]), 2)
+        self.assertEqual(self.srv.code_exchanges, 1, "the refused request never reached the gateway")
+
+    def test_a_request_of_a_typed_login_that_may_have_reached_the_gateway_is_not_sent_again(self):
+        real = S._request
+        for step in ("register", "token"):
+            calls = []
+
+            def broken(cfg, method, url, headers, body, deadline, **kw):
+                calls.append(url)
+                if url == self.found[step]:
+                    raise ConnectionResetError()         # the connection broke after the request went out
+                return real(cfg, method, url, headers, body, deadline, **kw)
+            with self.subTest(step), mock.patch.object(S, "_request", side_effect=broken):
+                with self.assertRaises(S.Refused):
+                    S.login(self.cfg, self.backend, self.found, self.browser, wait=10, budget=3.0, patient=True)
+                self.assertEqual(calls.count(self.found[step]), 1)
+                self.assertFalse(S.logged_in(self.backend, self.found["origin"]))
+
+    def test_the_end_of_a_login_shortens_the_wait_for_the_browser_and_keeps_time_for_the_exchange(self):
+        t0 = time.monotonic()
+        with self.assertRaises(S.Refused) as cm:
+            S.login(self.cfg, self.backend, self.found, lambda url: None, wait=20, budget=3.0, patient=True,
+                    end=t0 + 4.5)
+        self.assertIn("no matching answer from the browser in time", str(cm.exception))
+        self.assertLess(time.monotonic() - t0, 3.5, "the wait ended `budget` seconds before the end")
+
     def test_the_fresh_name_source_cache_takes_only_a_record_of_its_own_url(self):
         from maisecrets import ner_gateway
         self.addCleanup(ner_gateway.CACHE.unlink, missing_ok=True)
@@ -1148,24 +1213,25 @@ class StatusWithoutReferencesTests(unittest.TestCase):
                       "30 s, twice)", text)
         self.assertIn("good-gw (gw.example.com): not logged in", text)
 
-    def test_a_slow_discovery_shortens_the_wait_for_the_browser_and_the_command_ends_in_time(self):
+    def test_a_typed_login_ends_inside_the_two_minutes_of_the_client(self):
         import io
         import types
         from contextlib import redirect_stdout
         from maisecrets import cli, vault_refs
         origin = "https://gw.example.com"
-        clock = iter([100.0, 150.0])                 # the command starts, the discovery took 50 s
-        waits = []
+        waits, ends = [], []
         with mock.patch.object(vault_refs, "user_servers", return_value={"gw": origin + "/mcp"}), \
-                mock.patch.object(S, "discover_typed", return_value=({"origin": origin}, "")), \
-                mock.patch.object(S, "login", side_effect=lambda *a, wait: waits.append(wait)), \
+                mock.patch.object(S, "discover_typed", side_effect=lambda *a, end: ends.append(end)
+                                  or ({"origin": origin}, "")), \
+                mock.patch.object(S, "login", side_effect=lambda *a, **kw: waits.append(kw)), \
                 mock.patch.object(S, "account", return_value=""), \
-                mock.patch.object(cli, "time", types.SimpleNamespace(monotonic=lambda: next(clock))), \
+                mock.patch.object(cli, "time", types.SimpleNamespace(monotonic=lambda: 100.0)), \
                 mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
                                                                     "allow_plaintext_store": True}), \
                 redirect_stdout(io.StringIO()):
             self.assertEqual(cli.cmd_sref(["login", "gw"]), 0)
-        self.assertEqual(waits, [65.0])
+        self.assertEqual(ends, [140.0], "the discovery of a login ends after 40 s")
+        self.assertEqual(waits, [{"wait": 110.0, "budget": 15.0, "patient": True, "end": 215.0}])
 
     def test_a_silent_gateway_with_a_good_discovery_of_this_week_is_used_and_said(self):
         import io
