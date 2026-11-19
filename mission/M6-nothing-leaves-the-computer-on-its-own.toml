@@ -12,8 +12,7 @@ beliefs = ["c33-no-hook-opens-a-network-connection-by-default"]
 
 [[part]]
 says = "In the demo, Claude Code sends no request; when the plugin gives no answer, the request is refused."
-beliefs = []
-tests = ["tests/fetch.test.ts"]
+beliefs = ["c33-the-demo-sends-no-request", "c33-no-answer-from-the-plugin-sends-no-request"]
 
 [[part]]
 says = "Diagnostics stay on the computer until the person sends them."
@@ -25,5 +24,4 @@ beliefs = ["c30-*"]
 
 [[part]]
 says = "The mod starts only hooks/dispatch.py, with a fixed command line and no shell, and makes no network request."
-beliefs = []
-tests = ["tests/mod.test.ts"]
+beliefs = ["c33-the-mod-starts-only-the-plugins-dispatcher"]
