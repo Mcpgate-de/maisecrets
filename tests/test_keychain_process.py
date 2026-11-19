@@ -326,6 +326,28 @@ class AfterTheHeadTests(FakeKeychain):
         self.assertEqual(len(self.parts_of("SECRET_c17")), 1, "one generation of parts is left")
 
 
+class FailedDumpTests(FakeKeychain):
+    """Gate A round 3 of #75: `keys()` read a failed `dump-keychain` as an empty store, and repair then wrote an
+    index with no entries over the good one."""
+
+    def test_a_repair_with_a_failed_dump_raises_and_keeps_the_index(self):
+        v = open_vault(self, self.backend)
+        v.put("fake-value-0021", "SECRET", "manual")
+        before = vault.INDEX.read_bytes()
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_DUMP_RC": "51"}):
+            with self.assertRaisesRegex(CodedError, "rc 51"):
+                self.backend.keys()
+            with self.assertRaises(CodedError):
+                v.repair()
+        self.assertEqual(vault.INDEX.read_bytes(), before)
+
+    def test_a_wipe_with_a_failed_dump_names_the_problem(self):
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_DUMP_RC": "51"}), \
+                mock.patch.object(vault, "make_backend", return_value=self.backend):
+            _n, problems = vault.wipe_everything({"backend": "jsonfile", "allow_plaintext_store": True})
+        self.assertTrue([p for p in problems if "not listed" in p], problems)
+
+
 class FailedFindTests(FakeKeychain):
     """Gate A round 2 of #75: a find that failed for another reason than "no such item" (rc 44) read as absent. The
     fingerprint key was then made again over the old one, and every fingerprint in the index was lost."""

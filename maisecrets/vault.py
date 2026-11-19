@@ -661,7 +661,8 @@ class KeychainBackend:
         The parts of a long value are no keys of their own."""
         r = _run_store("keychain", ["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
         if r.returncode != 0:
-            return []
+            # never an empty list: repair rebuilt the index from it and lost every entry (Gate A round 3, #75)
+            raise CodedError(f"keychain dump failed (rc {r.returncode})", "store.expire", "rc", r.returncode)
         return [k for k in parse_keychain_dump(r.stdout, SERVICE) if not self._PART_RE.search(k)]
 
     def remove_orphan_parts(self) -> int:
@@ -1647,8 +1648,9 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
             problems.append(f"store: {type(exc).__name__}")
         try:
             keys = backend.keys() if hasattr(backend, "keys") else []
-        except (RuntimeError, OSError):
+        except (RuntimeError, OSError) as exc:
             keys = []
+            problems.append(f"store items not listed: {type(exc).__name__}")   # a value may still be there
         for key in keys:
             try:
                 backend.delete(key)

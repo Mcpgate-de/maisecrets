@@ -10,6 +10,7 @@ FAKE_SECURITY_FAIL_ADD (a regex) makes each add of a matching account fail witho
 ("REGEX:RC") makes each find of a matching account fail with RC. FAKE_SECURITY_FIND_ONCE ("REGEX:RC:N") makes only the
 N-th find of a matching account fail with RC, or wait 30 s when RC is "hang" (a keychain that stops answering).
 FAKE_SECURITY_DELETE_FAIL ("REGEX:RC") makes each delete of a matching account fail with RC.
+FAKE_SECURITY_DUMP_RC makes `dump-keychain` fail with that rc.
 """
 import hashlib
 import json
@@ -148,6 +149,8 @@ def run(argv):
                 return 0, ""
         return 44, ""
     if name == "dump-keychain":
+        if os.environ.get("FAKE_SECURITY_DUMP_RC"):
+            return int(os.environ["FAKE_SECURITY_DUMP_RC"]), ""
         out = []
         for k in items:
             s, _, a = k.partition("\0")
