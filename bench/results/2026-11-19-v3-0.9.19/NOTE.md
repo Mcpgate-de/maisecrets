@@ -1,0 +1,1 @@
+The detection did not change since v0.9.18, so the release gate did not measure it again. The results here are those of 2026-11-19-v3-0.9.18, unchanged. measured.json names the runtime trees of 0.9.19 (commit 1d0ea132), which --verify-tag compares with the tag.
