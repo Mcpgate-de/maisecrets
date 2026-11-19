@@ -1045,17 +1045,19 @@ def _only_prints(command: str, ctxs: list[str], segs: list[dict], seg: dict | No
     return not re.search(r"[<>|]", unquoted)
 
 
-# the programs a line may run when a weakening command stands in its data (#84): they print, write or store a text
-# and run none. An allow list, as C21 reads a mention of ssh (ssh_consent._TEXT_SAFE_CMDS: data commands with no
-# option that starts a program). Each entry: how its words are checked. A program that is not here, or a word it
-# does not know, makes the line a call: a list of programs that run a text was never complete (Gate A of #84: a git
-# alias, make --eval)
+# the programs a line may run when a weakening command stands in its data (#84): they print, write or store a text,
+# and the line gives the text to no other program. An allow list, as C21 reads a mention of ssh
+# (ssh_consent._TEXT_SAFE_CMDS: data commands with no option that starts a program). Each entry: how its words are
+# checked. A program that is not here, or a word it does not know, makes the line a call: a list of programs that run
+# a text was never complete (Gate A of #84: a git alias, make --eval). Not seen: a program that git or gh starts from
+# its configuration (a repository hook gets the commit message), and a file that a later command or another tool
+# gives to a client (as with the Write tool)
 _PLAIN_TEXT_CMDS = {"cat", "tee"}
 # git: only these subcommands, with no option before them (-c sets an alias or a program) and only these options
 _GIT_OPTIONS = {
     "commit": ({"-a", "--all", "-q", "--quiet", "-s", "--signoff", "--amend", "--no-edit", "--allow-empty",
                 "--allow-empty-message", "-v", "--verbose"}, {"-m", "--message", "-F", "--file"}),
-    "tag": ({"-a", "--annotate", "-s", "--sign", "-f", "--force"}, {"-m", "--message", "-F", "--file"}),
+    "tag": ({"-a", "--annotate", "-f", "--force"}, {"-m", "--message", "-F", "--file"}),
 }
 # gh: issue or pr, then comment, create or edit, with these options (no --editor, no --web, no extension or alias)
 _GH_OPTIONS = ({"-d", "--draft"},
@@ -1158,10 +1160,13 @@ def only_mentions(command: str, found) -> bool:
                     skip[k] = True
         pos = end + 1
 
+    targets: list[str] = []         # the files the line writes or reads by a redirection
+
     def flush() -> None:
         nonlocal cur, quoted, target
         if cur or quoted:
             if target:
+                targets.append("".join(cur))
                 target = False
             else:
                 commands[-1].append(("".join(cur), quoted))
@@ -1209,6 +1214,10 @@ def only_mentions(command: str, found) -> bool:
                 continue
         cur.append(ch)
     flush()
+    from .ssh_consent import _STARTUP_FILE
+    written = targets + [w for words in commands if words and words[0][0] == "tee" for w, _q in words[1:]]
+    if any(_STARTUP_FILE.search(w) for w in written):
+        return False                    # a startup or settings file or a git hook: a shell or git runs it later
     for words in commands:
         if not words:
             continue

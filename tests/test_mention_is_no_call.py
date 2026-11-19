@@ -67,7 +67,8 @@ class NotASecretMentions(unittest.TestCase):
     def test_a_comment_body_in_a_heredoc_passes(self):
         # the field case of #84
         self.assertEqual(_decision(_heredoc("gh issue comment 29 --body-file -", BODY)), "pass")
-        self.assertEqual(_decision(_heredoc("glab issue note 84 --message \"$(cat)\" 2>&1", BODY)), "deny",
+        # no heredoc and no text after the `)`: else the unsure-heredoc rule or the command-word rule refuses it first
+        self.assertEqual(_decision(f"gh issue comment 84 --body \"{NAS} {KEY} $(cat notes.md)\" 2>&1"), "deny",
                          "a substitution runs its text: no mention")
 
     def test_a_commit_message_passes(self):
@@ -173,6 +174,18 @@ class EachRuleOfTheReader(unittest.TestCase):
             "a gh verb off the list": f"gh issue develop 1 --name {text}",
             "a gh option off the list": f"gh issue comment 1 --web --body {text}",
             "a bare git": f"git # {NAS}",
+            "a signed tag": f"git tag -s v1 -m {text}",
+            "a tag signed with a key": f"git tag -u KEYID v1 -m {text}",
+            "a tag with --sign": f"git tag --sign v1 -m {text}",
+            "a signed commit": f"git commit -S -m {text}",
+            "a commit with --gpg-sign": f"git commit --gpg-sign -m {text}",
+            "a commit template": f"git commit --template=t.txt -m {text}",
+            "a commit through the editor": f"git commit -e -m {text}",
+            "a commit with --edit": f"git commit --edit -m {text}",
+            "a redirection into a startup file": f"echo {text} >> ~/.bashrc",
+            "a redirection into a git hook": _heredoc("cat > .git/hooks/commit-msg", NAS),
+            "a redirection into .envrc": f"printf %s {text} > .envrc",
+            "tee into the git settings": f"echo {text} | tee -a ~/.gitconfig",
         }
         for why, command in calls.items():
             with self.subTest(why=why):
@@ -189,6 +202,8 @@ class EachRuleOfTheReader(unittest.TestCase):
             "a redirection before the command": f"2>/dev/null echo {text}",
             "a line continuation": f"git commit \\\n  -m {text}",
             "two allowed commands": f"echo {text} | tee -a notes.md",
+            "an annotated tag": f"git tag -a v1 -m {text}",
+            "a file next to a startup file": f"echo {text} > docs/bashrc-notes.md",
         }
         for why, command in mentions.items():
             with self.subTest(why=why):
