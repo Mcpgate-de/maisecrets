@@ -47,6 +47,7 @@ from .shell_commands import (  # noqa: F401
     _value_reaches, _refusal_for, _SSH_ARG_FLAGS, _SSH_REFUSED_FLAGS, _SSH_REFUSED_OPTIONS, _ssh_options, _ssh_way,
     _remote_refusal, READ_ONLY_REMOTE, _JOURNALCTL_STATEFUL, _READ_ONLY_WRAPPERS, _SORT_OK, _UNIQ_OK,
     _remote_is_read_only, _ssh_route, _HOOK_ENTRIES, _calls_a_hook_entry, _only_prints, _parse_for_consent,
+    only_mentions,
 )
 from .tool_output import (  # noqa: F401
     _TOKEN_SPLIT_RE, _FINE_SPLIT_RE, _EXACT_MIN_LEN, _candidates, _HEX_RE, _B64_RE, _decoded, _derived_forms,
@@ -1334,6 +1335,13 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
 _SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets settings change; only the person makes one, "
                           "as their own prompt (/maisecrets:settings KEY VALUE). The command did not run. Tell the "
                           "user the prompt to send.")
+
+
+def _carries(command: str, found) -> bool:
+    """A Bash command that carries a text `found` matches and does not only mention it (only_mentions, #84)."""
+    return bool(found(command)) and not only_mentions(command, found)
+
+
 _HOOK_ENTRY_TEXT_RE = _LazyRx(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
                                  r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt|"
                                  r"mod-values|mod-reveal|mod-settings|mod-demo)\b", re.I)
@@ -1645,13 +1653,15 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     if elsewhere:
         return _deny(_elsewhere_reason(elsewhere) + " The command did not run.")
     from . import settings as settings_mod
-    if settings_mod.IN_A_COMMAND_RE.search(command):
+    # a weakening command counts only where the line runs it; in the body of an issue comment or a commit message it
+    # is a mention (only_mentions, #84). The ssh consent sentence below keeps every mention refused (C21 is frozen)
+    if _carries(command, lambda t: bool(settings_mod.IN_A_COMMAND_RE.search(t))):
         return _deny(_SETTINGS_IN_A_COMMAND)
-    if value_files.removal_in_command(command):
+    if _carries(command, value_files.removal_in_command):
         return _deny(value_files.IN_A_COMMAND)
-    if not_a_secret.in_a_command(command):
+    if _carries(command, not_a_secret.in_a_command):
         return _deny(not_a_secret.IN_A_COMMAND)
-    if demo.in_a_command(command):
+    if _carries(command, demo.in_a_command):
         return _deny(demo.IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
