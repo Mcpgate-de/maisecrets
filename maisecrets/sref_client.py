@@ -49,6 +49,13 @@ _PROFILE_TYPES = {"local-file-1": "local_file", "process-1": "process", "mcpgate
 MAX_REFS = 100
 MAX_REQUEST_BYTES = 64 * 1024
 BUDGET = 8.0
+# a command the person typed (sref login, sref status): no hook watchdog waits, and a slow mobile network needed more
+# than 8 s for the two documents (field report, 2026-11-19). Each try gets this budget; one more try after a timeout
+# or no connection
+TYPED_BUDGET = 30.0
+TYPED_TRIES = 2
+# the last good discovery of an MCP URL stands in for a timeout or no connection this long
+LAST_GOOD_KEEP = 7 * 86400
 _STORE_PREFIX = "_maisecrets_sref_"
 
 
@@ -65,11 +72,14 @@ def find(text: str) -> list:
 DISCOVERY: dict = {"why": "", "status": None, "named": False}
 
 
-def _get_json(cfg: dict, url: str, deadline: float) -> dict | None:
+def _get_json(cfg: dict, url: str, deadline: float, patient: bool = False) -> dict | None:
     try:
-        status, headers, body = _request(cfg, "GET", url, {"Accept": "application/json"}, None, deadline)
+        status, headers, body = _request(cfg, "GET", url, {"Accept": "application/json"}, None, deadline,
+                                         **({"patient": True} if patient else {}))
     except _net_errors() as exc:
-        DISCOVERY["why"] = "timeout" if isinstance(exc, TimeoutError) else "network"
+        import socket
+        # socket.timeout is no TimeoutError before Python 3.10
+        DISCOVERY["why"] = "timeout" if isinstance(exc, (TimeoutError, socket.timeout)) else "network"
         return None
     DISCOVERY["status"] = status
     if status != 200 or not _is_json(headers):
@@ -105,9 +115,10 @@ def login_scope(resolve_scope: str, process_scope: object, windows: bool | None 
     return " ".join(scopes)
 
 
-def discover(cfg: dict, mcp_url: str, deadline: float | None = None) -> dict | None:
+def discover(cfg: dict, mcp_url: str, deadline: float | None = None, patient: bool = False) -> dict | None:
     """The resolver of the gateway behind an MCP URL: {"origin", "resolve", "scope", "sinks", "authorize", "token",
-    "register"}, or None when the gateway names none. Every endpoint must be https on the same origin."""
+    "register"}, or None when the gateway names none. Every endpoint must be https on the same origin. `patient`:
+    only the deadline bounds each request (vault_refs._request)."""
     deadline = deadline if deadline is not None else time.monotonic() + BUDGET
     DISCOVERY.update(why="", status=None, named=False)
     origin = origin_of(mcp_url)
@@ -116,7 +127,7 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None) -> dict | N
         return None
     path = urlsplit(mcp_url).path
     path = "" if path == "/" else path
-    meta = _get_json(cfg, f"{origin}/.well-known/oauth-protected-resource{path}", deadline)
+    meta = _get_json(cfg, f"{origin}/.well-known/oauth-protected-resource{path}", deadline, patient)
     if meta is None:
         return None                                   # DISCOVERY names why
     block = meta.get("sensitive_references")
@@ -124,7 +135,7 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None) -> dict | N
         DISCOVERY["why"] = "absent"
         return None
     DISCOVERY["named"] = True
-    auth = _get_json(cfg, f"{origin}/.well-known/oauth-authorization-server", deadline)
+    auth = _get_json(cfg, f"{origin}/.well-known/oauth-authorization-server", deadline, patient)
     if auth is None:
         return None
     ends = {k: auth.get(f"{k}_endpoint") for k in ("authorization", "token", "registration")}
@@ -170,6 +181,63 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None) -> dict | N
             "display_scope": display_scope if isinstance(display_scope, str) else None,
             "sinks": sinks, "sink_types": types,
             "authorize": ends["authorization"], "token": ends["token"], "register": ends["registration"]}
+
+
+def _same_origin(found: object, origin: str | None) -> bool:
+    """A discovery record that discover() could have returned for this origin: every endpoint https on it."""
+    if not origin or not isinstance(found, dict) or found.get("origin") != origin \
+            or not isinstance(found.get("scope"), str) or not isinstance(found.get("sinks"), list):
+        return False
+    ends = [found.get(k) for k in ("resolve", "authorize", "token", "register")]
+    ner = found.get("ner")
+    if ner is not None:
+        if not isinstance(ner, dict):
+            return False
+        ends += [ner.get("endpoint")] + ([ner["status"]] if "status" in ner else [])
+    return all(origin_of(e) == origin for e in ends)
+
+
+def _seconds(budgets: list) -> str:
+    """"30 s, twice", "30 s" or "30 s and 4 s": the budget of each try."""
+    words = [f"{b:.0f} s" for b in budgets]
+    if len(words) == 2 and words[0] == words[1]:
+        return f"{words[0]}, twice"
+    return " and ".join(words)
+
+
+def discover_typed(cfg: dict, mcp_url: str, budget: float = TYPED_BUDGET, tries: int = TYPED_TRIES,
+                   end: float | None = None, keep: float = LAST_GOOD_KEEP) -> tuple:
+    """discover() for a command the person typed: (found, note). Each try gets `budget` seconds (never past `end`,
+    the end of the command's whole discovery), and a timeout or no connection gets one more try. When every try
+    failed that way, the last good discovery of this MCP URL (ner_gateway's cache, younger than `keep`) stands in,
+    checked again as discover() checks a fresh one; `note` then says so. A failure that is no timeout and no lost
+    connection (no document, an HTTP error, a broken answer) never uses it. found None: `note` names the failure for
+    a timeout or no connection, else it is "" and DISCOVERY names why. A login with a record from the cache still
+    runs the whole OAuth flow against its endpoints."""
+    from . import ner_gateway
+    budgets: list = []
+    for _ in range(max(1, tries)):
+        left = budget if end is None else min(budget, end - time.monotonic())
+        if budgets and left < 1.0:
+            break                                  # no time left for one more try
+        left = max(1.0, left)
+        budgets.append(left)
+        found = discover(cfg, mcp_url, time.monotonic() + left, True)
+        if found:
+            ner_gateway._keep(found["origin"], found, mcp_url)
+            return found, ""
+        if DISCOVERY.get("why") not in ("timeout", "network"):
+            return None, ""
+    origin = origin_of(mcp_url)
+    old = ner_gateway.last_good(origin, mcp_url, keep) if origin else None
+    timeout = DISCOVERY.get("why") == "timeout"
+    if old and _same_origin(old[0], origin):
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(old[1]))
+        return old[0], (f"the gateway {'did not answer in time' if timeout else 'could not be reached'}; maisecrets "
+                        f"used the discovery from {when}")
+    if timeout:
+        return None, f"the gateway did not answer within {_seconds(budgets)}"
+    return None, "no connection to the gateway" + (", twice" if len(budgets) == 2 else "")
 
 
 def discovery_failed() -> bool:

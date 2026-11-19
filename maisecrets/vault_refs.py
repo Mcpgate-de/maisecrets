@@ -847,15 +847,17 @@ def _cafile(cfg: dict) -> str | None:
     return f if isinstance(f, str) and f else None
 
 
-def _request(cfg: dict, method: str, url: str, headers: dict, body: bytes | None, deadline: float):
+def _request(cfg: dict, method: str, url: str, headers: dict, body: bytes | None, deadline: float,
+             patient: bool = False):
     """_send in a thread that the caller waits for until the deadline only: a socket timeout bounds one read, not a
-    server that sends one header line every few seconds."""
+    server that sends one header line every few seconds. `patient`: only the deadline bounds the connection and each
+    read (a command the person typed on a slow network); else CONNECT_TIMEOUT and SOCKET_TIMEOUT do too."""
     import threading
     box: dict = {}
 
     def run() -> None:
         try:
-            box["ok"] = _send(cfg, method, url, headers, body, deadline)
+            box["ok"] = _send(cfg, method, url, headers, body, deadline, patient)
         except BaseException as exc:  # noqa: BLE001 - handed to the caller
             box["err"] = exc
     t = threading.Thread(target=run, daemon=True)
@@ -868,7 +870,8 @@ def _request(cfg: dict, method: str, url: str, headers: dict, body: bytes | None
     raise TimeoutError("the server took too long")
 
 
-def _send(cfg: dict, method: str, url: str, headers: dict, body: bytes | None, deadline: float):
+def _send(cfg: dict, method: str, url: str, headers: dict, body: bytes | None, deadline: float,
+          patient: bool = False):
     """One HTTPS request with no redirect and no proxy. Returns (status, headers, body) with the body cut above
     MAX_ANSWER_BYTES + 1, so a longer body is seen as too long."""
     import http.client
@@ -879,11 +882,12 @@ def _send(cfg: dict, method: str, url: str, headers: dict, body: bytes | None, d
         raise TimeoutError("no time left")
     ctx = ssl.create_default_context(cafile=_cafile(cfg))
     conn = http.client.HTTPSConnection(parts.hostname, 443 if parts.port is None else parts.port,
-                                       timeout=min(CONNECT_TIMEOUT, left),
+                                       timeout=left if patient else min(CONNECT_TIMEOUT, left),
                                        context=ctx)
     try:
         conn.connect()
-        conn.sock.settimeout(min(SOCKET_TIMEOUT, max(0.2, deadline - time.monotonic())))
+        left = max(0.2, deadline - time.monotonic())
+        conn.sock.settimeout(left if patient else min(SOCKET_TIMEOUT, left))
         path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
         conn.request(method, path, body=body, headers=headers)
         answer = conn.getresponse()

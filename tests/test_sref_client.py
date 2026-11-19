@@ -782,6 +782,111 @@ class SrefClientTests(unittest.TestCase):
             S.resolve(self.cfg, self.backend, self.found, [ref], "local_file", "/tmp/a.txt")
         self.assertIn("not logged in", str(cm.exception))
 
+    # ------------------------------------------------ a command the person typed, on a slow network (2026-11-19) --
+    def typed(self, **kw) -> tuple:
+        from maisecrets import ner_gateway
+        self.addCleanup(ner_gateway.CACHE.unlink, missing_ok=True)
+        return S.discover_typed(self.cfg, self.srv.url + "/mcp", **kw)
+
+    def test_a_slow_gateway_fails_the_hook_budget_and_passes_the_budget_of_a_typed_command(self):
+        from maisecrets import vault_refs
+        # a read that stalls longer than the socket timeout of a hook: only the deadline bounds a typed command
+        with mock.patch.object(vault_refs, "SOCKET_TIMEOUT", 0.3):
+            self.srv.discovery_delays = [0.8]
+            self.assertIsNone(S.discover(self.cfg, self.srv.url + "/mcp", time.monotonic() + 3.0))
+            self.assertEqual(S.DISCOVERY["why"], "timeout")
+            self.srv.discovery_delays = [0.8, 0.8]
+            before = self.srv.discovery_gets
+            found, note = self.typed(budget=3.0)
+        self.assertEqual(found, self.found)
+        self.assertEqual((note, self.srv.discovery_gets - before), ("", 1), "the first try waited for the answer")
+
+    def test_a_slow_handshake_waits_for_the_budget_of_a_typed_command_not_the_connect_timeout(self):
+        import socket
+        from maisecrets import vault_refs
+        silent = socket.socket()
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(4)                             # accepts the connection and never starts the TLS handshake
+        self.addCleanup(silent.close)
+        url = f"https://127.0.0.1:{silent.getsockname()[1]}/mcp"
+        with mock.patch.object(vault_refs, "CONNECT_TIMEOUT", 0.2):
+            t0 = time.monotonic()
+            self.assertIsNone(S.discover(self.cfg, url, t0 + 1.5))
+            self.assertLess(time.monotonic() - t0, 1.0, "a hook keeps its connect timeout")
+            t0 = time.monotonic()
+            found, note = S.discover_typed(self.cfg, url, budget=1.5, tries=1)
+            waited = time.monotonic() - t0
+        self.assertIsNone(found)
+        self.assertEqual(note, "the gateway did not answer within 2 s")
+        self.assertGreater(waited, 1.2, "a typed command waits for its whole budget")
+
+    def test_a_typed_command_tries_once_more_after_a_lost_connection(self):
+        self.srv.discovery_drops = 1
+        before = self.srv.discovery_gets
+        found, note = self.typed(budget=3.0)
+        self.assertEqual(found, self.found)
+        self.assertEqual((note, self.srv.discovery_gets - before), ("", 2))
+
+    def test_a_typed_command_names_the_budget_and_the_retry_when_the_gateway_stays_silent(self):
+        self.srv.discovery_delays = [1.6, 1.6]
+        before = self.srv.discovery_gets
+        found, note = self.typed(budget=1.0)
+        self.assertIsNone(found)
+        self.assertEqual(note, "the gateway did not answer within 1 s, twice")
+        self.assertEqual(self.srv.discovery_gets - before, 2)
+        self.assertTrue(S.discovery_failed())
+
+    def test_a_timeout_uses_the_last_good_discovery_and_the_login_still_runs_the_whole_flow(self):
+        from maisecrets import ner_gateway
+        self.assertEqual(self.typed(budget=3.0), (self.found, ""))
+        self.srv.discovery_delays = [1.6, 1.6]
+        found, note = self.typed(budget=1.0)
+        self.assertEqual(found, self.found)
+        self.assertRegex(note, r"^the gateway did not answer in time; maisecrets used the discovery from "
+                               r"\d{4}-\d\d-\d\d \d\d:\d\d$")
+        clients = len(self.srv.clients)
+        S.login(self.cfg, self.backend, found, self.browser, wait=10)
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+        self.assertEqual(len(self.srv.clients), clients + 1, "the login registered at the gateway again")
+        self.assertNotIn("srefr_", ner_gateway.CACHE.read_text(encoding="utf-8"), "the cache holds no token")
+
+    def test_the_last_good_discovery_never_stands_in_for_an_answer_that_names_no_resolver(self):
+        self.assertEqual(self.typed(budget=3.0), (self.found, ""))
+        json_type = {"content-type": "application/json"}
+        for name, answer in (("no block", (200, json_type, b'{"resource": "x"}')), ("404", (404, {}, b"")),
+                             ("server error", (503, {}, b"")), ("broken", (200, json_type, b"[1]"))):
+            with self.subTest(name), mock.patch.object(S, "_request", return_value=answer) as req:
+                self.assertEqual(self.typed(budget=3.0), (None, ""))
+                self.assertEqual(req.call_count, 1, "no second try for an answer")
+
+    def test_a_cached_discovery_of_another_url_or_too_old_or_on_another_origin_is_not_used(self):
+        from maisecrets import ner_gateway
+        url, origin = self.srv.url + "/mcp", self.found["origin"]
+        silent = mock.patch.object(S, "_request", side_effect=TimeoutError())
+        for name, url_kept, found, age in (
+                ("another URL", self.srv.url + "/other", self.found, 0),
+                ("too old", url, self.found, S.LAST_GOOD_KEEP + 60),
+                ("token endpoint elsewhere", url, {**self.found, "token": "https://elsewhere.example/token"}, 0),
+                ("authorize over http", url, {**self.found, "authorize": self.found["authorize"].replace(
+                    "https:", "http:")}, 0)):
+            with self.subTest(name), silent:
+                ner_gateway._keep(origin, found, url_kept)
+                data = json.loads(ner_gateway.CACHE.read_text(encoding="utf-8"))
+                data[origin]["at"] -= age
+                ner_gateway.CACHE.write_text(json.dumps(data), encoding="utf-8")
+                found_now, note = self.typed(budget=1.0)
+                self.assertIsNone(found_now)
+                self.assertTrue(note.startswith("the gateway did not answer within"), note)
+
+    def test_the_fresh_name_source_cache_takes_only_a_record_of_its_own_url(self):
+        from maisecrets import ner_gateway
+        self.addCleanup(ner_gateway.CACHE.unlink, missing_ok=True)
+        origin, url = self.found["origin"], self.srv.url + "/mcp"
+        ner_gateway._keep(origin, self.found, url)
+        self.assertEqual(ner_gateway._cached(origin, url), self.found)
+        self.assertEqual(ner_gateway._cached(origin), self.found, "the scope check of a source asks by origin")
+        self.assertIsNone(ner_gateway._cached(origin, self.srv.url + "/other"))
+
 
 class LoginScopeTests(unittest.TestCase):
     def test_the_process_scope_is_asked_for_on_top_where_command_output_is_masked(self):
@@ -976,7 +1081,7 @@ class StatusWithoutReferencesTests(unittest.TestCase):
         from contextlib import redirect_stdout
         from maisecrets import cli, vault_refs
 
-        def request(cfg, method, url, headers, body, deadline):
+        def request(cfg, method, url, headers, body, deadline, **kw):
             if isinstance(answer, BaseException):
                 raise answer
             return answer
@@ -1031,5 +1136,56 @@ class StatusWithoutReferencesTests(unittest.TestCase):
             code = cli.cmd_sref(["status"])
         text = out.getvalue()
         self.assertEqual(code, 1, text)
-        self.assertIn("discovery of Sensitive References failed for slow-mcp (timeout)", text)
+        self.assertIn("discovery of Sensitive References failed for slow-mcp (the gateway did not answer within "
+                      "30 s, twice)", text)
         self.assertIn("good-gw (gw.example.com): not logged in", text)
+
+    def test_a_slow_discovery_shortens_the_wait_for_the_browser_and_the_command_ends_in_time(self):
+        import io
+        import types
+        from contextlib import redirect_stdout
+        from maisecrets import cli, vault_refs
+        origin = "https://gw.example.com"
+        clock = iter([100.0, 150.0])                 # the command starts, the discovery took 50 s
+        waits = []
+        with mock.patch.object(vault_refs, "user_servers", return_value={"gw": origin + "/mcp"}), \
+                mock.patch.object(S, "discover_typed", return_value=({"origin": origin}, "")), \
+                mock.patch.object(S, "login", side_effect=lambda *a, wait: waits.append(wait)), \
+                mock.patch.object(S, "account", return_value=""), \
+                mock.patch.object(cli, "time", types.SimpleNamespace(monotonic=lambda: next(clock))), \
+                mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
+                                                                    "allow_plaintext_store": True}), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.cmd_sref(["login", "gw"]), 0)
+        self.assertEqual(waits, [65.0])
+
+    def test_a_silent_gateway_with_a_good_discovery_of_this_week_is_used_and_said(self):
+        import io
+        from contextlib import redirect_stdout
+        from maisecrets import cli, ner_gateway, vault_refs
+        url, origin = "https://gw.example.com/mcp", "https://gw.example.com"
+        good = {"origin": origin, "resolve": origin + "/sensitive-references/resolve", "ner": None,
+                "scope": S.SCOPE, "process_scope": None, "display_scope": None, "sinks": ["local-file-1"],
+                "sink_types": ["local_file"], "authorize": origin + "/auth/authorize", "token": origin + "/auth/token",
+                "register": origin + "/register"}
+        ner_gateway._keep(origin, good, url)
+        self.addCleanup(ner_gateway.CACHE.unlink, missing_ok=True)
+        calls = []
+
+        def discover(cfg, u, *a):
+            calls.append(a)
+            S.DISCOVERY.update(why="timeout", status=None, named=False)
+            return None
+        out = io.StringIO()
+        with mock.patch.object(vault_refs, "user_servers", return_value={"gw": url}), \
+                mock.patch.object(S, "discover", side_effect=discover), \
+                mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
+                                                                    "allow_plaintext_store": True}), \
+                redirect_stdout(out):
+            code = cli.cmd_sref(["status"])
+        text = out.getvalue()
+        self.assertEqual(code, 0, text)
+        self.assertIn("maisecrets: gw: the gateway did not answer in time; maisecrets used the discovery from ", text)
+        self.assertIn("gw (gw.example.com): not logged in", text)
+        self.assertEqual(len(calls), 2, "one more try after the timeout")
+        self.assertTrue(all(d - time.monotonic() > 20 for d, _p in calls), "each try has the budget of a command")
