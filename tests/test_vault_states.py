@@ -371,13 +371,15 @@ class States(base.OnlineBase):
         real = vault_refs.atomic_write
 
         def keys_fail(path, text):
-            if path == vault_refs.KEYS:
+            # the write of the new kid fails; the mark of the new kid as `rotating` before the key write goes through
+            if path == vault_refs.KEYS and '"rotating"' not in text:
                 raise OSError("disk full")
             return real(path, text)
         with mock.patch.object(vault_refs, "atomic_write", keys_fail):
             self.assertNotIn("made a new key", self.start() or "")
         self.assertEqual(vault_refs._key(Vault().backend, origin, create=False), old, "the store and keys.json agree")
         self.assertEqual(vault_refs.kid_of(old), vault_refs._kid_now(origin))
+        self.assertIn("rotating", vault_refs._known_keys()[origin], "premise: the new key was written")
         self.assertIn("made a new key", self.start() or "", "the next start tries again")
         self.assertNotEqual(vault_refs._key(Vault().backend, origin, create=False), old)
 
