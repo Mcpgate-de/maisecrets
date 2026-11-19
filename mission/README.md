@@ -1,15 +1,21 @@
 # Missions
 
 One file per product promise (`M*.toml`). Each file says the promise in plain words, the actors of
-`docs/THREAT-MODEL.md` it protects against, the controls (C*) and invariants (I*) that serve it, and
-where the promise ends.
+`docs/THREAT-MODEL.md` it protects against, the controls (C*) and invariants (I*) that serve it, where the
+promise ends, and its parts: one sentence each, with the beliefs (`beliefs/*.toml`, ids or globs) that prove
+that sentence. A part that only a test without a belief covers names that test in `tests` and still counts as
+a gap: no mutation proves that the test can fail.
 
-The missions are derived from the controls, not the other way round: they name what the existing
-controls already promise, so a control that serves no promise, or a promise part with no belief that
-can fail, becomes visible.
+`claims.toml` maps the promises that `README.md` and `PRIVACY.md` make to users onto the missions: a promise
+to the mission that keeps it, a limit ("What it does not protect") to the mission whose `ends` names it, a
+function to none. Every bullet of the gated README sections must start with the quote of a claim, so a new
+or reworded promise turns the check red until it is mapped.
+
+M1 to M5 are derived from the controls (bottom-up); M6 comes from README.md and PRIVACY.md (top-down), and no
+control of the threat model names it yet.
 
     python3 scripts/mission_coverage.py            # report
-    python3 scripts/mission_coverage.py --strict   # exit 1 on a gap, an orphan or an unknown name
+    python3 scripts/mission_coverage.py --strict   # exit 1 on a gap, an orphan, an unknown name or a claim
 
-The beliefs (`beliefs/*.toml`) prove that each test can fail; this layer shows which promise each
-belief serves. It is a draft (#77) and not a CI gate yet.
+The beliefs prove that each test can fail; this layer shows which promise each belief serves. It is a draft
+(#77) and not a CI gate yet.

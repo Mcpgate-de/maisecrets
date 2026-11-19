@@ -5,3 +5,7 @@ actors = ["A1", "A4"]
 controls = ["C3"]
 invariants = ["I4"]
 ends = "A transcript of a client maisecrets does not scrub; a record written after the scrub window."
+
+[[part]]
+says = "A detected value is masked in the transcript in every record shape the clients write."
+beliefs = ["c3-*", "inv-every-detected-value-can-be-scrubbed"]
