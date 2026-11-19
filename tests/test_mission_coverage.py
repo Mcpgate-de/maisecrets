@@ -280,6 +280,14 @@ class MissionCoverageTests(unittest.TestCase):
         m += '\n[[part]]\nid = "M1.2"\nsays = 3\n\n[[part]]\nid = "M2.5"\nsays = "odd"\n'
         r = mission_coverage.analyse(self.tree({"M1-x": m}, ["C1", "C2", "C3", "I1", ("C1", ["M2.5"])]))
         self.assertIn("M1: labels is not a list of names", r["unknown"])
+        for bad in ('controls = "C1"', 'controls = [["C1"]]', "invariants = 5"):
+            with self.subTest(bad):
+                text = mission("M1", ["C1", "C2", "C3"], ["I1"])
+                text = text.replace('controls = ["C1", "C2", "C3"]', bad) if bad.startswith("controls") \
+                    else text.replace('invariants = ["I1"]', bad)
+                key = bad.split(" ")[0]
+                found = mission_coverage.analyse(self.tree({"M1-x": text}, ["C1", "C2", "C3", "I1"]))["unknown"]
+                self.assertIn(f"M1: {key} is not a list of names", found)
         self.assertIn("M1.2: the part has no sentence in says", r["unknown"])
         self.assertIn("b4: serves M2.5, which no mission has", r["unknown"])
 

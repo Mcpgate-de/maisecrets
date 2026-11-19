@@ -114,6 +114,16 @@ def analyse(root: Path):
     beliefs = {b["belief"]: b.get("control", "") for b in loaded}
     serves = {b["belief"]: b.get("serves") for b in loaded}
     missions = [(p, tomllib.loads(p.read_text(encoding="utf-8"))) for p in sorted((root / "mission").glob("M*.toml"))]
+    typed: list[str] = []
+    for path, m in missions:
+        if not isinstance(m.get("mission"), str):
+            typed.append(f"{path.name}: mission is not a name")
+            m["mission"] = path.stem.split("-")[0]
+        for key in ("controls", "invariants", "labels"):
+            value = m.get(key, [])
+            if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+                typed.append(f"{m['mission']}: {key} is not a list of names")
+                m[key] = [x for x in value if isinstance(x, str)] if isinstance(value, list) else []
     served: set[str] = set()
     # part id -> the controls, invariants and labels its mission names (a belief labelled "operations" or "detector"
     # serves a part only when its mission names that label in `labels`)
@@ -134,7 +144,7 @@ def analyse(root: Path):
          "unowned_beliefs": Counter(),
          "undocumented_belief_controls": sorted({c for c in beliefs.values()
                                                  if c not in controls and c not in invariants})}
-    r["unknown"].extend(twice)
+    r["unknown"].extend(typed + twice)
     for path, m in missions:
         mid = m["mission"]
         if not path.stem.startswith(mid + "-"):
@@ -146,11 +156,6 @@ def analyse(root: Path):
         if not m.get("invariants"):
             r["no_invariant"].append(mid)
         rows = []
-        for key in ("controls", "invariants", "labels"):
-            value = m.get(key, [])
-            if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
-                r["unknown"].append(f"{mid}: {key} is not a list of names")
-                m[key] = [x for x in value if isinstance(x, str)] if isinstance(value, list) else []
         for label in m.get("labels", []):
             if label in controls or label in invariants:
                 r["unknown"].append(f"{mid}: {label} is a control; name it in controls or invariants, not labels")

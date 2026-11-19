@@ -2,7 +2,8 @@
 
 A static check over every Python module of the plugin and the skill, and over the mod. Each list below names a module
 and why it may reach for the network or start a program; a module that starts to import a network library, or a new
-place that starts a program (a reference to a starting call, or a call of a local function that leads to one), fails,
+place that starts a program (a reference to a starting call, or a call of a local function or name that leads to
+one, at any depth), fails,
 and so does an entry that no longer matches its module, so the lists cannot rot.
 tests/test_promises.py NoNetworkTests checks the other side at run time: with the default settings no hook connects.
 What this check cannot see: a library that another module imports for it, a name built at run time
@@ -49,20 +50,20 @@ MAY_CONNECT = {
 # the modules that start a program: how many places start one (program_starts: each start, and each call of a
 # function that makes one), and what they start. A new place is red until it is counted here, with a reason.
 MAY_START = {
-    "hooks/guard.py": (2, "the clipboard tool, with the restart command"),
-    "maisecrets/codex_helper.py": (2, "ps, for the parent process"),
-    "maisecrets/file_reads.py": (7, "a text extractor for a PDF, ps and ldd"),
-    "maisecrets/hooks.py": (20, "the clipboard tool (read, write), and Python children: a later transcript scrub, "
+    "hooks/guard.py": (6, "the clipboard tool, with the restart command"),
+    "maisecrets/codex_helper.py": (5, "ps, for the parent process"),
+    "maisecrets/file_reads.py": (27, "a text extractor for a PDF, ps and ldd"),
+    "maisecrets/hooks.py": (58, "the clipboard tool (read, write), and Python children: a later transcript scrub, "
                                "the server of a value through a FIFO, the scrub of a failed prompt"),
     "maisecrets/hub.py": (2, "maisecrets.cli ner start, for the name service the person set up"),
-    "maisecrets/ner_setup.py": (20, "the container tool of the name service the person set up, and its keeper"),
-    "maisecrets/sref_client.py": (3, "a Python child that serves a gateway value through a FIFO"),
-    "maisecrets/user_rules.py": (2, "a Python child that checks a rule of the person"),
-    "maisecrets/vault.py": (11, "the tool of the operating system's store"),
+    "maisecrets/ner_setup.py": (35, "the container tool of the name service the person set up, and its keeper"),
+    "maisecrets/sref_client.py": (5, "a Python child that serves a gateway value through a FIFO"),
+    "maisecrets/user_rules.py": (6, "a Python child that checks a rule of the person"),
+    "maisecrets/vault.py": (54, "the tool of the operating system's store"),
     "skills/secret-hygiene/scripts/_detector.py": (2, "worker processes of the scan, and git log for the history"),
-    "skills/secret-hygiene/scripts/protection_status.py": (5, "Python and claude plugin list, for the status"),
-    "skills/secret-hygiene/scripts/redact_copy.py": (2, "git rev-parse"),
-    "skills/secret-hygiene/scripts/scan_secrets.py": (6, "git, for the repository the person asked to scan"),
+    "skills/secret-hygiene/scripts/protection_status.py": (6, "Python and claude plugin list, for the status"),
+    "skills/secret-hygiene/scripts/redact_copy.py": (3, "git rev-parse"),
+    "skills/secret-hygiene/scripts/scan_secrets.py": (12, "git, for the repository the person asked to scan"),
 }
 # modules that import a process library and start nothing with it
 NAMES_ONLY = {"maisecrets/incidents.py": "names subprocess.TimeoutExpired"}
@@ -70,10 +71,11 @@ NAMES_ONLY = {"maisecrets/incidents.py": "names subprocess.TimeoutExpired"}
 # the mod has MOD_PROCESS_RUNS places that do (tests/mod.test.ts checks their command lines), and a new one fails.
 MOD_MEMBERS = {"clock", "command", "env", "plugin", "process", "prompt", "session", "state", "store", "ui"}
 MOD_GLOBALS = {"crypto"}
-MOD_PROCESS_RUNS = 8
+MOD_PROCESS_RUNS = 8     # each a reference $.process.run(; any other use of $.process is a finding
 MOD_FORBIDDEN = (r"\bfetch\b", r"\bXMLHttpRequest\b", r"\bWebSocket\b", r"\bEventSource\b", r"\bnavigator\b",
                  r"\bwindow\b", r"\bimport\s*\(", r"\brequire\s*\(", r"^\s*import\s", r"\bchild_process\b",
-                 r"\$\s*\[", r"(?:^|[^}\s])\s*=\s*\$\s*(?:[;\n,)]|$)", r"\bglobalThis\s*\[")
+                 r"\$\s*\[", r"(?:^|[^}\s])\s*=\s*\$\s*(?:[;\n,)]|$)", r"\bglobalThis\s*\[",
+                 r"\$\.process(?!\.run\s*\()", r"\}\s*\}\s*=\s*\$(?![\w.])")
 
 
 def modules():
@@ -154,7 +156,8 @@ def _starts_here(node, names):
 def program_starts(tree):
     """The places of a module that start a program: each outermost reference to a starting call (also one bound to a
     name, `run = subprocess.run`), and each reference to a local function that leads to one (a wrapper such as
-    `def _git(*a): return subprocess.run(...)`), through any import spelling."""
+    `def _git(*a): return subprocess.run(...)`), through any import spelling. A function that calls a wrapper is a
+    wrapper too, at any depth, and so is a module-level name bound to a start or a wrapper (`run = subprocess.run`)."""
     names = bindings(tree)
     parent = {id(c): n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
 
@@ -187,11 +190,16 @@ def program_starts(tree):
                     break
         return out
 
-    # one level: a function that starts a program itself is a wrapper, and each call of it is a place; a function
-    # that only calls a wrapper is not, or every caller up the stack would count (a refactor would turn this red)
-    wrappers = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and refs(n, set())}
-    return refs(tree, wrappers)
+    # every depth: measured over 59 commits of next, the count of every depth changed in 7, one level in 8
+    functions = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    aliases = [n for n in tree.body if isinstance(n, ast.Assign) and all(isinstance(x, ast.Name) for x in n.targets)]
+    wrappers: set = set()
+    while True:
+        more = {f.name for f in functions if f.name not in wrappers and refs(f, wrappers)}
+        more |= {x.id for a in aliases if refs(a.value, wrappers) for x in a.targets if x.id not in wrappers}
+        if not more:
+            return refs(tree, wrappers)
+        wrappers |= more
 
 
 def code_of(js):
@@ -205,8 +213,9 @@ def code_of(js):
             i = n if j < 0 else j
         elif js.startswith("/*", i):
             j = js.find("*/", i + 2)
-            i = n if j < 0 else j + 2
-            out.append(" ")
+            j = n if j < 0 else j + 2
+            out.append(" " + "\n" * js.count("\n", i, j))
+            i = j
         elif c == "/" and re.search(r"(?:^|[(,=:\[!&|?{};+\-*%<>~^]|\breturn|\btypeof)\s*$", "".join(out[-40:])):
             # a regex literal: skip to its closing slash, past escapes and character classes
             j, in_class = i + 1, False
@@ -234,6 +243,8 @@ def code_of(js):
                 if depth:
                     depth += {"{": 1, "}": -1}.get(js[j], 0)
                     out.append(js[j] if depth else " ")
+                elif js[j] == "\n":
+                    out.append("\n")
                 j += 1
             i = j + 1
         elif c in "'\"":
@@ -313,10 +324,15 @@ class NetworkImportTests(unittest.TestCase):
         # a wrapper: its own start, and each call of it, are places
         wrapped = ("import subprocess\ndef _git(*a):\n    return subprocess.run(['git', *a])\n"
                    "def _two(*a):\n    return _git(*a)\n_git('status')\n_two('fetch')\n")
-        self.assertEqual(program_starts(ast.parse(wrapped)), 3,
-                         "the start, and the calls of _git; _two is no wrapper")
+        self.assertEqual(program_starts(ast.parse(wrapped)), 4, "the start, and the calls of _git, _git and _two")
         method = ("import subprocess\nclass C:\n    def _run(self):\n        subprocess.run(['x'])\n"
                   "    def go(self):\n        self._run()\n        self._run()\n")
+        self.assertEqual(program_starts(ast.parse(method)), 3)
+        deep = ("import subprocess\ndef _a(x):\n    return subprocess.run(x)\ndef _b(x):\n    return _a([x])\n"
+                "def _c():\n    return _b('fetch')\n_c()\n")
+        self.assertEqual(program_starts(ast.parse(deep)), 4, "the start, and the calls of _a, _b and _c")
+        alias = "import subprocess\nrun = subprocess.run\nrun(['x'])\nrun(['y'])\n"
+        self.assertEqual(program_starts(ast.parse(alias)), 3, "the binding, and each call of the bound name")
         self.assertEqual(program_starts(ast.parse(method)), 3)
         for code in ("import subprocess\nisinstance(e, subprocess.TimeoutExpired)", "import os\nos.getpid()"):
             with self.subTest(code):
@@ -331,7 +347,18 @@ class ModNetworkTests(unittest.TestCase):
             js = path.read_text(encoding="utf-8")
             self.assertTrue(re.findall(r"\$\.(\w+)", code_of(js)), "the pattern no longer reads the mod's use of $")
             self.assertEqual(mod_findings(js), [], path.name)
-        runs = sum(len(re.findall(r"\$\.process\.run\s*\(", code_of(p.read_text(encoding="utf-8")))) for p in mods)
+        for path in mods:
+            # the reader must not swallow code (a misread regex or string): each line that starts with a statement
+            # word still starts with it after the reader
+            js = path.read_text(encoding="utf-8")
+            code = code_of(js).split("\n")
+            self.assertEqual(len(code), js.count("\n") + 1, f"{path.name}: the reader lost lines")
+            starts = [(i, w) for i, line in enumerate(js.split("\n"))
+                      for w in [re.match(r"\s*(const|let|return|await|if|for|function|export)\b", line)] if w]
+            self.assertGreater(len(starts), 100, "the canary reads no statement of the mod")
+            lost = [i + 1 for i, w in starts if not code[i].lstrip().startswith(w.group(1))]
+            self.assertEqual(lost, [], f"{path.name}: the reader swallowed code at these lines")
+        runs = sum(len(re.findall(r"\$\.process\b", code_of(p.read_text(encoding="utf-8")))) for p in mods)
         self.assertEqual(runs, MOD_PROCESS_RUNS, "a new place in the mod starts a program; count it, and test its "
                                                  "command line in tests/mod.test.ts")
 
@@ -339,7 +366,9 @@ class ModNetworkTests(unittest.TestCase):
         for js in ("await fetch('https://example.com')", "const r = globalThis.fetch", "const { net } = $",
                    "const n = $\nn.net()", "$['net'].run()", "$.net.run()", "globalThis.process.exit()",
                    "globalThis['fetch']('x')", "const ws = new WebSocket('wss://x')", "await import('node:http')",
-                   "const { process } = $", "const { ui, net: n } = $", "x(); fetch(u) /* a comment */"):
+                   "const { process } = $", "const { ui, net: n } = $", "x(); fetch(u) /* a comment */",
+                   "const p = $.process\nawait p.run(['curl'], {})", "const { process: { run } } = $",
+                   "const { net: { request } } = $", "log(`${fetch(u)}`)"):
             with self.subTest(js):
                 self.assertTrue(mod_findings(js), js)
         for js in ("on('http.fetch', h)", "// a fetch in a comment", "$.process.run(argv, init)",

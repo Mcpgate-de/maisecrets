@@ -233,4 +233,6 @@ mission = "M6"
 [[claim]]
 source = "PRIVACY.md"
 quote = "It reads no other file of yours, except through a tool call that you or the agent makes."
+# a promise that no mission keeps yet: no control and no belief checks which files maisecrets reads. Kind "feature"
+# until one does; then make it a promise of that mission.
 kind = "feature"

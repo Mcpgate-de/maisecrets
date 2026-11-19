@@ -115,9 +115,9 @@ Five goals hold over every path, each with its own tests and a mutation per path
 - **I5** A network connection can start only in the code of a service the person set up (C33): only
   the modules of the name service, the gateway of Sensitive References, the vault reference server, the
   browser of a typed login and the two ssh helpers import a network library; a program starts only at the
-  counted places of listed modules, each for a named reason (a call of a local function that starts one counts; a
-  function that only calls such a function does not); the mod uses no network API and starts a program only at
-  its counted places (`tests/mod.test.ts` checks their command lines). A static check: a
+  counted places of listed modules, each for a named reason (a call of a local function or name that leads to a
+  start counts, at any depth); the mod uses no network API and starts a program only at its counted
+  `$.process.run` places (`tests/mod.test.ts` checks their command lines). A static check: a
   library that another module imports for it, a name built at run time, a module or `$` handed on under
   another name, and what a started program does stay outside.
 
