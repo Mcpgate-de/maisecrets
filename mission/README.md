@@ -11,8 +11,8 @@ to the mission that keeps it, a limit ("What it does not protect") to the missio
 function to none. Every bullet of the gated README sections must start with the quote of a claim, so a new
 or reworded promise turns the check red until it is mapped.
 
-M1 to M5 are derived from the controls (bottom-up); M6 comes from README.md and PRIVACY.md (top-down), and no
-control of the threat model names it yet.
+M1 to M5 are derived from the controls (bottom-up); M6 comes from README.md and PRIVACY.md (top-down) and
+brought control C33 into the threat model.
 
     python3 scripts/mission_coverage.py            # report
     python3 scripts/mission_coverage.py --strict   # exit 1 on a gap, an orphan, an unknown name or a claim
