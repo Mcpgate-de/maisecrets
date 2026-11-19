@@ -322,6 +322,172 @@ class SrefClientTests(unittest.TestCase):
         self.assertEqual(S.ended_why(self.found["origin"]), "uncertain", "not 'the gateway ended the login'")
         self.assertIsNone(S._inflight(self.found["origin"]))
 
+    # ---- #87: one retry of a lost answer inside the gateway's reuse window (ai-gateway #1933) ----
+    def _with_window(self, seconds) -> str:
+        """The gateway names a reuse window; a login whose access token has expired. Returns the refresh token."""
+        self.srv.reuse_interval = seconds
+        self.found = S.discover(self.cfg, self.srv.url + "/mcp")
+        self.login()
+        rec = json.loads(self.backend.get(S._entry(self.found["origin"])))
+        S._keep(self.backend, self.found["origin"], {**rec, "expires": 0})
+        return rec["refresh"]
+
+    def _refresh_in_process(self, seconds: float = 20):
+        with mock.patch.object(S, "_spawn", side_effect=OSError):
+            return S._access(self.cfg, self.backend, self.found, time.monotonic() + seconds)
+
+    def _rotate_and_lose_the_answer(self, old: str, at: float) -> None:
+        """The gateway rotates and the answer never comes back; the process that sent it is gone (killed)."""
+        self.srv.drop_answers = 1
+        with self.assertRaises(S.Refused):
+            S._token(self.cfg, self.found, {"grant_type": "refresh_token", "refresh_token": old,
+                                            "client_id": json.loads(self.backend.get(
+                                                S._entry(self.found["origin"])))["client_id"]}, time.monotonic() + 5)
+        S._set_inflight(self.found["origin"], S._digest(old), at)
+
+    def test_the_reuse_window_of_the_gateway_is_read_from_its_metadata(self):
+        self.assertIsNone(self.found["reuse"], "no field: no window")
+        for value, kept in ((30, 30), (True, None), ("30", None), (0, None), (-5, None)):
+            with self.subTest(value=value):
+                self.srv.reuse_interval = value
+                self.assertEqual(S.discover(self.cfg, self.srv.url + "/mcp")["reuse"], kept)
+
+    def test_a_lost_answer_is_sent_once_more_inside_the_reuse_window_and_the_login_stays(self):
+        old = self._with_window(30)
+        self.srv.drop_answers = 1
+        t0 = time.monotonic()
+        access = self._refresh_in_process()
+        self.assertGreaterEqual(time.monotonic() - t0, S.RETRY_AFTER, "not at once: the first renewal has ended")
+        self.assertEqual(self.srv.refreshes, [old, old], "the same token, sent twice and never a third time")
+        self.assertEqual(self.srv.families_revoked, 0)
+        rec = json.loads(self.backend.get(S._entry(self.found["origin"])))
+        self.assertEqual(rec["access"], access)
+        self.assertEqual(rec["refresh"], self.srv.reuse[old]["pair"]["refresh_token"], "the pair the lost answer held")
+        self.assertIsNone(S._inflight(self.found["origin"]))
+        self.assertFalse(S.ended(self.found["origin"]))
+        self.assertEqual(S.resolve(self.cfg, self.backend, self.found, [self.srv.mint("email", VALUE_MAIL)],
+                                   "process", "mail", deadline=time.monotonic() + 10),
+                         {list(self.srv.values)[-1]: VALUE_MAIL})
+
+    def test_without_a_reuse_window_a_lost_answer_is_never_sent_again(self):
+        old = self._with_window(None)
+        self.srv.drop_answers = 1
+        with self.assertRaises(S.Refused):
+            self._refresh_in_process()
+        self.assertEqual(self.srv.refreshes, [old])
+        with self.assertRaises(S.Refused) as cm:
+            self._refresh_in_process()
+        self.assertIn("did not finish", str(cm.exception))
+        self.assertEqual(self.srv.refreshes, [old], "the spent token was not sent a second time")
+        self.assertEqual(S.ended_why(self.found["origin"]), "uncertain")
+
+    def test_a_renewal_killed_inside_the_window_is_finished_by_the_next_one(self):
+        old = self._with_window(30)
+        self._rotate_and_lose_the_answer(old, time.time())
+        self._refresh_in_process()
+        self.assertEqual(self.srv.refreshes, [old, old])
+        self.assertEqual(self.srv.families_revoked, 0)
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+        self.assertIsNone(S._inflight(self.found["origin"]))
+
+    def test_a_renewal_killed_before_the_window_ended_is_never_retried_after_it(self):
+        for ago in (40, 28.5):                 # after the window; too late for a retry of RETRY_MIN s inside it
+            with self.subTest(ago=ago):
+                old = self._with_window(30)
+                self.srv.refreshes.clear()
+                self._rotate_and_lose_the_answer(old, time.time() - ago)
+                with self.assertRaises(S.Refused) as cm:
+                    self._refresh_in_process()
+                self.assertIn("did not finish", str(cm.exception))
+                self.assertEqual(self.srv.refreshes, [old], "no retry outside the window")
+                self.assertEqual(S.ended_why(self.found["origin"]), "uncertain")
+
+    def test_a_token_is_retried_once_and_never_a_third_time(self):
+        old = self._with_window(30)
+        self.srv.drop_answers = 2              # the retry loses its answer too
+        with self.assertRaises(S.Refused):
+            self._refresh_in_process()
+        self.assertEqual(self.srv.refreshes, [old, old])
+        self.assertTrue(S._inflight_entry(self.found["origin"]).get("retried"))
+        with self.assertRaises(S.Refused) as cm:
+            self._refresh_in_process()
+        self.assertIn("did not finish", str(cm.exception))
+        self.assertEqual(self.srv.refreshes, [old, old], "never a third time")
+        self.assertEqual(self.srv.families_revoked, 0, "the client never makes a second reuse")
+        self.assertEqual(S.ended_why(self.found["origin"]), "uncertain")
+
+    def test_a_slow_gateway_finishes_its_renewal_before_the_retry_arrives(self):
+        # the read ends after SOCKET_TIMEOUT (4 s) while the gateway still renews; a retry at once, or 3 s after the
+        # send, would be a second use during the first renewal, and the gateway would end the family
+        old = self._with_window(30)
+        self.srv.refresh_delay = 5.5
+
+        def fast_after_the_first():               # only the first renewal is slow
+            while not self.srv.refreshes:
+                time.sleep(0.02)
+            self.srv.refresh_delay = 0.0
+        __import__("threading").Thread(target=fast_after_the_first, daemon=True).start()
+        self._refresh_in_process(30)
+        self.assertEqual(self.srv.refreshes, [old, old])
+        self.assertEqual(self.srv.families_revoked, 0, "the retry came after the first renewal ended")
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+
+    def test_a_killed_renewal_is_retried_no_sooner_than_retry_after_its_send(self):
+        old = self._with_window(30)
+        self._rotate_and_lose_the_answer(old, time.time())
+        t0, at = time.monotonic(), S._inflight_entry(self.found["origin"])["at"]
+        self._refresh_in_process()
+        self.assertGreaterEqual(time.time() - at, S.RETRY_AFTER)
+        self.assertGreater(time.monotonic() - t0, S.RETRY_AFTER - 0.5)
+
+    def test_a_short_deadline_keeps_the_record_for_a_renewal_with_time(self):
+        old = self._with_window(30)
+        self._rotate_and_lose_the_answer(old, time.time())
+        with self.assertRaises(S.Refused) as cm:
+            self._refresh_in_process(2)
+        self.assertNotIn("did not finish", str(cm.exception))
+        self.assertIsNotNone(S._inflight(self.found["origin"]), "the record stays")
+        self.assertFalse(S.ended(self.found["origin"]))
+        self.assertEqual(self.srv.refreshes, [old])
+        self._refresh_in_process(20)
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+        self.assertEqual(self.srv.refreshes, [old, old])
+
+    def test_a_retry_that_never_left_keeps_the_one_retry(self):
+        old = self._with_window(30)
+        self._rotate_and_lose_the_answer(old, time.time())
+        real = S._request
+
+        def refused(cfg, method, url, *a, **kw):
+            if url == self.found["token"]:
+                raise ConnectionRefusedError("down")
+            return real(cfg, method, url, *a, **kw)
+        with mock.patch.object(S, "_request", refused), self.assertRaises(S.Refused):
+            self._refresh_in_process()
+        entry = S._inflight_entry(self.found["origin"])
+        self.assertFalse(entry.get("retried"), "nothing reached the gateway")
+        self._refresh_in_process()
+        self.assertEqual(self.srv.refreshes, [old, old])
+        self.assertTrue(S.logged_in(self.backend, self.found["origin"]))
+
+    def test_a_window_too_short_or_a_deadline_too_close_gives_no_retry(self):
+        now = time.time()
+        far = time.monotonic() + 60
+        self.assertIsNotNone(S._retry_at({"reuse": 30}, now, False, far))
+        self.assertIsNone(S._retry_at({"reuse": 5}, now, False, far), "no room in a 5 s window")
+        self.assertIsNone(S._retry_at({"reuse": 30}, now, True, far), "retried once already")
+        self.assertIsNone(S._retry_at({"reuse": 30}, now, False, time.monotonic() + 4), "no room in the deadline")
+        self.assertIsNone(S._retry_at({"reuse": None}, now, False, far))
+        start, end = S._retry_at({"reuse": 30}, now, False, far, lost=time.monotonic())
+        self.assertGreaterEqual(start - time.monotonic(), S.RETRY_AFTER - 0.1)
+        # sent 10 s ago, the failure seen now (a read that timed out): the wait counts from the failure too
+        start, _ = S._retry_at({"reuse": 30}, now - 10, False, far, lost=time.monotonic())
+        self.assertGreaterEqual(start - time.monotonic(), S.RETRY_AFTER - 0.1)
+        self.assertIsNone(S._retry_at({"reuse": 30}, float("nan"), False, far))
+        self.assertIsNone(S._retry_at({"reuse": 30}, now + 20, False, time.monotonic() + 1000),
+                          "a clock that went back")
+        self.assertLessEqual(end - time.monotonic(), 29.1, "ends 1 s before the window")
+
     def test_only_a_request_that_never_left_clears_the_record_of_a_refresh(self):
         self.login()
         origin = self.found["origin"]
