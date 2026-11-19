@@ -35,6 +35,8 @@ README = """# x
   reads it.
 - **Checks a value first:** without sending it.
 
+## What the Claude Code mod does
+
 ## What it does not protect
 
 - A name without a label.
@@ -43,7 +45,31 @@ README = """# x
 
 - not gated
 """
+PRIVACY = """# p
+
+## What it reads
+
+- **Only the prompt.**
+
+## What it stores, and where
+
+## What leaves the machine
+
+- Nothing, unless
+  you ask.
+"""
 CLAIMS = """[[claim]]
+source = "PRIVACY.md"
+quote = "**Only the prompt.**"
+kind = "feature"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "Nothing, unless you ask."
+kind = "promise"
+mission = "M1"
+
+[[claim]]
 source = "README.md"
 quote = "**Masks output** before the model reads it."
 kind = "promise"
@@ -91,13 +117,14 @@ def quiet(fn, argv):
 
 @unittest.skipIf(tomllib is None, "tomllib is Python 3.11+; the other CI Pythons run the script")
 class MissionCoverageTests(unittest.TestCase):
-    def tree(self, missions, beliefs, claims=CLAIMS, readme=README):
+    def tree(self, missions, beliefs, claims=CLAIMS, readme=README, privacy=PRIVACY):
         root = Path(tempfile.mkdtemp(prefix="maisecrets-mission-"))
         self.addCleanup(shutil.rmtree, root, True)
         for d in ("docs", "mission", "beliefs"):
             (root / d).mkdir()
         (root / "docs" / "THREAT-MODEL.md").write_text(THREAT_MODEL, encoding="utf-8")
         (root / "README.md").write_text(readme, encoding="utf-8")
+        (root / "PRIVACY.md").write_text(privacy, encoding="utf-8")
         (root / "mission" / "claims.toml").write_text(claims, encoding="utf-8")
         for name, text in missions.items():
             (root / "mission" / f"{name}.toml").write_text(text, encoding="utf-8")
@@ -181,6 +208,18 @@ class MissionCoverageTests(unittest.TestCase):
                       r["claims"])
         self.assertIn('README "What it does not protect" bullet no claim maps: A new limit.', r["claims"])
         self.assertFalse(any("not gated" in c for c in r["claims"]), "a section outside the gate is free text")
+
+    def test_privacy_bullets_are_gated_and_a_gated_section_cannot_go(self):
+        import mission_coverage
+        privacy = PRIVACY.replace("- Nothing, unless", "- A crash report goes out.\n- Nothing, unless")
+        privacy = privacy.replace("## What it stores, and where", "## What it keeps")
+        r = mission_coverage.analyse(self.tree(self.covered(), ["C1", "C2", "C3", "I1"], privacy=privacy))
+        self.assertEqual(r["claims"], ['PRIVACY.md has no section "What it stores, and where" (GATED_SECTIONS)',
+                                       'PRIVACY "What leaves the machine" bullet no claim maps: '
+                                       'A crash report goes out.'])
+        readme = README.replace("## What the Claude Code mod does\n\n", "")
+        r = mission_coverage.analyse(self.tree(self.covered(), ["C1", "C2", "C3", "I1"], readme=readme))
+        self.assertEqual(r["claims"], ['README.md has no section "What the Claude Code mod does" (GATED_SECTIONS)'])
 
     def test_a_claim_needs_a_kind_and_an_existing_mission(self):
         import mission_coverage

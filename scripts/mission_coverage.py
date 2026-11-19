@@ -11,7 +11,8 @@ PRIVACY.md make to users onto the missions. This script joins them and reports:
 - a documented control or invariant that no mission names, and beliefs that no part names,
 - a name in a mission or a belief that the threat model does not document, a belief without `serves`, a part id
   in `serves` that no mission has, a part without its id, or a belief whose control its mission does not name,
-- a claim whose quote no longer stands in its source, and a bullet of a gated README section that no claim maps,
+- a claim whose quote no longer stands in its source, a bullet of a gated section of README.md or PRIVACY.md that
+  no claim maps, and a gated section that is gone,
 - each mission's measured number (`[measure]`: a source file, the row that holds it and its column, and the gate
   that keeps its bound), or why it has none (`none`); a measure that cannot be read is a finding.
 
@@ -28,8 +29,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CONTROL_ROW = re.compile(r"^\| (C\d+) \|", re.M)
 INVARIANT_ITEM = re.compile(r"^- \*\*(I\d+)\*\*", re.M)
-# the README sections whose every bullet is a promise, a limit or a feature that claims.toml must map
-GATED_SECTIONS = ("What it does", "What the Claude Code mod does", "What it does not protect")
+# the sections whose every bullet is a promise, a limit or a feature that claims.toml must map
+GATED_SECTIONS = (("README.md", "What it does"), ("README.md", "What the Claude Code mod does"),
+                  ("README.md", "What it does not protect"), ("PRIVACY.md", "What it reads"),
+                  ("PRIVACY.md", "What it stores, and where"), ("PRIVACY.md", "What leaves the machine"))
 KINDS = ("promise", "limit", "feature")
 
 
@@ -41,11 +44,12 @@ def flat(text: str) -> str:
     return " ".join(text.split())
 
 
-def bullets(markdown: str, section: str) -> list[str]:
-    """The top-level bullets of one `## section`, each as one line of text without its `- `."""
+def bullets(markdown: str, section: str) -> list[str] | None:
+    """The top-level bullets of one `## section`, each as one line of text without its `- `; None without the
+    section."""
     m = re.search(rf"^## {re.escape(section)}\n(.*?)(?=^## |\Z)", markdown, re.M | re.S)
     if not m:
-        return []
+        return None
     out: list[str] = []
     for line in m.group(1).splitlines():
         if line.startswith("- "):
@@ -72,12 +76,18 @@ def check_claims(root: Path, missions: set[str]) -> list[str]:
             findings.append(f"claim kind {kind!r} is not one of {', '.join(KINDS)}: {quote[:50]}")
         elif kind != "feature" and c.get("mission") not in missions:
             findings.append(f"claim names no existing mission ({c.get('mission')}): {quote[:50]}")
-    readme = texts.get("README.md") or (root / "README.md").read_text(encoding="utf-8")
-    quotes = [flat(c.get("quote", "")) for c in claims if c.get("source") == "README.md"]
-    for section in GATED_SECTIONS:
-        for b in bullets(readme, section):
+    for src, section in GATED_SECTIONS:
+        if src not in texts:
+            texts[src] = (root / src).read_text(encoding="utf-8") if (root / src).exists() else ""
+        found = bullets(texts[src], section)
+        if found is None:
+            # a renamed section would end its gate without a word
+            findings.append(f"{src} has no section \"{section}\" (GATED_SECTIONS)")
+            continue
+        quotes = [flat(c.get("quote", "")) for c in claims if c.get("source") == src]
+        for b in found:
             if not any(q and b.startswith(q) for q in quotes):
-                findings.append(f"README \"{section}\" bullet no claim maps: {b[:70]}")
+                findings.append(f"{Path(src).stem} \"{section}\" bullet no claim maps: {b[:70]}")
     return findings
 
 

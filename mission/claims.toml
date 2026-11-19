@@ -1,7 +1,7 @@
 # The promises README.md and PRIVACY.md make to users, each mapped to the mission that keeps it (kind "promise"),
 # to the mission whose `ends` names it (kind "limit"), or to none (kind "feature": a function, not a protection).
 # scripts/mission_coverage.py checks that each quote still stands in its source, and that every bullet of the
-# README sections in GATED_SECTIONS starts with the quote of a claim: a new or reworded promise turns the check
+# sections in GATED_SECTIONS (README.md and PRIVACY.md) starts with the quote of a claim: a new or reworded promise turns the check
 # red until someone maps it here.
 
 [[claim]]
@@ -133,4 +133,87 @@ mission = "M6"
 source = "PRIVACY.md"
 quote = "It never holds a value."
 kind = "promise"
+mission = "M4"
+
+# PRIVACY.md: each bullet of "What it reads", "What it stores, and where" and "What leaves the machine"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "**For detection:** only the text that the client hands the hooks and the mod"
+kind = "feature"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "**Its own files:**"
+kind = "feature"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "**Files you named in a setting:**"
+kind = "feature"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "**The client's transcript:** with `scrub_transcript` on (the default), it reads the transcript file of the current session on your disk and masks a detected value in it."
+kind = "promise"
+mission = "M2"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "Detected values go into the store of your operating system"
+kind = "promise"
+mission = "M4"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "`~/.maisecrets/index.json` holds metadata"
+kind = "promise"
+mission = "M4"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "`~/.maisecrets/audit.log` holds one line per resolve"
+kind = "promise"
+mission = "M5"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "With `scrub_transcript` on (the default), the plugin masks a detected value inside the client's own transcript file on your disk, in place."
+kind = "promise"
+mission = "M2"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "Vault references (only after an MCP server you added yourself sent a server token and names a vault endpoint)"
+kind = "promise"
+mission = "M3"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "Your own ssh command inside the Claude Code sandbox"
+kind = "promise"
+mission = "M3"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "`/maisecrets:report` prints the issue text and a prefilled link"
+kind = "promise"
+mission = "M6"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "Vault references: after an MCP server that you added yourself"
+kind = "promise"
+mission = "M6"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "A named-entity service (`remote_detector`, off by default)"
+kind = "promise"
+mission = "M6"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "The Windows Credential Locker may roam through a Microsoft account"
+kind = "limit"
 mission = "M4"

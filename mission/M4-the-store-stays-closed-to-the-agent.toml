@@ -4,7 +4,7 @@ promise = "The agent cannot read the store or loosen the protection, and a copy 
 actors = ["A2", "A4"]
 controls = ["C8", "C10", "C11", "C12", "C15", "C22", "C25", "C26", "C27"]
 invariants = ["I3"]
-ends = "Not A3: every store hands a value to any process of the same user; a process that runs as the person, or an agent that builds the store path at run time (C8 is text matching)."
+ends = "Not A3: every store hands a value to any process of the same user; a process that runs as the person, or an agent that builds the store path at run time (C8 is text matching); the Windows Credential Locker may roam through a Microsoft account (PRIVACY.md)."
 
 [[part]]
 id = "M4.1"
