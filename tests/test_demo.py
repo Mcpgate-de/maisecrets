@@ -172,6 +172,38 @@ class SpacedCommandTests(_Base):
         self.assertNotIn("with the colon", out["reason"])
         self.assertNotIn(TOKEN, json.dumps(out))
 
+
+class FillCheckTests(_Base):
+    """The mod's value check of a command it puts into the input box (prompt_commands.fill_check, Gate A of !591): the
+    colon form with each value masked and stored, the transcript record scrubbed later; no command runs."""
+
+    def test_a_value_in_a_command_the_mod_fills_is_masked_and_stored(self):
+        session = UUID.format(7)
+        out = _mod_fill(f"/maisecrets:status {TOKEN}", session)
+        self.assertEqual(out["count"], 1)
+        self.assertNotIn(TOKEN, json.dumps(out))
+        self.assertTrue(out["masked"].startswith("/maisecrets:status " + OPEN + "SECRET_c"), out)
+        self.assertTrue(any(e["session"] == session for e in _entries().values()), "stored for this session")
+
+    def test_a_command_with_no_value_comes_back_as_it_is_and_runs_nothing(self):
+        session = UUID.format(8)
+        for text in ("/maisecrets:status all", "/maisecrets:demo on", "/maisecrets:settings rehydration block"):
+            self.assertEqual(_mod_fill(text, session), {"masked": text, "count": 0})
+        self.assertFalse(demo.active(session), "the demo was not switched")
+        self.assertEqual(load_config().get("rehydration", "automatic"), "automatic", "no setting changed")
+
+    def test_no_answer_for_another_text_or_a_session_of_another_shape(self):
+        for text, session in ((f"status {TOKEN}", UUID.format(9)), (f"/maisecrets:status {TOKEN}", "a b/c"),
+                              ("/maisecrets:status a\nb", UUID.format(9))):
+            self.assertEqual(_mod_fill(text, session), {})
+        self.assertEqual(_entries(), {}, "nothing stored")
+
+
+def _mod_fill(prompt: str, session: str) -> dict:
+    hooks._live_cache.clear()
+    return hooks.rewrite_prompt({"prompt": prompt, "session_id": session, "cwd": "", "origin": "composer",
+                                 "fill_check": True})
+
 # ------------------------------------------------------------ switching it on --
 class SwitchTests(_Base):
     def test_on_by_the_persons_typed_prompt(self):

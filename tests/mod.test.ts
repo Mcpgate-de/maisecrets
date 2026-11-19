@@ -649,7 +649,7 @@ test('a command after /maisecrets with a space, typed by the person, takes the p
 })
 
 test('a command file command after /maisecrets with a space goes into the box with its colon', async ($, on) => {
-  const seen = ownSetup(on, () => own({}))
+  const seen = ownSetup(on, (q) => own(q.fill_check === true ? { masked: q.prompt, count: 0 } : {}))
   for (const [spaced, colon] of [['/maisecrets status', '/maisecrets:status'], ['/maisecrets list', '/maisecrets:list'],
     ['/maisecrets settings rehydration confirm', '/maisecrets:settings rehydration confirm'],
     ['/maisecrets forget SECRET_c1', '/maisecrets:forget SECRET_c1'], ['/maisecrets sref login', '/maisecrets:sref login'],
@@ -696,3 +696,39 @@ test('in a demo session a command after /maisecrets with a space runs as its col
     expect((r as any).drop).toBe('Stored values (1)')
     expect(asked).toEqual(['mod-' + 'demo'])
   })
+
+
+// the value check of a filled command (prompt_commands.fill_check): the box gets the masked form, never the value
+test('a command with a value goes into the box masked, and with no check nothing goes into the box', async ($, on) => {
+  const RAW = '/maisecrets:status ' + 'glpat-' + 'FILLxxxxx1234567890abcd'
+  const MASKED = '/maisecrets:status \u27e6SECRET_c1\u27e7'
+  const asked: any[] = []
+  const seen = ownSetup(on, (q) => { asked.push(q); return own(q.fill_check === true ? { masked: MASKED, count: 1 } : {}) })
+  for (const text of [RAW.replace(':', ' '), '/maisecrets stauts ' + RAW.slice(19)]) {
+    seen.filled.length = 0
+    asked.length = 0
+    const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBe(`maisecrets: I put ${MASKED} into the input box. Press Enter to run it, or clear the box. `
+      + 'maisecrets masked 1 value(s) in it.')
+    expect(r.drop).not.toContain(RAW.slice(19))
+    await settleFill()
+    expect(seen.filled).toEqual([MASKED])
+    expect(asked.filter(q => q.fill_check === true).map(q => q.prompt)).toEqual([RAW])
+  }
+  // claude -p: the line names the masked form
+  const p = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind: 'sdk' } })
+  expect(p.drop).toBe(`maisecrets: send ${MASKED} with the colon to run it. Nothing was sent.`)
+  // no answer, an answer that is no command, or one with a line break: nothing goes into the box, nothing is sent
+  for (const fail of [() => ({ value: { exitCode: 1, stderr: 'boom', stdout: '' } }),
+    () => own({ masked: 'echo hi', count: 0 }), () => own({ masked: '/maisecrets:status\nx', count: 0 }),
+    () => own({})]) {
+    seen.answer = (q) => (q.fill_check === true ? fail() : own({}))
+    seen.filled.length = 0
+    seen.downstream = 0
+    const r = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBe('maisecrets could not check this command. Nothing was sent; type it again with the colon.')
+    await settleFill()
+    expect(seen.filled).toEqual([])
+    expect(seen.downstream).toBe(0)
+  }
+})

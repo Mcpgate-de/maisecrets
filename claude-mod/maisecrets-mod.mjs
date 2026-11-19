@@ -709,8 +709,13 @@ function editDistance(a, b) {
   }
   return d[a.length][b.length]
 }
+// the commands a mistyped name may become: they only show. A command that deletes, weakens, changes a setting, starts
+// something or sends a prompt (forget, term, not-a-secret, settings, ner, demo, sref, put, send, guard, shortcut,
+// report) needs its exact name: `/maisecrets forger SECRET_c1` must not become a forget for a reflex Enter (Gate A)
+const NEAR_ONLY = ['status', 'list', 'audit', 'rules']
 // `/maisecrets stauts`: the one command name closest to a mistyped word (at most 2 changes, 1 for a short word), as
-// `/maisecrets:status REST`; null for a known name, a word near none or near two
+// `/maisecrets:status REST`; null for a known name, a word near none or near two, and a word nearest to a command
+// outside NEAR_ONLY
 function nearCommand(text) {
   const m = SPACED_CMD.exec(typeof text === 'string' ? text : '')
   if (!m) return null
@@ -718,7 +723,7 @@ function nearCommand(text) {
   if (COMMANDS.includes(word) || word.length < 3 || word.length > 20) return null
   const most = word.length < 5 ? 1 : 2
   const near = COMMANDS.map(c => [c, editDistance(word, c)]).filter(([, n]) => n <= most).sort((x, y) => x[1] - y[1])
-  if (!near.length || (near.length > 1 && near[1][1] === near[0][1])) return null
+  if (!near.length || (near.length > 1 && near[1][1] === near[0][1]) || !NEAR_ONLY.includes(near[0][0])) return null
   return `/maisecrets:${near[0][0]}${m[2].replace(/\s+$/, '')}`
 }
 // what the person reads when a command went into the input box: what happened, and how to go on
@@ -727,6 +732,30 @@ const filledNote = (command) => `maisecrets: I put ${command} into the input box
   'the box.' + (NEW_SESSION.test(command) ? ' The demo starts only in a new session (or after /clear).' : '')
 // a prompt of claude -p or an SDK host (origin sdk) has no input box: the line names the command to send instead
 const typeNote = (command) => `maisecrets: send ${command} with the colon to run it. Nothing was sent.`
+// a command goes into the box only with its values masked, as the prompt hook masks a prompt that carries one: the
+// box never gets a value back (prompt_commands.fill_check, Gate A of !591). null: Python gave no answer
+async function checkFill($, text, origin) {
+  let r = null
+  try {
+    r = await runDispatch($, JSON.stringify({ prompt: text, session_id: await $.session.id(),
+      cwd: await $.session.cwd(), origin, fill_check: true }))
+  } catch { return null }
+  if (!r) return null
+  let a = null
+  try { a = JSON.parse(r.stdout) } catch { return null }
+  return a?.maisecrets === MARK && typeof a.masked === 'string' && a.masked.startsWith('/maisecrets:') &&
+    !/[\r\n]/.test(a.masked) ? a : null
+}
+const FILL_FAILED = 'maisecrets could not check this command. Nothing was sent; type it again with the colon.'
+const maskedNote = (a) => (Number(a.count) > 0 ? ` maisecrets masked ${Number(a.count)} value(s) in it.` : '')
+// the drop of a person's prompt whose command goes into the box (or, without a box, is named): the masked form only
+async function offer($, e, command) {
+  const a = await checkFill($, command, e.origin?.kind)
+  if (!a) return { drop: FILL_FAILED }
+  if (e.origin?.kind === 'sdk') return { drop: typeNote(a.masked) }
+  fillSoon($, a.masked)
+  return { drop: filledNote(a.masked) + maskedNote(a) }
+}
 const firstWord = (args) => (typeof args === 'string' ? args.trim().split(/\s+/)[0] : '') || ''
 const unknownLine = (word) => `"${word.slice(0, 40)}" is no maisecrets command. Try: status, settings, ner, ` +
   'sref login, list, forget, term, audit, rules, put, send.'
@@ -1185,8 +1214,10 @@ function registerSettingsPane(on) {
     const spaced = `/maisecrets ${e?.args ?? ''}`
     const meant = meantCommand(spaced) ?? nearCommand(spaced)
     if (meant) {
-      try { await $.prompt.fill({ text: meant }) } catch { /* the line names it */ }
-      return { text: filledNote(meant) }
+      const a = await checkFill($, meant, e?.origin?.kind)
+      if (!a) return { text: FILL_FAILED }
+      try { await $.prompt.fill({ text: a.masked }) } catch { /* the line names it */ }
+      return { text: filledNote(a.masked) + maskedNote(a) }
     }
     const word = firstWord(e?.args)
     pane.hint = word ? unknownLine(word) : null
@@ -1224,9 +1255,7 @@ export function register(on) {
     if (near) {
       // a mistyped name: the engine puts a dropped prompt back into the box, and the closest command goes there once
       // the drop landed. The person's Enter sends it
-      if (e.origin?.kind === 'sdk') return { drop: typeNote(near) }
-      fillSoon($, near)
-      return { drop: filledNote(near) }
+      return await offer($, e, near)
     }
     const asked = SETTINGS_CMD.exec(own)
     if (asked) {
@@ -1261,9 +1290,7 @@ export function register(on) {
       // a command that a command file runs (status, list, a settings change …): only a typed slash line makes the
       // engine render it with the person's authority, and the engine throws away a change of a slash line (#44). Its
       // colon form goes into the box once the drop landed, and the person's Enter sends it
-      if (e.origin?.kind === 'sdk') return { drop: typeNote(meant) }
-      fillSoon($, meant)
-      return { drop: filledNote(meant) }
+      return await offer($, e, meant)
     }
     if (SLASH.test(e.text)) return next(e)
     if (CHECK.test(e.text)) {

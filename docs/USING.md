@@ -226,22 +226,27 @@ hook answers these commands as before.
 `/maisecrets demo on` is `/maisecrets:demo on`: the Tab completion of
 `/maise` gives `/maisecrets` and a space, so a command after `/maisecrets`
 with a space counts as the command with its colon, when you type it as your
-own prompt. It takes the same way and the same checks as the colon form. The
-commands maisecrets answers itself (the panel of `settings`, `term`,
-`not-a-secret`, `demo`, `forget import:ID`, `report incident`, and every
-command in a demo session) run at once. A command that the AI runs from its
-command file (`status`, `list`, a settings change and the others) needs the
-typed form with the colon: maisecrets puts that form into the input box and
-says so in one line, for example `maisecrets: I put /maisecrets:status into
-the input box. Press Enter to run it, or clear the box.` A mistyped name
-(`/maisecrets stauts`) gets the closest command the same way; for `demo on`
-the line adds that the demo starts only in a new session. A word that is near
-no command name (at most two letters wrong) opens the panel with a line that
-names the commands. A prompt that is not your own (a subagent, another
-session, a program) gets none of this. In Codex, in `claude -p` without the
-mod and in a client without mods, the prompt hook keeps such a prompt from
-the AI and names the form that runs it (`/maisecrets:demo on`, in Codex
-`maisecrets: demo on`).
+own prompt. The commands maisecrets answers itself (the panel of `settings`,
+`term`, `not-a-secret`, `demo`, `forget import:ID`, `report incident`, and
+every command in a demo session) run at once, with the same checks as the
+colon form. A command that the AI runs from its command file (`status`,
+`list`, a settings change and the others) runs only from the typed form with
+the colon. maisecrets puts that form into the input box and says so in one
+line, for example `maisecrets: I put /maisecrets:status into the input box.
+Press Enter to run it, or clear the box.` Before that, it masks each value in
+the command, as it does for a prompt, so the box never gets a value back; the
+line then adds how many it masked. The prompt hook checks the command again
+when you send it. For `demo on` the line adds that the demo starts only in a
+new session. A mistyped name gets the closest command the same way, but only
+for the commands that only show something (`status`, `list`, `audit`,
+`rules`, at most two letters wrong). A mistyped name of a command that
+deletes, weakens, changes a setting or sends something (`forget`, `term`,
+`not-a-secret`, `settings`, `ner`, `demo`, `sref` and the others) gets no
+suggestion: the panel opens with a line that names the commands, as for any
+other word. A prompt that is not your own (a subagent, another session, a
+program) gets none of this. In Codex, in `claude -p` without the mod and in a
+client without mods, the prompt hook keeps such a prompt from the AI and names
+the form that runs it (`/maisecrets:demo on`, in Codex `maisecrets: demo on`).
 
 ### Settings you decide
 

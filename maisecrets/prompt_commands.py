@@ -226,3 +226,29 @@ def spaced_answer(payload: dict) -> dict | None:
     return {"decision": "block", "reason": f"maisecrets: send /maisecrets:{name}{rest} with the colon to run it. "
                                            "This prompt was not sent to the AI.",
             "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+
+
+def fill_check(payload: dict) -> dict:
+    """The mod's value check of a command it puts into the input box (`/maisecrets status VALUE` typed with a space, or
+    a mistyped name): the colon form with each value taken out, stored and masked as the prompt hook does for a prompt
+    that carries one, so the box never gets a value back (Gate A of !591). It runs no command and reads no command
+    words. {"masked": text, "count": n}; {} when the text is no maisecrets command or the session id has no valid shape,
+    and the mod then fills nothing."""
+    from . import events
+    from . import hooks as h
+    prompt = payload.get("prompt")
+    session = payload.get("session_id")
+    if (not isinstance(prompt, str) or not prompt.startswith("/maisecrets:") or "\n" in prompt or "\r" in prompt
+            or not isinstance(session, str) or not h._SESSION_ID_RE.fullmatch(session)):
+        return {}
+    cfg = h.load_config()
+    matches = h._prompt_hits(prompt)
+    if not matches and not h._has_live(cfg):
+        return {"masked": prompt, "count": 0}
+    rewritten, entries, values, stored, matches = h._take_values_out(prompt, matches, cfg, h.Vault(cfg), session)
+    count = len(matches) + stored["n"]
+    if count:
+        if cfg.get("scrub_transcript", True):
+            h._scrub_transcript_later("", values, [], session=session)    # the record of the typed prompt
+        events.record("UserPromptSubmit", "claude", entries, outcome="masked in a command the mod put into the box")
+    return {"masked": rewritten, "count": count}

@@ -710,6 +710,8 @@ def rewrite_prompt(payload: dict) -> dict:
     the prompt as it is, and the settings hook, which runs after the mod on what the mod passes on,
     decides it as without the mod: a clean prompt, an @file mention, a subagent report, a setting
     that turns the rewrite off. The answer carries placeholders, never a value."""
+    if payload.get("fill_check") is True:
+        return _pc().fill_check(payload)     # a command the mod puts into the box: its values masked, nothing run
     own = _pc().mod_command(payload)
     if own is not None:
         return own

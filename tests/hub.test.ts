@@ -65,6 +65,11 @@ function engine(on, calls: any[], opened: { placed: boolean },
   on('prompt.fill', ($, e) => { filled.push(e.text); return { isFilled: true } })
   on('process.run', async ($, e) => {
     calls.push(e)
+    if (e.argv.includes('mod-' + 'prompt') && JSON.parse(e.init.stdin || '{}').fill_check === true) {
+      const prompt = JSON.parse(e.init.stdin).prompt
+      return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-' + 'prompt',
+        masked: prompt, count: 0 }) } }
+    }
     if (e.argv[2] !== ENTRY) return { value: { exitCode: 1, stderr: '', stdout: '' } }
     const q = JSON.parse(e.init.stdin)
     const set = q.action === 'set'
@@ -370,8 +375,12 @@ test('a maisecrets command typed after /maisecrets with a space goes into the bo
     + 'the box.')
   await settle()
   expect(filled).toContain('/maisecrets:sref login')
-  // as for the colon form: only the demo's question for an own command, no settings entry
-  expect(calls.every(c => c.argv.includes('mod-' + 'demo'))).toBe(true)
+  // the demo's question for an own command (as for the colon form), then the value check of the filled command; no
+  // settings entry (the demo's question tries each Python: this engine answers none of them)
+  expect(calls.length).toBeGreaterThan(1)
+  expect([...new Set(calls.map(c => c.argv[c.argv.length - 1]))]).toEqual(['mod-' + 'demo', 'mod-' + 'prompt'])
+  expect(JSON.parse(calls[calls.length - 1].init.stdin)).toMatchObject({ prompt: '/maisecrets:sref login',
+    fill_check: true })
 })
 
 test('/maisecrets settings with a space opens the panel as the colon form does; /maisecrets alone goes to the menu',
@@ -416,12 +425,37 @@ test('a mistyped command after /maisecrets goes into the box as the closest comm
     + 'the box.')
   await settle()
   expect(filled).toContain('/maisecrets:status all')
-  expect(calls.length).toBe(0)
+  expect(calls.length).toBe(1)
+  expect(JSON.parse(calls[0].init.stdin)).toMatchObject({ prompt: '/maisecrets:status all', fill_check: true })
   filled.length = 0
-  const d = await $.command.run({ command: 'maisecrets', args: 'deom on' } as any)
+  for (const [word, command] of [['lsit', '/maisecrets:list'], ['adit 5', '/maisecrets:audit 5'],
+    ['rulse', '/maisecrets:rules']]) {
+    const d = await $.command.run({ command: 'maisecrets', args: word } as any)
+    expect(d.text).toBe(`maisecrets: I put ${command} into the input box. Press Enter to run it, or clear the box.`)
+    expect(filled).toContain(command)
+  }
+  // a demo on that no person typed: the box gets it, and the line says where the demo starts
+  const d = await $.command.run({ command: 'maisecrets', args: 'demo on' } as any)
   expect(d.text).toBe('maisecrets: I put /maisecrets:demo on into the input box. Press Enter to run it, or clear the '
     + 'box. The demo starts only in a new session (or after /clear).')
-  expect(filled).toContain('/maisecrets:demo on')
+})
+
+// a mistyped name never becomes a command that deletes, weakens, changes or sends: a reflex Enter must not run it
+test('a mistyped name near a command that changes something is no suggestion', async ($, on) => {
+  const calls: any[] = []
+  engine(on, calls, { placed: true })
+  on('command.run', () => ({ text: 'engine' }))
+  filled.length = 0
+  for (const args of ['forger SECRET_c1', 'team remove Bertolt Q', 'not-a-secre SECRET_c1', 'settigns rehydration automatic',
+    'nre off', 'deom on', 'sfer logout', 'pt', 'snd', 'gaurd remove', 'shotcut --remove', 'reprot incident']) {
+    const p = await $.prompt.submit({ text: `/maisecrets ${args}`, wait: false, origin: { kind: 'composer' },
+      command: { name: 'maisecrets', args } })
+    expect(p.drop).toBeUndefined()
+    const r = await $.command.run({ command: 'maisecrets', args } as any)
+    expect(r.text).toBeUndefined()
+  }
+  expect(filled.filter(f => f.startsWith('/maisecrets:'))).toEqual([])
+  expect(calls.filter(c => c.argv.includes('mod-' + 'prompt'))).toEqual([])
 })
 
 test('a word near no command, or near two, is no suggestion: the panel says it is no command', async ($, on) => {
