@@ -145,6 +145,31 @@ lint:
     # the plugin files as a directory check reads them (frontmatter YAML, manifests, hook paths)
     - python scripts/lint_plugin.py
 
+# No symlink, no submodule, no binary outside the gzip results and the PNG icons (docs/REPO-STANDARDS.md, "Layout and
+# hygiene"), from the git index. It runs in every pipeline but a schedule, a merge request of results alone included
+tree_types:
+  stage: validate
+  extends: .not_on_a_schedule
+  image: alpine:3.20
+  script:
+    - apk add --no-cache git python3 >/dev/null
+    - python3 scripts/tree_types.py
+
+# Every path outside the measurement results and the format-watch snapshot (scripts/mr_scope.py). GitLab cannot say
+# "only these paths changed", so a merge request into next that changes one of these paths runs every test job, and one
+# that changes none runs baseline_only, whose guard reads the diff again. Generated: python3 scripts/mr_scope.py globs
+# (tests/test_mr_scope.py compares).
+.code_paths: &code_paths
+  - '{[!bd]*,b,b[!e]*,be,be[!n]*,ben,ben[!c]*,benc,benc[!h]*,bench?*,d,d[!o]*,do,do[!c]*,doc,doc[!s]*,docs?*}'
+  - '{[!bd]*,b,b[!e]*,be,be[!n]*,ben,ben[!c]*,benc,benc[!h]*,bench?*,d,d[!o]*,do,do[!c]*,doc,doc[!s]*,docs?*}/**/*'
+  - '{bench,docs}'
+  - 'bench/{[!Hr]*,H,H[!O]*,HO,HO[!L]*,HOL,HOL[!D]*,HOLD,HOLD[!O]*,HOLDO,HOLDO[!U]*,HOLDOU,HOLDOU[!T]*,HOLDOUT,HOLDOUT[!-]*,HOLDOUT-,HOLDOUT-[!L]*,HOLDOUT-L,HOLDOUT-L[!O]*,HOLDOUT-LO,HOLDOUT-LO[!G]*,HOLDOUT-LOG,HOLDOUT-LOG[!.]*,HOLDOUT-LOG.,HOLDOUT-LOG.[!m]*,HOLDOUT-LOG.m,HOLDOUT-LOG.m[!d]*,HOLDOUT-LOG.md?*,r,r[!e]*,re,re[!s]*,res,res[!u]*,resu,resu[!l]*,resul,resul[!t]*,result,result[!s]*,results?*}'
+  - 'bench/{[!Hr]*,H,H[!O]*,HO,HO[!L]*,HOL,HOL[!D]*,HOLD,HOLD[!O]*,HOLDO,HOLDO[!U]*,HOLDOU,HOLDOU[!T]*,HOLDOUT,HOLDOUT[!-]*,HOLDOUT-,HOLDOUT-[!L]*,HOLDOUT-L,HOLDOUT-L[!O]*,HOLDOUT-LO,HOLDOUT-LO[!G]*,HOLDOUT-LOG,HOLDOUT-LOG[!.]*,HOLDOUT-LOG.,HOLDOUT-LOG.[!m]*,HOLDOUT-LOG.m,HOLDOUT-LOG.m[!d]*,HOLDOUT-LOG.md?*,r,r[!e]*,re,re[!s]*,res,res[!u]*,resu,resu[!l]*,resul,resul[!t]*,result,result[!s]*,results?*}/**/*'
+  - 'bench/{HOLDOUT-LOG.md/**/*,results}'
+  - 'docs/{[!cf]*,c,c[!o]*,co,co[!v]*,cov,cov[!e]*,cove,cove[!r]*,cover,cover[!a]*,covera,covera[!g]*,coverag,coverag[!e]*,coverage,coverage[!.]*,coverage.,coverage.[!j]*,coverage.j,coverage.j[!s]*,coverage.js,coverage.js[!o]*,coverage.jso,coverage.jso[!n]*,coverage.json?*,f,f[!o]*,fo,fo[!r]*,for,for[!m]*,form,form[!a]*,forma,forma[!t]*,format,format[!-]*,format-,format-[!w]*,format-w,format-w[!a]*,format-wa,format-wa[!t]*,format-wat,format-wat[!c]*,format-watc,format-watc[!h]*,format-watch,format-watch[!.-]*,format-watch-,format-watch-[!f]*,format-watch-f,format-watch-f[!p]*,format-watch-fp,format-watch-fp[!.]*,format-watch-fp.,format-watch-fp.[!t]*,format-watch-fp.t,format-watch-fp.t[!x]*,format-watch-fp.tx,format-watch-fp.tx[!t]*,format-watch-fp.txt?*,format-watch.,format-watch.[!t]*,format-watch.t,format-watch.t[!x]*,format-watch.tx,format-watch.tx[!t]*,format-watch.txt?*}'
+  - 'docs/{[!cf]*,c,c[!o]*,co,co[!v]*,cov,cov[!e]*,cove,cove[!r]*,cover,cover[!a]*,covera,covera[!g]*,coverag,coverag[!e]*,coverage,coverage[!.]*,coverage.,coverage.[!j]*,coverage.j,coverage.j[!s]*,coverage.js,coverage.js[!o]*,coverage.jso,coverage.jso[!n]*,coverage.json?*,f,f[!o]*,fo,fo[!r]*,for,for[!m]*,form,form[!a]*,forma,forma[!t]*,format,format[!-]*,format-,format-[!w]*,format-w,format-w[!a]*,format-wa,format-wa[!t]*,format-wat,format-wat[!c]*,format-watc,format-watc[!h]*,format-watch,format-watch[!.-]*,format-watch-,format-watch-[!f]*,format-watch-f,format-watch-f[!p]*,format-watch-fp,format-watch-fp[!.]*,format-watch-fp.,format-watch-fp.[!t]*,format-watch-fp.t,format-watch-fp.t[!x]*,format-watch-fp.tx,format-watch-fp.tx[!t]*,format-watch-fp.txt?*,format-watch.,format-watch.[!t]*,format-watch.t,format-watch.t[!x]*,format-watch.tx,format-watch.tx[!t]*,format-watch.txt?*}/**/*'
+  - 'docs/{coverage.json/**/*,format-watch-fp.txt/**/*,format-watch.txt/**/*}'
+
 # A release tag sits on the release commit: the tested main commit plus the four release files.
 # verify_release proves exactly that (file list, subject, author, on main, version), and the
 # release job that made the commit needs every test job of the main pipeline. The tag pipeline
@@ -168,6 +193,13 @@ lint:
     # into main (a hotfix) runs every job
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
         && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "next"
+      when: never
+    # a merge request into next that changes only measurement results or the format-watch snapshot runs baseline_only
+    # instead (scripts/mr_scope.py): 38 merge requests without code used 477 runner minutes in test jobs in 14 days
+    # (maintainer, 2026-11-19). Every other path, .gitlab-ci.yml included, runs the suites
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: *code_paths
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
       when: never
     - when: on_success
 
@@ -211,6 +243,9 @@ lint:
 # bench/HOLDOUT-LOG.md and docs/coverage.json, nothing else. It ran the whole suite (11 to 19 minutes,
 # about 54 CPU minutes on the runner) for files only three test modules read. This job refuses any other
 # changed path, so the branch name cannot carry code past the tests, and runs those three modules.
+# Any merge request into next whose paths are all measurement results or the format-watch snapshot runs it too (no
+# path of .code_paths): scripts/mr_scope.py refuses another path, a mode other than a regular file, a file type that
+# no baseline holds and a binary that is no gzip, and names the test modules that read those files.
 baseline_only:
   stage: test
   needs: []
@@ -218,10 +253,25 @@ baseline_only:
     GIT_DEPTH: "0"
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^chore\/baseline-/
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
+      changes: *code_paths
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "next"
   script:
     - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git >/dev/null
-    - python scripts/baseline_only.py "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - python -m unittest tests.test_extended_baseline tests.test_release_tree tests.test_release_gate
+    - pip install --quiet --disable-pip-version-check pyyaml==6.0.3
+    # a merged-results pipeline tests the merge commit: its base is the target branch tip, not the diff base, which
+    # can hold changes of other merge requests (GitLab docs). The SHA is fetched; a missing one fails the job
+    - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+    - git fetch --quiet origin "$BASE" || echo "the fetch of $BASE failed; the local history must hold it"
+    - git cat-file -e "$BASE^{commit}"
+    - |
+      case "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" in
+        chore/baseline-*) python scripts/baseline_only.py "$BASE" ;;
+      esac
+    - python scripts/mr_scope.py check "$BASE"
+    - python -m unittest -v $(python scripts/mr_scope.py tests) > light.log 2>&1 || { cat light.log; exit 1; }
+    - tail -n 3 light.log && python scripts/no_unexpected_skips.py light.log
 
 unit:
   stage: test
@@ -347,7 +397,8 @@ windows_macos:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_LABELS =~ /(^|,)public-ci(,|$)/
     # a merge request into next runs it unless it changes documentation alone: the matrix runs the whole unit suite,
     # and a test imports the plugin, the detection core, the benchmark and the scripts. The first list (2026-10-21)
-    # named platform paths only, and a test that imported a POSIX-only module reached next untested on Windows (!194)
+    # named platform paths only, and a test that imported a POSIX-only module reached next untested on Windows (!194).
+    # bench/ without the measurement results: the bench part of .code_paths (baseline_only tests the results)
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         - maisecrets/**/*
@@ -360,7 +411,8 @@ windows_macos:
         - .codex-plugin/**/*
         - .github/**/*
         - tests/**/*
-        - bench/**/*
+        - 'bench/{[!Hr]*,H,H[!O]*,HO,HO[!L]*,HOL,HOL[!D]*,HOLD,HOLD[!O]*,HOLDO,HOLDO[!U]*,HOLDOU,HOLDOU[!T]*,HOLDOUT,HOLDOUT[!-]*,HOLDOUT-,HOLDOUT-[!L]*,HOLDOUT-L,HOLDOUT-L[!O]*,HOLDOUT-LO,HOLDOUT-LO[!G]*,HOLDOUT-LOG,HOLDOUT-LOG[!.]*,HOLDOUT-LOG.,HOLDOUT-LOG.[!m]*,HOLDOUT-LOG.m,HOLDOUT-LOG.m[!d]*,HOLDOUT-LOG.md?*,r,r[!e]*,re,re[!s]*,res,res[!u]*,resu,resu[!l]*,resul,resul[!t]*,result,result[!s]*,results?*}'
+        - 'bench/{[!Hr]*,H,H[!O]*,HO,HO[!L]*,HOL,HOL[!D]*,HOLD,HOLD[!O]*,HOLDO,HOLDO[!U]*,HOLDOU,HOLDOU[!T]*,HOLDOUT,HOLDOUT[!-]*,HOLDOUT-,HOLDOUT-[!L]*,HOLDOUT-L,HOLDOUT-L[!O]*,HOLDOUT-LO,HOLDOUT-LO[!G]*,HOLDOUT-LOG,HOLDOUT-LOG[!.]*,HOLDOUT-LOG.,HOLDOUT-LOG.[!m]*,HOLDOUT-LOG.m,HOLDOUT-LOG.m[!d]*,HOLDOUT-LOG.md?*,r,r[!e]*,re,re[!s]*,res,res[!u]*,resu,resu[!l]*,resul,resul[!t]*,result,result[!s]*,results?*}/**/*'
         - scripts/**/*
         - beliefs/**/*
         - examples/**/*
@@ -484,7 +536,7 @@ release:
   rules:
     # not on the release commit itself (pushed with ci.skip anyway), not on tags, not on schedules
     - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_MESSAGE !~ /^chore\(release\):/
-  needs: [manifests, plugin_validate, commit_format, no_secrets_in_tree, lint, unit, unit_python39, beliefs_can_fail_replay, harness_claude, harness_codex, mirror]
+  needs: [manifests, plugin_validate, commit_format, no_secrets_in_tree, lint, tree_types, unit, unit_python39, beliefs_can_fail_replay, harness_claude, harness_codex, mirror]
   variables:
     GIT_DEPTH: "0"
   script:

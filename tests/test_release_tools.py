@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import unittest
 import urllib.error
@@ -236,11 +237,17 @@ class ListingManifestTests(unittest.TestCase):
         release = job.index('$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"')
         changes = job.index("changes:")
         self.assertLess(release, changes, "the release rule must come before the path rule")
-        patterns = [line.strip()[2:] for line in job[changes:].splitlines()[1:] if line.strip().startswith("- ")]
+        patterns = [line.strip()[2:].strip("'") for line in job[changes:].splitlines()[1:]
+                    if line.strip().startswith("- ")]
         self.assertGreaterEqual(len(patterns), 10, "the premise: the rule lists paths")
+        # the bench part of .code_paths has braces and brackets, which Path.glob does not read: the matcher of
+        # scripts/mr_scope.py reads them as GitLab does, over the files of the tree
+        mr_scope = _load("mr_scope")
+        tree = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=ROOT,
+                              capture_output=True, text=True).stdout.split("\0")
         matched = set()
         for p in patterns:
-            files = {f.relative_to(ROOT).as_posix() for f in ROOT.glob(p) if f.is_file()}
+            files = {f for f in tree if f and mr_scope.glob_match(p, f)}
             self.assertTrue(files, f"{p} names no file, so it never starts the job")
             matched |= files
         # every top folder a test imports from or names, and every test itself
