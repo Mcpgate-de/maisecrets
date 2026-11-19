@@ -10,7 +10,8 @@ PRIVACY.md make to users onto the missions. This script joins them and reports:
 - a mission without an invariant (only per-line proofs, no check over every path),
 - a documented control or invariant that no mission names, and beliefs that no part names,
 - a name in a mission or a belief that the threat model does not document, a belief without `serves`, a part id
-  in `serves` that no mission has, a part without its id, or a belief whose control its mission does not name,
+  in `serves` that no mission has, a part without its id or with one that another part has, two files of one
+  mission, or a belief whose control (or label, such as "operations") its mission does not name,
 - a claim whose quote no longer stands in its source, a bullet of a gated section of README.md or PRIVACY.md that
   no claim maps, and a gated section that is gone,
 - each mission's measured number (`[measure]`: a source file, the row that holds it and its column, and the gate
@@ -62,7 +63,7 @@ def bullets(markdown: str, section: str) -> list[str] | None:
 def check_claims(root: Path, missions: set[str]) -> list[str]:
     path = root / "mission" / "claims.toml"
     if not path.exists():
-        return []
+        return ["mission/claims.toml not found: no promise of README.md or PRIVACY.md is checked"]
     claims = tomllib.loads(path.read_text(encoding="utf-8")).get("claim", [])
     findings: list[str] = []
     texts: dict[str, str] = {}
@@ -80,9 +81,9 @@ def check_claims(root: Path, missions: set[str]) -> list[str]:
         if src not in texts:
             texts[src] = (root / src).read_text(encoding="utf-8") if (root / src).exists() else ""
         found = bullets(texts[src], section)
-        if found is None:
-            # a renamed section would end its gate without a word
-            findings.append(f"{src} has no section \"{section}\" (GATED_SECTIONS)")
+        if not found:
+            # a renamed section, or one whose bullets moved, would end its gate without a word
+            findings.append(f"{src} has no section \"{section}\" with a bullet (GATED_SECTIONS)")
             continue
         quotes = [flat(c.get("quote", "")) for c in claims if c.get("source") == src]
         for b in found:
@@ -114,16 +115,26 @@ def analyse(root: Path):
     serves = {b["belief"]: b.get("serves") for b in loaded}
     missions = [(p, tomllib.loads(p.read_text(encoding="utf-8"))) for p in sorted((root / "mission").glob("M*.toml"))]
     served: set[str] = set()
-    parts: dict[str, set[str]] = {}         # part id -> the controls and invariants its mission names
+    # part id -> the controls, invariants and labels its mission names (a belief labelled "operations" or "detector"
+    # serves a part only when its mission names that label in `labels`)
+    parts: dict[str, set[str]] = {}
+    twice = [f"{mid}: {n} files name this mission" for mid, n in
+             sorted(Counter(m["mission"] for _p, m in missions).items()) if n > 1]
+    part_ids = Counter(part.get("id") for _p, m in missions for part in m.get("part", [])
+                       if isinstance(part.get("id"), str))
     for _path, m in missions:
         for part in m.get("part", []):
-            if part.get("id"):
-                parts.setdefault(part["id"], set(m.get("controls", [])) | set(m.get("invariants", [])))
-    r = {"missions": [], "gaps": [], "thin": [], "no_invariant": [], "orphans": [], "unknown": [], "claims": [],
+            pid = part.get("id")
+            if isinstance(pid, str) and pid:
+                names = set(m.get("controls", [])) | set(m.get("invariants", [])) | set(m.get("labels", []))
+                parts.setdefault(pid, set()).update(names)
+    r = {"_dup": set(), "missions": [], "gaps": [], "thin": [], "no_invariant": [], "orphans": [], "unknown": [],
+         "claims": [],
          "measures": [],
          "unowned_beliefs": Counter(),
          "undocumented_belief_controls": sorted({c for c in beliefs.values()
                                                  if c not in controls and c not in invariants})}
+    r["unknown"].extend(twice)
     for path, m in missions:
         mid = m["mission"]
         if not path.stem.startswith(mid + "-"):
@@ -135,14 +146,17 @@ def analyse(root: Path):
         if not m.get("invariants"):
             r["no_invariant"].append(mid)
         rows = []
-        seen_ids: set[str] = set()
+        for label in m.get("labels", []):
+            if label in controls or label in invariants:
+                r["unknown"].append(f"{mid}: {label} is a control; name it in controls or invariants, not labels")
         for i, part in enumerate(m.get("part", []), 1):
             pid = part.get("id", "")
-            if not re.fullmatch(rf"{re.escape(mid)}\.\d+", pid):
+            if not isinstance(pid, str) or not re.fullmatch(rf"{re.escape(mid)}\.\d+", pid):
                 r["unknown"].append(f"{mid}, part {i}: the id {pid!r} is not {mid}.<number>")
-            elif pid in seen_ids:
-                r["unknown"].append(f"{pid}: two parts have this id")
-            seen_ids.add(pid)
+                pid = ""
+            elif part_ids[pid] > 1 and pid not in r["_dup"]:
+                r["unknown"].append(f"{pid}: {part_ids[pid]} parts have this id")
+                r["_dup"].add(pid)
             if "beliefs" in part:
                 r["unknown"].append(f"{pid or mid}: a part names no beliefs; each belief names its parts in serves")
             got = {b for b, s in serves.items() if pid and pid in (s or [])}
@@ -180,9 +194,10 @@ def analyse(root: Path):
         for pid in s:
             if pid not in parts:
                 r["unknown"].append(f"{b}: serves {pid}, which no mission has")
-            elif (control in controls or control in invariants) and control not in parts[pid]:
+            elif control not in parts[pid]:
                 r["unknown"].append(f"{b}: serves {pid}, but {pid.split('.')[0]} does not name its control {control}")
     r["claims"] = check_claims(root, {m["mission"] for _, m in missions})
+    del r["_dup"]
     return r
 
 

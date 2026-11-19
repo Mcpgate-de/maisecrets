@@ -114,9 +114,10 @@ Five goals hold over every path, each with its own tests and a mutation per path
   `allow` (C5); a test records that exception and fails when it changes.
 - **I5** A network connection can start only in the code of a service the person set up (C33): only
   the modules of the name service, the gateway of Sensitive References, the vault reference server, the
-  browser of a typed login and the two ssh helpers import a network library; only listed modules start a
-  program, each for a named reason; the mod uses no network API. A static check: a library that another
-  module imports for it, a name built at run time and what a started program does stay outside.
+  browser of a typed login and the two ssh helpers import a network library; a program starts only at the
+  counted places of listed modules, each for a named reason; the mod uses no network API. A static check: a
+  library that another module imports for it, a name built at run time, a module or `$` handed on under
+  another name, and what a started program does stay outside.
 
 ## What is knowingly not defended
 

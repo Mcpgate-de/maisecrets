@@ -217,3 +217,9 @@ source = "PRIVACY.md"
 quote = "The Windows Credential Locker may roam through a Microsoft account"
 kind = "limit"
 mission = "M4"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "holds the server tokens seen, the key ids and endpoints and each server's link state, never a value or a key; a value a server gave stays in the store for one hour"
+kind = "promise"
+mission = "M4"

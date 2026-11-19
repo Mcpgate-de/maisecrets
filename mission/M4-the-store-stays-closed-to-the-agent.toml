@@ -12,7 +12,7 @@ says = "No tool of the agent reads the store or the vault home."
 
 [[part]]
 id = "M4.2"
-says = "Only the person's own typed prompt changes a setting, a term or a rule folder; a machine policy wins over both."
+says = "Only the person's own typed prompt changes a setting, a term, an import of values or a rule folder; a machine policy wins over both."
 
 [[part]]
 id = "M4.3"

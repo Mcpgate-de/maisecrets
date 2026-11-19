@@ -4,6 +4,7 @@ promise = "The person sees what left and decides, and a fault of maisecrets show
 actors = ["A5"]
 controls = ["C9", "C13", "C16"]
 invariants = []
+labels = ["operations"]
 ends = "The log is on the same disk; a client that kills a hook before the guard answers."
 
 [[part]]

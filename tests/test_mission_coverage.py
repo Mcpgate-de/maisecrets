@@ -37,6 +37,8 @@ README = """# x
 
 ## What the Claude Code mod does
 
+- **Rewrites a prompt.**
+
 ## What it does not protect
 
 - A name without a label.
@@ -53,12 +55,24 @@ PRIVACY = """# p
 
 ## What it stores, and where
 
+- Nothing on disk.
+
 ## What leaves the machine
 
 - Nothing, unless
   you ask.
 """
 CLAIMS = """[[claim]]
+source = "README.md"
+quote = "**Rewrites a prompt.**"
+kind = "feature"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "Nothing on disk."
+kind = "feature"
+
+[[claim]]
 source = "PRIVACY.md"
 quote = "**Only the prompt.**"
 kind = "feature"
@@ -169,17 +183,32 @@ class MissionCoverageTests(unittest.TestCase):
         beliefs = [("C1", ["M1.1"]), ("C1", None), ("C2", ["M9.1"]), ("C3", ["M1.1"]), ("C1", "M1.1"),
                    ("detector", ["M1.1"]), ("I1", ["M1.4"])]
         r = mission_coverage.analyse(self.tree(missions, beliefs))
-        self.assertIn("M1.1: two parts have this id", r["unknown"])
+        self.assertIn("M1.1: 2 parts have this id", r["unknown"])
         self.assertIn("M1, part 3: the id 'M2.7' is not M1.<number>", r["unknown"])
         self.assertIn("M1.4: a part names no beliefs; each belief names its parts in serves", r["unknown"])
         self.assertIn("b1: no serves list of part ids (serves = [] when it serves no promise)", r["unknown"])
         self.assertIn("b2: serves M9.1, which no mission has", r["unknown"])
         self.assertIn("b3: serves M1.1, but M1 does not name its control C3", r["unknown"])
         self.assertIn("b4: no serves list of part ids (serves = [] when it serves no promise)", r["unknown"])
-        self.assertFalse(any(u.startswith(("b0:", "b5:", "b6:")) for u in r["unknown"]),
-                         "a served part with its control, or a label that is no documented control, is no finding")
-        self.assertEqual(len(r["unknown"]), 7, r["unknown"])
+        self.assertIn("b5: serves M1.1, but M1 does not name its control detector", r["unknown"])
+        self.assertFalse(any(u.startswith(("b0:", "b6:")) for u in r["unknown"]),
+                         "a served part whose mission names the belief's control is no finding")
+        self.assertEqual(len(r["unknown"]), 8, r["unknown"])
         self.assertEqual(r["unowned_beliefs"], {}, "serves = [] is the only way to serve no promise")
+
+    def test_ids_are_unique_over_all_missions_and_a_label_needs_its_mission(self):
+        import mission_coverage
+        labelled = mission("M1", ["C1", "C2", "C3"], ["I1"]).replace('invariants = ["I1"]\n',
+                                                                     'invariants = ["I1"]\nlabels = ["ops", "C2"]\n')
+        missions = {"M1-x": labelled, "M1-y": mission("M1", [], parts=(("again", 'id = "M1.1"\n'),)),
+                    "M2-z": mission("M2", [], parts=(("own", 'id = "M2.1"\n'),))}
+        beliefs = ["C1", "C2", "C3", "I1", ("ops", ["M1.1"]), ("ops", ["M2.1"])]
+        r = mission_coverage.analyse(self.tree(missions, beliefs))
+        self.assertIn("M1: 2 files name this mission", r["unknown"])
+        self.assertIn("M1.1: 2 parts have this id", r["unknown"])
+        self.assertIn("M1: C2 is a control; name it in controls or invariants, not labels", r["unknown"])
+        self.assertIn("b5: serves M2.1, but M2 does not name its control ops", r["unknown"])
+        self.assertFalse(any(u.startswith("b4:") for u in r["unknown"]), "M1 names the label ops")
 
     def test_a_belief_counts_only_for_the_parts_it_serves(self):
         import mission_coverage
@@ -214,12 +243,22 @@ class MissionCoverageTests(unittest.TestCase):
         privacy = PRIVACY.replace("- Nothing, unless", "- A crash report goes out.\n- Nothing, unless")
         privacy = privacy.replace("## What it stores, and where", "## What it keeps")
         r = mission_coverage.analyse(self.tree(self.covered(), ["C1", "C2", "C3", "I1"], privacy=privacy))
-        self.assertEqual(r["claims"], ['PRIVACY.md has no section "What it stores, and where" (GATED_SECTIONS)',
+        self.assertEqual(r["claims"], ['PRIVACY.md has no section "What it stores, and where" with a bullet '
+                                       '(GATED_SECTIONS)',
                                        'PRIVACY "What leaves the machine" bullet no claim maps: '
                                        'A crash report goes out.'])
         readme = README.replace("## What the Claude Code mod does\n\n", "")
         r = mission_coverage.analyse(self.tree(self.covered(), ["C1", "C2", "C3", "I1"], readme=readme))
-        self.assertEqual(r["claims"], ['README.md has no section "What the Claude Code mod does" (GATED_SECTIONS)'])
+        self.assertEqual(r["claims"], ['README.md has no section "What the Claude Code mod does" with a bullet '
+                                       '(GATED_SECTIONS)'])
+        # the bullets moved out of a gated section: the claims still stand in the file, the section is empty
+        privacy = PRIVACY.replace("- **Only the prompt.**\n", "").replace("# p\n", "# p\n\n- **Only the prompt.**\n")
+        r = mission_coverage.analyse(self.tree(self.covered(), ["C1", "C2", "C3", "I1"], privacy=privacy))
+        self.assertEqual(r["claims"], ['PRIVACY.md has no section "What it reads" with a bullet (GATED_SECTIONS)'])
+        root = self.tree(self.covered(), ["C1", "C2", "C3", "I1"])
+        (root / "mission" / "claims.toml").unlink()
+        self.assertEqual(mission_coverage.analyse(root)["claims"],
+                         ["mission/claims.toml not found: no promise of README.md or PRIVACY.md is checked"])
 
     def test_a_claim_needs_a_kind_and_an_existing_mission(self):
         import mission_coverage
