@@ -415,6 +415,23 @@ class States(base.OnlineBase):
         self.login()
         self.assertEqual(self.write(tok("EMAIL_1"))["hookSpecificOutput"]["updatedInput"]["content"], VALUES[0])
 
+    def test_a_late_answer_for_the_old_key_does_not_keep_an_unsettled_new_key(self):
+        """Gate A round 4 of #75: the new key was stored without proof, and a late answer for the old key set the
+        state to active. rotate_lost then skipped the origin before it settled, and `rotating` stayed for good."""
+        old = self.lose_the_key()
+        origin = vault_refs.origin_of(self.srv.url)
+        backend = Vault().backend
+        with self.put_key_without_proof(takes=True):
+            with self.assertRaises(CodedError):
+                vault_refs.rotate_lost(backend)
+        new = vault_refs._key(backend, origin, create=False)
+        vault_refs._set_state(origin, "active", kid=vault_refs.kid_of(old))    # the late answer
+        self.assertEqual(vault_refs.state_of(origin).get("state"), "active", "premise: the old kid looks active")
+        self.assertEqual(vault_refs.rotate_lost(backend), [], "no second new key")
+        self.assertNotIn("rotating", vault_refs._known_keys()[origin])
+        self.assertEqual(vault_refs._kid_now(origin), vault_refs.kid_of(new))
+        self.assertEqual(vault_refs._key(backend, origin, create=False), new)
+
     def test_a_new_key_that_was_not_stored_is_made_again_at_the_next_start(self):
         old = self.lose_the_key()
         origin = vault_refs.origin_of(self.srv.url)

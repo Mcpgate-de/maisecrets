@@ -1292,6 +1292,13 @@ def rotate_lost(backend, deadline: float | None = None) -> list[str]:
     out = []
     servers = None
     for origin, entries in _enabled().items():
+        rec = _known_keys().get(origin)
+        if isinstance(rec, dict) and isinstance(rec.get("rotating"), str):
+            # before every check below: a late answer for the old key can set the state to active meanwhile, and the
+            # skip would then keep `rotating` and the new key for good (Gate A round 4, #75)
+            with _own_lock(deadline):
+                with _store_lock(deadline):
+                    _settle_rotation(backend, origin)
         if state_of(origin).get("state") != "lost":
             continue
         servers = user_servers() if servers is None else servers
