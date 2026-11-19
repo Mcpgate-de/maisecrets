@@ -408,22 +408,65 @@ def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
                          "timeout") from None
 
 
-PARTS_PENDING = HOME / "keychain-parts.pending"
+PARTS_PENDING = HOME / "keychain-parts"   # one marker file per put of a long value (Gate A round 2, #75)
+PENDING_FRESH = 600.0       # seconds: a marker this young belongs to a put that may still run
+_wall = time.time           # the tests replace this module's `time`
 
 
-def _parts_pending(on: bool | None = None) -> bool:
-    """A marker that a put of a long value began and has not finished: the next full sweep looks for orphan parts.
-    With no argument: whether the marker is there."""
-    if on is None:
-        return PARTS_PENDING.exists()
+def _pending_mark(key: str, gen: str, stale: bool = False) -> Path | None:
+    """A marker that parts of `key` (generation `gen`, "" for any) may stand without their head. A fresh marker is a
+    put that runs: the sweep keeps its parts. A stale one is left for the sweep. One file per put, so one writer
+    never clears the marker of another."""
+    import secrets as _secrets
     try:
-        if on:
-            PARTS_PENDING.touch()
-        else:
-            PARTS_PENDING.unlink()
+        PARTS_PENDING.mkdir(mode=0o700, exist_ok=True)
+        path = PARTS_PENDING / _secrets.token_hex(8)
+        path.write_text(json.dumps({"key": key, "gen": gen}), encoding="utf-8")
+        if stale:
+            os.utime(path, (0, 0))
+        return path
+    except OSError:
+        return None
+
+
+def _pending_stale(path: Path | None) -> None:
+    """The put of this marker ended without its proof: its parts are for the next full sweep."""
+    try:
+        if path is not None:
+            os.utime(path, (0, 0))
     except OSError:
         pass
-    return on
+
+
+def _pending_clear(path: Path | None) -> None:
+    try:
+        if path is not None:
+            path.unlink()
+    except OSError:
+        pass
+
+
+def _pending_marks() -> list[tuple[Path, str, str, bool]]:
+    """(path, key, generation, fresh) of each marker. A damaged marker counts as stale and for every key."""
+    out = []
+    try:
+        paths = list(PARTS_PENDING.iterdir())
+    except OSError:
+        return out
+    for path in paths:
+        try:
+            fresh = _wall() - path.stat().st_mtime < PENDING_FRESH
+            data = json.loads(path.read_text(encoding="utf-8"))
+            out.append((path, str(data["key"]), str(data["gen"]), fresh))
+        except (OSError, ValueError, TypeError, KeyError):
+            out.append((path, "", "", False))
+    return out
+
+
+def _parts_pending() -> bool:
+    """Whether a full sweep has orphan parts to look for: a marker of a put that ended without its proof, or one
+    older than PENDING_FRESH (a process that was stopped)."""
+    return any(not fresh for _p, _k, _g, fresh in _pending_marks())
 
 
 class KeychainBackend:
@@ -530,21 +573,29 @@ class KeychainBackend:
                 raise CodedError("keychain add refused: the value is too long for the keychain's stdin form",
                                  "store.keychain-add", "shape")
             chunks = [b64[i * room:(i + 1) * room] for i in range(n)]
-            _parts_pending(True)             # a put that stops before its head leaves parts for the sweep
-            for i in range(1, n):
-                name = self._part_name(key, i, gen)
-                self._add(self._add_line(name, chunks[i], f"maisecrets part of {key}", None), name, chunks[i])
-            self._add(self._add_line(key, f"b64p:{n}:{gen}:{chunks[0]}", label, comment))
+            mark = _pending_mark(key, gen)   # a put that stops before its head leaves parts for the sweep
+            try:
+                for i in range(1, n):
+                    name = self._part_name(key, i, gen)
+                    self._add(self._add_line(name, chunks[i], f"maisecrets part of {key}", None), name, chunks[i])
+                self._add(self._add_line(key, f"b64p:{n}:{gen}:{chunks[0]}", label, comment))
+            except BaseException:
+                _pending_stale(mark)
+                raise
         # the new value is proven before anything of the old one goes: a failed add keeps the old value whole
         if self.get(key) != value:
+            if gen:
+                _pending_stale(mark)
             raise CodedError("keychain add failed (read-back differs)", "store.keychain-readback", "shape")
         head = self._split_head(old)
         if head and head[1] != gen:          # the same value again keeps its parts: they are the new ones
             rc = self._delete_parts(key, head)
             if rc:
+                if gen:
+                    _pending_stale(mark)
                 raise CodedError(f"keychain add failed (old parts stay, rc {rc})", "store.keychain-add", "rc", rc)
         if gen:
-            _parts_pending(False)
+            _pending_clear(mark)
 
     def _delete_parts(self, key: str, head: tuple[int, str, str]) -> int:
         """Delete the parts a head names; the return code of the first that refused, else 0."""
@@ -611,31 +662,41 @@ class KeychainBackend:
 
     def remove_orphan_parts(self) -> int:
         """Delete every part that no readable head names (a put that stopped between its parts and its head, a
-        head deleted without its parts). A key whose head cannot be read keeps its parts. Returns the count."""
+        head deleted without its parts). A key whose head cannot be read keeps its parts and gets a marker, so the
+        next full sweep looks again. The parts of a put that runs now (a fresh marker) stay. Returns the count."""
         r = _run_store("keychain", ["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
         if r.returncode != 0:
             raise CodedError(f"keychain dump failed (rc {r.returncode})", "store.expire", "rc", r.returncode)
+        # the markers after the dump: a put makes its marker before its first part, so each part in the dump has one
+        marks = _pending_marks()
+        running = {(k, g) for _p, k, g, fresh in marks if fresh}
         by_key: dict = {}
         for acct in parse_keychain_dump(r.stdout, SERVICE):
             m = self._PART_RE.search(acct)
             if m:
                 by_key.setdefault(acct[:m.start()], []).append(acct)
         n = 0
+        unread = set()
         for key, parts in by_key.items():
             rc, raw = self._raw(key)
             if rc not in (0, 44):
+                unread.add(key)
                 continue
             head = self._split_head(raw) if rc == 0 else None
             keep = {self._part_name(key, i, head[1]) for i in range(1, head[0])} if head else set()
             for part in parts:
-                if part in keep:
+                if part in keep or (key, part.rsplit(".", 1)[1]) in running:
                     continue
                 d = _run_store("keychain", ["security", "delete-generic-password", "-s", SERVICE, "-a", part],
                                capture_output=True, timeout=5)
                 if d.returncode not in (0, 44):
                     raise CodedError(f"keychain delete failed (rc {d.returncode})", "store.expire", "rc", d.returncode)
                 n += d.returncode == 0
-        _parts_pending(False)
+        for path, key, gen, fresh in marks:
+            if not fresh and key not in unread:
+                _pending_clear(path)
+        for key in unread - {k for _p, k, _g, fresh in marks if not fresh}:
+            _pending_mark(key, "", stale=True)
         return n
 
     def wipe(self) -> int:

@@ -57,6 +57,8 @@ class FakeKeychain(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.addCleanup(vault.hook_deadline, None)
+        shutil.rmtree(vault.PARTS_PENDING, True)       # the markers of an earlier test
+        self.addCleanup(shutil.rmtree, vault.PARTS_PENDING, True)
         self.backend = KeychainBackend()
 
     def calls(self) -> list[dict]:
@@ -215,7 +217,36 @@ class ExitZeroOnFailureTests(FakeKeychain):
         self.assertEqual(removed, len(orphans) - (int(left[vault.SERVICE + "\0SECRET_c5"].split(":")[1]) - 1))
         self.assertFalse([k for k in left if "SECRET_c6" in k])
         self.assertIn(vault.SERVICE + "\0SECRET_c7.part1.0123456789ab", left)
+        # Gate A round 2: a head that could not be read keeps the sweep pending, so the next full sweep looks again
+        self.assertTrue(vault._parts_pending())
+        self.assertEqual(self.backend.remove_orphan_parts(), 1)
+        self.assertNotIn(vault.SERVICE + "\0SECRET_c7.part1.0123456789ab", self.items())
         self.assertFalse(vault._parts_pending())
+
+    def test_two_writers_do_not_clear_each_others_marker_or_parts(self):
+        # Gate A round 2: one global marker, and a writer that finished cleared it under a writer that still ran.
+        # Writer A: its marker and its first part stand, its head is not written yet
+        gen = "0" * 12
+        mark = vault._pending_mark("SECRET_c12", gen)
+        items = self.items()
+        items[vault.SERVICE + "\0SECRET_c12.part1." + gen] = "QUJD"
+        (self.dir / "items.json").write_text(json.dumps(items), encoding="utf-8")
+        with mock.patch.dict(os.environ, {"FAKE_SECURITY_FAIL_ADD": r"^SECRET_c13$"}):
+            with self.assertRaises(CodedError):
+                self.backend.put("SECRET_c13", random_text(9000))    # writer C stopped: its parts are orphans
+        self.backend.put("SECRET_c14", random_text(9000))            # writer B finished
+        self.assertTrue(mark.exists(), "writer B cleared the marker of writer A")
+        self.assertTrue(vault._parts_pending())
+        self.backend.remove_orphan_parts()
+        left = self.items()
+        self.assertIn(vault.SERVICE + "\0SECRET_c12.part1." + gen, left, "the sweep took a running put's part")
+        self.assertFalse([k for k in left if "SECRET_c13" in k])
+        self.assertTrue(mark.exists())
+        self.assertFalse(vault._parts_pending())                     # only a running put is left
+        os.utime(mark, (0, 0))                                       # writer A was stopped long ago
+        self.assertTrue(vault._parts_pending())
+        self.assertEqual(self.backend.remove_orphan_parts(), 1)
+        self.assertFalse(mark.exists())
 
     def test_the_full_sweep_and_the_repair_remove_orphan_parts(self):
         with mock.patch.dict(os.environ, {"FAKE_SECURITY_FAIL_ADD": r"^SECRET_c9$"}):
