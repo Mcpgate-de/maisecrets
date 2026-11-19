@@ -874,7 +874,33 @@ function pollNer($, left) {
 async function setNer($, value) {
   pane.nerSub = null
   const a = await loadNer($, { action: 'ner_set', value })
-  if (a && a.starting) { pane.starting = true; pollNer($, 24) }
+  if (a && a.starting) { pane.starting = true; pollNer($, 24); watchNerStart($) }
+}
+
+// the start of the local service that the person's choice began (ner_setup.start_typed): the status line says that it
+// loads until the service answers or the start ends, every 5 s, for at most NER_WATCH_ROUNDS
+const NER_LOADING = 'maisecrets: loading the name service (starting)'
+const NER_WATCH_ROUNDS = 180
+let nerWatching = false
+function watchNerStart($, left = NER_WATCH_ROUNDS) {
+  if (nerWatching && left === NER_WATCH_ROUNDS) return
+  nerWatching = true
+  try { $.ui.status(NER_LOADING) } catch { /* no status line */ }
+  const done = (text) => {
+    nerWatching = false
+    try { $.ui.status(undefined) } catch { /* no status line */ }
+    if (text) try { $.ui.toast(text, { timeoutMs: 8000 }) } catch { /* a note only */ }
+  }
+  try {
+    $.clock.after(5000, () => {
+      void askEntry($, { action: 'ner' }).then(a => {
+        if (a?.answers === true) return done('maisecrets: the name service runs and checks names now.')
+        if (a && a.starting !== true) return done('maisecrets: the name service did not start. /maisecrets:ner shows why.')
+        if (left <= 1) return done('maisecrets: the name service still loads. /maisecrets:ner shows its state.')
+        watchNerStart($, left - 1)
+      }).catch(() => done(null))
+    })
+  } catch { done(null) }
 }
 
 async function fillPrompt($, text) {
@@ -970,12 +996,6 @@ function drawNer($, e, Box, Text, Button) {
     h(Text, { dimColor: true, key: 'd' }, 'A service that finds names in tool results, after the rules.')]
   if (n.locked) {
     rows.push(h(Text, { bold: true, key: 'lk' }, `${n.source} ⚙  set by your admin`))
-  } else if (pane.nerSub === 'local') {
-    rows.push(h(Box, { marginTop: 1, key: 'lq' }, h(Text, { color: 'yellow' },
-      'local downloads the image mcpgate/ner (about 690 MB) and runs it on 127.0.0.1 only.')))
-    rows.push(h(Box, { flexDirection: 'row', key: 'lb' },
-      btn(Box, Button, 'start', 'start', () => setNer($, 'local'), { variant: 'primary' }),
-      btn(Box, Button, 'cancel', 'cancel', () => { pane.nerSub = null; $.ui.invalidate('ui.render') })))
   } else if (pane.nerSub === 'gateway') {
     rows.push(h(Box, { marginTop: 1, key: 'gq' }, h(Text, {}, 'The gateway of which MCP server?')))
     if (!n.servers.length) {
@@ -990,7 +1010,8 @@ function drawNer($, e, Box, Text, Button) {
       onPress, n.source === key ? { variant: 'primary' } : { dimColor: true })
     rows.push(h(Box, { flexDirection: 'row', flexWrap: 'wrap', marginTop: 1, key: 'src' },
       choice('off', 'off', () => setNer($, 'off')),
-      choice('local', 'local', () => { pane.nerSub = 'local'; $.ui.invalidate('ui.render') }),
+      // the press is the person's choice: it starts the service at once, and the note says how to stop it
+      choice('local', 'local', () => setNer($, 'local')),
       choice('url', 'url…', () => fillPrompt($, '/maisecrets:ner url ')),
       choice('gateway', n.source === 'gateway' && n.gateway_name ? `gateway: ${n.gateway_name}` : 'gateway…',
         () => { pane.nerSub = 'gateway'; $.ui.invalidate('ui.render') })))

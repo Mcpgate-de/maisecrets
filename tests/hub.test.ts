@@ -244,7 +244,7 @@ test('name service: the source as buttons, a gateway pick goes through the entry
   await done.unmount()
 })
 
-test('name service: local asks first and runs nothing before start', async ($, on) => {
+test('name service: local starts at once, with no question first (0.9.19)', async ($, on) => {
   const calls: any[] = []
   engine(on, calls, { placed: true })
   on('command.run', () => ({ text: 'engine' }))
@@ -255,10 +255,10 @@ test('name service: local asks first and runs nothing before start', async ($, o
   const n = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await n.press({ key: 'ner:local' })
   await n.unmount()
+  const sent = calls.map(c => JSON.parse(c.init.stdin || '{}')).filter(q => q.action === 'ner_set')
+  expect(sent.map(q => q.value)).toEqual(['local'])
   const q = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await q.find({ type: 'Text', text: /690 MB/ })).toBeDefined()
-  expect(calls.some(c => JSON.parse(c.init.stdin || '{}').action === 'ner_set')).toBe(false)
-  await q.press({ key: 'cancel' })
+  expect(await q.find({ key: 'start' })).toBeUndefined()
   await q.unmount()
 })
 
@@ -488,7 +488,7 @@ test('the panel opens with the focus on Close, and a forget asks with the focus 
   expect(calls.some(c => ['forget', 'forget_all'].includes(JSON.parse(c.init.stdin || '{}').action))).toBe(false)
 })
 
-test('the name service questions open on Back: local starts its download only on a press of start', async ($, on) => {
+test('the gateway question of the name service opens on Back, and a cancel sends nothing', async ($, on) => {
   const calls: any[] = []
   engine(on, calls, { placed: true })
   on('command.run', () => ({ text: 'engine' }))
@@ -496,7 +496,7 @@ test('the name service questions open on Back: local starts its download only on
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'names' })
   await ui.unmount()
-  for (const sub of ['ner:local', 'ner:gateway']) {
+  for (const sub of ['ner:gateway']) {
     const n = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect(await focused(n)).toEqual(['back'])
     await n.press({ key: sub })

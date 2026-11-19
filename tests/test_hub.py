@@ -3,6 +3,7 @@ typed path, no answer holds a stored value, and a tool call that names the entry
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -203,9 +204,18 @@ class NameServiceTests(unittest.TestCase):
         self.assertTrue(_user()["remote_detector"].get("url", "").startswith("https://gw.example.com"))
 
     def test_local_starts_the_container_in_the_background_with_a_fixed_command(self):
-        with mock.patch("subprocess.Popen") as popen:
+        from maisecrets import ner_setup
+        self.addCleanup(lambda: Path(HOME, ner_setup.START_PID).unlink(missing_ok=True))
+        with mock.patch("subprocess.Popen") as popen, mock.patch.dict(os.environ, {ner_setup.NO_START_ENV: "0"}), \
+                mock.patch.object(ner_setup, "container_tool", return_value="/usr/bin/docker"), \
+                mock.patch.object(ner_setup, "probe", return_value=(False, "")), \
+                mock.patch.object(ner_setup, "_alive", return_value=True), \
+                mock.patch.object(ner_setup, "stop_local", return_value=[]):
+            popen.return_value.pid = 4242
             out = ask(action="ner_set", value="local")
-        self.assertTrue(out.get("starting"))
+            self.assertTrue(out.get("starting"))
+        # no question first: the press is the person's choice, and the note says what happens and how to stop it
+        self.assertIn("To stop it: /maisecrets:ner off", out["note"])
         (call,) = [c for c in popen.call_args_list if "maisecrets.cli" in c.args[0]]
         self.assertEqual(call.args[0][1:], ["-m", "maisecrets.cli", "ner", "start"])
         self.assertTrue(call.kwargs.get("start_new_session"))

@@ -1118,7 +1118,10 @@ def cmd_ner(args: list[str]) -> int:
     for the service, after a start."""
     from . import ner_setup
     if args[:1] == ["start"]:
-        code, lines = ner_setup.start_local(load_config())
+        try:
+            code, lines = ner_setup.start_local(load_config())
+        finally:
+            ner_setup._end_start_file(os.getpid())     # a start in the background (start_typed) is over
         print("\n".join(lines))
         return code
     wait = 0.0

@@ -176,9 +176,9 @@ opens at once: no model turn, nothing goes to the AI. From top to bottom:
   `[ forget all… ]` deletes every stored value after its own question; the logs
   and records stay (the full wipe is `run.sh wipe --yes` in a terminal). The
   panel never shows a value.
-- **Name service.** The source as buttons: `off`, `local` (it asks first: the
-  image is about 690 MB and runs on 127.0.0.1 only; then it starts it and
-  shows `starting…`), `url…` (puts `/maisecrets:ner url ` into the prompt box
+- **Name service.** The source as buttons: `off`, `local` (it starts the
+  service at once and says so: the image is about 690 MB, 1 to 2 GB on disk,
+  and runs on 127.0.0.1 only; `off` stops the download and the service), `url…` (puts `/maisecrets:ner url ` into the prompt box
   for you to complete) and `gateway…` (the MCP servers of your configuration
   that have an https address; after a pick, `[ log in ]` puts
   `/maisecrets:sref login NAME` into the prompt box). Under them, the checks

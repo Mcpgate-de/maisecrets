@@ -517,7 +517,8 @@ def restart_local(conf) -> bool:
     if not tool:
         return False
     from . import ner_secret
-    if not ner_secret.container_of(ner_secret.endpoint(LOCAL_URL)):
+    recorded = bool(ner_secret.container_of(ner_secret.endpoint(LOCAL_URL)))
+    if not recorded:
         ok, _line = probe(conf, timeout=0.3)
         if ok:
             return False
@@ -531,7 +532,9 @@ def restart_local(conf) -> bool:
         flags = {"start_new_session": True}
     subprocess.Popen([sys.executable, "-I", "-c", _KEEP, root, tool], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **flags)
-    return True
+    # follow_pin never makes a first container (no download from a setting alone): without a container that
+    # maisecrets set up, the session start says the service is not running and names /maisecrets:ner local
+    return recorded
 
 
 # the container's share of this computer: without a limit the service starts one worker per core and can take the
@@ -697,6 +700,133 @@ def start_local(cfg: dict) -> tuple[int, list]:
                    "minutes). Run /maisecrets:ner again in a minute."]
 
 
+# the person's typed choice `ner local` starts the service at once, in the background (no question first, maintainer
+# decision for 0.9.19). Only a typed route does it: a setting of a policy or of an earlier session never starts a
+# download (the session start only starts a container that exists, follow_pin)
+TYPED_ROUTES = ("typed prompt", "slash command", "settings pane")
+START_NOTE = ("maisecrets: I am loading the name service mcpgate/ner (about 690 MB, 1 to 2 GB on disk) and starting "
+              "it on 127.0.0.1:8765 only. That takes a few minutes. To stop it: /maisecrets:ner off (it stops the "
+              "download and the service).")
+START_PID = "ner-start.pid"         # the background start: its process id, for /maisecrets:ner off
+START_LOG = "ner-start.log"
+START_MAX_S = 3600.0                # a pid file older than this is no start that runs (a pid can be used again)
+# the test suite sets it (tests/_isolate.py): a test that types `ner local` or `ner off` never starts or stops a real
+# container (docker may run on the machine of the tests)
+NO_START_ENV = "MAISECRETS_NO_CONTAINER_START"
+
+
+def _start_file():
+    from .vault import HOME
+    return HOME / START_PID
+
+
+def _alive(pid: int) -> bool:
+    if os.name == "nt":
+        try:
+            r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=10,
+                               **_quiet())
+            return str(pid) in r.stdout
+        except (OSError, subprocess.SubprocessError):
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def start_pid() -> int:
+    """The process id of a background start that runs now, or 0."""
+    try:
+        d = json.loads(_start_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    pid, t = (d.get("pid"), d.get("t")) if isinstance(d, dict) else (None, None)
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0 or not isinstance(t, (int, float)):
+        return 0
+    if time.time() - t > START_MAX_S or not _alive(pid):
+        return 0
+    return pid
+
+
+def start_typed(route: str) -> bool:
+    """The start after the person typed `ner local` (settings.apply_typed): the container in the background, as
+    `run.sh ner start`. True when a start runs now (this one or one before). Nothing starts for a route that is not
+    the person's typed choice, without docker or podman, or when the service answers already."""
+    if route not in TYPED_ROUTES or os.environ.get(NO_START_ENV) == "1":
+        return False
+    if start_pid():
+        return True
+    if not container_tool():
+        return False
+    ok, _line = probe({"url": LOCAL_URL}, timeout=0.3)
+    if ok:
+        return False
+    from .vault import HOME
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    flags = ({"creationflags": getattr(subprocess, "DETACHED_PROCESS", 0)
+              | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
+             else {"start_new_session": True})
+    try:
+        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with open(HOME / START_LOG, "w", encoding="utf-8") as f:
+            p = subprocess.Popen([sys.executable, "-m", "maisecrets.cli", "ner", "start"], cwd=root, stdout=f,
+                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **flags)
+        from .home import atomic_write
+        atomic_write(_start_file(), json.dumps({"pid": p.pid, "t": time.time()}) + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def _end_start_file(pid: int) -> None:
+    """The background start ends: its pid file goes (only its own, a newer start keeps its file)."""
+    try:
+        d = json.loads(_start_file().read_text(encoding="utf-8"))
+        if isinstance(d, dict) and d.get("pid") == pid:
+            _start_file().unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def stop_local() -> list:
+    """`ner off` typed by the person: the background start ends (its process group: the pull of the docker client
+    goes with it), a container `ner` that this start made halfway is removed, and the container that maisecrets set up
+    stops. A container of another image is left alone. The lines say what was done."""
+    lines = []
+    pid = start_pid()
+    if pid:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=30, **_quiet())
+            else:
+                import signal
+                os.killpg(pid, signal.SIGTERM)
+            lines.append("the download and start of the name service stopped")
+        except (OSError, subprocess.SubprocessError):
+            pass
+        _end_start_file(pid)
+    tool = container_tool() if os.environ.get(NO_START_ENV) != "1" else ""
+    if not tool:
+        return lines
+    from . import ner_secret
+    cid, running, image, _image_id = _inspect(tool, "ner")
+    if not cid or not _ours_image(image):
+        return lines
+    if cid != ner_secret.container_of(ner_secret.endpoint(LOCAL_URL)):
+        # made by the start that just ended, before it kept its secret: no one checks it, so it goes
+        if pid:
+            _docker(tool, "rm", "-f", cid, timeout=60)
+            lines.append("the half-made container ner was removed")
+        return lines
+    if running == "true":
+        _docker(tool, "stop", cid, timeout=60)
+        lines.append("the container ner stopped (/maisecrets:ner local starts it again)")
+    return lines
+
+
 def _start_local(cfg: dict, tool: str) -> tuple[int, list]:
     from . import ner_secret
     from .vault import make_backend
@@ -807,9 +937,15 @@ def report(conf, wait: float = 0.0, facts: dict | None = None) -> tuple[int, lis
     if local:
         tool = container_tool()
         facts["tool"] = os.path.basename(tool) if tool else ""
+        if tool and start_pid():
+            # the person's typed `ner local` started it (start_typed): no second start
+            facts["starting"] = True
+            lines.append("starting: maisecrets loads the image mcpgate/ner and starts it in the background; that takes "
+                         "a few minutes. /maisecrets:ner off stops it.")
+            return 1, lines
         if tool:
-            # commands/ner.md runs `run.sh ner start` on exit code 3 (a container with a secret, #1699)
-            lines.append(f"start: run.sh ner start (with {os.path.basename(tool)})")
+            # exit code 3: no start runs; only the person's typed `ner local` starts one (commands/ner.md)
+            lines.append(f"start: /maisecrets:ner local (with {os.path.basename(tool)})")
             return 3, lines
         lines.append("Neither docker nor podman is installed. Install one of them (Docker Desktop, OrbStack, Podman), "
                      f"then run: {START}. Or use a service of your team: /maisecrets:ner url URL. Or turn it off: "
