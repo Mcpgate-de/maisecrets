@@ -9,7 +9,9 @@ promises that README.md and PRIVACY.md make to users onto the missions. This scr
 - a mission without an invariant (only per-line proofs, no check over every path),
 - a documented control or invariant that no mission names, and beliefs that no part names,
 - a name in a mission or a belief that the threat model does not document, or a part glob that matches nothing,
-- a claim whose quote no longer stands in its source, and a bullet of a gated README section that no claim maps.
+- a claim whose quote no longer stands in its source, and a bullet of a gated README section that no claim maps,
+- each mission's measured number (`[measure]`: a source file, the row that holds it and its column, and the gate
+  that keeps its bound), or why it has none (`none`); a measure that cannot be read is a finding.
 
 Without --strict it only reports and exits 0. With --strict it exits 1 on a gap, an orphan control, an unknown name
 or a claim finding. Python 3.11+ (tomllib), like replay_can_fail.py.
@@ -78,6 +80,22 @@ def check_claims(root: Path, missions: set[str]) -> list[str]:
     return findings
 
 
+def read_measure(root: Path, measure: dict) -> tuple[float | None, str]:
+    """The newest value of a measure: the last table row of `source` that holds `row`, its `column` (1-based, as the
+    cells of a Markdown row split on "|"). (value, "") or (None, why)."""
+    path = root / measure.get("source", "")
+    if not path.is_file():
+        return None, f"source {measure.get('source')} not found"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    rows = [r for r in lines if r.startswith("|") and measure.get("row", "") in r]
+    if not rows:
+        return None, f"no row with {measure.get('row')!r} in {measure.get('source')}"
+    try:
+        return float(rows[-1].split("|")[int(measure["column"])]), ""
+    except (KeyError, IndexError, ValueError):
+        return None, f"column {measure.get('column')} of the last {measure.get('row')!r} row is no number"
+
+
 def analyse(root: Path):
     controls, invariants = documented((root / "docs" / "THREAT-MODEL.md").read_text(encoding="utf-8"))
     beliefs = {b["belief"]: b.get("control", "") for b in
@@ -86,6 +104,7 @@ def analyse(root: Path):
     served: set[str] = set()
     in_a_part: set[str] = set()
     r = {"missions": [], "gaps": [], "thin": [], "no_invariant": [], "orphans": [], "unknown": [], "claims": [],
+         "measures": [],
          "unowned_beliefs": Counter(),
          "undocumented_belief_controls": sorted({c for c in beliefs.values()
                                                  if c not in controls and c not in invariants})}
@@ -117,6 +136,17 @@ def analyse(root: Path):
                 r["thin"].append(f"{mid}.{i}: one belief: {part['says']}")
         if not m.get("part"):
             r["gaps"].append(f"{mid}: no part names a belief")
+        measure = m.get("measure") or {}
+        if measure.get("none"):
+            r["measures"].append(f"{mid}: none: {measure['none']}")
+        elif measure:
+            value, why = read_measure(root, measure)
+            if value is None:
+                r["unknown"].append(f"{mid}: the measure cannot be read: {why}")
+            else:
+                r["measures"].append(f"{mid}: {value} = {measure.get('what')} (bound: {measure.get('gate')})")
+        else:
+            r["unknown"].append(f"{mid}: no [measure], and no `none` that says why")
         r["missions"].append((mid, m["promise"], rows))
     for name in sorted(controls | invariants, key=lambda s: (s[0], int(s[1:]))):
         if name not in served:
@@ -140,6 +170,7 @@ def render(r) -> str:
                 ("unowned", "beliefs that no part names, by control", unowned),
                 ("unknown", "unknown names and empty globs", r["unknown"]),
                 ("claims", "claims of README.md and PRIVACY.md", r["claims"]),
+                ("measures", "the measured number of each mission", r["measures"]),
                 ("labels", "belief control labels that are no documented control",
                  r["undocumented_belief_controls"]))
     for _key, title, lines in sections:

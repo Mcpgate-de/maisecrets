@@ -11,6 +11,9 @@ to the mission that keeps it, a limit ("What it does not protect") to the missio
 function to none. Every bullet of the gated README sections must start with the quote of a claim, so a new
 or reworded promise turns the check red until it is mapped.
 
+Each mission names its measured number in `[measure]` (a source file, the row and column that hold it, and the
+gate that keeps its bound), or says in `none` why it has none: most promises are kept or broken, not a rate.
+
 M1 to M5 are derived from the controls (bottom-up); M6 comes from README.md and PRIVACY.md (top-down) and
 brought control C33 into the threat model.
 

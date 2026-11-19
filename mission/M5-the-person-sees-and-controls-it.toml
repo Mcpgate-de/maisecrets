@@ -17,3 +17,6 @@ beliefs = ["c13-*"]
 [[part]]
 says = "A stricter policy asks the person before a value leaves."
 beliefs = ["c16-*"]
+
+[measure]
+none = "no rate: each fault either blocks and names its cause or not (C13 beliefs)"

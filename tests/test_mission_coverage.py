@@ -70,11 +70,13 @@ def toml_list(xs):
     return "[" + ", ".join(f'"{x}"' for x in xs) + "]"
 
 
-def mission(mid, controls, invariants=(), parts=(("all", ["b*"]),)):
+def mission(mid, controls, invariants=(), parts=(("all", ["b*"]),), measure='none = "a yes or no"'):
     text = (f'mission = "{mid}"\npromise = "p"\ncontrols = {toml_list(controls)}\n'
             f'invariants = {toml_list(invariants)}\n')
     for says, beliefs in parts:
         text += f'\n[[part]]\nsays = "{says}"\nbeliefs = {toml_list(beliefs)}\n'
+    if measure is not None:
+        text += f'\n[measure]\n{measure}\n'
     return text
 
 
@@ -169,6 +171,22 @@ class MissionCoverageTests(unittest.TestCase):
                 root = self.tree(missions, beliefs, claims=claims)
                 self.assertEqual(quiet(mission_coverage.main, ["--root", str(root)]), 0)
                 self.assertEqual(quiet(mission_coverage.main, ["--strict", "--root", str(root)]), 1)
+
+    def test_a_measure_is_read_from_the_last_row_and_a_missing_one_is_named(self):
+        import mission_coverage
+        log = ("| Date | Source | Recall |\n|---|---|---|\n| d1 | holdout-v2 | 0.5 |\n| d2 | other | 0.1 |\n"
+               "| d3 | holdout-v2 | 0.7 |\n")
+        read = 'what = "recall"\nsource = "LOG.md"\nrow = "holdout-v2"\ncolumn = 3\ngate = "g"'
+        missions = {"M1-x": mission("M1", ["C1", "C2", "C3"], ["I1"], measure=read),
+                    "M2-y": mission("M2", [], parts=(("all", ["b*"]),), measure=None),
+                    "M3-z": mission("M3", [], parts=(("all", ["b*"]),),
+                                    measure=read.replace("holdout-v2", "holdout-v9"))}
+        root = self.tree(missions, ["C1", "C2", "C3", "I1"])
+        (root / "LOG.md").write_text(log, encoding="utf-8")
+        r = mission_coverage.analyse(root)
+        self.assertEqual(r["measures"], ["M1: 0.7 = recall (bound: g)"])
+        self.assertIn("M2: no [measure], and no `none` that says why", r["unknown"])
+        self.assertIn("M3: the measure cannot be read: no row with 'holdout-v9' in LOG.md", r["unknown"])
 
     def test_the_repository_maps_every_promise_and_names_only_documented_controls(self):
         import mission_coverage

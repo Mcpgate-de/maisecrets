@@ -41,3 +41,10 @@ beliefs = ["c19-*"]
 [[part]]
 says = "The leak audit (secret-hygiene) never shows the model a value it finds."
 beliefs = ["c17-*", "skill-*"]
+
+[measure]
+what = "Holdout V2 recall, strict: the share of values on the sealed holdout that the detection finds whole"
+source = "bench/HOLDOUT-LOG.md"
+row = "holdout-v2"
+column = 5
+gate = "scripts/release_gate.py --holdout: a release candidate may not fall below the last row"

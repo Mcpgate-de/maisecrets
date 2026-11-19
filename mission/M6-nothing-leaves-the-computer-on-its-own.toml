@@ -25,3 +25,6 @@ beliefs = ["c30-*"]
 [[part]]
 says = "The mod starts only hooks/dispatch.py, with a fixed command line and no shell, and makes no network request."
 beliefs = ["c33-the-mod-starts-only-the-plugins-dispatcher"]
+
+[measure]
+none = "the count of connections is zero or the promise is broken; the C33 beliefs check it"

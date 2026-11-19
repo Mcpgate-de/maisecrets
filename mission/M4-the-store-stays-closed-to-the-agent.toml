@@ -17,3 +17,6 @@ beliefs = ["c22-*", "c15-*", "c25-*"]
 [[part]]
 says = "A copy of the disk reveals no short value, and a value expires."
 beliefs = ["c10-*", "c12-*", "vault-*"]
+
+[measure]
+none = "a read of the store is refused or not; invariant I3 checks every tool and every spelling of the path"
