@@ -193,6 +193,7 @@ class MissionCoverageTests(unittest.TestCase):
         r = mission_coverage.analyse(ROOT)
         self.assertGreaterEqual(len(r["missions"]), 1, "a population test must fail on an empty population")
         self.assertEqual(r["unknown"], [])
+        self.assertEqual(r["gaps"], [], "every part of a mission rests on a belief that can fail")
         self.assertEqual(r["orphans"], [], "a documented control must serve a mission")
         self.assertEqual(r["claims"], [], "every promise of README.md and PRIVACY.md maps to a mission")
 

@@ -20,5 +20,7 @@ brought control C33 into the threat model.
     python3 scripts/mission_coverage.py            # report
     python3 scripts/mission_coverage.py --strict   # exit 1 on a gap, an orphan, an unknown name or a claim
 
-The beliefs prove that each test can fail; this layer shows which promise each belief serves. It is not a CI
-gate yet.
+The beliefs prove that each test can fail; this layer shows which promise each belief serves.
+`tests/test_mission_coverage.py` runs the strict check on the repository in CI: a gap, an orphan control, an
+unknown name or a claim finding turns it red. A thin part, a mission without an invariant and the measures are
+reported only.
