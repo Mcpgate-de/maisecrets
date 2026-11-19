@@ -81,6 +81,8 @@ class RefusedTests(unittest.TestCase):
                S.Entry(run + "run.json", "100755", False), S.Entry(run + "tool.py", "100644", False),
                S.Entry(run + "table.csv", "100644", False), S.Entry(run + "x.json", "100644", True, b"MZ\0\0"),
                S.Entry(run + "fake.json.gz", "100644", True, b"PK\x03\x04"),
+               # text that git does not call binary, under a gzip name
+               S.Entry(run + "text.json.gz", "100644", False, b"not "), S.Entry(run + "empty.json.gz", "100644", False),
                S.Entry("docs/coverage.json", "100644", True, b"\0\0"), S.Entry(CODE, "100644", False),
                S.Entry(".gitlab-ci.yml", "100644", False)]
         got = S.refused(bad)
@@ -119,11 +121,14 @@ class CheckTests(unittest.TestCase):
             self.assertEqual(check(base).returncode, 1, "no change is no class")
             write(RESULT, b"b\n")
             write("bench/results/2026-11-19-v3-0.9.18/measured.json.gz", GZ + b"\0\0data")
+            # the magic bytes and no NUL byte: git calls it text, and the guard reads its head all the same
+            write("bench/results/2026-11-19-v3-0.9.18/small.json.gz", b"\x1f\x8b\x08\x08abc")
             commit("result")
             done = check(base)
             self.assertEqual(done.returncode, 0, done.stdout)
             step = git("rev-parse", "HEAD")
             for rel, data, why in (("bench/results/2026-11-19-v3-0.9.18/x.json", b"MZ\0\0\0", "binary"),
+                                   ("bench/results/2026-11-19-v3-0.9.18/t.json.gz", b"not gzip text\n", "magic"),
                                    (".gitlab-ci.yml", b"b\n", "no measurement result")):
                 write(rel, data)
                 commit(rel)

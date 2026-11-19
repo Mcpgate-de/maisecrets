@@ -27,7 +27,10 @@ class TreeTypesTests(unittest.TestCase):
         bad = [("120000", "bench/results/x/link.json", b""), ("160000", "vendor/sub", b""),
                ("100644", "maisecrets/blob.bin", b"MZ\0\0"), ("100644", "bench/results/x/a.json", b"{\0"),
                ("100644", "bench/results/x/fake.json.gz", b"PK\0\0"), ("100644", "maisecrets/icon.png", PNG),
-               ("100644", "assets/icon.png", GZ), ("100664", "README.md", b"text")]
+               ("100644", "assets/icon.png", GZ), ("100664", "README.md", b"text"),
+               # text under a gzip or PNG name: no NUL byte, and still no gzip or PNG
+               ("100644", "bench/results/x/text.json.gz", b"not gzip text\n"), ("100644", "assets/icon.png", b"x"),
+               ("100644", "bench/results/x/empty.json.gz", b"")]
         self.assertEqual(len(T.problems(bad)), len(bad), T.problems(bad))
 
     def test_data_binaries_and_text_pass(self):

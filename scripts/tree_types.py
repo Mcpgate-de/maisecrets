@@ -28,8 +28,11 @@ def problems(entries: list[tuple[str, str, bytes]]) -> list[str]:
         if mode not in MODES:
             kind = {"120000": "a symlink", "160000": "a submodule"}.get(mode, f"mode {mode}")
             out.append(f"{path}: {kind}")
+        elif any(rx.fullmatch(path) and not head.startswith(magic) for rx, magic in BINARY_OK):
+            # a .gz result or a .png icon has the magic bytes of its type, also when it holds no NUL byte
+            out.append(f"{path}: no {path.rsplit('.', 1)[-1]} content (magic bytes)")
         elif b"\0" in head[:8000]:
-            if not any(rx.fullmatch(path) and head.startswith(magic) for rx, magic in BINARY_OK):
+            if not any(rx.fullmatch(path) for rx, _ in BINARY_OK):
                 out.append(f"{path}: a binary file")
     return out
 

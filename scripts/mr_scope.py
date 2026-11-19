@@ -44,7 +44,7 @@ class Entry(NamedTuple):
     path: str
     mode: str            # the new mode; 000000 for a deleted entry
     binary: bool         # git diff --numstat shows "-"
-    head: bytes = b""    # the first bytes of the new blob of a binary entry
+    head: bytes = b""    # the first bytes of the new blob of a binary entry or a .gz file
 
 
 def _plain(path: str) -> bool:
@@ -76,7 +76,10 @@ def refused(entries: list[Entry]) -> list[str]:
         elif e.path.startswith(tuple(d + "/" for d in RESULT_DIRS)) and not (
                 e.path.endswith(RESULT_SUFFIXES) or e.path.rsplit("/", 1)[-1] in RESULT_NAMES):
             out.append(f"{e.path}: a file type that no baseline holds ({', '.join(RESULT_SUFFIXES + RESULT_NAMES)})")
-        elif e.binary and not (e.path.endswith(".gz") and e.head.startswith(GZIP)):
+        elif e.path.endswith(".gz") and not e.head.startswith(GZIP):
+            # also when git sees text: a .gz file is a gzip result or nothing
+            out.append(f"{e.path}: a .gz file without the gzip magic bytes")
+        elif e.binary and not e.path.endswith(".gz"):
             out.append(f"{e.path}: a binary file that is no gzip result")
     return out
 
@@ -100,7 +103,7 @@ def entries(base: str, head: str = "HEAD") -> list[Entry]:
         _, new_mode, _, new_sha, _ = meta[1:].decode().split(" ")
         name = path.decode("utf-8", "replace")
         blob = b""
-        if name in binary and new_mode != "000000":
+        if (name in binary or name.endswith(".gz")) and new_mode != "000000":
             blob = _git("cat-file", "blob", new_sha)[:4]
         out.append(Entry(name, new_mode, name in binary, blob))
     return out
