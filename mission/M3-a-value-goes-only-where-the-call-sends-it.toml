@@ -8,6 +8,8 @@ ends = "The destination of an allowed call, which may pass the value on; a perso
 
 [[part]]
 says = "A placeholder or a reference resolves only in the session that received it."
+# the twin: tests/test_twin_session_rule.py (a model of this sentence against the real hooks; belief
+# c4-a-tool-result-admits-only-the-values-it-holds)
 beliefs = ["c4-*", "c31-a-reference-resolves-only-in-the-session-that-received-it",
            "c31-a-reference-no-session-received-stops-the-command"]
 
