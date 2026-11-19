@@ -223,6 +223,15 @@ after `maisecrets:` that is no command name (`maisecrets: why …`) is an
 ordinary prompt. In Codex, in `claude -p` and without the mod, the prompt
 hook answers these commands as before.
 
+A command after `/maisecrets` with a space (the Tab completion of `/maise`
+gives `/maisecrets` and a space) or with a mistyped name (`/maisecrets stauts`)
+does not go to the AI. maisecrets puts the command with its colon into the
+input box and says so in one line, for example `maisecrets: I put
+/maisecrets:status into the input box. Press Enter to run it, or clear the
+box.` For `demo on` the line adds that the demo starts only in a new session.
+A word that is near no command name (at most two letters wrong) opens the
+panel with a line that names the commands.
+
 ### Settings you decide
 
 Without the panel (Codex, `claude -p`, a client without the mod),

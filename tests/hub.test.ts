@@ -366,7 +366,8 @@ test('a maisecrets command typed after /maisecrets with a space goes into the bo
   filled.length = 0
   const r = await $.prompt.submit({ text: '/maisecrets sref login', wait: false, origin: { kind: 'composer' },
     command: { name: 'maisecrets', args: 'sref login' } })
-  expect(r.drop).toBe('Did you mean /maisecrets:sref login? Press Enter.')
+  expect(r.drop).toBe('maisecrets: I put /maisecrets:sref login into the input box. Press Enter to run it, or clear '
+    + 'the box.')
   await settle()
   expect(filled).toContain('/maisecrets:sref login')
   expect(calls.length).toBe(0)
@@ -377,8 +378,39 @@ test('a command that no person typed gets the same answer from the menu command'
   filled.length = 0
   on('command.run', () => ({ text: 'engine' }))
   const r = await $.command.run({ command: 'maisecrets', args: 'not-a-secret SECRET_c1' } as any)
-  expect(r.text).toBe('Did you mean /maisecrets:not-a-secret SECRET_c1? Press Enter.')
+  expect(r.text).toBe('maisecrets: I put /maisecrets:not-a-secret SECRET_c1 into the input box. Press Enter to run it, '
+    + 'or clear the box.')
   expect(filled).toContain('/maisecrets:not-a-secret SECRET_c1')
+})
+
+// a mistyped command name: the closest command goes into the box, and the note says so; the demo adds where it starts
+test('a mistyped command after /maisecrets goes into the box as the closest command, with a note', async ($, on) => {
+  const calls: any[] = []
+  engine(on, calls, { placed: true })
+  filled.length = 0
+  const r = await $.prompt.submit({ text: '/maisecrets stauts all', wait: false, origin: { kind: 'composer' },
+    command: { name: 'maisecrets', args: 'stauts all' } })
+  expect(r.drop).toBe('maisecrets: I put /maisecrets:status all into the input box. Press Enter to run it, or clear '
+    + 'the box.')
+  await settle()
+  expect(filled).toContain('/maisecrets:status all')
+  expect(calls.length).toBe(0)
+  filled.length = 0
+  const d = await $.command.run({ command: 'maisecrets', args: 'deom on' } as any)
+  expect(d.text).toBe('maisecrets: I put /maisecrets:demo on into the input box. Press Enter to run it, or clear the '
+    + 'box. The demo starts only in a new session (or after /clear).')
+  expect(filled).toContain('/maisecrets:demo on')
+})
+
+test('a word near no command, or near two, is no suggestion: the panel says it is no command', async ($, on) => {
+  engine(on, [], { placed: true })
+  on('command.run', () => ({ text: 'engine' }))
+  filled.length = 0
+  for (const word of ['wibble', 'st', 'zzzzzz']) {
+    const r = await $.command.run({ command: 'maisecrets', args: word } as any)
+    expect(r.text).toBeUndefined()
+  }
+  expect(filled.filter(f => f.startsWith('/maisecrets:'))).toEqual([])
 })
 
 test('/maisecrets with a word that is no command opens the panel with a line that says so', async ($, on) => {

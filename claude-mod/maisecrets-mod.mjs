@@ -695,6 +695,36 @@ function meantCommand(text) {
   if (!m || !COMMANDS.includes(m[1].toLowerCase())) return null
   return `/maisecrets:${m[1].toLowerCase()}${m[2].replace(/\s+$/, '')}`
 }
+// the number of single-letter changes (insert, delete, replace, swap of two neighbours) from a to b
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+      }
+    }
+  }
+  return d[a.length][b.length]
+}
+// `/maisecrets stauts`: the one command name closest to a mistyped word (at most 2 changes, 1 for a short word), as
+// `/maisecrets:status REST`; null for a known name, a word near none or near two
+function nearCommand(text) {
+  const m = SPACED_CMD.exec(typeof text === 'string' ? text : '')
+  if (!m) return null
+  const word = m[1].toLowerCase()
+  if (COMMANDS.includes(word) || word.length < 3 || word.length > 20) return null
+  const most = word.length < 5 ? 1 : 2
+  const near = COMMANDS.map(c => [c, editDistance(word, c)]).filter(([, n]) => n <= most).sort((x, y) => x[1] - y[1])
+  if (!near.length || (near.length > 1 && near[1][1] === near[0][1])) return null
+  return `/maisecrets:${near[0][0]}${m[2].replace(/\s+$/, '')}`
+}
+// what the person reads when a command went into the input box: what happened, and how to go on
+const NEW_SESSION = /^\/maisecrets:demo\s+on\b/i
+const filledNote = (command) => `maisecrets: I put ${command} into the input box. Press Enter to run it, or clear ` +
+  'the box.' + (NEW_SESSION.test(command) ? ' The demo starts only in a new session (or after /clear).' : '')
 const firstWord = (args) => (typeof args === 'string' ? args.trim().split(/\s+/)[0] : '') || ''
 const unknownLine = (word) => `"${word.slice(0, 40)}" is no maisecrets command. Try: status, settings, ner, ` +
   'sref login, list, forget, term, audit, rules, put, send.'
@@ -1148,12 +1178,13 @@ function registerSettingsPane(on) {
   // command file: the typeahead would turn it into the first /maisecrets:… command on Enter)
   on('command.run', { command: 'maisecrets' }, async ($, e) => {
     const t0 = await $.clock.now()
-    // `/maisecrets sref login` that no person's prompt brought (the prompt.submit hook drops a person's): the box
-    // gets the command with its colon
-    const meant = meantCommand(`/maisecrets ${e?.args ?? ''}`)
+    // `/maisecrets sref login` that no person's prompt brought (the prompt.submit hook drops a person's), or a
+    // mistyped name: the box gets the command with its colon, and the person decides
+    const spaced = `/maisecrets ${e?.args ?? ''}`
+    const meant = meantCommand(spaced) ?? nearCommand(spaced)
     if (meant) {
       try { await $.prompt.fill({ text: meant }) } catch { /* the line names it */ }
-      return { text: `Did you mean ${meant}? Press Enter.` }
+      return { text: filledNote(meant) }
     }
     const word = firstWord(e?.args)
     pane.hint = word ? unknownLine(word) : null
@@ -1181,14 +1212,12 @@ export function register(on) {
     }
     if (!PERSON.has(e.origin?.kind)) return next(e)
     afterPrompt($, e.text)
-    const meant = meantCommand(e.text)
+    const meant = meantCommand(e.text) ?? nearCommand(e.text)
     if (meant) {
       // the engine puts a dropped prompt back into the box: the corrected command goes there once the drop landed.
       // The person's Enter sends it, so a command that wants the person's own prompt still gets it
-      try {
-        $.clock.after(60, () => { void $.prompt.fill({ text: meant }).catch(() => {}) })
-      } catch { /* the line names it */ }
-      return { drop: `Did you mean ${meant}? Press Enter.` }
+      fillSoon($, meant)
+      return { drop: filledNote(meant) }
     }
     const asked = SETTINGS_CMD.exec(e.text)
     if (asked) {
