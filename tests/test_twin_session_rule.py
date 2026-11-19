@@ -8,9 +8,8 @@ Claude session admits nothing; `forget` ends a placeholder everywhere, and the s
 
 Generated sequences of these events run through the real hooks and against the model, and each use of a
 placeholder (a Write that names it) must resolve exactly when the model says so. The beliefs prove that each guard
-can fail alone; this test checks the whole path against the promise, as the method of a "digital twin" does
-(issue #77). A failure prints the seed and the steps, so the sequence replays (MAISECRETS_TWIN_SEED,
-MAISECRETS_TWIN_SEQUENCES).
+can fail alone; this test checks the whole path against the promise, as a model-based test does. A failure prints
+the seed and the steps, so the sequence replays (MAISECRETS_TWIN_SEED, MAISECRETS_TWIN_SEQUENCES).
 
 Measured when it was written (2026-11-19): 400 sequences of 24 steps agree with the hooks. Of four injected
 defects it caught three (a tool result admits no session; forget keeps the fingerprint; a tool result admits
