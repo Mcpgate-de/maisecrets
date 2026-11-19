@@ -223,6 +223,35 @@ after `maisecrets:` that is no command name (`maisecrets: why …`) is an
 ordinary prompt. In Codex, in `claude -p` and without the mod, the prompt
 hook answers these commands as before.
 
+With the mod, the commands that only show something or run one maisecrets
+step also run without the AI, when you type them yourself (or send them
+through Remote Control): `/maisecrets:status` (and `status all`), `list`,
+`audit`, `rules`, `term` (the lists), `sref` (`status`, `login NAME`, `logout
+NAME`), `ner` (and `ner all`; after a change such as `ner local`), `settings
+KEY` and `settings KEY VALUE`, `forget KEY`, `put`, `shortcut`, `guard`,
+`report` and `send`. The prompt hook checks the command first, exactly as for
+the command file: a value in the arguments blocks it, and a settings or `ner`
+change is made there. Then the mod runs the maisecrets command itself, in the
+background, and the input box is free at once. The output opens in a panel
+(Esc closes it); where no panel can open, it stands above the prompt. The
+output holds no value, and it never goes to the AI.
+
+- `/maisecrets:sref login NAME` opens the browser at once. While the login
+  waits for your consent (up to 110 seconds), the status line says
+  `maisecrets: waiting for your consent in the browser (NAME)`, and you can
+  go on working. At the end a note says `maisecrets: logged in at NAME`, or
+  why the login did not complete. A second login while one waits starts
+  nothing.
+- `/maisecrets:ner` and its changes open the name-service view of the panel.
+- `/maisecrets:send` puts the cleaned prompt into the input box: press Enter
+  to send it.
+- `/maisecrets:status test` keeps its old way: its test value comes only from
+  the hook of a tool call, and the test proves the path of the tool output.
+
+The form with a space, such as `/maisecrets sref login NAME`, runs the same.
+In Codex, in `claude -p` and without the mod, each command runs through its
+command file, as before.
+
 ### Settings you decide
 
 Without the panel (Codex, `claude -p`, a client without the mod),

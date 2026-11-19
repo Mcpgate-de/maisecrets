@@ -359,7 +359,8 @@ test('the panel asks for the status again when it takes the keys back', async ($
   await ui.unmount()
 })
 
-// `/maisecrets sref login`, typed with a space: the command with its colon goes into the box, and nothing is sent
+// `/maisecrets sref login`, typed with a space: when the prompt check gives no answer, the command with its colon goes
+// into the box, and nothing is sent (with an answer it runs as the colon form: tests/mod.test.ts)
 test('a maisecrets command typed after /maisecrets with a space goes into the box with its colon', async ($, on) => {
   const calls: any[] = []
   engine(on, calls, { placed: true })
@@ -369,7 +370,8 @@ test('a maisecrets command typed after /maisecrets with a space goes into the bo
   expect(r.drop).toBe('Did you mean /maisecrets:sref login? Press Enter.')
   await settle()
   expect(filled).toContain('/maisecrets:sref login')
-  expect(calls.length).toBe(0)
+  // only the questions of the prompt were asked (they failed here); no entry ran
+  expect(calls.every(c => ['mod-prompt', 'mod-demo'].includes(c.argv[c.argv.length - 1]))).toBe(true)
 })
 
 test('a command that no person typed gets the same answer from the menu command', async ($, on) => {
