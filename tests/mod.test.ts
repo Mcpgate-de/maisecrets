@@ -718,17 +718,26 @@ test('a command with a value goes into the box masked, and with no check nothing
   // claude -p: the line names the masked form
   const p = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind: 'sdk' } })
   expect(p.drop).toBe(`maisecrets: send ${MASKED} with the colon to run it. Nothing was sent.`)
-  // no answer, an answer that is no command, or one with a line break: nothing goes into the box, nothing is sent
-  for (const fail of [() => ({ value: { exitCode: 1, stderr: 'boom', stdout: '' } }),
+  // no answer (a failed start, a refused one, an exit code), an answer that is no command or one with a line break:
+  // nothing is sent, and the box is emptied, because the engine puts the dropped text (maybe with a value) back
+  for (const fail of [() => ({ value: { exitCode: 1, stderr: 'boom', stdout: '' } }), () => ({ deny: 'cannot start' }),
     () => own({ masked: 'echo hi', count: 0 }), () => own({ masked: '/maisecrets:status\nx', count: 0 }),
-    () => own({})]) {
+    () => own({}), () => ({ value: { exitCode: 0, stderr: '', stdout: 'not json' } })]) {
     seen.answer = (q) => (q.fill_check === true ? fail() : own({}))
+    for (const kind of ['composer', 'bridge']) {
+      seen.filled.length = 0
+      seen.downstream = 0
+      const r = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind } })
+      expect(r.drop).toBe('maisecrets could not check the text, so it removed it from the input box. Type it again.')
+      await settleFill()
+      expect(seen.filled).toEqual([''])
+      expect(seen.downstream).toBe(0)
+    }
+    // claude -p has no box: nothing to empty, and the line says that nothing was sent
     seen.filled.length = 0
-    seen.downstream = 0
-    const r = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind: 'composer' } })
-    expect(r.drop).toBe('maisecrets could not check this command. Nothing was sent; type it again with the colon.')
+    const s = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind: 'sdk' } })
+    expect(s.drop).toBe('maisecrets could not check this command. Nothing was sent; type it again with the colon.')
     await settleFill()
     expect(seen.filled).toEqual([])
-    expect(seen.downstream).toBe(0)
   }
 })

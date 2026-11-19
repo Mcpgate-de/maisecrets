@@ -746,12 +746,19 @@ async function checkFill($, text, origin) {
   return a?.maisecrets === MARK && typeof a.masked === 'string' && a.masked.startsWith('/maisecrets:') &&
     !/[\r\n]/.test(a.masked) ? a : null
 }
-const FILL_FAILED = 'maisecrets could not check this command. Nothing was sent; type it again with the colon.'
+const CHECK_FAILED = 'maisecrets could not check this command. Nothing was sent; type it again with the colon.'
+// the engine puts a dropped prompt back into the box: a text that could not be checked may hold a value, so the box is
+// emptied once the drop landed (Gate A round 2 of !591)
+const FILL_FAILED = 'maisecrets could not check the text, so it removed it from the input box. Type it again.'
 const maskedNote = (a) => (Number(a.count) > 0 ? ` maisecrets masked ${Number(a.count)} value(s) in it.` : '')
 // the drop of a person's prompt whose command goes into the box (or, without a box, is named): the masked form only
 async function offer($, e, command) {
   const a = await checkFill($, command, e.origin?.kind)
-  if (!a) return { drop: FILL_FAILED }
+  if (!a) {
+    if (e.origin?.kind === 'sdk') return { drop: CHECK_FAILED }     // no box (claude -p, an SDK host)
+    fillSoon($, '')
+    return { drop: FILL_FAILED }
+  }
   if (e.origin?.kind === 'sdk') return { drop: typeNote(a.masked) }
   fillSoon($, a.masked)
   return { drop: filledNote(a.masked) + maskedNote(a) }
@@ -1215,7 +1222,7 @@ function registerSettingsPane(on) {
     const meant = meantCommand(spaced) ?? nearCommand(spaced)
     if (meant) {
       const a = await checkFill($, meant, e?.origin?.kind)
-      if (!a) return { text: FILL_FAILED }
+      if (!a) return { text: CHECK_FAILED }      // a command run: nothing was put into the box
       try { await $.prompt.fill({ text: a.masked }) } catch { /* the line names it */ }
       return { text: filledNote(a.masked) + maskedNote(a) }
     }

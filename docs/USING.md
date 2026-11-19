@@ -235,7 +235,8 @@ the colon. maisecrets puts that form into the input box and says so in one
 line, for example `maisecrets: I put /maisecrets:status into the input box.
 Press Enter to run it, or clear the box.` Before that, it masks each value in
 the command, as it does for a prompt, so the box never gets a value back; the
-line then adds how many it masked. The prompt hook checks the command again
+line then adds how many it masked. If it cannot check the command, it empties
+the box and says so. The prompt hook checks the command again
 when you send it. For `demo on` the line adds that the demo starts only in a
 new session. A mistyped name gets the closest command the same way, but only
 for the commands that only show something (`status`, `list`, `audit`,
