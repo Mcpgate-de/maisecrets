@@ -67,10 +67,15 @@ def check_claims(root: Path, missions: set[str]) -> list[str]:
     claims = tomllib.loads(path.read_text(encoding="utf-8")).get("claim", [])
     findings: list[str] = []
     texts: dict[str, str] = {}
+    if not isinstance(claims, list) or not all(isinstance(c, dict) for c in claims):
+        return ["mission/claims.toml: claim is not a list of [[claim]] tables"]
     for c in claims:
+        if not isinstance(c.get("quote", ""), str) or not isinstance(c.get("source", ""), str):
+            findings.append(f"claim with a quote or a source that is no text: {c.get('quote')!r}"[:90])
+            c["quote"], c["source"] = "", str(c.get("source", ""))
         src, quote, kind = c.get("source", ""), flat(c.get("quote", "")), c.get("kind")
         if src not in texts:
-            texts[src] = (root / src).read_text(encoding="utf-8") if (root / src).exists() else ""
+            texts[src] = (root / src).read_text(encoding="utf-8") if src and (root / src).is_file() else ""
         if not quote or quote not in flat(texts[src]):
             findings.append(f"claim not found in {src}: {quote[:70]}")
         if kind not in KINDS:
@@ -79,7 +84,7 @@ def check_claims(root: Path, missions: set[str]) -> list[str]:
             findings.append(f"claim names no existing mission ({c.get('mission')}): {quote[:50]}")
     for src, section in GATED_SECTIONS:
         if src not in texts:
-            texts[src] = (root / src).read_text(encoding="utf-8") if (root / src).exists() else ""
+            texts[src] = (root / src).read_text(encoding="utf-8") if src and (root / src).is_file() else ""
         found = bullets(texts[src], section)
         if not found:
             # a renamed section, or one whose bullets moved, would end its gate without a word
@@ -124,6 +129,16 @@ def analyse(root: Path):
             if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
                 typed.append(f"{m['mission']}: {key} is not a list of names")
                 m[key] = [x for x in value if isinstance(x, str)] if isinstance(value, list) else []
+        if not isinstance(m.get("promise"), str):
+            typed.append(f"{m['mission']}: promise is not a sentence")
+            m["promise"] = ""
+        if not isinstance(m.get("measure", {}), dict):
+            typed.append(f"{m['mission']}: measure is not a [measure] table")
+            m["measure"] = {}
+        found = m.get("part", [])
+        if not isinstance(found, list) or not all(isinstance(x, dict) for x in found):
+            typed.append(f"{m['mission']}: part is not a list of [[part]] tables")
+            m["part"] = [x for x in found if isinstance(x, dict)] if isinstance(found, list) else []
     served: set[str] = set()
     # part id -> the controls, invariants and labels its mission names (a belief labelled "operations" or "detector"
     # serves a part only when its mission names that label in `labels`)

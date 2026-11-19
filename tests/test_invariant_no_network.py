@@ -20,8 +20,15 @@ import _isolate  # noqa: E402,F401  first: no client environment, a temp home an
 
 SOURCES = ("maisecrets", "hooks", "skills")
 NETWORK = {"socket", "ssl", "http.client", "http.server", "urllib.request", "socketserver", "ftplib", "smtplib",
-           "imaplib", "poplib", "telnetlib", "xmlrpc.client", "xmlrpc.server", "asyncio", "webbrowser", "requests",
-           "httpx", "urllib3", "aiohttp", "websocket", "websockets"}
+           "imaplib", "poplib", "telnetlib", "xmlrpc.client", "xmlrpc.server", "webbrowser", "requests",
+           "httpx", "httpcore", "urllib3", "aiohttp", "websocket", "websockets", "pycurl", "paramiko", "grpc", "zmq",
+           "asyncio.open_connection", "asyncio.start_server", "asyncio.open_unix_connection",
+           "asyncio.start_unix_server"}
+# the same calls through `import asyncio` (asyncio.open_connection(...)), and the network methods of an event loop
+NETWORK_CALLS = {"asyncio.open_connection", "asyncio.start_server", "asyncio.open_unix_connection",
+                 "asyncio.start_unix_server"}
+LOOP_NETWORK = {"create_connection", "create_server", "create_datagram_endpoint", "create_unix_connection",
+                "create_unix_server", "sock_connect"}
 PROCESS = {"subprocess", "multiprocessing", "pty", "concurrent.futures.process",
            "concurrent.futures.ProcessPoolExecutor"}
 # the calls that start a program, by their full name
@@ -53,13 +60,13 @@ MAY_START = {
     "hooks/guard.py": (6, "the clipboard tool, with the restart command"),
     "maisecrets/codex_helper.py": (5, "ps, for the parent process"),
     "maisecrets/file_reads.py": (27, "a text extractor for a PDF, ps and ldd"),
-    "maisecrets/hooks.py": (58, "the clipboard tool (read, write), and Python children: a later transcript scrub, "
+    "maisecrets/hooks.py": (40, "the clipboard tool (read, write), and Python children: a later transcript scrub, "
                                "the server of a value through a FIFO, the scrub of a failed prompt"),
     "maisecrets/ner_setup.py": (36, "the container tool of the name service the person set up, its keeper, and its "
                                     "typed start"),
     "maisecrets/sref_client.py": (5, "a Python child that serves a gateway value through a FIFO"),
     "maisecrets/user_rules.py": (6, "a Python child that checks a rule of the person"),
-    "maisecrets/vault.py": (54, "the tool of the operating system's store"),
+    "maisecrets/vault.py": (34, "the tool of the operating system's store"),
     "skills/secret-hygiene/scripts/_detector.py": (2, "worker processes of the scan, and git log for the history"),
     "skills/secret-hygiene/scripts/protection_status.py": (6, "Python and claude plugin list, for the status"),
     "skills/secret-hygiene/scripts/redact_copy.py": (3, "git rev-parse"),
@@ -73,10 +80,11 @@ NAMES_ONLY = {"maisecrets/incidents.py": "names subprocess.TimeoutExpired"}
 MOD_MEMBERS = {"clock", "command", "env", "plugin", "process", "prompt", "session", "state", "store", "ui"}
 MOD_GLOBALS = {"crypto"}
 MOD_PROCESS_RUNS = 9     # each $.process.run( or $.process.spawn(; any other use of $.process is a finding
+MEMBER = r"\$\s*\??\.\s*"  # $. and $?. and $ on one line with .x on the next
 MOD_FORBIDDEN = (r"\bfetch\b", r"\bXMLHttpRequest\b", r"\bWebSocket\b", r"\bEventSource\b", r"\bnavigator\b",
                  r"\bwindow\b", r"\bimport\s*\(", r"\brequire\s*\(", r"^\s*import\s", r"\bchild_process\b",
-                 r"\$\s*\[", r"(?:^|[^}\s])\s*=\s*\$\s*(?:[;\n,)]|$)", r"\bglobalThis\s*\[",
-                 r"\$\.process(?!\.(?:run|spawn)\s*\()", r"\}\s*\}\s*=\s*\$(?![\w.])")
+                 r"\$\s*\??\.?\s*\[", r"(?:^|[^}\s])\s*=\s*\$\s*(?:[;\n,)]|$)", r"\bglobalThis\s*\??\.?\s*\[",
+                 r"\$\s*\??\.\s*process(?!\s*\??\.\s*(?:run|spawn)\s*\()")
 
 
 def modules():
@@ -127,6 +135,10 @@ def imports(tree, libs):
 
     names = bindings(tree)
     for node in ast.walk(tree):
+        if libs is NETWORK and isinstance(node, ast.Attribute):
+            f = full_name(node, names)
+            if f in NETWORK_CALLS or (f is None and node.attr in LOOP_NETWORK):
+                found.add(f or f"<loop>.{node.attr}")
         if isinstance(node, ast.Import):
             for a in node.names:
                 hit(a.name)
@@ -178,26 +190,41 @@ def program_starts(tree):
             yield n
             n = n.value if isinstance(n, ast.Attribute) else n.func if isinstance(n, ast.Call) else None
 
+    # the names each function binds itself (parameters, assignments): such a name is a local, not a wrapper
+    owner, local = {}, {}
+    for f in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))]:
+        a = f.args
+        local[id(f)] = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x} | \
+            {x.id for x in ast.walk(f) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store)}
+        for x in ast.walk(f):
+            owner[id(x)] = id(f)        # ast.walk is outer first, so the innermost function wins
+
+    def a_wrapper(m, wrappers):
+        if isinstance(m, ast.Name):
+            return m.id in wrappers and m.id not in local.get(owner.get(id(m)), ())
+        return isinstance(m, ast.Attribute) and m.attr in wrappers and (m.attr.startswith("_") or (
+            isinstance(m.value, ast.Name) and m.value.id in ("self", "cls")))
+
     def refs(node, wrappers):
         out = 0
         for n in ast.walk(node):
             if not isinstance(n, (ast.Name, ast.Attribute)) or not isinstance(n.ctx, ast.Load) or continued(n):
                 continue
             for m in chain(n):
-                if _starts_here(m, names) or (isinstance(m, ast.Name) and m.id in wrappers) or \
-                        (isinstance(m, ast.Attribute) and m.attr in wrappers and isinstance(m.value, ast.Name)
-                         and m.value.id in ("self", "cls")):
+                if _starts_here(m, names) or a_wrapper(m, wrappers):
                     out += 1
                     break
         return out
 
     # every depth: measured over 59 commits of next, the count of every depth changed in 7, one level in 8
     functions = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    aliases = [n for n in tree.body if isinstance(n, ast.Assign) and all(isinstance(x, ast.Name) for x in n.targets)]
+    aliases = [(a.value, [x.id for x in (a.targets if isinstance(a, ast.Assign) else [a.target])])
+               for a in tree.body if isinstance(a, (ast.Assign, ast.AnnAssign)) and a.value is not None
+               and all(isinstance(x, ast.Name) for x in (a.targets if isinstance(a, ast.Assign) else [a.target]))]
     wrappers: set = set()
     while True:
         more = {f.name for f in functions if f.name not in wrappers and refs(f, wrappers)}
-        more |= {x.id for a in aliases if refs(a.value, wrappers) for x in a.targets if x.id not in wrappers}
+        more |= {x for value, targets in aliases if refs(value, wrappers) for x in targets if x not in wrappers}
         if not more:
             return refs(tree, wrappers)
         wrappers |= more
@@ -217,7 +244,7 @@ def code_of(js):
             j = n if j < 0 else j + 2
             out.append(" " + "\n" * js.count("\n", i, j))
             i = j
-        elif c == "/" and re.search(r"(?:^|[(,=:\[!&|?{};+\-*%<>~^]|\breturn|\btypeof)\s*$", "".join(out[-40:])):
+        elif c == "/" and re.search(r"(?:^|[(,=:\[!&|?{;+\-*%<>~^]|\breturn|\btypeof)\s*$", "".join(out[-40:])):
             # a regex literal: skip to its closing slash, past escapes and character classes
             j, in_class = i + 1, False
             while j < n and js[j] != "\n" and (in_class or js[j] != "/"):
@@ -260,15 +287,32 @@ def code_of(js):
     return "".join(out)
 
 
+def mod_process_places(js):
+    return len(re.findall(MEMBER + r"process\b", code_of(js)))
+
+
+def destructured(code):
+    """The pattern of each `{ ... } = $`, read back to its balanced opening brace."""
+    for m in re.finditer(r"\}\s*=\s*\$(?![\w?.\s]*[\w.])", code):
+        depth, i = 0, m.start()
+        while i >= 0:
+            depth += {"}": 1, "{": -1}.get(code[i], 0)
+            if depth == 0:
+                break
+            i -= 1
+        yield code[i + 1:m.start()]
+
+
 def mod_findings(js):
     code = code_of(js)
     out = [p for p in MOD_FORBIDDEN if re.search(p, code, re.M)]
-    out += [f"$.{m}" for m in sorted(set(re.findall(r"\$\.(\w+)", code)) - MOD_MEMBERS)]
-    out += [f"globalThis.{m}" for m in sorted(set(re.findall(r"\bglobalThis\.(\w+)", code)) - MOD_GLOBALS)]
-    # a destructured member of $ is used without "$.": it must be an allowed one, and process stays "$.process.run"
-    for group in re.findall(r"\{([^{}]*)\}\s*=\s*\$(?![\w.])", code):
-        for part in group.split(","):
-            name = part.split(":")[0].strip().lstrip(".")
+    out += [f"$.{m}" for m in sorted(set(re.findall(MEMBER + r"(\w+)", code)) - MOD_MEMBERS)]
+    out += [f"globalThis.{m}" for m in sorted(set(re.findall(r"\bglobalThis\s*\??\.\s*(\w+)", code)) - MOD_GLOBALS)]
+    # a destructured member of $ is used without "$.": it must be an allowed one, and not process (it stays
+    # $.process.run); a nested pattern reads a member of an allowed one
+    for group in destructured(code):
+        for part in re.split(r",(?![^{}]*\})", group):      # the top-level members; a nested pattern is one part
+            name = part.split(":")[0].split("=")[0].strip().lstrip(".")
             if name and (name not in MOD_MEMBERS or name == "process"):
                 out.append(f"{{ {name} }} = $")
     return out
@@ -305,11 +349,14 @@ class NetworkImportTests(unittest.TestCase):
     def test_the_check_sees_each_spelling(self):
         for code in ("import socket", "import http.client", "from http import client", "from urllib import request",
                      "from urllib.request import urlopen", "__import__('ssl')", "importlib.import_module('socket')",
-                     "from importlib import import_module\nimport_module('socket')", "import asyncio.streams",
-                     "def f():\n    import urllib.request as u"):
+                     "from importlib import import_module\nimport_module('socket')",
+                     "import asyncio.streams\nasyncio.open_connection",
+                     "def f():\n    import urllib.request as u", "import asyncio\nasyncio.open_connection('h', 1)",
+                     "import httpcore", "async def f(loop):\n    await loop.create_connection(p, 'h', 1)"):
             with self.subTest(code):
                 self.assertTrue(imports(ast.parse(code), NETWORK), code)
-        for code in ("from urllib.request import url2pathname", "import urllib.parse", "from http import HTTPStatus"):
+        for code in ("from urllib.request import url2pathname", "import urllib.parse", "from http import HTTPStatus",
+                     "import asyncio\nasync def f():\n    await asyncio.sleep(0.1)"):
             with self.subTest(code):
                 self.assertFalse(imports(ast.parse(code), NETWORK), code)
         for code in ("import subprocess\nsubprocess.run(['x'])", "import os\nos.system('x')",
@@ -334,6 +381,14 @@ class NetworkImportTests(unittest.TestCase):
         self.assertEqual(program_starts(ast.parse(deep)), 4, "the start, and the calls of _a, _b and _c")
         alias = "import subprocess\nrun = subprocess.run\nrun(['x'])\nrun(['y'])\n"
         self.assertEqual(program_starts(ast.parse(alias)), 3, "the binding, and each call of the bound name")
+        receiver = ("import subprocess\nclass B:\n    def _ps(self, s):\n        return subprocess.run(['ps', s])\n"
+                    "def health(backend):\n    return backend._ps('x')\n")
+        self.assertEqual(program_starts(ast.parse(receiver)), 2, "a private wrapper method counts through any receiver")
+        typed = "import subprocess\nRUN: object = subprocess.run\nRUN(['x'])\n"
+        self.assertEqual(program_starts(ast.parse(typed)), 2, "a typed alias is an alias")
+        shadow = ("import subprocess\ndef keys():\n    return subprocess.run(['x'])\n"
+                  "def f(xs, last=None):\n    keys = sorted(xs)\n    return keys, last\n")
+        self.assertEqual(program_starts(ast.parse(shadow)), 1, "a local that shares a wrapper's name starts nothing")
         self.assertEqual(program_starts(ast.parse(method)), 3)
         for code in ("import subprocess\nisinstance(e, subprocess.TimeoutExpired)", "import os\nos.getpid()"):
             with self.subTest(code):
@@ -355,11 +410,12 @@ class ModNetworkTests(unittest.TestCase):
             code = code_of(js).split("\n")
             self.assertEqual(len(code), js.count("\n") + 1, f"{path.name}: the reader lost lines")
             starts = [(i, w) for i, line in enumerate(js.split("\n"))
-                      for w in [re.match(r"\s*(const|let|return|await|if|for|function|export)\b", line)] if w]
+                      for w in [re.match(r"\s*(const|let|var|return|await|if|else|for|while|switch|throw|try|class|"
+                                         r"function|export)\b", line)] if w]
             self.assertGreater(len(starts), 100, "the canary reads no statement of the mod")
             lost = [i + 1 for i, w in starts if not code[i].lstrip().startswith(w.group(1))]
             self.assertEqual(lost, [], f"{path.name}: the reader swallowed code at these lines")
-        runs = sum(len(re.findall(r"\$\.process\b", code_of(p.read_text(encoding="utf-8")))) for p in mods)
+        runs = sum(mod_process_places(p.read_text(encoding="utf-8")) for p in mods)
         self.assertEqual(runs, MOD_PROCESS_RUNS, "a new place in the mod starts a program; count it, and test its "
                                                  "command line in tests/mod.test.ts")
 
@@ -369,16 +425,26 @@ class ModNetworkTests(unittest.TestCase):
                    "globalThis['fetch']('x')", "const ws = new WebSocket('wss://x')", "await import('node:http')",
                    "const { process } = $", "const { ui, net: n } = $", "x(); fetch(u) /* a comment */",
                    "const p = $.process\nawait p.run(['curl'], {})", "const { process: { run } } = $",
-                   "const { net: { request } } = $", "log(`${fetch(u)}`)"):
+                   "const { net: { request } } = $", "log(`${fetch(u)}`)",
+                   "const { ui: { open }, process } = $", "const { ui: { open }, net } = $", "$?.net?.request(u)",
+                   "const p = $?.process", "$\n  .net\n  .request(u)", "$?.['net']",
+                   "const x = {} / fetch(endpoint) / 2"):
             with self.subTest(js):
                 self.assertTrue(mod_findings(js), js)
         for js in ("on('http.fetch', h)", "// a fetch in a comment", "$.process.run(argv, init)",
                    "globalThis.crypto.getRandomValues(a)", "if (await inDemo($) === false) return next(e)",
                    "x(); // fetch later", "/* one\n   window line */", "say('open a new window to log in')",
                    "say('node: v20')", "const { Box, Text } = $.ui.resolve(e)", "const { ui, store } = $",
-                   "const u = `https://example.com/${id}`", "note(`the http.fetch hook of ${$.plugin.name}`)"):
+                   "const u = `https://example.com/${id}`", "note(`the http.fetch hook of ${$.plugin.name}`)",
+                   "await $?.process?.run(['x'], {})", "const { ui, store = null } = $",
+                   "const { ui: { Box, Text }, store } = $"):
             with self.subTest(js):
                 self.assertEqual(mod_findings(js), [], js)
+        # each spelling of a start counts as a place
+        for js in ("$.process.run(a)", "await $?.process?.run(['x'], {})", "$\n  .process\n  .run(['x'])",
+                   "$.process.spawn(req)"):
+            with self.subTest(js):
+                self.assertEqual(mod_process_places(js), 1, js)
 
 
 if __name__ == "__main__":

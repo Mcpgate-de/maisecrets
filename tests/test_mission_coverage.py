@@ -280,7 +280,7 @@ class MissionCoverageTests(unittest.TestCase):
         m += '\n[[part]]\nid = "M1.2"\nsays = 3\n\n[[part]]\nid = "M2.5"\nsays = "odd"\n'
         r = mission_coverage.analyse(self.tree({"M1-x": m}, ["C1", "C2", "C3", "I1", ("C1", ["M2.5"])]))
         self.assertIn("M1: labels is not a list of names", r["unknown"])
-        for bad in ('controls = "C1"', 'controls = [["C1"]]', "invariants = 5"):
+        for bad in ('controls = "C1"', 'controls = [["C1"]]', "invariants = 5"):  # noqa: B007
             with self.subTest(bad):
                 text = mission("M1", ["C1", "C2", "C3"], ["I1"])
                 text = text.replace('controls = ["C1", "C2", "C3"]', bad) if bad.startswith("controls") \
@@ -290,6 +290,20 @@ class MissionCoverageTests(unittest.TestCase):
                 self.assertIn(f"M1: {key} is not a list of names", found)
         self.assertIn("M1.2: the part has no sentence in says", r["unknown"])
         self.assertIn("b4: serves M2.5, which no mission has", r["unknown"])
+
+    def test_a_part_table_a_missing_promise_and_a_number_quote_are_findings_not_crashes(self):
+        import mission_coverage
+        single = mission("M1", ["C1", "C2", "C3"], ["I1"], parts=()) + '\n[part]\nid = "M1.1"\nsays = "x"\n'
+        r = mission_coverage.analyse(self.tree({"M1-x": single.replace('promise = "p"\n', "")},
+                                               ["C1", "C2", "C3", "I1"], claims=CLAIMS + "\n[[claim]]\nquote = 5\n"))
+        self.assertIn("M1: part is not a list of [[part]] tables", r["unknown"])
+        self.assertIn("M1: promise is not a sentence", r["unknown"])
+        self.assertIn("claim with a quote or a source that is no text: 5", r["claims"])
+        for bad in ('part = ["sentence"]', 'measure = "none"'):
+            with self.subTest(bad):
+                text = mission("M1", ["C1", "C2", "C3"], ["I1"], parts=(), measure=None) + bad + "\n"
+                found = mission_coverage.analyse(self.tree({"M1-x": text}, ["C1", "C2", "C3", "I1"]))["unknown"]
+                self.assertTrue(any(bad.split(" ")[0] + " is not" in u for u in found), found)
 
     def test_a_claim_needs_a_kind_and_an_existing_mission(self):
         import mission_coverage
