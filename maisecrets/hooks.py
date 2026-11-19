@@ -47,7 +47,7 @@ from .shell_commands import (  # noqa: F401
     _value_reaches, _refusal_for, _SSH_ARG_FLAGS, _SSH_REFUSED_FLAGS, _SSH_REFUSED_OPTIONS, _ssh_options, _ssh_way,
     _remote_refusal, READ_ONLY_REMOTE, _JOURNALCTL_STATEFUL, _READ_ONLY_WRAPPERS, _SORT_OK, _UNIQ_OK,
     _remote_is_read_only, _ssh_route, _HOOK_ENTRIES, _calls_a_hook_entry, _only_prints, _parse_for_consent,
-    TEXT_RUNNERS, only_mentions,
+    only_mentions,
 )
 from .tool_output import (  # noqa: F401
     _TOKEN_SPLIT_RE, _FINE_SPLIT_RE, _EXACT_MIN_LEN, _candidates, _HEX_RE, _B64_RE, _decoded, _derived_forms,

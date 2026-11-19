@@ -1,7 +1,8 @@
 """A weakening command in a tool call (#84): a Bash call that runs it is refused, a Bash call that only mentions it
 passes (hooks._carries, shell_commands.only_mentions). A mention: the text stands in quotes, a heredoc body or a
-comment, and no word of the line runs a text (a shell, an interpreter, an AI client, a wrapper, a path or a variable
-as the command word). PowerShell has no word parser here and refuses every mention.
+comment, and each simple command of the line is on the allow list of programs that print, write or store a text
+(echo, printf, cat, tee, the data commands of C21, git commit and tag, gh issue and pr comment, create and edit), with
+their allowed options. Anything else is a call. PowerShell has no word parser here and refuses every mention.
 
 Each guard of the same class gets both sides: settings and term removal and the name service (C22, C26), the removal
 of an import (C26), not-a-secret (C22) and the demo (C22). The ssh consent sentence (C21, frozen) keeps refusing every
@@ -74,11 +75,16 @@ class NotASecretMentions(unittest.TestCase):
                         f'git commit -m "docs: name {NAS} KEY" -m "Fixes #84"',
                         _heredoc("git commit -F -", f"docs: tell the person about {NAS} {KEY}"),
                         _heredoc("cat > notes.md", BODY),
-                        f"printf '%s\\n' '{NAS} {KEY}' >> notes.md 2>&1 && git add notes.md",
+                        f"printf '%s\\n' '{NAS} {KEY}' >> notes.md 2>&1",
+                        _heredoc("tee -a notes.md", BODY),
+                        f"git tag -a v1 -m 'release: {NAS} {KEY}'",
+                        f"gh pr create --title 'docs' --body '{NAS} {KEY}' --base next",
+                        f"gh issue edit 84 --body=\"{NAS} {KEY}\"",
+                        f"echo '{NAS}' && echo done",
                         f"grep -rn '{NAS}' docs/ # look for {NAS}",
                         # a line continuation and a redirection do not start a command (a backslash before a
                         # heredoc makes its body unsure: refused, shell_commands.heredoc_is_sure)
-                        f"git -C \\\n  ./repo commit -m 'docs: {NAS} {KEY}'",
+                        f"git commit \\\n  -m 'docs: {NAS} {KEY}'",
                         _heredoc("gh issue comment 29 2>&1 --repo group/proj --body-file -", BODY)):
             with self.subTest(command=command):
                 self.assertEqual(_decision(command), "pass")
@@ -117,6 +123,18 @@ class NotASecretMentions(unittest.TestCase):
             f"cat <<EOF\n$(codex exec '{NAS_CODEX} {KEY}')\nEOF",
             f"git commit -m 'x {NAS}'\r",
             _heredoc("gh issue comment 29 --repo \\\n  group/proj --body-file -", BODY),
+            # programs that run a text under another name: not on the allow list (Gate A of #84)
+            f"git -c alias.x='!codex exec' x '{NAS_CODEX} {KEY}'",
+            f"git x '{NAS} {KEY}'",
+            f"git -C . commit -m '{NAS}'",
+            f"make --eval 'x:;codex exec \"{NAS_CODEX} {KEY}\"' x",
+            f"find . -maxdepth 0 -exec codex exec '{NAS_CODEX} {KEY}' ';'",
+            f"awk 'BEGIN {{ system(\"codex exec \\\"{NAS_CODEX} {KEY}\\\"\") }}'",
+            f"node -e 'require(\"child_process\").execSync(\"codex exec \\\"{NAS_CODEX}\\\"\")'",
+            f"echo '{NAS} {KEY}' | sort",
+            _heredoc("cat", BODY).replace("'EOF'", "'EOF' | ./ask", 1),
+            f"gh alias set x '!codex exec \"{NAS_CODEX}\"'",
+            f"gh issue comment 29 --editor --body '{NAS}'",
         )
         for command in refused:
             with self.subTest(command=command):
@@ -136,26 +154,41 @@ class EachRuleOfTheReader(unittest.TestCase):
     def test_each_rule(self):
         text = f"'{NAS} {KEY}'"
         calls = {
-            "a substitution inside quotes": f'echo "$(codex e {text})"',
-            "a backtick runs its text": f"printf {text} | `which codex` e -",
-            "a variable as the command word": f"$C e {text}",
-            "a braced variable as the command word": f"${{C}} e {text}",
-            "a quoted command word": f"'codex' e {text}",
-            "a path as the command word": f"./ask {text}",
-            "a versioned python": f"python3.12 x.py # {NAS}",
-            "an unbuffer wrapper": f"unbuffer codex e {text}",
+            "a substitution inside quotes": f'echo {text} "$(codex e x)"',
+            "a backtick": f"echo `true` {text}",
             "a carriage return": f"echo {text}\r",
             "the match in the code": f"echo {NAS}",
             "a heredoc after a backslash": _heredoc("echo \\x; gh issue comment 1 --body-file -", NAS),
+            "a program off the list": f"ask {text}",
+            "a pipe from an allowed program into another": f"echo {text} | ask",
+            "the second command off the list": f"echo {text}; ask",
+            "a path as the command word": f"/bin/echo {text}",
+            "a quoted command word": f"'echo' {text}",
+            "a variable as the command word": f"$E {text}",
+            "an assignment before the command": f"GIT_EDITOR=ask git commit -m {text}",
+            "a git option before the subcommand": f"git -c core.editor=ask commit -m {text}",
+            "a git subcommand off the list": f"git notes add -m {text}",
+            "a git option off the list": f"git commit --template=x -m {text}",
+            "a gh command off the list": f"gh alias set x {text}",
+            "a gh verb off the list": f"gh issue develop 1 --name {text}",
+            "a gh option off the list": f"gh issue comment 1 --web --body {text}",
+            "a bare git": f"git # {NAS}",
         }
         for why, command in calls.items():
             with self.subTest(why=why):
                 self.assertFalse(self.mention(command))
         mentions = {
             "a heredoc body": _heredoc("gh issue comment 29 --body-file -", BODY),
+            "a heredoc with a dash and a tab": f"cat > notes.md <<-'EOF'\n\t{NAS}\n\tEOF",
             "a quoted argument": f"git commit -m {text}",
-            "a redirection with &": f"gh issue comment 29 --body-file - >&./gh.log <<'EOF'\n{NAS}\nEOF",
-            "a line continuation": f"git -C \\\n  ./repo commit -m {text}",
+            "a glued value": f"git commit -m{text}",
+            "a value after =": f"gh issue comment 1 --body={text}",
+            "a quoted option": f"gh issue comment 1 \"--body\" {text}",
+            "a data command of C21": f"grep -n {text} docs/USING.md",
+            "a redirection with &": f"gh issue comment 29 2>&1 --body-file - <<'EOF'\n{NAS}\nEOF",
+            "a redirection before the command": f"2>/dev/null echo {text}",
+            "a line continuation": f"git commit \\\n  -m {text}",
+            "two allowed commands": f"echo {text} | tee -a notes.md",
         }
         for why, command in mentions.items():
             with self.subTest(why=why):

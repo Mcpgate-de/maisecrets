@@ -1045,34 +1045,76 @@ def _only_prints(command: str, ctxs: list[str], segs: list[dict], seg: dict | No
     return not re.search(r"[<>|]", unquoted)
 
 
-# programs that run a text they get (an argument, stdin, a file they read) as code or as a prompt: a shell, an
-# interpreter, an AI client, a maisecrets entry, a wrapper that runs its arguments, a terminal or a tool that types
-# keys. A weakening command in quotes or in a heredoc body reaches a client or a writer only through one of them (#84)
-TEXT_RUNNERS = SHELLS | INLINE_INTERPRETERS | REMOTE_OR_EVAL | ARG_RUNNERS | WRAPPERS | {
-    "claude", "codex", "maisecrets", "run.sh", "run.cmd", "dispatch.py", "source", ".", "csh", "tcsh", "pwsh",
-    "powershell", "cmd", "py", "tclsh", "awk", "gawk", "mawk", "nawk", "find", "npx", "bunx", "uv", "uvx", "pipx",
-    "npm", "pnpm", "yarn", "docker", "podman", "kubectl", "xdotool", "ydotool", "wtype", "kitty", "wezterm", "zellij"}
-_PYTHON_NAME_RE = _LazyRx(r"(?:python|pypy)[\d.]*w?")
+# the programs a line may run when a weakening command stands in its data (#84): they print, write or store a text
+# and run none. An allow list, as C21 reads a mention of ssh (ssh_consent._TEXT_SAFE_CMDS: data commands with no
+# option that starts a program). Each entry: how its words are checked. A program that is not here, or a word it
+# does not know, makes the line a call: a list of programs that run a text was never complete (Gate A of #84: a git
+# alias, make --eval)
+_PLAIN_TEXT_CMDS = {"cat", "tee"}
+# git: only these subcommands, with no option before them (-c sets an alias or a program) and only these options
+_GIT_OPTIONS = {
+    "commit": ({"-a", "--all", "-q", "--quiet", "-s", "--signoff", "--amend", "--no-edit", "--allow-empty",
+                "--allow-empty-message", "-v", "--verbose"}, {"-m", "--message", "-F", "--file"}),
+    "tag": ({"-a", "--annotate", "-s", "--sign", "-f", "--force"}, {"-m", "--message", "-F", "--file"}),
+}
+# gh: issue or pr, then comment, create or edit, with these options (no --editor, no --web, no extension or alias)
+_GH_OPTIONS = ({"-d", "--draft"},
+               {"-b", "--body", "-F", "--body-file", "-t", "--title", "-R", "--repo", "-l", "--label",
+                "--add-label", "--remove-label", "-a", "--assignee", "-B", "--base", "-H", "--head", "-m",
+                "--milestone", "-r", "--reviewer"})
+_GH_VERBS = {"issue": {"comment", "create", "edit"}, "pr": {"comment", "create", "edit"}}
+
+
+def _options_ok(args: list[str], flags: set, valued: set) -> bool:
+    """Every option of `args` is in `flags`, or in `valued` with its value (next word, `=VALUE`, or glued to a short
+    option); a word that is no option is data. After `--` every word is data."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            return True
+        if a.startswith("-") and a != "-":
+            name = a.split("=", 1)[0] if a.startswith("--") else a
+            if name in flags and "=" not in a:
+                i += 1
+                continue
+            if name in valued:
+                i += 1 if "=" in a else 2
+                continue
+            if not a.startswith("--") and a[:2] in valued:
+                i += 1                                  # -mTEXT, -F-
+                continue
+            return False
+        i += 1
+    return True
+
+
+def _a_text_command(words: list[str]) -> bool:
+    """One simple command of a mention line: an allowed program with allowed options (_PLAIN_TEXT_CMDS, the data
+    commands of C21, git commit and tag, gh issue and pr)."""
+    from .ssh_consent import _TEXT_SAFE_CMDS
+    cmd, args = words[0], words[1:]
+    if cmd in _PLAIN_TEXT_CMDS or cmd in _TEXT_SAFE_CMDS:
+        return True
+    if cmd == "git":
+        return bool(args) and args[0] in _GIT_OPTIONS and _options_ok(args[1:], *_GIT_OPTIONS[args[0]])
+    if cmd == "gh":
+        return len(args) >= 2 and args[1] in _GH_VERBS.get(args[0], ()) and _options_ok(args[2:], *_GH_OPTIONS)
+    return False
+
+
 # a substitution runs its text, also inside "…" and in an unquoted heredoc
 _SUBSTITUTION_RE = _LazyRx(r"\$\(|[<>]\(")
-
-
-def _runs_text(word: str) -> bool:
-    name = os.path.basename(word.replace("\\", "/")).lower()
-    name = name[:-4] if name.endswith(".exe") else name
-    return name in TEXT_RUNNERS or bool(_PYTHON_NAME_RE.fullmatch(name))
 
 
 def only_mentions(command: str, found) -> bool:
     """Whether a Bash command only mentions a text that `found` matches, and does not run it (#84). A mention: each
     match stands in data the shell hands over and never runs (inside '…' or "…", in a heredoc body or a comment the
-    parser reads for sure), the line has no substitution, and no word of the line runs a text (TEXT_RUNNERS; and a
-    path, a variable or a quoted name as the command word). `gh issue comment --body-file - <<'EOF'` with the
-    command in its body is a mention; `codex exec - <<'EOF'` with the same body, `bash -c '…'`, `eval`, `env`,
-    `$c exec '…'` and `python3 - <<'EOF'` are calls. False when unsure: the caller then refuses as before.
-
-    A text match, as the guards it serves (C22): a program that runs its argument under another name (a git alias, a
-    script of the user called by its bare name) is not seen."""
+    parser reads for sure), the line has no substitution and no carriage return, and each simple command of the line
+    is an allowed program with allowed options that prints, writes or stores a text (_a_text_command), named as a
+    plain word with no assignment before it. A redirection to a file is allowed. `gh issue comment 29 --body-file -
+    <<'EOF'` and `git commit -m '…'` with the command in the text are mentions; anything else (`codex exec -`, a git
+    alias, `make --eval`, a pipe into another program) is a call. False when unsure: the caller then refuses."""
     if "\r" in command:
         return False
     ctxs = _shell_contexts(command)
@@ -1095,29 +1137,46 @@ def only_mentions(command: str, found) -> bool:
     code = "".join(" " if d and ch != "\n" else ch for ch, d in zip(command, data))
     if found(code):
         return False                    # a match in the code itself: the shell reads it as words of the command
-    # the words of the line, with quotes taken out; a heredoc body and a comment end a word and give none
-    words: list[tuple[str, bool, bool]] = []      # (word, in the command position, had a quote)
+    # the simple commands of the line, each a list of (word, had a quote), quotes and escapes taken out; a heredoc
+    # body and a comment end a word and give none; a redirection target is no word
+    commands: list[list[tuple[str, bool]]] = [[]]
     cur: list[str] = []
-    quoted = False
-    command_pos, target = True, False
+    quoted = target = escaped = False
+    prev = ""
+    # the line that ends a heredoc is no command: the first plain line after the announcement that is its tag
+    tags = [(m.start(), (m.group("tag").replace("'", "").replace('"', "").replace("\\", ""), bool(m.group("dash"))))
+            for m in _HEREDOC_RE.finditer(command) if ctxs[m.start()] == ""]
+    skip = [False] * len(command)
+    pos = 0
+    for line in command.split("\n"):
+        end = pos + len(line)
+        if tags and tags[0][0] < pos and all(c == "" for c in ctxs[pos:end]):
+            tag, dash = tags[0][1]
+            if (line.lstrip("\t") if dash else line) == tag:
+                tags.pop(0)
+                for k in range(pos, end):
+                    skip[k] = True
+        pos = end + 1
 
     def flush() -> None:
-        nonlocal cur, quoted, command_pos, target
+        nonlocal cur, quoted, target
         if cur or quoted:
-            w = "".join(cur)
             if target:
                 target = False
-            elif command_pos and (_ASSIGN_RE.match(w) or w in SHELL_KEYWORDS) and not quoted:
-                pass
             else:
-                words.append((w, command_pos, quoted))
-                command_pos = False
+                commands[-1].append(("".join(cur), quoted))
         cur, quoted = [], False
 
-    escaped, prev = False, ""
-    for ch, cx in zip(command, ctxs):
-        if cx in ("hd", "hdq", "comment"):
+    for ch, cx, sk in zip(command, ctxs, skip):
+        if cx in ("hd", "hdq", "comment") or sk:
             flush()
+            continue
+        if cx == "dq" and escaped:
+            escaped = False
+            cur.append(ch)
+            continue
+        if (cx == "sq" and ch == "'") or (cx == "dq" and ch in '"\\'):
+            escaped = ch == "\\"        # the closing quote is no text; \" and \\ inside "…" give the second character
             continue
         if cx == "" and escaped:
             escaped = False
@@ -1129,17 +1188,19 @@ def only_mentions(command: str, found) -> bool:
             if ch == "\\":
                 escaped = True
                 continue
-            if ch in " \t\n":
+            if ch in " \t":
                 flush()
-                command_pos = command_pos or ch == "\n"
                 continue
             if ch == "&" and last in "<>":
                 continue                # 2>&1, <&3: a redirection, no separator
-            if ch in ";&|()":
+            if ch in ";&|()\n":
                 flush()
-                command_pos, target = True, False
+                commands.append([])
+                target = False
                 continue
             if ch in "<>":
+                if cur and not quoted and "".join(cur).isdigit():
+                    cur = []            # 2>file: the number names the stream, it is no word
                 flush()
                 target = True
                 continue
@@ -1148,10 +1209,13 @@ def only_mentions(command: str, found) -> bool:
                 continue
         cur.append(ch)
     flush()
-    for w, at_command, had_quote in words:
-        if at_command and (_runs_text(w) or "/" in w or "\\" in w or w.startswith(("$", "~")) or had_quote):
-            return False
-        if not at_command and not re.search(r"\s", w) and _runs_text(w):
+    for words in commands:
+        if not words:
+            continue
+        name, had_quote = words[0]
+        if had_quote or not re.fullmatch(r"[a-z\[][a-z0-9-]*", name):
+            return False                # a quoted name, a path, a variable or an assignment as the command word
+        if not _a_text_command([w for w, _q in words]):
             return False
     return True
 
