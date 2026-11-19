@@ -7,8 +7,11 @@ makes the command NAME wait first, as a keychain that waits for an unlock dialog
 
 `-i` exits 0 also when its command failed (the real tool may; Gate A of #75), unless FAKE_SECURITY_I_RC is set.
 FAKE_SECURITY_FAIL_ADD (a regex) makes each add of a matching account fail without a write; FAKE_SECURITY_FIND_FAIL
-("REGEX:RC") makes each find of a matching account fail with RC.
+("REGEX:RC") makes each find of a matching account fail with RC. FAKE_SECURITY_FIND_ONCE ("REGEX:RC:N") makes only the
+N-th find of a matching account fail with RC, or wait 30 s when RC is "hang" (a keychain that stops answering).
+FAKE_SECURITY_DELETE_FAIL ("REGEX:RC") makes each delete of a matching account fail with RC.
 """
+import hashlib
 import json
 import os
 import re
@@ -81,6 +84,31 @@ def slow(name):
         time.sleep(float(spec.partition(":")[2]))
 
 
+def find_once(account):
+    """The rc of a one-shot failed find (FAKE_SECURITY_FIND_ONCE), or None. The count of matching finds is kept per
+    setting in $FAKE_SECURITY_DIR."""
+    spec = os.environ.get("FAKE_SECURITY_FIND_ONCE", "")
+    if not spec:
+        return None
+    rx, rc, n = spec.rsplit(":", 2)
+    if not re.search(rx, account):
+        return None
+    count = os.path.join(DIR, "find-once." + hashlib.sha256(spec.encode()).hexdigest()[:12])
+    try:
+        with open(count, encoding="utf-8") as f:
+            seen = int(f.read() or 0) + 1
+    except OSError:
+        seen = 1
+    with open(count, "w", encoding="utf-8") as f:
+        f.write(str(seen))
+    if seen != int(n):
+        return None
+    if rc == "hang":
+        time.sleep(30)
+        return 0
+    return int(rc)
+
+
 def run(argv):
     name, opts = argv[0], opts_of(argv[1:])
     slow(name)
@@ -101,11 +129,17 @@ def run(argv):
         fail, _, rc = os.environ.get("FAKE_SECURITY_FIND_FAIL", "").rpartition(":")
         if fail and re.search(fail, opts["-a"]):
             return int(rc), ""
+        once = find_once(opts["-a"])
+        if once is not None:
+            return once, ""
         pw = items.get(opts["-s"] + "\0" + opts["-a"])
         if pw is None:
             return 44, ""
         return 0, (pw if pw.isascii() else pw.encode("utf-8").hex()) + "\n"
     if name == "delete-generic-password":
+        fail, _, rc = os.environ.get("FAKE_SECURITY_DELETE_FAIL", "").rpartition(":")
+        if fail and "-a" in opts and re.search(fail, opts["-a"]):
+            return int(rc), ""
         for k in list(items):
             s, _, a = k.partition("\0")
             if s == opts["-s"] and ("-a" not in opts or a == opts["-a"]):

@@ -250,6 +250,31 @@ class ExitZeroOnFailureTests(FakeKeychain):
         self.assertEqual(self.items(), before)
 
 
+class FailedFindTests(FakeKeychain):
+    """Gate A round 2 of #75: a find that failed for another reason than "no such item" (rc 44) read as absent. The
+    fingerprint key was then made again over the old one, and every fingerprint in the index was lost."""
+
+    def once(self, account: str, rc: int, n: int = 1):
+        return mock.patch.dict(os.environ, {"FAKE_SECURITY_FIND_ONCE": f"^{account}$:{rc}:{n}"})
+
+    def test_a_failed_find_of_the_fingerprint_key_does_not_replace_it(self):
+        key = open_vault(self, self.backend).fp_key()
+        with self.once(vault.FP_KEY_ENTRY, 51):
+            with self.assertRaisesRegex(CodedError, "rc 51"):
+                open_vault(self, self.backend).fp_key()
+        self.assertEqual(open_vault(self, self.backend).fp_key(), key)
+
+    def test_a_failed_find_of_a_stored_value_or_of_its_part_is_no_absent_value(self):
+        self.backend.put("SECRET_c1", random_text(9000))
+        for account in ("SECRET_c1", r"SECRET_c1\.part1\..*"):
+            with self.subTest(account=account), self.once(account, 36):
+                with self.assertRaisesRegex(CodedError, "rc 36") as cm:
+                    self.backend.get("SECRET_c1")
+                self.assertEqual(cm.exception.incident_rc, 36)
+        self.assertIsNone(self.backend.get("SECRET_c2"))            # rc 44: no such item
+        self.assertEqual(len(self.backend.get("SECRET_c1")), 9000)
+
+
 def open_vault(test: unittest.TestCase, backend):
     """A Vault of the test home on this backend; the index goes at the end of the test."""
     def clean():

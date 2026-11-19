@@ -484,6 +484,14 @@ class KeychainBackend:
         )
         return r.returncode, (r.stdout.rstrip("\n") if r.returncode == 0 else "")
 
+    def _read(self, account: str) -> tuple[int, str]:
+        """_raw, but only rc 44 (no such item) reads as absent. Any other failed find (a locked or busy keychain) is
+        raised: a caller that took it as absent made a new fingerprint key over the old one (Gate A round 2, #75)."""
+        rc, raw = self._raw(account)
+        if rc not in (0, 44):
+            raise CodedError(f"keychain read failed (rc {rc})", "store.keychain-readback", "rc", rc)
+        return rc, raw
+
     @staticmethod
     def _split_head(raw: str) -> tuple[int, str, str] | None:
         """(parts, generation, first part) of a head item `b64p:N:GEN:PART`, or None."""
@@ -503,9 +511,7 @@ class KeychainBackend:
         label = label or f"maisecrets {key}"
         b64 = base64.b64encode(value.encode("utf-8")).decode("ascii")
         line = self._add_line(key, "b64:" + b64, label, comment)
-        rc, old = self._raw(key)          # the parts of a long value it replaces go after the new head is proven
-        if rc not in (0, 44):
-            raise CodedError(f"keychain read failed (rc {rc})", "store.keychain-readback", "rc", rc)
+        _rc, old = self._read(key)        # the parts of a long value it replaces go after the new head is proven
         gen = ""
         if len(line.encode("utf-8")) <= self.MAX_LINE:
             self._add(line)
@@ -550,7 +556,7 @@ class KeychainBackend:
         return 0
 
     def get(self, key: str) -> str | None:
-        rc, raw = self._raw(key)
+        rc, raw = self._read(key)
         if rc != 0:
             return None
         import base64
@@ -559,7 +565,7 @@ class KeychainBackend:
             n, gen, first = head
             chunks = [first]
             for i in range(1, n):
-                rc, part = self._raw(self._part_name(key, i, gen))
+                rc, part = self._read(self._part_name(key, i, gen))
                 if rc != 0 or not re.fullmatch(r"[A-Za-z0-9+/=]+", part):
                     return None
                 chunks.append(part)
