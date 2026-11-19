@@ -736,7 +736,7 @@ class KeychainBackendTests(BackendContract, unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, r"\(rc 1\)"):
             self.backend.put("SECRET_c1", LONG)
         del self.fake.rc["add-generic-password"]
-        with mock.patch.object(KeychainBackend, "get", return_value="something else"):
+        with mock.patch.object(KeychainBackend, "_raw", return_value=(0, "b64:c29tZXRoaW5nIGVsc2U=")):
             with self.assertRaisesRegex(RuntimeError, "read-back differs"):
                 self.backend.put("SECRET_c1", "fail-fake-value-32")
         self.backend.delete("SECRET_c7")        # rc 44
@@ -746,7 +746,8 @@ class KeychainBackendTests(BackendContract, unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.backend.wipe()
         self.fake.rc["dump-keychain"] = 1
-        self.assertEqual(self.backend.keys(), [])
+        with self.assertRaisesRegex(RuntimeError, r"\(rc 1\)"):   # never an empty store (Gate A round 3, #75)
+            self.backend.keys()
 
     def test_wipe_deletes_every_item_of_this_service_and_no_other(self):
         for k in ("SECRET_c1", "SECRET_c2", FP_KEY_ENTRY):
