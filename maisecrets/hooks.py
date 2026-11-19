@@ -1016,6 +1016,9 @@ def user_prompt(payload: dict) -> dict:
     rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)
     entries, values = inline + entries, inline_values + values
     if not matches and not stored["n"] and not inline:
+        spaced = _pc().spaced_answer(payload)     # `/maisecrets demo on`: the form with the colon, nothing sent
+        if spaced:
+            return spaced
         if typed:
             # the model has never seen the bracket syntax; without this it asks the user for the
             # value, and that value is blocked again (agent review, 2026-09-26)

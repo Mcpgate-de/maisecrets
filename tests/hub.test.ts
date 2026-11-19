@@ -370,8 +370,30 @@ test('a maisecrets command typed after /maisecrets with a space goes into the bo
     + 'the box.')
   await settle()
   expect(filled).toContain('/maisecrets:sref login')
-  expect(calls.length).toBe(0)
+  // as for the colon form: only the demo's question for an own command, no settings entry
+  expect(calls.every(c => c.argv.includes('mod-' + 'demo'))).toBe(true)
 })
+
+test('/maisecrets settings with a space opens the panel as the colon form does; /maisecrets alone goes to the menu',
+  async ($, on) => {
+    const calls: any[] = []
+    engine(on, calls, { placed: true })
+    for (const text of ['/maisecrets settings', '/maisecrets settings all']) {
+      const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' },
+        command: { name: 'maisecrets', args: text.slice(12) } })
+      expect(r.drop).toBe('maisecrets: the panel is open. Esc closes it.')
+    }
+    // a prompt that is no person's: no panel from it
+    const before = calls.length
+    const p = await $.prompt.submit({ text: '/maisecrets settings', wait: false, origin: { kind: 'plugin' },
+      command: { name: 'maisecrets', args: 'settings' } })
+    expect(p.drop).toBeUndefined()
+    expect(calls.length).toBe(before)
+    // /maisecrets alone is the menu command: the prompt goes on, and the command opens the panel
+    const r = await $.prompt.submit({ text: '/maisecrets', wait: false, origin: { kind: 'composer' },
+      command: { name: 'maisecrets', args: '' } })
+    expect(r.drop).toBeUndefined()
+  })
 
 test('a command that no person typed gets the same answer from the menu command', async ($, on) => {
   engine(on, [], { placed: true })

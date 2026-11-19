@@ -725,6 +725,8 @@ function nearCommand(text) {
 const NEW_SESSION = /^\/maisecrets:demo\s+on\b/i
 const filledNote = (command) => `maisecrets: I put ${command} into the input box. Press Enter to run it, or clear ` +
   'the box.' + (NEW_SESSION.test(command) ? ' The demo starts only in a new session (or after /clear).' : '')
+// a prompt of claude -p or an SDK host (origin sdk) has no input box: the line names the command to send instead
+const typeNote = (command) => `maisecrets: send ${command} with the colon to run it. Nothing was sent.`
 const firstWord = (args) => (typeof args === 'string' ? args.trim().split(/\s+/)[0] : '') || ''
 const unknownLine = (word) => `"${word.slice(0, 40)}" is no maisecrets command. Try: status, settings, ner, ` +
   'sref login, list, forget, term, audit, rules, put, send.'
@@ -1205,21 +1207,28 @@ export function register(on) {
   registerShowValues(on)
   registerSettingsPane(on)
   on('prompt.submit', async ($, e, next) => {
+    const person = PERSON.has(e.origin?.kind)
+    // `/maisecrets demo on`, typed by the person, is `/maisecrets:demo on`: the steps below read `own`, the colon
+    // form, with the person's origin as it came, so it has the same path and checks as the colon form and no more. Any
+    // other origin keeps its text (the hook path, and the menu command only fills the box)
+    const meant = person ? meantCommand(e.text) : null
+    const own = meant ?? e.text
     // only the demo command changes whether a session is in the demo: the next model step asks again then. A demo
     // session is left only with /clear, a new session id, which asks anew
-    if (DEMO_CMD.test(e.text ?? '')) {
+    if (DEMO_CMD.test(own ?? '')) {
       try { demo.delete(await $.session.id()) } catch { /* the step asks */ }
     }
-    if (!PERSON.has(e.origin?.kind)) return next(e)
-    afterPrompt($, e.text)
-    const meant = meantCommand(e.text) ?? nearCommand(e.text)
-    if (meant) {
-      // the engine puts a dropped prompt back into the box: the corrected command goes there once the drop landed.
-      // The person's Enter sends it, so a command that wants the person's own prompt still gets it
-      fillSoon($, meant)
-      return { drop: filledNote(meant) }
+    if (!person) return next(e)
+    afterPrompt($, own)
+    const near = meant ? null : nearCommand(e.text)
+    if (near) {
+      // a mistyped name: the engine puts a dropped prompt back into the box, and the closest command goes there once
+      // the drop landed. The person's Enter sends it
+      if (e.origin?.kind === 'sdk') return { drop: typeNote(near) }
+      fillSoon($, near)
+      return { drop: filledNote(near) }
     }
-    const asked = SETTINGS_CMD.exec(e.text)
+    const asked = SETTINGS_CMD.exec(own)
     if (asked) {
       pane.hint = null
       // the panel in place of the text view; the command never renders, so the model gets no turn
@@ -1233,20 +1242,28 @@ export function register(on) {
         return { drop: 'maisecrets: the panel is open. Esc closes it.' }
       }
     }
-    if (OWN_SLASH.test(e.text) && !DEMO_CMD.test(e.text)) {
-      let own = null
-      try { own = await ownInDemo($, e.text, e.origin?.kind) } catch { own = null }
-      if (own !== null) return { drop: showOwn($, own) }
+    if (OWN_SLASH.test(own) && !DEMO_CMD.test(own)) {
+      let shown = null
+      try { shown = await ownInDemo($, own, e.origin?.kind) } catch { shown = null }
+      if (shown !== null) return { drop: showOwn($, shown) }
     }
     let ownAnswer = null      // Python's answer to an own-command shape: the steps below use it, not a second ask
-    if (OWN_CMD.test(e.text)) {
-      try { ownAnswer = await askOwn($, e.text, e.origin?.kind) } catch { ownAnswer = null }
+    if (OWN_CMD.test(own)) {
+      try { ownAnswer = await askOwn($, own, e.origin?.kind) } catch { ownAnswer = null }
       if (ownAnswer === null) return { drop: OWN_FAILED }
       if (typeof ownAnswer.drop === 'string') {
         fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
         return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE) }
       }
       // no command of the mod's: the steps below, as for any prompt
+    }
+    if (meant) {
+      // a command that a command file runs (status, list, a settings change …): only a typed slash line makes the
+      // engine render it with the person's authority, and the engine throws away a change of a slash line (#44). Its
+      // colon form goes into the box once the drop landed, and the person's Enter sends it
+      if (e.origin?.kind === 'sdk') return { drop: typeNote(meant) }
+      fillSoon($, meant)
+      return { drop: filledNote(meant) }
     }
     if (SLASH.test(e.text)) return next(e)
     if (CHECK.test(e.text)) {

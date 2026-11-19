@@ -202,3 +202,27 @@ def mod_command(payload: dict) -> dict | None:
     form = f"/maisecrets:{name}" + (f" {m.group('args')}" if m.group("args") else "")
     return {"drop": f"maisecrets: in Claude Code this is {form}. It is in your input box: press Enter to run it.",
             "fill": form}
+
+
+# `/maisecrets NAME ARGS`: a maisecrets command with a space in place of the colon (the Tab completion of `/maise` in
+# Claude Code gives the mod's own /maisecrets and a space). The mod runs it as the colon form for the person's prompt;
+# here (Codex, claude -p and a client without the mod) the prompt hook names the right form and sends nothing
+_SPACED_RE = LazyRx(r"\A\s*/maisecrets[ \t]+(?P<name>[a-z][a-z-]*)(?P<rest>(?:[ \t][^\r\n]*)?)\s*\Z", re.I)
+
+
+def spaced_answer(payload: dict) -> dict | None:
+    """The block for a maisecrets command typed with a space, with the form that runs it; None for any other prompt.
+    It changes nothing, so it needs no check of who typed it: it only keeps the command text from the AI."""
+    from . import hooks as h
+    prompt = payload.get("prompt")
+    m = _SPACED_RE.match(prompt) if isinstance(prompt, str) else None
+    name = m.group("name").lower() if m else ""
+    if name not in demo.FORMS and name not in demo.NOT_PASSED or name == "secret-hygiene":
+        return None
+    rest = m.group("rest").rstrip()
+    if h.client_of(payload) == "codex":
+        return {"decision": "block", "reason": f"maisecrets: in Codex, send maisecrets: {name}{rest}. This prompt "
+                                               "was not sent to the AI."}
+    return {"decision": "block", "reason": f"maisecrets: send /maisecrets:{name}{rest} with the colon to run it. "
+                                           "This prompt was not sent to the AI.",
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}

@@ -133,6 +133,45 @@ class _Base(unittest.TestCase):
         return d
 
 
+
+# ------------------------------------------------------------ `/maisecrets demo on`, with a space --
+class SpacedCommandTests(_Base):
+    """Without the mod (Codex, claude -p, a client without mods) the prompt hook sees `/maisecrets demo on` as text: it
+    keeps it from the AI and names the form that runs it. It changes nothing (prompt_commands.spaced_answer); with the
+    mod, the person's own prompt runs as the colon form (tests/mod.test.ts)."""
+
+    def test_a_known_command_with_a_space_is_kept_from_the_ai_with_the_colon_form(self):
+        for typed, form in (("/maisecrets demo on", "/maisecrets:demo on"),
+                            ("  /maisecrets Status all ", "/maisecrets:status all"),
+                            ("/maisecrets not-a-secret SECRET_c1", "/maisecrets:not-a-secret SECRET_c1"),
+                            ("/maisecrets settings rehydration confirm", "/maisecrets:settings rehydration confirm")):
+            for source in ("user", None, "cron"):
+                out = _prompt(typed, source=source)
+                self.assertEqual(out["decision"], "block", typed)
+                self.assertEqual(out["reason"], f"maisecrets: send {form} with the colon to run it. This prompt was "
+                                                "not sent to the AI.")
+                self.assertTrue(out["hookSpecificOutput"]["suppressOriginalPrompt"])
+        self.assertFalse(demo.active(SESSION), "the space form switches nothing")
+        self.assertEqual(load_config().get("rehydration", "automatic"), "automatic", "and changes no setting")
+
+    def test_codex_gets_its_own_form(self):
+        out = _prompt("/maisecrets demo on", source=None, client=CODEX)
+        self.assertEqual(out, {"decision": "block", "reason": "maisecrets: in Codex, send maisecrets: demo on. This "
+                                                             "prompt was not sent to the AI."})
+        self.assertFalse(demo.active(SESSION))
+
+    def test_other_prompts_keep_their_way(self):
+        for typed in ("/maisecrets", "/maisecrets wibble on", "/maisecrets secret-hygiene",
+                      "/maisecrets-demo on", "please run /maisecrets demo on", "/maisecrets demo on\nand more"):
+            out = _prompt(typed)
+            self.assertNotEqual(out.get("decision"), "block", typed)
+
+    def test_a_value_in_it_is_blocked_as_a_value(self):
+        out = _prompt(f"/maisecrets settings rehydration {TOKEN}")
+        self.assertEqual(out["decision"], "block")
+        self.assertNotIn("with the colon", out["reason"])
+        self.assertNotIn(TOKEN, json.dumps(out))
+
 # ------------------------------------------------------------ switching it on --
 class SwitchTests(_Base):
     def test_on_by_the_persons_typed_prompt(self):
