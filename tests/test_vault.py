@@ -974,6 +974,15 @@ class LifeCycleTests(unittest.TestCase):
         self.assertEqual(sorted(self.v().live_fingerprints().values()), sorted([real.key, other.key]))
         self.assertEqual(self.v().quiet_code_words(), [], "a second run finds nothing")
 
+    def test_a_reserved_word_stored_by_an_old_detector_is_quieted(self):
+        # #29: before the fix a keyword rule stored `readonly` from `const secret = readonly;` and masked the word in
+        # every later file. The start marks it weak; a real value next to it stays hunted
+        old = self.v().put("readonly", "SECRET", "ds-keyword-equal-signs", session="A")
+        upper = self.v().put("DISTINCT", "SECRET", "ds-keyword-colon", session="A")
+        real = self.v().put("readonly" + "Xk9mQ2", "SECRET", "ds-keyword-equal-signs", session="A")
+        self.assertEqual(sorted(self.v().quiet_code_words()), sorted([old.key, upper.key]))
+        self.assertEqual(list(self.v().live_fingerprints().values()), [real.key])
+
     def test_the_plugins_own_name_is_never_hunted_whoever_stored_it(self):
         # #53: the plugin's name stored as a value masked its own commands and paths, and blocked the forget prompt
         own = vault.OWN_NAME

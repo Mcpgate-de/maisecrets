@@ -1905,17 +1905,29 @@ _CODE_WORDS = frozenset({"break", "continue", "return", "pass", "raise", "throw"
 # the word after a label in an error message or a log line: "pwd: expected bytes, got str" (Python standard library,
 # 2026-09-29), "token: invalid", "password: required". None is a password anyone chooses
 _MESSAGE_WORDS = _words("passwords/error-message-words")
+# a reserved word of a language or of SQL as the whole value: `const secret = readonly;` (#29). Only as code writes
+# it: lower case, capitals (SQL), or True, False and None (Python). `Readonly` and `readonly7` stay values
+_RESERVED_WORDS = _words("passwords/reserved-words")
+_PYTHON_CONSTANTS = frozenset({"True", "False", "None"})
+
+
+def is_reserved_word(value: str) -> bool:
+    """A reserved word of a programming language or of SQL, as code writes it: a keyword rule never takes it."""
+    w = value.strip().rstrip(";")
+    return (w if w.islower() else w.lower() if w.isupper() else "") in _RESERVED_WORDS or w in _PYTHON_CONSTANTS
 
 
 def is_code_word(value: str) -> bool:
-    """A statement keyword or a word of an error message: a keyword rule never takes it as a value."""
+    """A statement keyword, a reserved word or a word of an error message: a keyword rule never takes it as a
+    value."""
     w = value.strip().rstrip(";").lower()
-    return w in _CODE_WORDS or w in _MESSAGE_WORDS
+    return w in _CODE_WORDS or w in _MESSAGE_WORDS or is_reserved_word(value)
 
 
 def code_words() -> frozenset:
-    """The statement keywords and the words of error messages that a keyword rule never takes as a value."""
-    return _CODE_WORDS | _MESSAGE_WORDS
+    """The statement keywords, the reserved words and the words of error messages that a keyword rule never takes
+    as a value."""
+    return _CODE_WORDS | _MESSAGE_WORDS | _RESERVED_WORDS
 
 
 # the index of a text (_text_index, _newlines, _line_start, _line_end, _positions) is in text_index.py
