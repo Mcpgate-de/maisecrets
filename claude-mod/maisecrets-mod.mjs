@@ -628,6 +628,9 @@ async function loudAgain($) {
 const DEMO_DENY = 'maisecrets demo: nothing goes to the AI. /clear to switch it off.'
 
 function registerDemo(on) {
+  // Where an organization manages Claude Code (2.1.327 and later), the http.fetch{origin=engine} and session.compact
+  // hooks of a plugin the person installed do not run: /compact and the side requests then go out, with placeholders
+  // only. on() gives no sign of it, so the demo start says it as a condition (maisecrets/demo.py ORG_NOTE, ADMIN.md)
   // every request the engine sends raises http.fetch (origin "engine"): the turns, and each side request a client
   // command makes outside a turn (/btw side_question, /rename, /recap away_summary, the title, the next-prompt guess,
   // measured on Claude Code 2.1.326). In a session in the demo none goes out, with a body or without (a URL can carry

@@ -41,7 +41,10 @@ FILES = ("index.json", "vault.json", "audit.log", "events.log", "demo.json", "de
 PENDING = Path(HOME, "pending")
 LINE = "Demo mode: nothing was sent to the AI. /clear to switch it off."
 LINE_CODEX = "Demo mode: nothing was sent to the AI. A new session switches it off."
-ON = "Demo mode is on: what you send stays here, nothing goes to the AI. /clear switches it off."
+ON = ("Demo mode is on: what you send stays here, no prompt goes to the AI. /clear switches it off. If an "
+      "organization manages this Claude Code, /compact and side requests (a title by /rename, /btw, /recap, "
+      "suggestions) can still go to the AI, with placeholders only; an administrator stops them by installing "
+      "maisecrets as the organization's own plugin.")
 
 
 def _reset(**user) -> None:
