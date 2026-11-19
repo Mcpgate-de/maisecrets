@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## [0.9.18] - 2026-11-19
+
+### Features
+
+- maisecrets warns when an older version still runs in another session and can end your gateway login (8ccba34)
+- /maisecrets demo on, typed with a space, runs as /maisecrets:demo on (446c102)
+
+### Fixes
+
+- a slow MCP server no longer takes the time of your gateway in /maisecrets:sref (7d283a5)
+- /maisecrets:sref login also registers and gets its token on a slow network (f072fe4)
+- /maisecrets:sref login and status work on a slow network (bb9eb9b)
+- a command that maisecrets cannot check is removed from the input box (8ba4cf8)
+- the warning about an older maisecrets keeps every session's time and says only what it knows (0d3c317)
+- a command that maisecrets puts into the input box has its values masked, and a typo suggests only a command that shows (0ea36ea)
+- an everyday word after a password key in a .env or YAML file stays masked; only code words are skipped (3bc67a8)
+- a mistyped command after /maisecrets goes into the input box with a note that says what happened (77cf77a)
+- the demo start tells that an organization-managed Claude Code can still send /compact and side requests (2c8ecde)
+- a late answer for the old server key no longer keeps an unsettled new key for good (586298c)
+- a quoted reserved word after a secret name is still found, and no other rule takes an unquoted one (5b74416)
+- a new server key whose save did not answer no longer leaves the server's values unreadable (6da96ee)
+- a reserved word of a language or of SQL after a secret name is no longer masked as a secret (08bb919)
+- on macOS a save of a long value that is stopped halfway no longer leaves parts that no cleanup finds (8f231b6)
+- a command that only mentions a maisecrets command in a comment or a message runs again (348f2b1)
+- on macOS a keychain that cannot list its items no longer looks empty to repair and wipe (513da8a)
+- a keychain that does not answer now fails the tool-result hook closed also when it deletes server values or reads a gateway login (c10b92b)
+- on macOS a long value that replaces another no longer reports a failed save after it was saved (0b32783)
+- on macOS two writes of long values at the same time no longer remove the parts of each other (184ac4a)
+- on macOS a locked or busy keychain no longer reads as a missing value, so the fingerprint key is never made again (d20674a)
+- a keychain add that fails no longer loses the value it replaces on macOS (067c802)
+- a keychain that does not answer no longer holds a hook to its watchdog; the hook stops in time and names the keychain (32ebfdb)
+
+### Security
+
+- a mention that writes a startup file or signs a tag is refused (8305edc)
+- a mention passes only with programs that print or store text (049dc6a)
+- on macOS a long value (a private key, a gateway login) no longer appears on the command line of `security` (24d3ade)
+
+### Other
+
+- Merge origin/next into fix/ux-0918 (c0769cf)
+- Merge origin/next into fix/ux-0918 (50f3748)
+
 ## [0.9.17] - 2026-11-18
 
 ### Features
