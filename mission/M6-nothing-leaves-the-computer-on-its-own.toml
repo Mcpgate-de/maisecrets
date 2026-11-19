@@ -3,7 +3,7 @@ mission = "M6"
 promise = "maisecrets sends nothing off the computer on its own: no telemetry, no network connection of its hooks or its mod; text goes only to a service the person set up."
 actors = ["A5"]
 controls = ["C33", "C24", "C30"]
-invariants = []
+invariants = ["I5"]
 ends = "A command that the person or the agent runs; an MCP server, a name service or a gateway that the person added."
 
 [[part]]
@@ -27,4 +27,4 @@ id = "M6.5"
 says = "The mod starts only hooks/dispatch.py, with a fixed command line and no shell, and makes no network request."
 
 [measure]
-none = "the count of connections is zero or the promise is broken; the C33 beliefs check it"
+none = "the count of connections is zero or the promise is broken; the C33 beliefs and invariant I5 check it"

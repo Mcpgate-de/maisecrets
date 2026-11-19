@@ -2,8 +2,9 @@
 
 mission/M*.toml names one promise each, the controls (C*) and invariants (I*) of docs/THREAT-MODEL.md that serve
 it, and its parts: one sentence each, with an id (M1.3). Each belief of beliefs/*.toml names the parts it proves in
-`serves`, so a new belief counts for no part until its author says which. scripts/replay_can_fail.py proves that each belief's test goes red under its mutation. mission/claims.toml maps the
-promises that README.md and PRIVACY.md make to users onto the missions. This script joins them and reports:
+`serves`, so a new belief counts for no part until its author says which. scripts/replay_can_fail.py proves that
+each belief's test goes red under its mutation. mission/claims.toml maps the promises that README.md and
+PRIVACY.md make to users onto the missions. This script joins them and reports:
 
 - a part with no belief (the sentence rests on prose, or on tests no mutation proves), or with one only (thin),
 - a mission without an invariant (only per-line proofs, no check over every path),
