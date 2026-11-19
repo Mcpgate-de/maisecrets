@@ -45,7 +45,8 @@ on the same git tree exists (the release then reuses it). A merge without a rele
 ## What makes a test count
 
 - **A belief per control.** `beliefs/*.toml` names, per control of `docs/THREAT-MODEL.md`,
-  the tests that own it and one mutation of the guarded code. The replay runs the tests green,
+  the tests that own it, one mutation of the guarded code, and in `serves` the parts of the
+  product promises (`mission/*.toml`) that it proves. The replay runs the tests green,
   applies the mutation, demands red, and restores the file. A skipped test is no evidence.
 - **An invariant over every path.** A mechanism belief proves one guard; an invariant belief
   (`beliefs/inv-*.toml`, `kind = "invariant"`) proves one goal over every path to it. It names

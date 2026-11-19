@@ -7,16 +7,16 @@ invariants = []
 ends = "The log is on the same disk; a client that kills a hook before the guard answers."
 
 [[part]]
+id = "M5.1"
 says = "Each resolve leaves an audit line, and each hook run a log line, never a value."
-beliefs = ["c9-*", "run-log-*"]
 
 [[part]]
+id = "M5.2"
 says = "Without a usable Python, a moved plugin folder or a broken import, every hook blocks and names the cause."
-beliefs = ["c13-*"]
 
 [[part]]
+id = "M5.3"
 says = "A stricter policy asks the person before a value leaves."
-beliefs = ["c16-*"]
 
 [measure]
 none = "no rate: each fault either blocks and names its cause or not (C13 beliefs)"

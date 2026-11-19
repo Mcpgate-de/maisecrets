@@ -2,6 +2,7 @@
 belief = "c21-asks-on-visible-executable-intent-not-on-textual-mention"
 kind = "invariant"
 control = "C21"
+serves = ["M3.4"]
 statement = "With ssh_consent on, an ssh-family word asks where the shell, or a program the line names, starts it (the command word, a launcher, find -exec, a nested shell or its heredoc, a command substitution, a command word built at run time, a file or pipe a shell runs, a URL a client connects to, a program option, gh codespace or alias, a startup file); a mention that starts nothing (a search, a path, a comment, a commit message, a URL in git or a text, the code of an interpreter) does not ask."
 runner = [
   "tests/test_ssh_consent.py::VisibleIntentTests::test_a_mention_that_starts_nothing_does_not_ask",

@@ -1,6 +1,7 @@
 # c1-a-prompt-with-a-hit-is-blocked: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c1-a-prompt-with-a-hit-is-blocked"
 control = "C1"
+serves = ["M1.1"]
 statement = "Without the mod, the settings hook blocks a prompt that carries a detected value, stores it and answers with a placeholder; the value never reaches the model."
 runner = ["tests/test_core.py::HookTests::test_prompt_with_secret_is_blocked_and_stored"]
 

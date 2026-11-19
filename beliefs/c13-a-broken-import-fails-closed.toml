@@ -1,6 +1,7 @@
 # c13-a-broken-import-fails-closed: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c13-a-broken-import-fails-closed"
 control = "C13"
+serves = ["M5.2"]
 statement = "When the entry point cannot import the plugin's own code, every hook event refuses as the launcher does without Python: the prompt and the tool are blocked, the output is withheld, and the text carries the exception type only."
 runner = ["tests/test_promises.py::BrokenImportFailsClosedTests::test_a_broken_package_blocks_every_event"]
 

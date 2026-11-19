@@ -1,6 +1,7 @@
 # c26-no-import-hit-inside-a-placeholder: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-no-import-hit-inside-a-placeholder"
 control = "C26"
+serves = ["M1.3"]
 statement = "An import hit never lands inside a placeholder, so an import cannot turn a resolvable placeholder into a masked one."
 runner = ["tests/test_values.py::ReviewRoundOne::test_an_import_hit_never_lands_inside_a_placeholder"]
 

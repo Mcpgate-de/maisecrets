@@ -7,8 +7,8 @@ invariants = ["I4"]
 ends = "A transcript of a client maisecrets does not scrub; a record written after the scrub window."
 
 [[part]]
+id = "M2.1"
 says = "A detected value is masked in the transcript in every record shape the clients write."
-beliefs = ["c3-*", "inv-every-detected-value-can-be-scrubbed"]
 
 [measure]
 none = "the scrub is all or nothing per record shape; invariant I4 checks every detected value in every shape"

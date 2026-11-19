@@ -1,6 +1,7 @@
 # c27-codex-the-start-answer-of-a-session-stays: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c27-codex-the-start-answer-of-a-session-stays"
 control = "C27"
+serves = ["M3.3"]
 statement = "A Codex session whose start saw a project layer or profile file with servers notes no result, also after that layer is deleted: Codex keeps the URLs it merged at the start."
 runner = ["tests/test_codex_vault.py::ToolNames::test_a_layer_deleted_during_the_session_still_names_nothing"]
 

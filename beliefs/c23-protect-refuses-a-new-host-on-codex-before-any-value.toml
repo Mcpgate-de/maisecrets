@@ -1,6 +1,7 @@
 # c23-protect-refuses-a-new-host-on-codex-before-any-value: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c23-protect-refuses-a-new-host-on-codex-before-any-value"
 control = "C23"
+serves = ["M3.6"]
 statement = "Codex cannot ask with a rewritten input: under protect a new host is refused before any value is resolved, audited or pended."
 runner = ["tests/test_destinations.py::Protect::test_codex_refuses_a_new_host_before_any_value_is_resolved"]
 

@@ -2,6 +2,7 @@
 belief = "inv-a-rewrite-grants-no-more-than-the-call"
 kind = "invariant"
 control = "I2"
+serves = ["M3.2"]
 statement = "On Claude Code a rewrite never grants more than the call the model wrote: no permissionDecision allow; MCP, Write and Edit get back the original input when each value becomes its placeholder again; Bash gets only the reads of the values (each ending the command with exit 97 when it fails) and, for ssh, the sandbox guard and the options that narrow ssh. A call without a placeholder gets no grant. Codex gets allow with a rewrite: the named exception of THREAT-MODEL C5, recorded by a test that fails when it changes."
 runner = [
   "tests/test_invariant_rewrite_grants_no_more.py::ClaudeRewriteTests::test_no_bash_rewrite_grants_more_than_the_command",

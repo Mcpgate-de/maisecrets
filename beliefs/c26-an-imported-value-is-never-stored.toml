@@ -1,6 +1,7 @@
 # c26-an-imported-value-is-never-stored: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-an-imported-value-is-never-stored"
 control = "C26"
+serves = ["M1.3"]
 statement = "The store keeps the import id and the value id of an import hit, never the value."
 runner = ["tests/test_values.py::Hooks::test_a_tool_result_is_masked_and_the_store_never_holds_the_value"]
 

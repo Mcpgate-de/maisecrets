@@ -62,19 +62,23 @@ mission = "M1"
 """
 
 
-def belief(name, control):
-    return f'belief = "{name}"\ncontrol = "{control}"\nstatement = "s"\nrunner = ["t"]\n[proof]\nfile = "f"\n'
-
-
 def toml_list(xs):
     return "[" + ", ".join(f'"{x}"' for x in xs) + "]"
 
 
-def mission(mid, controls, invariants=(), parts=(("all", ["b*"]),), measure='none = "a yes or no"'):
+def belief(name, control, serves=("M1.1",)):
+    line = "" if serves is None else f'serves = "{serves}"\n' if isinstance(serves, str) \
+        else f"serves = {toml_list(serves)}\n"
+    return f'belief = "{name}"\ncontrol = "{control}"\n{line}statement = "s"\nrunner = ["t"]\n[proof]\nfile = "f"\n'
+
+
+def mission(mid, controls, invariants=(), parts=("all",), measure='none = "a yes or no"'):
+    """parts: the sentence of each part; its id is <mid>.<n> unless the item is (sentence, extra TOML lines)."""
     text = (f'mission = "{mid}"\npromise = "p"\ncontrols = {toml_list(controls)}\n'
             f'invariants = {toml_list(invariants)}\n')
-    for says, beliefs in parts:
-        text += f'\n[[part]]\nsays = "{says}"\nbeliefs = {toml_list(beliefs)}\n'
+    for i, part in enumerate(parts, 1):
+        says, extra = (part, f'id = "{mid}.{i}"\n') if isinstance(part, str) else part
+        text += f'\n[[part]]\n{extra}says = "{says}"\n'
     if measure is not None:
         text += f'\n[measure]\n{measure}\n'
     return text
@@ -97,8 +101,10 @@ class MissionCoverageTests(unittest.TestCase):
         (root / "mission" / "claims.toml").write_text(claims, encoding="utf-8")
         for name, text in missions.items():
             (root / "mission" / f"{name}.toml").write_text(text, encoding="utf-8")
-        for i, control in enumerate(beliefs):
-            (root / "beliefs" / f"b{i}.toml").write_text(belief(f"b{i}", control), encoding="utf-8")
+        # each belief: its control, which serves M1.1, or (control, serves); serves None leaves the key out
+        for i, b in enumerate(beliefs):
+            control, serves = (b, ("M1.1",)) if isinstance(b, str) else b
+            (root / "beliefs" / f"b{i}.toml").write_text(belief(f"b{i}", control, serves), encoding="utf-8")
         return root
 
     def covered(self):
@@ -115,15 +121,13 @@ class MissionCoverageTests(unittest.TestCase):
 
     def test_each_mission_finding_class_is_named(self):
         import mission_coverage
-        missions = {"M1-x": mission("M1", ["C1", "C2", "C9"], parts=(("one", ["b0"]), ("none", ["zz*"]),
-                                                                     ("many", ["b1", "b2"]))),
+        missions = {"M1-x": mission("M1", ["C1", "C2", "C9"], parts=("one", "none", "many")),
                     "M7-y": mission("M2", [], parts=())}
-        root = self.tree(missions, ["C1", "C2", "C2", "operations"])
+        root = self.tree(missions, [("C1", ["M1.1"]), ("C2", ["M1.3"]), ("C2", ["M1.3"]), ("operations", [])])
         r = mission_coverage.analyse(root)
         self.assertEqual(r["thin"], ["M1.1: one belief: one"])
         self.assertIn("M1.2: no belief: none", r["gaps"])
         self.assertIn("M2: no part names a belief", r["gaps"])
-        self.assertIn("M1.2: zz* matches no belief", r["unknown"])
         self.assertIn("M1: C9 is not in docs/THREAT-MODEL.md", r["unknown"])
         self.assertIn("M7-y.toml: the file name does not start with M2-", r["unknown"])
         self.assertEqual(r["no_invariant"], ["M1", "M2"])
@@ -131,10 +135,38 @@ class MissionCoverageTests(unittest.TestCase):
         self.assertEqual(r["unowned_beliefs"], {"operations": 1})
         self.assertEqual(r["undocumented_belief_controls"], ["operations"])
 
+    def test_each_broken_link_between_a_belief_and_a_part_is_named(self):
+        import mission_coverage
+        parts = ("all", ("two", 'id = "M1.1"\n'), ("odd", 'id = "M2.7"\n'), ("glob", 'id = "M1.4"\nbeliefs = ["b*"]\n'))
+        missions = {"M1-x": mission("M1", ["C1", "C2"], ["I1"], parts=parts)}
+        beliefs = [("C1", ["M1.1"]), ("C1", None), ("C2", ["M9.1"]), ("C3", ["M1.1"]), ("C1", "M1.1"),
+                   ("detector", ["M1.1"]), ("I1", ["M1.4"])]
+        r = mission_coverage.analyse(self.tree(missions, beliefs))
+        self.assertIn("M1.1: two parts have this id", r["unknown"])
+        self.assertIn("M1, part 3: the id 'M2.7' is not M1.<number>", r["unknown"])
+        self.assertIn("M1.4: a part names no beliefs; each belief names its parts in serves", r["unknown"])
+        self.assertIn("b1: no serves list of part ids (serves = [] when it serves no promise)", r["unknown"])
+        self.assertIn("b2: serves M9.1, which no mission has", r["unknown"])
+        self.assertIn("b3: serves M1.1, but M1 does not name its control C3", r["unknown"])
+        self.assertIn("b4: no serves list of part ids (serves = [] when it serves no promise)", r["unknown"])
+        self.assertFalse(any(u.startswith(("b0:", "b5:", "b6:")) for u in r["unknown"]),
+                         "a served part with its control, or a label that is no documented control, is no finding")
+        self.assertEqual(len(r["unknown"]), 7, r["unknown"])
+        self.assertEqual(r["unowned_beliefs"], {}, "serves = [] is the only way to serve no promise")
+
+    def test_a_belief_counts_only_for_the_parts_it_serves(self):
+        import mission_coverage
+        missions = {"M1-x": mission("M1", ["C1", "C2", "C3"], ["I1"], parts=("a", "b", "c"))}
+        beliefs = [("C1", ["M1.1", "M1.2"]), ("C2", ["M1.2"]), ("C3", ["M1.2"]), ("I1", [])]
+        r = mission_coverage.analyse(self.tree(missions, beliefs))
+        self.assertEqual(r["missions"], [("M1", "p", [("M1.1", "a", 1), ("M1.2", "b", 3), ("M1.3", "c", 0)])])
+        self.assertEqual(r["gaps"], ["M1.3: no belief: c"])
+        self.assertEqual(r["unowned_beliefs"], {"I1": 1})
+
     def test_a_part_tested_elsewhere_is_still_a_gap_and_says_where(self):
         import mission_coverage
         m = mission("M1", ["C1", "C2", "C3"], ["I1"])
-        m += '\n[[part]]\nsays = "the mod"\nbeliefs = []\ntests = ["tests/mod.test.ts"]\n'
+        m += '\n[[part]]\nid = "M1.2"\nsays = "the mod"\ntests = ["tests/mod.test.ts"]\n'
         r = mission_coverage.analyse(self.tree({"M1-x": m}, ["C1", "C2", "C3", "I1"]))
         self.assertEqual(r["gaps"], ["M1.2: no belief (tested only in tests/mod.test.ts, which no mutation proves): "
                                      "the mod"])
@@ -163,9 +195,8 @@ class MissionCoverageTests(unittest.TestCase):
         import mission_coverage
         cases = {"claim": (self.covered(), ["C1", "C2", "C3", "I1"], CLAIMS.replace("A name without", "A cat with")),
                  "orphan": ({"M1-x": mission("M1", ["C1", "C2"], ["I1"])}, ["C1", "C2", "I1"], CLAIMS),
-                 "gap": ({"M1-x": mission("M1", ["C1", "C2", "C3"], ["I1"], parts=(("n", []),))}, ["C1"], CLAIMS),
-                 "empty glob": ({"M1-x": mission("M1", ["C1", "C2", "C3"], ["I1"], parts=(("n", ["b0", "zz"]),))},
-                                ["C1"], CLAIMS)}
+                 "gap": ({"M1-x": mission("M1", ["C1", "C2", "C3"], ["I1"], parts=("n",))}, [("C1", [])], CLAIMS),
+                 "no serves": (self.covered(), ["C1", "C2", ("C3", None), "I1"], CLAIMS)}
         for name, (missions, beliefs, claims) in cases.items():
             with self.subTest(name):
                 root = self.tree(missions, beliefs, claims=claims)
@@ -178,9 +209,8 @@ class MissionCoverageTests(unittest.TestCase):
                "| d3 | holdout-v2 | 0.7 |\n")
         read = 'what = "recall"\nsource = "LOG.md"\nrow = "holdout-v2"\ncolumn = 3\ngate = "g"'
         missions = {"M1-x": mission("M1", ["C1", "C2", "C3"], ["I1"], measure=read),
-                    "M2-y": mission("M2", [], parts=(("all", ["b*"]),), measure=None),
-                    "M3-z": mission("M3", [], parts=(("all", ["b*"]),),
-                                    measure=read.replace("holdout-v2", "holdout-v9"))}
+                    "M2-y": mission("M2", [], measure=None),
+                    "M3-z": mission("M3", [], measure=read.replace("holdout-v2", "holdout-v9"))}
         root = self.tree(missions, ["C1", "C2", "C3", "I1"])
         (root / "LOG.md").write_text(log, encoding="utf-8")
         r = mission_coverage.analyse(root)

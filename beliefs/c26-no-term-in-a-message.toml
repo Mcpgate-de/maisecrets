@@ -1,6 +1,7 @@
 # c26-no-term-in-a-message: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-no-term-in-a-message"
 control = "C26"
+serves = ["M1.3"]
 statement = "A refusal of a term list names a line number, never the text of the line."
 runner = ["tests/test_terms.py::RejectTests::test_duplicate_label_and_the_first_bad_line"]
 

@@ -2,6 +2,7 @@
 belief = "c1-a-person-field-of-an-api-is-read-as-one"
 kind = "invariant"
 control = "C1"
+serves = ["M1.3"]
 statement = "Since 0.8.20, the real_name of a profile is a person label, a number under a plural or directory phone key (phones, businessPhones, homePhones, workPhone) is a phone after its label, and forty lower-case hex digits after an AWS key id are a git commit, not the secret half of the key."
 runner = ["tests/test_personal_after_its_label.py::ApiFieldTests::test_the_real_name_of_a_profile_is_a_name", "tests/test_personal_after_its_label.py::ApiFieldTests::test_a_number_under_a_plural_or_directory_phone_key_is_a_phone", "tests/test_personal_after_its_label.py::ApiFieldTests::test_a_commit_hash_after_an_aws_key_id_is_no_secret"]
 

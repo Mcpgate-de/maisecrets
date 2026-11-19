@@ -1,6 +1,7 @@
 # c26-an-imported-value-in-a-placeholder-display-is-masked: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-an-imported-value-in-a-placeholder-display-is-masked"
 control = "C26"
+serves = ["M1.3"]
 statement = "The import pass skips only the bracket and the key of a placeholder: an imported value in its display text is masked."
 runner = ["tests/test_values.py::ReviewRoundTwo::test_an_imported_value_in_the_display_text_of_a_placeholder_is_masked"]
 

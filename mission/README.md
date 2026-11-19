@@ -2,9 +2,11 @@
 
 One file per product promise (`M*.toml`). Each file says the promise in plain words, the actors of
 `docs/THREAT-MODEL.md` it protects against, the controls (C*) and invariants (I*) that serve it, where the
-promise ends, and its parts: one sentence each, with the beliefs (`beliefs/*.toml`, ids or globs) that prove
-that sentence. A part that only a test without a belief covers names that test in `tests` and still counts as
-a gap: no mutation proves that the test can fail.
+promise ends, and its parts: one sentence each, with an id (`M1.3`). Each belief (`beliefs/*.toml`) names the
+parts it proves in `serves = ["M1.3"]`, one or more; `serves = []` says that it serves no promise. A belief without
+`serves`, a part id that no mission has, and a belief whose control its mission does not name are findings, so a new
+belief counts for no part until its author says which. A part that only a test without a belief covers names that
+test in `tests` and still counts as a gap: no mutation proves that the test can fail.
 
 `claims.toml` maps the promises that `README.md` and `PRIVACY.md` make to users onto the missions: a promise
 to the mission that keeps it, a limit ("What it does not protect") to the mission whose `ends` names it, a
