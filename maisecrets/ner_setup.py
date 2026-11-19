@@ -748,9 +748,13 @@ def start_typed(route: str) -> bool:
              else {"start_new_session": True})
     try:
         HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # no bytecode from the detached start: not into the plugin folder (Codex binds its hook trust to the folder's
+        # contents) and not into a cache folder of the caller, which may be gone before the start ends
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPYCACHEPREFIX"}
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         with open(HOME / START_LOG, "w", encoding="utf-8") as f:
             subprocess.Popen([sys.executable, "-m", "maisecrets.cli", "ner", "start"], cwd=root, stdout=f,
-                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **flags)
+                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, **flags)
     except OSError:
         return False
     return True

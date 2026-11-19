@@ -55,15 +55,36 @@ class TypedStartTests(unittest.TestCase):
         tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
         env = {"PATH": self.dir + os.pathsep + os.environ.get("PATH", ""), "FAKE_DOCKER_LOG": str(self.log),
                "FAKE_DOCKER_DIR": self.dir}
-        for p in (mock.patch.dict(os.environ, env), mock.patch.object(ner_setup, "probe", return_value=(False, ""))):
+        # each start this test spawns is kept, so the cleanup waits for it and reaps it: none outlives the test
+        import subprocess
+        real, self.spawned = subprocess.Popen, []
+
+        def popen(argv, *a, **k):
+            p = real(argv, *a, **k)
+            if "maisecrets.cli" in argv:
+                self.spawned.append(p)
+            return p
+        for p in (mock.patch.dict(os.environ, env), mock.patch.object(ner_setup, "probe", return_value=(False, "")),
+                  mock.patch.object(ner_setup.subprocess, "Popen", popen)):
             p.start()
             self.addCleanup(p.stop)
         os.environ.pop(ner_setup.NO_START_ENV, None)
         self.addCleanup(self._clean)
 
     def _clean(self):
-        # the fake download ends, and with it the start, which then lets its lock go
+        # the fake download ends, and with it the start; each start is reaped, or its group is killed
+        import signal
+        import subprocess
         Path(self.dir, "die").write_text("", encoding="utf-8")
+        for p in self.spawned:
+            try:
+                p.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                p.wait()
         self.wait_for(lambda: not ner_setup.start_running(), 20)
         Path(HOME, ner_setup.START_LOG).unlink(missing_ok=True)
         Path(HOME, "config.json").write_text(json.dumps(CONFIG), encoding="utf-8")
