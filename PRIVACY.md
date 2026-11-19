@@ -1,9 +1,10 @@
 # Privacy
 
-maisecrets has no service of the publisher, no telemetry and no automatic network
-connection. Its hooks and its mod process your data on your machine. Network
+maisecrets has no service of the publisher, no telemetry and no network connection that
+you did not set up. Its hooks and its mod process your data on your machine. Network
 communication happens only in the cases listed under "What leaves the machine": a
-command that you or the agent runs, and an MCP server that you added yourself. This page
+command that you or the agent runs, and a service that you set up yourself (a name
+service, a gateway of references, or an MCP server you added). This page
 states what it reads, what it stores, for how long, and what leaves the machine, so that
 a person or a data-protection officer can check it against the source.
 
@@ -56,8 +57,11 @@ everything at once.
 
 ## What leaves the machine
 
-No telemetry and no download. The hooks and the mod send nothing to a server of their own.
-Connections start only from a command you run, or go to an MCP server you added yourself:
+No telemetry. The hooks and the mod send nothing to a server of their own. The one download
+is the image of a name service on this computer that you set up (`/maisecrets:ner local` or
+`run.sh ner start` pulls it first): at a session start, the plugin gives that container the image
+its version pins, with the docker or podman on your PATH (`/maisecrets:ner updates off` keeps the
+image). Connections start only from a command you run, or go to a service you set up yourself:
 
 - Your own ssh command inside the Claude Code sandbox goes through Claude Code's local
   sandbox proxy to the host you named, with the proxy login Claude Code sets for that
