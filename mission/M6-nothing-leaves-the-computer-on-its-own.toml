@@ -4,11 +4,11 @@ promise = "maisecrets sends nothing off the computer on its own: no telemetry, n
 actors = ["A5"]
 controls = ["C33", "C24", "C30"]
 invariants = ["I5"]
-ends = "A command that the person or the agent runs; an MCP server, a name service or a gateway that the person added."
+ends = "A command that the person or the agent runs; an MCP server, a name service or a gateway that the person added; the Windows Credential Locker may roam through a Microsoft account (PRIVACY.md)."
 
 [[part]]
 id = "M6.1"
-says = "No hook opens a network connection unless the person set up a name service."
+says = "No hook opens a network connection unless the person set up a service for it (a name service, a gateway, a vault server) or runs an ssh command with a value in the sandbox."
 
 [[part]]
 id = "M6.2"
@@ -20,7 +20,7 @@ says = "Diagnostics stay on the computer until the person sends them."
 
 [[part]]
 id = "M6.4"
-says = "The name service gets text only when the person set one up."
+says = "The name service gets text only when the person set one up, and by default the values the rules found go to it as filler."
 
 [[part]]
 id = "M6.5"

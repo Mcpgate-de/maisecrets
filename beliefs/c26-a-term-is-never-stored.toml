@@ -1,7 +1,7 @@
 # c26-a-term-is-never-stored: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-a-term-is-never-stored"
 control = "C26"
-serves = ["M1.3"]
+serves = ["M4.3"]
 statement = "The store keeps the entity id of a term, never the term: no file of the maisecrets folder but the term lists and their index holds it."
 runner = ["tests/test_terms_hooks.py::TermHookTests::test_the_term_is_never_copied_into_the_store_or_the_index"]
 

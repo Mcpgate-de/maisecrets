@@ -2,7 +2,8 @@
 
 A static check over every Python module of the plugin and the skill, and over the mod. Each list below names a module
 and why it may reach for the network or start a program; a module that starts to import a network library, or a new
-place that starts a program, fails, and so does an entry that no longer matches its module, so the lists cannot rot.
+place that starts a program (a reference to a starting call, or a call of a local function that leads to one), fails,
+and so does an entry that no longer matches its module, so the lists cannot rot.
 tests/test_promises.py NoNetworkTests checks the other side at run time: with the default settings no hook connects.
 What this check cannot see: a library that another module imports for it, a name built at run time
 (`__import__(name)`, `getattr`), a module or `$` handed on under another name, and what a started program does."""
@@ -20,11 +21,12 @@ SOURCES = ("maisecrets", "hooks", "skills")
 NETWORK = {"socket", "ssl", "http.client", "http.server", "urllib.request", "socketserver", "ftplib", "smtplib",
            "imaplib", "poplib", "telnetlib", "xmlrpc.client", "xmlrpc.server", "asyncio", "webbrowser", "requests",
            "httpx", "urllib3", "aiohttp", "websocket", "websockets"}
-PROCESS = {"subprocess", "multiprocessing", "pty", "concurrent.futures.process"}
+PROCESS = {"subprocess", "multiprocessing", "pty", "concurrent.futures.process",
+           "concurrent.futures.ProcessPoolExecutor"}
 # the calls that start a program, by their full name
 STARTS = {f"subprocess.{f}" for f in ("run", "Popen", "call", "check_call", "check_output", "getoutput",
                                       "getstatusoutput")} | \
-    {f"os.{f}" for f in ("system", "popen", "fork", "forkpty", "posix_spawn", "posix_spawnp")} | \
+    {f"os.{f}" for f in ("system", "popen", "fork", "forkpty", "posix_spawn", "posix_spawnp", "startfile")} | \
     {f"os.{p}{s}" for p in ("exec", "spawn") for s in ("l", "le", "lp", "lpe", "v", "ve", "vp", "vpe")} | \
     {"multiprocessing.Process", "multiprocessing.Pool", "pty.spawn", "pty.fork",
      "concurrent.futures.ProcessPoolExecutor", "asyncio.create_subprocess_exec", "asyncio.create_subprocess_shell"}
@@ -44,33 +46,34 @@ MAY_CONNECT = {
     "hooks/proxy_connect.py": ({"socket"}, "the ssh ProxyCommand of a command with a value, to the sandbox proxy"),
     "hooks/sandbox_probe.py": ({"socket"}, "the first step of such a command: is it inside the sandbox"),
 }
-# the modules that start a program: how many places start one, and what they start. A new place is a new entry.
+# the modules that start a program: how many places start one (program_starts: each start, and each call of a
+# function that makes one), and what they start. A new place is red until it is counted here, with a reason.
 MAY_START = {
-    "hooks/guard.py": (1, "the clipboard tool, with the restart command"),
-    "maisecrets/codex_helper.py": (1, "ps, for the parent process"),
-    "maisecrets/file_reads.py": (3, "a text extractor for a PDF, ps and ldd"),
-    "maisecrets/hooks.py": (5, "the clipboard tool (read, write), and Python children: a later transcript scrub, "
+    "hooks/guard.py": (2, "the clipboard tool, with the restart command"),
+    "maisecrets/codex_helper.py": (2, "ps, for the parent process"),
+    "maisecrets/file_reads.py": (7, "a text extractor for a PDF, ps and ldd"),
+    "maisecrets/hooks.py": (20, "the clipboard tool (read, write), and Python children: a later transcript scrub, "
                                "the server of a value through a FIFO, the scrub of a failed prompt"),
-    "maisecrets/hub.py": (1, "maisecrets.cli ner start, for the name service the person set up"),
-    "maisecrets/ner_setup.py": (2, "the container tool of the name service the person set up, and its keeper"),
-    "maisecrets/sref_client.py": (1, "a Python child that serves a gateway value through a FIFO"),
-    "maisecrets/user_rules.py": (1, "a Python child that checks a rule of the person"),
-    "maisecrets/vault.py": (1, "the tool of the operating system's store"),
+    "maisecrets/hub.py": (2, "maisecrets.cli ner start, for the name service the person set up"),
+    "maisecrets/ner_setup.py": (20, "the container tool of the name service the person set up, and its keeper"),
+    "maisecrets/sref_client.py": (3, "a Python child that serves a gateway value through a FIFO"),
+    "maisecrets/user_rules.py": (2, "a Python child that checks a rule of the person"),
+    "maisecrets/vault.py": (11, "the tool of the operating system's store"),
     "skills/secret-hygiene/scripts/_detector.py": (2, "worker processes of the scan, and git log for the history"),
-    "skills/secret-hygiene/scripts/protection_status.py": (2, "Python and claude plugin list, for the status"),
-    "skills/secret-hygiene/scripts/redact_copy.py": (1, "git rev-parse"),
-    "skills/secret-hygiene/scripts/scan_secrets.py": (1, "git, for the repository the person asked to scan"),
+    "skills/secret-hygiene/scripts/protection_status.py": (5, "Python and claude plugin list, for the status"),
+    "skills/secret-hygiene/scripts/redact_copy.py": (2, "git rev-parse"),
+    "skills/secret-hygiene/scripts/scan_secrets.py": (6, "git, for the repository the person asked to scan"),
 }
 # modules that import a process library and start nothing with it
 NAMES_ONLY = {"maisecrets/incidents.py": "names subprocess.TimeoutExpired"}
-# the members of `$` the mod may use, and of globalThis; none of them reaches the network
+# the members of `$` the mod may use, and of globalThis; none of them reaches the network. $.process starts a program:
+# the mod has MOD_PROCESS_RUNS places that do (tests/mod.test.ts checks their command lines), and a new one fails.
 MOD_MEMBERS = {"clock", "command", "env", "plugin", "process", "prompt", "session", "state", "store", "ui"}
 MOD_GLOBALS = {"crypto"}
+MOD_PROCESS_RUNS = 8
 MOD_FORBIDDEN = (r"\bfetch\b", r"\bXMLHttpRequest\b", r"\bWebSocket\b", r"\bEventSource\b", r"\bnavigator\b",
-                 r"\bwindow\b", r"\bimport\s*\(", r"\brequire\s*\(", r"^\s*import\s", r"\bnode:", r"\bchild_process\b",
-                 r"\$\s*\[", r"\}\s*=\s*\$(?![\w.])", r"=\s*\$\s*(?:[;\n,)]|$)", r"\bglobalThis\s*\[")
-# the hook name the mod registers is no use of the API
-MOD_HOOK_NAMES = ("'http.fetch'", '"http.fetch"')
+                 r"\bwindow\b", r"\bimport\s*\(", r"\brequire\s*\(", r"^\s*import\s", r"\bchild_process\b",
+                 r"\$\s*\[", r"(?:^|[^}\s])\s*=\s*\$\s*(?:[;\n,)]|$)", r"\bglobalThis\s*\[")
 
 
 def modules():
@@ -137,18 +140,112 @@ def imports(tree, libs):
     return found
 
 
+def _starts_here(node, names):
+    """A reference to a call that starts a program: a name in STARTS, or anything of multiprocessing."""
+    f = full_name(node, names)
+    if f in STARTS:
+        return True
+    while isinstance(node, (ast.Attribute, ast.Call)):        # multiprocessing.get_context("spawn").Process
+        node = node.value if isinstance(node, ast.Attribute) else node.func
+    return isinstance(node, ast.Name) and names.get(node.id, "").split(".")[0] == "multiprocessing" \
+        and f != "multiprocessing"
+
+
 def program_starts(tree):
-    """The number of calls that start a program, through any import spelling of the module."""
+    """The places of a module that start a program: each outermost reference to a starting call (also one bound to a
+    name, `run = subprocess.run`), and each reference to a local function that leads to one (a wrapper such as
+    `def _git(*a): return subprocess.run(...)`), through any import spelling."""
     names = bindings(tree)
-    return sum(1 for n in ast.walk(tree) if isinstance(n, ast.Call) and full_name(n.func, names) in STARTS)
+    parent = {id(c): n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
+
+    def continued(n):
+        """n is part of a longer chain a.b(...).c: the chain counts once, at its top."""
+        p = parent.get(id(n))
+        if isinstance(p, ast.Attribute) and p.value is n:
+            return True
+        if isinstance(p, ast.Call) and p.func is n:
+            g = parent.get(id(p))
+            return isinstance(g, ast.Attribute) and g.value is p
+        return False
+
+    def chain(top):
+        n = top
+        while isinstance(n, (ast.Name, ast.Attribute, ast.Call)):
+            yield n
+            n = n.value if isinstance(n, ast.Attribute) else n.func if isinstance(n, ast.Call) else None
+
+    def refs(node, wrappers):
+        out = 0
+        for n in ast.walk(node):
+            if not isinstance(n, (ast.Name, ast.Attribute)) or not isinstance(n.ctx, ast.Load) or continued(n):
+                continue
+            for m in chain(n):
+                if _starts_here(m, names) or (isinstance(m, ast.Name) and m.id in wrappers) or \
+                        (isinstance(m, ast.Attribute) and m.attr in wrappers and isinstance(m.value, ast.Name)
+                         and m.value.id in ("self", "cls")):
+                    out += 1
+                    break
+        return out
+
+    # one level: a function that starts a program itself is a wrapper, and each call of it is a place; a function
+    # that only calls a wrapper is not, or every caller up the stack would count (a refactor would turn this red)
+    wrappers = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and refs(n, set())}
+    return refs(tree, wrappers)
 
 
 def code_of(js):
-    """The mod's code without its comment lines and the name of its http.fetch hook."""
-    code = "\n".join(line for line in js.splitlines() if not line.lstrip().startswith(("//", "*", "/*")))
-    for name in MOD_HOOK_NAMES:
-        code = code.replace(name, "''")
-    return code
+    """The mod's code without its comments and the text of its strings ('…', "…" and the text of a template literal
+    become empty; the ${…} expressions of a template stay code)."""
+    out, i, n = [], 0, len(js)
+    while i < n:
+        c = js[i]
+        if js.startswith("//", i):
+            j = js.find("\n", i)
+            i = n if j < 0 else j
+        elif js.startswith("/*", i):
+            j = js.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            out.append(" ")
+        elif c == "/" and re.search(r"(?:^|[(,=:\[!&|?{};+\-*%<>~^]|\breturn|\btypeof)\s*$", "".join(out[-40:])):
+            # a regex literal: skip to its closing slash, past escapes and character classes
+            j, in_class = i + 1, False
+            while j < n and js[j] != "\n" and (in_class or js[j] != "/"):
+                if js[j] == "\\":
+                    j += 1
+                elif js[j] == "[":
+                    in_class = True
+                elif js[j] == "]":
+                    in_class = False
+                j += 1
+            out.append("/./")
+            i = j + 1
+        elif c == "`":
+            j, depth = i + 1, 0
+            out.append("``")
+            while j < n and (depth or js[j] != "`"):
+                if depth == 0 and js[j] == "\\":
+                    j += 2
+                    continue
+                if depth == 0 and js.startswith("${", j):
+                    depth, j = 1, j + 2
+                    out.append(" ")
+                    continue
+                if depth:
+                    depth += {"{": 1, "}": -1}.get(js[j], 0)
+                    out.append(js[j] if depth else " ")
+                j += 1
+            i = j + 1
+        elif c in "'\"":
+            j = i + 1
+            while j < n and js[j] != c and js[j] != "\n":
+                j += 2 if js[j] == "\\" else 1
+            out.append(c + c)
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 
 def mod_findings(js):
@@ -156,6 +253,12 @@ def mod_findings(js):
     out = [p for p in MOD_FORBIDDEN if re.search(p, code, re.M)]
     out += [f"$.{m}" for m in sorted(set(re.findall(r"\$\.(\w+)", code)) - MOD_MEMBERS)]
     out += [f"globalThis.{m}" for m in sorted(set(re.findall(r"\bglobalThis\.(\w+)", code)) - MOD_GLOBALS)]
+    # a destructured member of $ is used without "$.": it must be an allowed one, and process stays "$.process.run"
+    for group in re.findall(r"\{([^{}]*)\}\s*=\s*\$(?![\w.])", code):
+        for part in group.split(","):
+            name = part.split(":")[0].strip().lstrip(".")
+            if name and (name not in MOD_MEMBERS or name == "process"):
+                out.append(f"{{ {name} }} = $")
     return out
 
 
@@ -200,9 +303,21 @@ class NetworkImportTests(unittest.TestCase):
         for code in ("import subprocess\nsubprocess.run(['x'])", "import os\nos.system('x')",
                      "from os import system\nsystem('x')", "import os as o\no.execvp('x', [])",
                      "from subprocess import Popen as P\nP(['x'])", "import multiprocessing\nmultiprocessing.Pool()",
-                     "def f():\n    import subprocess as s\n    return s.check_output(['x'])"):
+                     "def f():\n    import subprocess as s\n    return s.check_output(['x'])",
+                     "import os\nos.startfile('x')",
+                     "import multiprocessing\nmultiprocessing.get_context('spawn').Process()",
+                     "import subprocess\n_RUN = subprocess.run",
+                     "from concurrent.futures import ProcessPoolExecutor as P\nP()"):
             with self.subTest(code):
                 self.assertEqual(program_starts(ast.parse(code)), 1, code)
+        # a wrapper: its own start, and each call of it, are places
+        wrapped = ("import subprocess\ndef _git(*a):\n    return subprocess.run(['git', *a])\n"
+                   "def _two(*a):\n    return _git(*a)\n_git('status')\n_two('fetch')\n")
+        self.assertEqual(program_starts(ast.parse(wrapped)), 3,
+                         "the start, and the calls of _git; _two is no wrapper")
+        method = ("import subprocess\nclass C:\n    def _run(self):\n        subprocess.run(['x'])\n"
+                  "    def go(self):\n        self._run()\n        self._run()\n")
+        self.assertEqual(program_starts(ast.parse(method)), 3)
         for code in ("import subprocess\nisinstance(e, subprocess.TimeoutExpired)", "import os\nos.getpid()"):
             with self.subTest(code):
                 self.assertEqual(program_starts(ast.parse(code)), 0, code)
@@ -216,15 +331,22 @@ class ModNetworkTests(unittest.TestCase):
             js = path.read_text(encoding="utf-8")
             self.assertTrue(re.findall(r"\$\.(\w+)", code_of(js)), "the pattern no longer reads the mod's use of $")
             self.assertEqual(mod_findings(js), [], path.name)
+        runs = sum(len(re.findall(r"\$\.process\.run\s*\(", code_of(p.read_text(encoding="utf-8")))) for p in mods)
+        self.assertEqual(runs, MOD_PROCESS_RUNS, "a new place in the mod starts a program; count it, and test its "
+                                                 "command line in tests/mod.test.ts")
 
     def test_the_mod_check_sees_each_spelling(self):
         for js in ("await fetch('https://example.com')", "const r = globalThis.fetch", "const { net } = $",
                    "const n = $\nn.net()", "$['net'].run()", "$.net.run()", "globalThis.process.exit()",
-                   "globalThis['fetch']('x')", "const ws = new WebSocket('wss://x')", "await import('node:http')"):
+                   "globalThis['fetch']('x')", "const ws = new WebSocket('wss://x')", "await import('node:http')",
+                   "const { process } = $", "const { ui, net: n } = $", "x(); fetch(u) /* a comment */"):
             with self.subTest(js):
                 self.assertTrue(mod_findings(js), js)
         for js in ("on('http.fetch', h)", "// a fetch in a comment", "$.process.run(argv, init)",
-                   "globalThis.crypto.getRandomValues(a)", "if (await inDemo($) === false) return next(e)"):
+                   "globalThis.crypto.getRandomValues(a)", "if (await inDemo($) === false) return next(e)",
+                   "x(); // fetch later", "/* one\n   window line */", "say('open a new window to log in')",
+                   "say('node: v20')", "const { Box, Text } = $.ui.resolve(e)", "const { ui, store } = $",
+                   "const u = `https://example.com/${id}`", "note(`the http.fetch hook of ${$.plugin.name}`)"):
             with self.subTest(js):
                 self.assertEqual(mod_findings(js), [], js)
 

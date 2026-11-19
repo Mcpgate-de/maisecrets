@@ -125,7 +125,7 @@ def analyse(root: Path):
     for _path, m in missions:
         for part in m.get("part", []):
             pid = part.get("id")
-            if isinstance(pid, str) and pid:
+            if isinstance(pid, str) and re.fullmatch(rf"{re.escape(str(m.get('mission')))}\.\d+", pid):
                 names = set(m.get("controls", [])) | set(m.get("invariants", [])) | set(m.get("labels", []))
                 parts.setdefault(pid, set()).update(names)
     r = {"_dup": set(), "missions": [], "gaps": [], "thin": [], "no_invariant": [], "orphans": [], "unknown": [],
@@ -146,6 +146,11 @@ def analyse(root: Path):
         if not m.get("invariants"):
             r["no_invariant"].append(mid)
         rows = []
+        for key in ("controls", "invariants", "labels"):
+            value = m.get(key, [])
+            if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+                r["unknown"].append(f"{mid}: {key} is not a list of names")
+                m[key] = [x for x in value if isinstance(x, str)] if isinstance(value, list) else []
         for label in m.get("labels", []):
             if label in controls or label in invariants:
                 r["unknown"].append(f"{mid}: {label} is a control; name it in controls or invariants, not labels")
@@ -157,6 +162,9 @@ def analyse(root: Path):
             elif part_ids[pid] > 1 and pid not in r["_dup"]:
                 r["unknown"].append(f"{pid}: {part_ids[pid]} parts have this id")
                 r["_dup"].add(pid)
+            if not isinstance(part.get("says"), str):
+                r["unknown"].append(f"{pid or mid}: the part has no sentence in says")
+                part["says"] = ""
             if "beliefs" in part:
                 r["unknown"].append(f"{pid or mid}: a part names no beliefs; each belief names its parts in serves")
             got = {b for b, s in serves.items() if pid and pid in (s or [])}

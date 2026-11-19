@@ -260,14 +260,38 @@ class MissionCoverageTests(unittest.TestCase):
         self.assertEqual(mission_coverage.analyse(root)["claims"],
                          ["mission/claims.toml not found: no promise of README.md or PRIVACY.md is checked"])
 
+    def test_a_quote_maps_a_bullet_of_its_own_source_and_only_by_its_start(self):
+        import mission_coverage
+        # a README quote that a PRIVACY bullet starts with, and a PRIVACY quote from the middle of a bullet
+        privacy = PRIVACY.replace("- **Only the prompt.**",
+                                  "- **Masks output** before the model reads it.\n- **Only the prompt.**")
+        privacy = privacy.replace("- Nothing, unless", "- Here: Nothing, unless")
+        r = mission_coverage.analyse(self.tree(self.covered(), ["C1", "C2", "C3", "I1"], privacy=privacy))
+        self.assertIn('PRIVACY "What it reads" bullet no claim maps: **Masks output** before the model reads it.',
+                      r["claims"])
+        self.assertIn('PRIVACY "What leaves the machine" bullet no claim maps: Here: Nothing, unless you ask.',
+                      r["claims"])
+        self.assertEqual(len(r["claims"]), 2, r["claims"])
+
+    def test_a_mission_with_fields_of_the_wrong_type_is_named(self):
+        import mission_coverage
+        m = mission("M1", ["C1", "C2", "C3"], ["I1"])
+        m = m.replace('invariants = ["I1"]', 'invariants = ["I1"]\nlabels = "ops"')
+        m += '\n[[part]]\nid = "M1.2"\nsays = 3\n\n[[part]]\nid = "M2.5"\nsays = "odd"\n'
+        r = mission_coverage.analyse(self.tree({"M1-x": m}, ["C1", "C2", "C3", "I1", ("C1", ["M2.5"])]))
+        self.assertIn("M1: labels is not a list of names", r["unknown"])
+        self.assertIn("M1.2: the part has no sentence in says", r["unknown"])
+        self.assertIn("b4: serves M2.5, which no mission has", r["unknown"])
+
     def test_a_claim_needs_a_kind_and_an_existing_mission(self):
         import mission_coverage
         claims = CLAIMS.replace('kind = "limit"\nmission = "M1"', 'kind = "limit"\nmission = "M9"')
-        claims = claims.replace('kind = "feature"', 'kind = "wish"')
+        claims = claims.replace('kind = "feature"', 'kind = "wish"', 1)
+        claims = claims.replace('kind = "promise"\nmission = "M1"', 'kind = "promise"\nmission = "M8"', 1)
         r = mission_coverage.analyse(self.tree(self.covered(), ["C1", "C2", "C3", "I1"], claims=claims))
         self.assertIn("claim names no existing mission (M9): A name without a label.", r["claims"])
-        self.assertIn("claim kind 'wish' is not one of promise, limit, feature: **Checks a value first:**",
-                      r["claims"])
+        self.assertIn("claim kind 'wish' is not one of promise, limit, feature: **Rewrites a prompt.**", r["claims"])
+        self.assertTrue(any(c.startswith("claim names no existing mission (M8)") for c in r["claims"]), r["claims"])
 
     def test_strict_fails_on_each_blocking_class_and_the_report_alone_does_not(self):
         import mission_coverage
