@@ -707,9 +707,12 @@ TYPED_ROUTES = ("typed prompt", "slash command", "settings pane")
 START_NOTE = ("maisecrets: I am loading the name service mcpgate/ner (about 690 MB, 1 to 2 GB on disk) and starting "
               "it on 127.0.0.1:8765 only. That takes a few minutes. To stop it: /maisecrets:ner off (it stops the "
               "download and the service).")
-START_PID = "ner-start.pid"         # the background start: its process id, for /maisecrets:ner off
+START_PID = "ner-start.pid"         # the record of the background start, for /maisecrets:ner off
 START_LOG = "ner-start.log"
-START_MAX_S = 3600.0                # a pid file older than this is no start that runs (a pid can be used again)
+START_LOCK = ".ner-start.lock"      # around the check, the spawn and the record (two sessions start one, not two)
+START_LOCK_WAIT = 5.0
+START_MAX_S = 3600.0                # a record older than this is no start that runs
+NONCE_ENV = "MAISECRETS_NER_START_NONCE"     # the start's own nonce: the child writes it into the record
 # the test suite sets it (tests/_isolate.py): a test that types `ner local` or `ner off` never starts or stops a real
 # container (docker may run on the machine of the tests)
 NO_START_ENV = "MAISECRETS_NO_CONTAINER_START"
@@ -718,6 +721,12 @@ NO_START_ENV = "MAISECRETS_NO_CONTAINER_START"
 def _start_file():
     from .vault import HOME
     return HOME / START_PID
+
+
+def _start_lock():
+    from .home import _lock_for
+    from .vault import HOME
+    return _lock_for(HOME / START_LOCK).held(START_LOCK_WAIT)
 
 
 def _alive(pid: int) -> bool:
@@ -737,33 +746,104 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def start_pid() -> int:
-    """The process id of a background start that runs now, or 0."""
+def _proc_start(pid: int) -> str:
+    """The OS start time of a process, as a text that only that process has (a pid that the OS gives again gets
+    another one); "" when it cannot be read. Linux: field 22 of /proc/PID/stat; macOS and other POSIX: ps; Windows:
+    the creation time in ticks."""
+    if not isinstance(pid, int) or pid <= 0:
+        return ""
+    try:
+        if os.name == "nt":
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", f"(Get-Process -Id {pid}).StartTime.Ticks"],
+                               capture_output=True, text=True, timeout=15, **_quiet())
+            out = r.stdout.strip()
+            return "win:" + out if r.returncode == 0 and out.isdigit() else ""
+        stat = f"/proc/{pid}/stat"
+        if os.path.exists(stat):
+            with open(stat, encoding="utf-8", errors="replace") as f:
+                fields = f.read().rsplit(")", 1)[-1].split()
+            return "proc:" + fields[19] if len(fields) > 19 else ""
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+        out = " ".join(r.stdout.split())
+        return "ps:" + out if r.returncode == 0 and out else ""
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return ""
+
+
+def _read_start() -> dict:
     try:
         d = json.loads(_start_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return 0
-    pid, t = (d.get("pid"), d.get("t")) if isinstance(d, dict) else (None, None)
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _write_start(d: dict) -> None:
+    from .home import atomic_write
+    atomic_write(_start_file(), json.dumps(d) + "\n")
+
+
+def _verified(d: dict) -> int:
+    """The pid of the record when it is this start's process: alive, the same OS start time as recorded, younger than
+    START_MAX_S, and, once the child wrote it, the child's nonce equal to the start's. 0 otherwise: a pid that the OS
+    gave to another process never passes, so no signal reaches it."""
+    pid, t, started, nonce = d.get("pid"), d.get("t"), d.get("start"), d.get("nonce")
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0 or not isinstance(t, (int, float)):
         return 0
-    if time.time() - t > START_MAX_S or not _alive(pid):
+    if not isinstance(started, str) or not started or not isinstance(nonce, str) or not nonce:
+        return 0
+    if "child" in d and d.get("child") != nonce:
+        return 0
+    if time.time() - t > START_MAX_S or not _alive(pid) or _proc_start(pid) != started:
         return 0
     return pid
+
+
+def start_pid() -> int:
+    """The process id of the background start that runs now, verified (_verified), or 0."""
+    return _verified(_read_start())
+
+
+def _drop_stale() -> None:
+    """A record whose process is gone or is another process now: removed, with no signal."""
+    d = _read_start()
+    if d and not _verified(d):
+        try:
+            _start_file().unlink()
+        except OSError:
+            pass
+
+
+def _end_group(p) -> None:
+    """Ends a start that was spawned and not recorded, with its process group, and reaps it."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True, timeout=30, **_quiet())
+        else:
+            import signal
+            os.killpg(p.pid, signal.SIGTERM)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        p.wait(timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def start_typed(route: str) -> bool:
     """The start after the person typed `ner local` (settings.apply_typed): the container in the background, as
     `run.sh ner start`. True when a start runs now (this one or one before). Nothing starts for a route that is not
-    the person's typed choice, without docker or podman, or when the service answers already."""
+    the person's typed choice, without docker or podman, or when the service answers already. The check, the spawn
+    and the record are under one lock across processes: two sessions start one."""
     if route not in TYPED_ROUTES or os.environ.get(NO_START_ENV) == "1":
         return False
-    if start_pid():
-        return True
     if not container_tool():
         return False
     ok, _line = probe({"url": LOCAL_URL}, timeout=0.3)
     if ok:
         return False
+    import secrets
+    from .home import LockTimeout
     from .vault import HOME
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     flags = ({"creationflags": getattr(subprocess, "DETACHED_PROCESS", 0)
@@ -771,43 +851,87 @@ def start_typed(route: str) -> bool:
              else {"start_new_session": True})
     try:
         HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with open(HOME / START_LOG, "w", encoding="utf-8") as f:
-            p = subprocess.Popen([sys.executable, "-m", "maisecrets.cli", "ner", "start"], cwd=root, stdout=f,
-                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **flags)
-        from .home import atomic_write
-        atomic_write(_start_file(), json.dumps({"pid": p.pid, "t": time.time()}) + "\n")
-    except OSError:
+        with _start_lock():
+            if start_pid():
+                return True
+            _drop_stale()
+            nonce = secrets.token_hex(16)
+            env = dict(os.environ, **{NONCE_ENV: nonce})
+            with open(HOME / START_LOG, "w", encoding="utf-8") as f:
+                p = subprocess.Popen([sys.executable, "-m", "maisecrets.cli", "ner", "start"], cwd=root, stdout=f,
+                                     stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, **flags)
+            try:
+                _write_start({"pid": p.pid, "t": time.time(), "start": _proc_start(p.pid), "nonce": nonce})
+            except OSError:
+                # a start that no record names could be stopped by nobody: it ends now
+                _end_group(p)
+                return False
+    except (OSError, LockTimeout):
         return False
     return True
 
 
-def _end_start_file(pid: int) -> None:
-    """The background start ends: its pid file goes (only its own, a newer start keeps its file)."""
+def note_start(key: str, value: str) -> None:
+    """The child of start_typed writes into its record: `child` (its nonce, at its start), `pre` (the id of a
+    container `ner` that was there before it ran docker, or "") and `made` (the id that its docker run created).
+    Only the child whose pid and nonce the record names writes; any other process writes nothing."""
+    nonce = os.environ.get(NONCE_ENV)
+    if not nonce:
+        return
     try:
-        d = json.loads(_start_file().read_text(encoding="utf-8"))
-        if isinstance(d, dict) and d.get("pid") == pid:
-            _start_file().unlink()
-    except (OSError, ValueError):
+        with _start_lock():
+            d = _read_start()
+            if d.get("pid") != os.getpid() or d.get("nonce") != nonce:
+                return
+            d[key] = nonce if key == "child" else value
+            _write_start(d)
+    except Exception:  # noqa: BLE001 - without the note ner off removes no container: the safe side
+        pass
+
+
+def _end_start_file(pid: int) -> None:
+    """The background start ends: its record goes (only its own, a newer start keeps its record)."""
+    try:
+        with _start_lock():
+            if _read_start().get("pid") == pid:
+                _start_file().unlink()
+    except Exception:  # noqa: BLE001 - a record left behind fails the identity check later
         pass
 
 
 def stop_local() -> list:
-    """`ner off` typed by the person: the background start ends (its process group: the pull of the docker client
-    goes with it), a container `ner` that this start made halfway is removed, and the container that maisecrets set up
-    stops. A container of another image is left alone. The lines say what was done."""
+    """`ner off` typed by the person: the background start ends (its process group: the pull of the docker client goes
+    with it), after a check that the recorded pid is still that start (_verified); a stale record goes with no signal.
+    A container `ner` is removed only when the record proves this start made it: its own docker run gave that id, or
+    no container `ner` was there when the start ran docker. A container that maisecrets set up (its secret is kept)
+    stops. Any other container `ner` is left alone. The lines say what was done, and what failed."""
     lines = []
-    pid = start_pid()
+    d = _read_start()
+    pid = _verified(d)
+    stopped = False
     if pid:
         try:
             if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=30, **_quiet())
+                r = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=30,
+                                   **_quiet())
+                stopped = r.returncode == 0
             else:
                 import signal
                 os.killpg(pid, signal.SIGTERM)
-            lines.append("the download and start of the name service stopped")
+                stopped = True
+        except ProcessLookupError:
+            stopped = True                  # it ended by itself in the meantime
         except (OSError, subprocess.SubprocessError):
-            pass
-        _end_start_file(pid)
+            stopped = False
+        if stopped:
+            lines.append("the download and start of the name service stopped")
+            _end_start_file(pid)
+        else:
+            # the record stays: a later /maisecrets:ner off tries again
+            lines.append("the download and start of the name service could not be stopped; send /maisecrets:ner off "
+                         "again")
+    elif d:
+        _drop_stale()
     tool = container_tool() if os.environ.get(NO_START_ENV) != "1" else ""
     if not tool:
         return lines
@@ -816,8 +940,10 @@ def stop_local() -> list:
     if not cid or not _ours_image(image):
         return lines
     if cid != ner_secret.container_of(ner_secret.endpoint(LOCAL_URL)):
-        # made by the start that just ended, before it kept its secret: no one checks it, so it goes
-        if pid:
+        # made by the start that just ended, before it kept its secret: only an id the record proves is this start's
+        made = d.get("made") if pid and stopped else None
+        owned = pid and stopped and (cid == made or ("pre" in d and d.get("pre") == ""))
+        if owned:
             _docker(tool, "rm", "-f", cid, timeout=60)
             lines.append("the half-made container ner was removed")
         return lines
@@ -833,6 +959,8 @@ def _start_local(cfg: dict, tool: str) -> tuple[int, list]:
     ep = ner_secret.endpoint(LOCAL_URL)
     backend = make_backend(cfg)
     r = _docker(tool, "container", "inspect", "-f", "{{.Id}} {{.Config.Image}}", "ner", timeout=30)
+    # for /maisecrets:ner off: which container was there before this start (stop_local removes only its own)
+    note_start("pre", r.stdout.strip().partition(" ")[0] if r.returncode == 0 else "")
     if r.returncode == 0:
         cid, _, image = r.stdout.strip().partition(" ")
         if not _ours_image(image):
@@ -845,6 +973,8 @@ def _start_local(cfg: dict, tool: str) -> tuple[int, list]:
                    f"checked: {os.path.basename(tool)} rm -f ner, then /maisecrets:ner again."]
     secret = ner_secret.new_secret()
     rc, cid, err = _run_container(tool, secret, SECRET_IMAGE)
+    if cid:
+        note_start("made", cid)
     if rc != 0:
         return 1, ["The container did not start: " + err]
     try:

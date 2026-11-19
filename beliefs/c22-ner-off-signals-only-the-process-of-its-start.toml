@@ -1,0 +1,10 @@
+# c22-ner-off-signals-only-the-process-of-its-start: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-ner-off-signals-only-the-process-of-its-start"
+control = "C22"
+statement = "The off command of the name service signals the recorded start only while that process id still has the recorded OS start time; a process id that the system gave to another process gets no signal."
+runner = ["tests/test_ner_typed_start.py::TypedStartTests::test_a_pid_the_os_gave_to_another_process_gets_no_signal"]
+
+[proof]
+file = "maisecrets/ner_setup.py"
+find = "    if time.time() - t > START_MAX_S or not _alive(pid) or _proc_start(pid) != started:"
+replace = "    if time.time() - t > START_MAX_S or not _alive(pid):"

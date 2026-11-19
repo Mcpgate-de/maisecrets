@@ -210,6 +210,7 @@ class NameServiceTests(unittest.TestCase):
                 mock.patch.object(ner_setup, "container_tool", return_value="/usr/bin/docker"), \
                 mock.patch.object(ner_setup, "probe", return_value=(False, "")), \
                 mock.patch.object(ner_setup, "_alive", return_value=True), \
+                mock.patch.object(ner_setup, "_proc_start", return_value="ps:fake start"), \
                 mock.patch.object(ner_setup, "stop_local", return_value=[]):
             popen.return_value.pid = 4242
             out = ask(action="ner_set", value="local")

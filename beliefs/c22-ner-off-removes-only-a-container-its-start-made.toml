@@ -1,0 +1,10 @@
+# c22-ner-off-removes-only-a-container-its-start-made: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-ner-off-removes-only-a-container-its-start-made"
+control = "C22"
+statement = "The off command of the name service removes a container `ner` only when the record of the start proves that this start made it; a container that the person made by hand is never removed."
+runner = ["tests/test_ner_typed_start.py::TypedStartTests::test_off_never_removes_a_container_the_person_made_by_hand"]
+
+[proof]
+file = "maisecrets/ner_setup.py"
+find = "        owned = pid and stopped and (cid == made or (\"pre\" in d and d.get(\"pre\") == \"\"))"
+replace = "        owned = pid and stopped"
