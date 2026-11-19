@@ -6,5 +6,5 @@ runner = ["tests/test_keychain_process.py::NoValueOnTheCommandLineTests::test_a_
 
 [proof]
 file = "maisecrets/vault.py"
-find = "            self._add(line)\n        else:\n"
-replace = "            self._add(line)\n        else:\n            _run_store(\"keychain\", [\"security\", \"add-generic-password\", \"-U\", \"-s\", SERVICE, \"-a\", key, \"-w\", \"b64:\" + b64], capture_output=True, timeout=5)\n            return\n"
+find = "            self._add(line, key, \"b64:\" + b64)\n        else:\n"
+replace = "            self._add(line, key, \"b64:\" + b64)\n        else:\n            _run_store(\"keychain\", [\"security\", \"add-generic-password\", \"-U\", \"-s\", SERVICE, \"-a\", key, \"-w\", \"b64:\" + b64], capture_output=True, timeout=5)\n            return\n"
