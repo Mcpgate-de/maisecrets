@@ -30,9 +30,9 @@ a person or a data-protection officer can check it against the source.
   copy that the client fetched or a local marketplace folder you added (for the version
   that `/maisecrets:status` shows). In Codex: `config.toml` with its profile files, the hook
   trust and the marketplace copy.
-- **The language setting of the system:** on macOS, when the setting `regions` is empty,
-  the language and region of your account (`~/Library/Preferences/.GlobalPreferences.plist`),
-  to choose the label languages and the national identifiers.
+- **The language setting of the system:** on macOS, the language and region of your account
+  (`~/Library/Preferences/.GlobalPreferences.plist`), to choose the label languages and the
+  national identifiers. The environment variable `MAISECRETS_LOCALE` replaces this read.
 
 It reads no other file of yours, except through a tool call that you or the agent makes.
 
@@ -54,7 +54,7 @@ It reads no other file of yours, except through a tool call that you or the agen
   client's own transcript file on your disk, in place.
 - Before it changes the client's configuration, it keeps a copy: a `Client-Vault` header
   goes into the client's config file after a copy beside it (`~/.claude.json.maisecrets-backup`,
-  mode 0600; deleted at a session start that changes no header), or into the Codex profile
+  mode 0600; deleted when maisecrets next finds that no header needs a change), or into the Codex profile
   file after a copy to `~/.maisecrets/vault-refs/` (mode 0600). `/maisecrets:guard install`
   copies `settings.json` to `settings.json.bak-maisecrets-<time>` beside it and never deletes
   it. A copy holds what the original holds, also a token you put into that file.
@@ -76,11 +76,10 @@ It reads no other file of yours, except through a tool call that you or the agen
 A value expires after its TTL (24 hours by default, one hour for card numbers, at most 30
 days; renewed on use up to the cap) and is then deleted from the store. Metadata of an
 expired value is deleted 30 days later. The logs are capped (2 000 lines). `wipe` deletes
-everything in `~/.maisecrets/` that is no setting of yours: the stored values, the
-metadata, the logs, the waiting prompts and `vault-refs/`, at once, and also the copies of
-the client's configuration it made. It keeps your settings and your own lists in
-`~/.maisecrets/` (`config.json`, your terms, the imported value files, the list of values
-that are no secret).
+the stored values, the metadata, the logs, the waiting prompts, `vault-refs/` and the
+copies of the client's configuration it made, at once. It does not delete your settings
+and your own lists in `~/.maisecrets/` (`config.json`, your terms, the imported value
+files, the list of values that are no secret) and some state files of its own.
 
 ## What leaves the machine
 
