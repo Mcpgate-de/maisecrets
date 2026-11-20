@@ -237,6 +237,8 @@ background, and the input box is free at once. The output opens in a panel
 (Esc closes it); where no panel can open, it stands above the prompt. The
 output holds no value, and it never goes to the AI.
 
+- `/maisecrets:sref` shows each gateway and its login, with a button `log in: NAME`
+  for each one that needs a login: a press starts it, as the typed command does.
 - `/maisecrets:sref login NAME` opens the browser at once. While the login
   waits for your consent (up to 110 seconds), the status line says
   `maisecrets: waiting for your consent in the browser (NAME)`, and you can

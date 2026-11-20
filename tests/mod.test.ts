@@ -762,7 +762,7 @@ const KEY3 = 'SECRET_' + 'c3'
 // opts.chunks: what it prints; opts.code: its exit code; opts.placed: whether a pane is placed; opts.spawnFails
 function runSetup(on, opts: any = {}) {
   const st: any = { checks: [], spawns: [], statuses: [], toasts: [], logs: [], fills: [], opens: [], downstream: 0,
-    ended: 0 }
+    ended: 0, afters: [] as number[] }
   on('clock.now', () => ({ value: clock.t }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/work' }))
@@ -774,7 +774,7 @@ function runSetup(on, opts: any = {}) {
   on('ui.close', () => ({ value: undefined }))
   on('ui.invalidate', () => ({ value: undefined }))
   // a wait of $.clock.after never ends here: the run's own timeout is not part of these tests
-  on('clock.after', () => new Promise(() => {}))
+  on('clock.after', ($, e) => { st.afters.push(e.ms); return new Promise(() => {}) })
   on('prompt.fill', ($, e) => { st.fills.push(e.text); return { isFilled: true } })
   on('process.run', async ($, e) => {
     st.checks.push(e)
@@ -832,6 +832,40 @@ test('a command the person typed runs without a model turn: the prompt is droppe
     expect(await ui.find({ type: 'Text', text: 'Stored values: 0' })).toBeDefined()
     await ui.unmount()
   })
+
+test('the output of /maisecrets:sref has a login button per server; a press starts that login', async ($, on) => {
+  const STATUS = { run: { argv: ['sref', '--args-stdin'], stdin: '' } }
+  const st = runSetup(on, {
+    answer: (q) => q.prompt === '/maisecrets:sref login team-gw' ? LOGIN : STATUS,
+    chunks: (e) => e.input === '' ? [
+      'team-gw (gw.example): not logged in (/maisecrets:sref login team-gw)\n',
+      'other (o.example): logged in; values go into files (log in again to allow commands: ' +
+        '/maisecrets:sref login other)\n',
+      'odd: /maisecrets:sref login bad;name\n'] : ['logged in\n'] })
+  await $.prompt.submit({ text: '/maisecrets:sref', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.ended === 1)).toBe(true)
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const ui = await $.ui.mount({ ...OUTPUT, requestId: paneOf('cmd:sref') } as any)
+  expect(await ui.find({ type: 'Button', key: 'login:team-gw' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'login:other' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'login:bad' })).toBeUndefined()   // only a name the box takes
+  expect(await ui.find({ type: 'Button', key: 'login:bad;name' })).toBeUndefined()
+  const before = st.fills.length
+  const waits = st.afters.filter(ms => ms === 60).length
+  await ui.press({ key: 'login:team-gw' })
+  await ui.unmount()
+  // the press runs the login as the typed command would: Python checks it, the CLI gets the arguments on stdin
+  expect(await until(() => st.spawns.length === 2)).toBe(true)
+  const ask = st.checks.filter(c => c.argv[2] === 'mod-prompt').map(c => JSON.parse(c.init.stdin))
+  expect(ask[ask.length - 1]).toEqual({ prompt: '/maisecrets:sref login team-gw', session_id: 'sess-1', cwd: '/work',
+    origin: 'composer' })
+  expect(st.spawns[1].input).toBe('login team-gw')
+  expect(st.fills.length).toBe(before)                // the box keeps what the person typed
+  // one wait of 60 ms: the login's pane takes the keys; a fill of the box would plan a second one
+  expect(st.afters.filter(ms => ms === 60).length).toBe(waits + 1)
+  expect(await until(() => st.toasts.some(t => t.includes('opens your browser')))).toBe(true)
+  expect(st.downstream).toBe(0)
+})
 
 test('a prompt that is not the person\'s own keeps the command file: nothing runs', async ($, on) => {
   const st = runSetup(on, { answer: LOGIN })
