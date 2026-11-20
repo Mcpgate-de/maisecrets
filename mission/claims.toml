@@ -262,6 +262,12 @@ mission = "M6"
 
 [[claim]]
 source = "PRIVACY.md"
-quote = "Before it changes the client's configuration, it keeps a copy with mode 0600"
+quote = "**The language setting of the system:**"
+kind = "promise"
+mission = "M6"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "Before it changes the client's configuration, it keeps a copy"
 # a statement of what is on the disk; no test checks the mode or the place of each copy
 kind = "feature"

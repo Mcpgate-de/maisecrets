@@ -21,11 +21,18 @@ a person or a data-protection officer can check it against the source.
   (`rule_dirs`) and the files of values from your own tools (`value_files`).
 - **The client's transcript:** with `scrub_transcript` on (the default), it reads the
   transcript file of the current session on your disk and masks a detected value in it.
-- **The client's configuration:** the client's config file (`~/.claude.json` in Claude Code:
-  the MCP servers you added, and the account ids the guard compares), its settings files
-  (user, project and managed: the guard checks whether maisecrets is switched on), its
-  plugin list and `commands/` folder, and in Codex `config.toml` with its profile files and
-  hook trust.
+  When the client does not name that file, it looks for it by the session id in the
+  client's `projects/` folder.
+- **The client's configuration:** the client's config file (`~/.claude.json` in Claude Code,
+  or the file the client uses: the MCP servers you added, and the account ids the guard
+  compares), its settings files (user, project and managed: the guard checks whether
+  maisecrets is switched on), its plugin list, its `commands/` folder, and the marketplace
+  copy that the client fetched or a local marketplace folder you added (for the version
+  that `/maisecrets:status` shows). In Codex: `config.toml` with its profile files, the hook
+  trust and the marketplace copy.
+- **The language setting of the system:** on macOS, when the setting `regions` is empty,
+  the language and region of your account (`~/Library/Preferences/.GlobalPreferences.plist`),
+  to choose the label languages and the national identifiers.
 
 It reads no other file of yours, except through a tool call that you or the agent makes.
 
@@ -45,12 +52,12 @@ It reads no other file of yours, except through a tool call that you or the agen
   command, a session id or a value. None of them holds a value.
 - With `scrub_transcript` on (the default), the plugin masks a detected value inside the
   client's own transcript file on your disk, in place.
-- Before it changes the client's configuration, it keeps a copy with mode 0600: a
-  `Client-Vault` header goes into `~/.claude.json` after a copy to
-  `~/.claude.json.maisecrets-backup` (deleted when no header needs a change), or into the Codex
-  `config.toml` after a copy to `~/.maisecrets/vault-refs/`; `/maisecrets:guard install`
-  copies `settings.json` to `settings.json.bak-maisecrets-<time>` beside it. A copy holds
-  what the original holds, also a token you put into that file.
+- Before it changes the client's configuration, it keeps a copy: a `Client-Vault` header
+  goes into the client's config file after a copy beside it (`~/.claude.json.maisecrets-backup`,
+  mode 0600; deleted at a session start that changes no header), or into the Codex profile
+  file after a copy to `~/.maisecrets/vault-refs/` (mode 0600). `/maisecrets:guard install`
+  copies `settings.json` to `settings.json.bak-maisecrets-<time>` beside it and never deletes
+  it. A copy holds what the original holds, also a token you put into that file.
 - Vault references (only after an MCP server you added yourself sent a server token and
   names a vault endpoint): a random key K per server origin in the store above;
   `~/.maisecrets/vault-refs/` holds the server tokens seen, the key ids and endpoints,
@@ -69,7 +76,11 @@ It reads no other file of yours, except through a tool call that you or the agen
 A value expires after its TTL (24 hours by default, one hour for card numbers, at most 30
 days; renewed on use up to the cap) and is then deleted from the store. Metadata of an
 expired value is deleted 30 days later. The logs are capped (2 000 lines). `wipe` deletes
-everything at once, also the copies of the client's configuration it made.
+everything in `~/.maisecrets/` that is no setting of yours: the stored values, the
+metadata, the logs, the waiting prompts and `vault-refs/`, at once, and also the copies of
+the client's configuration it made. It keeps your settings and your own lists in
+`~/.maisecrets/` (`config.json`, your terms, the imported value files, the list of values
+that are no secret).
 
 ## What leaves the machine
 
