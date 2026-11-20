@@ -21,6 +21,11 @@ a person or a data-protection officer can check it against the source.
   (`rule_dirs`) and the files of values from your own tools (`value_files`).
 - **The client's transcript:** with `scrub_transcript` on (the default), it reads the
   transcript file of the current session on your disk and masks a detected value in it.
+- **The client's configuration:** the client's config file (`~/.claude.json` in Claude Code:
+  the MCP servers you added, and the account ids the guard compares), its settings files
+  (user, project and managed: the guard checks whether maisecrets is switched on), its
+  plugin list and `commands/` folder, and in Codex `config.toml` with its profile files and
+  hook trust.
 
 It reads no other file of yours, except through a tool call that you or the agent makes.
 
@@ -40,10 +45,17 @@ It reads no other file of yours, except through a tool call that you or the agen
   command, a session id or a value. None of them holds a value.
 - With `scrub_transcript` on (the default), the plugin masks a detected value inside the
   client's own transcript file on your disk, in place.
+- Before it changes the client's configuration, it keeps a copy with mode 0600: a
+  `Client-Vault` header goes into `~/.claude.json` after a copy to
+  `~/.claude.json.maisecrets-backup` (deleted when no header needs a change), or into the Codex
+  `config.toml` after a copy to `~/.maisecrets/vault-refs/`; `/maisecrets:guard install`
+  copies `settings.json` to `settings.json.bak-maisecrets-<time>` beside it. A copy holds
+  what the original holds, also a token you put into that file.
 - Vault references (only after an MCP server you added yourself sent a server token and
   names a vault endpoint): a random key K per server origin in the store above;
-  `~/.maisecrets/vault-refs/` holds the server tokens seen, the key ids and endpoints and
-  each server's link state, never a value or a key; a value a server gave stays in the store
+  `~/.maisecrets/vault-refs/` holds the server tokens seen, the key ids and endpoints,
+  each server's link state and the copy of the Codex `config.toml` above, never a value or a
+  key of maisecrets; a value a server gave stays in the store
   for one hour so its echo in later output is masked. In the client's configuration the
   plugin adds one `Client-Vault` header (a hash of K, never K) to that server's entry, in
   Claude Code, or a header helper line, in Codex.
