@@ -1304,8 +1304,13 @@ function drawOutput($, e, id) {
   if (out.markdown && out.done && Markdown) rows.push(h(Markdown, { key: 'md', text: out.lines.join('\n') }))
   else rows.push(...out.lines.map((l, i) => h(Text, { key: `l${i}` }, l || ' ')))
   if (!out.done && out.waiting) rows.push(h(Text, { color: 'yellow', key: 'wait' }, out.waiting))
-  rows.push(h(Box, { marginTop: 1, key: 'foot' }, h(Button, { key: 'close', label: 'Close', role: 'dismiss',
-    autoFocus: true, onPress: () => $.ui.close({ id }) })))
+  // the output of /maisecrets:sref names the login command of a server: one button per server starts it
+  const names = id === paneOf('cmd:sref') && out.done ? loginNames(out.lines).slice(0, 6) : []
+  rows.push(h(Box, { marginTop: 1, key: 'foot' },
+    ...names.map(n => h(Box, { marginRight: 1, flexShrink: 0, key: `b:${n}` }, h(Button, { key: `login:${n}`,
+      label: `log in: ${n}`, variant: 'primary', onPress: () => loginFromPane($, id, n) }))),
+    h(Button, { key: 'close', label: 'Close', role: 'dismiss', autoFocus: true,
+      onPress: () => $.ui.close({ id }) })))
   return h(Box, { flexDirection: 'column' }, ...rows)
 }
 
@@ -1464,6 +1469,63 @@ function startOwn($, run, flight, title, entry = running.get(flight)) {
   })().catch(() => { leave() })
 }
 
+// a command the mod runs itself, or Python's answer to an own-command shape: { drop } when it is answered here, else
+// { answer } with Python's answer for the steps of any prompt. `fill` empties the box for a prompt; a pane button leaves the box alone
+async function runOwn($, own, kind, runnable, ownCmd, fill) {
+  let ownAnswer = null      // Python's answer to an own-command shape: the steps below use it, not a second ask
+  // one run per flight, taken before the first await, so two quick prompts cannot both pass
+  const flight = runnable ? flightOf(own) : null
+  // a login again while one waits in the browser replaces it: the person found the wrong browser or profile and
+  // starts over (the earlier one is stopped only once the new one can start). A login that has not started yet
+  // (two quick prompts) and any other run of the flight start nothing
+  const before = flight ? running.get(flight) : undefined
+  const again = !!before && before.title === LOGIN_TITLE && titleOf(own) === LOGIN_TITLE && !!before.stop
+  if (before && !again) {
+    if (fill) fillSoon($, '')
+    return { drop: busyLine(flight) }
+  }
+  const entry = flight ? { title: titleOf(own), stop: null, replaced: false } : null
+  if (flight) running.set(flight, entry)
+  try { ownAnswer = await askOwn($, own, kind) } catch { ownAnswer = null }
+  const run = ownAnswer?.run
+  if (runnable && validRun(run)) {
+    if (fill) fillSoon($, '')
+    // a login that ended while this one was checked was not stopped: the plain start line then
+    const stopped = again && !before.ended
+    if (stopped) { before.replaced = true; before.stop?.() }
+    startOwn($, run, flight, titleOf(own), entry)
+    return { drop: stopped ? AGAIN_LINE : startedLine(run, titleOf(own)) }
+  }
+  if (flight && running.get(flight) === entry) {
+    // the earlier login waits on, unless it ended meanwhile: then the flight is free and its status line goes
+    if (again && !before.replaced && !before.ended) running.set(flight, before)
+    else {
+      running.delete(flight)
+      if (again) try { $.ui.status(undefined) } catch { /* no status line */ }
+    }
+  }
+  if (ownAnswer === null && ownCmd) return { drop: OWN_FAILED }
+  if (ownAnswer !== null && typeof ownAnswer.drop === 'string') {
+    if (fill) fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
+    return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE) }
+  }
+  return { answer: ownAnswer }
+}
+
+// a login button of the output pane of /maisecrets:sref: the person's press, which the AI cannot make, starts the login
+// as the typed command would (its checks in Python, one flight, a login again starts over). A server name of the output
+// only, in the form the box takes
+const LOGIN_NAME = /\/maisecrets:sref login ([A-Za-z0-9_.-]{1,64})(?=[\s)]|$)/g
+const loginNames = (lines) => [...new Set(lines.flatMap(l => [...String(l).matchAll(LOGIN_NAME)].map(m => m[1])))]
+
+async function loginFromPane($, id, name) {
+  try { await $.ui.close({ id }) } catch { /* closed already */ }
+  const own = `/maisecrets:sref login ${name}`
+  let done
+  try { done = await runOwn($, own, 'composer', true, true, false) } catch { done = undefined }
+  toast($, done?.drop ?? OWN_FAILED)
+}
+
 const startedLine = (run, title) => run.long
   ? `maisecrets: ${title} opens your browser; the status line shows the wait.`
   : `maisecrets: ${title} runs without the AI; its output opens in a panel.`
@@ -1588,42 +1650,9 @@ export function register(on) {
     const runnable = RUN_ORIGINS.has(kind) && RUN_CMD.test(own)
     const ownCmd = OWN_CMD.test(own)
     if (ownCmd || runnable) {
-      // one run per flight, taken before the first await, so two quick prompts cannot both pass
-      const flight = runnable ? flightOf(own) : null
-      // a login again while one waits in the browser replaces it: the person found the wrong browser or profile and
-      // starts over (the earlier one is stopped only once the new one can start). A login that has not started yet
-      // (two quick prompts) and any other run of the flight start nothing
-      const before = flight ? running.get(flight) : undefined
-      const again = !!before && before.title === LOGIN_TITLE && titleOf(own) === LOGIN_TITLE && !!before.stop
-      if (before && !again) {
-        fillSoon($, '')
-        return { drop: busyLine(flight) }
-      }
-      const entry = flight ? { title: titleOf(own), stop: null, replaced: false } : null
-      if (flight) running.set(flight, entry)
-      try { ownAnswer = await askOwn($, own, kind) } catch { ownAnswer = null }
-      const run = ownAnswer?.run
-      if (runnable && validRun(run)) {
-        fillSoon($, '')
-        // a login that ended while this one was checked was not stopped: the plain start line then
-        const stopped = again && !before.ended
-        if (stopped) { before.replaced = true; before.stop?.() }
-        startOwn($, run, flight, titleOf(own), entry)
-        return { drop: stopped ? AGAIN_LINE : startedLine(run, titleOf(own)) }
-      }
-      if (flight && running.get(flight) === entry) {
-        // the earlier login waits on, unless it ended meanwhile: then the flight is free and its status line goes
-        if (again && !before.replaced && !before.ended) running.set(flight, before)
-        else {
-          running.delete(flight)
-          if (again) try { $.ui.status(undefined) } catch { /* no status line */ }
-        }
-      }
-      if (ownAnswer === null && ownCmd) return { drop: OWN_FAILED }
-      if (ownAnswer !== null && typeof ownAnswer.drop === 'string') {
-        fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
-        return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE) }
-      }
+      const done = await runOwn($, own, kind, runnable, ownCmd, true)
+      if (done.drop !== undefined) return { drop: done.drop }
+      ownAnswer = done.answer
       // no command of the mod's: the steps below, as for any prompt (a slash command goes on to its command file)
     }
     if (meant) {
