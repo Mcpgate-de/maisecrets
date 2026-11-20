@@ -125,7 +125,7 @@ mission = "M1"
 
 [[claim]]
 source = "PRIVACY.md"
-quote = "maisecrets has no service of the publisher, no telemetry and no automatic network connection."
+quote = "maisecrets has no service of the publisher, no telemetry and no network connection that you did not set up."
 kind = "promise"
 mission = "M6"
 
@@ -226,8 +226,14 @@ mission = "M4"
 
 [[claim]]
 source = "PRIVACY.md"
-quote = "No telemetry and no download. The hooks and the mod send nothing to a server of their own."
+quote = "No telemetry. The hooks and the mod send nothing to a server of their own."
 kind = "promise"
+mission = "M6"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "The one download is the image of a name service on this computer that you set up"
+kind = "limit"
 mission = "M6"
 
 [[claim]]
