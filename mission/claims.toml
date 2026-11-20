@@ -232,7 +232,7 @@ mission = "M6"
 
 [[claim]]
 source = "PRIVACY.md"
-quote = "holds the server tokens seen, the key ids and endpoints, each server's link state and the copy of the Codex `config.toml` above, never a value or a key of maisecrets; a value a server gave stays in the store for one hour"
+quote = "holds the server tokens seen, the key ids and endpoints, each server's link state and the copy of the Codex profile file (below), never a value or a key of maisecrets; a value a server gave stays in the store for one hour"
 kind = "promise"
 mission = "M4"
 
@@ -266,8 +266,3 @@ quote = "**The language setting of the system:**"
 kind = "promise"
 mission = "M6"
 
-[[claim]]
-source = "PRIVACY.md"
-quote = "Before it changes the client's configuration, it keeps a copy"
-# a statement of what is on the disk; no test checks the mode or the place of each copy
-kind = "feature"

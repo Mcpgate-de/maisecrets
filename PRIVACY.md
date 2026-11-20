@@ -52,17 +52,11 @@ It reads no other file of yours, except through a tool call that you or the agen
   command, a session id or a value. None of them holds a value.
 - With `scrub_transcript` on (the default), the plugin masks a detected value inside the
   client's own transcript file on your disk, in place.
-- Before it changes the client's configuration, it keeps a copy: a `Client-Vault` header
-  goes into the client's config file after a copy beside it (`~/.claude.json.maisecrets-backup`,
-  mode 0600; deleted when maisecrets next finds that no header needs a change), or into the Codex profile
-  file after a copy to `~/.maisecrets/vault-refs/` (mode 0600). `/maisecrets:guard install`
-  copies `settings.json` to `settings.json.bak-maisecrets-<time>` beside it and never deletes
-  it. A copy holds what the original holds, also a token you put into that file.
 - Vault references (only after an MCP server you added yourself sent a server token and
   names a vault endpoint): a random key K per server origin in the store above;
   `~/.maisecrets/vault-refs/` holds the server tokens seen, the key ids and endpoints,
-  each server's link state and the copy of the Codex `config.toml` above, never a value or a
-  key of maisecrets; a value a server gave stays in the store
+  each server's link state and the copy of the Codex profile file (below), never a value or
+  a key of maisecrets; a value a server gave stays in the store
   for one hour so its echo in later output is masked. In the client's configuration the
   plugin adds one `Client-Vault` header (a hash of K, never K) to that server's entry, in
   Claude Code, or a header helper line, in Codex.
@@ -70,6 +64,8 @@ It reads no other file of yours, except through a tool call that you or the agen
   mode 0600: `<config>.maisecrets-backup` before it adds or removes that header, and
   `settings.json.bak-maisecrets-<time>` for each `/maisecrets:guard install`. A copy holds
   what the file holds, also its tokens. A link at a copy's name is removed, not followed.
+  The copy of the config file goes when maisecrets next finds that no header needs a
+  change. For a Codex profile file, the copy lies in `~/.maisecrets/vault-refs/` instead.
 
 ## For how long
 
