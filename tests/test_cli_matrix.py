@@ -917,7 +917,6 @@ class StateMatrixTests(unittest.TestCase):
         self.assertFalse((commands / "ms.md").exists())
         self.assertEqual((sb.home / ".shortcut").read_text().strip(), "removed")
 
-    @unittest.skipIf(os.name == "nt", "the guard is POSIX only; `guard install` refuses on Windows")
     def test_no_shortcut_or_forget_answer_repeats_a_typed_argument(self):
         # a typed argument can hold a value the prompt hook resolved: no answer shows any 8 characters of it (#82)
         sb = base_state("empty").copy()
@@ -941,6 +940,7 @@ class StateMatrixTests(unittest.TestCase):
         for i in range(len(typed) - 7):
             self.assertNotIn(typed[i:i + 8], r.stdout + r.stderr)
 
+    @unittest.skipIf(os.name == "nt", "the guard is POSIX only; `guard install` refuses on Windows")
     def test_the_guard_installs_beside_the_settings_and_keeps_the_users_own_hooks(self):
         sb = base_state("empty").copy()
         self.addCleanup(sb.remove)
