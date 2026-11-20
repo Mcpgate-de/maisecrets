@@ -21,6 +21,18 @@ a person or a data-protection officer can check it against the source.
   (`rule_dirs`) and the files of values from your own tools (`value_files`).
 - **The client's transcript:** with `scrub_transcript` on (the default), it reads the
   transcript file of the current session on your disk and masks a detected value in it.
+  When the client does not name that file, it looks for it by the session id in the
+  client's `projects/` folder.
+- **The client's configuration:** the client's config file (`~/.claude.json` in Claude Code,
+  or the file the client uses: the MCP servers you added, and the account ids the guard
+  compares), its settings files (user, project and managed: the guard checks whether
+  maisecrets is switched on), its plugin list, its `commands/` folder, and the marketplace
+  copy that the client fetched or a local marketplace folder you added (for the version
+  that `/maisecrets:status` shows). In Codex: `config.toml` with its profile files, the hook
+  trust and the marketplace copy.
+- **The language setting of the system:** on macOS, the language and region of your account
+  (`~/Library/Preferences/.GlobalPreferences.plist`), to choose the label languages and the
+  national identifiers. The environment variable `MAISECRETS_LOCALE` replaces this read.
 
 It reads no other file of yours, except through a tool call that you or the agent makes.
 
@@ -42,18 +54,28 @@ It reads no other file of yours, except through a tool call that you or the agen
   client's own transcript file on your disk, in place.
 - Vault references (only after an MCP server you added yourself sent a server token and
   names a vault endpoint): a random key K per server origin in the store above;
-  `~/.maisecrets/vault-refs/` holds the server tokens seen, the key ids and endpoints and
-  each server's link state, never a value or a key; a value a server gave stays in the store
+  `~/.maisecrets/vault-refs/` holds the server tokens seen, the key ids and endpoints,
+  each server's link state and the copy of the Codex profile file (below), never a value or
+  a key of maisecrets; a value a server gave stays in the store
   for one hour so its echo in later output is masked. In the client's configuration the
   plugin adds one `Client-Vault` header (a hash of K, never K) to that server's entry, in
   Claude Code, or a header helper line, in Codex.
+- Before it changes a file of the client's configuration, the plugin keeps a copy beside it,
+  mode 0600: `<config>.maisecrets-backup` before it adds or removes that header, and
+  `settings.json.bak-maisecrets-<time>` for each `/maisecrets:guard install`. A copy holds
+  what the file holds, also its tokens. A link at a copy's name is removed, not followed.
+  The copy of the config file goes when maisecrets next finds that no header needs a
+  change. For a Codex profile file, the copy lies in `~/.maisecrets/vault-refs/` instead.
 
 ## For how long
 
 A value expires after its TTL (24 hours by default, one hour for card numbers, at most 30
 days; renewed on use up to the cap) and is then deleted from the store. Metadata of an
 expired value is deleted 30 days later. The logs are capped (2 000 lines). `wipe` deletes
-everything at once.
+the stored values, the metadata, the logs, the waiting prompts, `vault-refs/` and the
+copies of the client's configuration it made, at once. It does not delete your settings
+and your own lists in `~/.maisecrets/` (`config.json`, your terms, the imported value
+files, the list of values that are no secret) and some state files of its own.
 
 ## What leaves the machine
 
@@ -67,6 +89,10 @@ image). Connections start only from a command you run, or go to a service you se
   sandbox proxy to the host you named, with the proxy login Claude Code sets for that
   sandbox. Before an ssh command that carries a value, a check tries a few direct
   connections that the sandbox must refuse; it sends no data.
+- In Claude Code, after a claude.ai connector of yours showed a gateway reference, the mod asks
+  that connector once per session which gateway it belongs to (its tool
+  `sensitive_references_resource`, with no argument). It sends no text of yours; the answer is a
+  proposal that only a login you type takes.
 - `/maisecrets:report` prints the issue text and a prefilled link to the configured
   `report_url`. It opens no browser and files nothing: the connection starts when you open
   the link, and you decide in GitHub's form. A prefilled GitHub link carries the issue text,

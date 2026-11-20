@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.9.21] - 2026-11-20
+
+### Features
+
+- a gateway that you use as a claude.ai connector works with Sensitive References (2ba21f3)
+- /maisecrets:sref shows a "log in" button for each gateway that needs a login (384f767)
+
+### Fixes
+
+- a list of timings such as "12.3,size_tier:1.4" is no secret (1405534)
+
+### Security
+
+- the settings copy of /maisecrets:guard install follows no link, and wipe deletes the copies of your client config (35a75d9)
+
 ## [0.9.20] - 2026-11-20
 
 ### Features
