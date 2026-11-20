@@ -594,6 +594,41 @@ class SyncedInstallTests(_Env):
         self.assertTrue(backups)
         self.assertEqual(os.stat(backups[0]).st_mode & 0o777, 0o600)
 
+    def test_a_link_at_the_name_of_the_backup_is_not_followed(self):
+        # a link planted at the copy's name would get the settings and their tokens; an existing file is never
+        # written into (#90)
+        from maisecrets import cli
+        settings = self.claude / "settings.json"
+        settings.write_text(json.dumps({"env": {"A_TOKEN": "x"}}))
+        target = self.claude / "elsewhere.txt"
+        target.write_text("unchanged")
+        fixed = "20260101-120000"
+        (self.claude / f"settings.json.bak-maisecrets-{fixed}").symlink_to(target)
+        with mock.patch("time.strftime", lambda *_a: fixed):
+            cli.install_guard()
+        copy = self.claude / f"settings.json.bak-maisecrets-{fixed}"
+        self.assertFalse(copy.is_symlink())
+        self.assertEqual(target.read_text(), "unchanged")
+        self.assertEqual(os.stat(copy).st_mode & 0o777, 0o600)
+        self.assertIn("A_TOKEN", copy.read_text())
+
+    def test_wipe_deletes_the_copies_of_the_client_config_it_made(self):
+        # the guard's settings copies and the config copy before a header change may hold tokens; wipe takes them,
+        # and nothing else beside them (#90)
+        from maisecrets import vault, vault_refs
+        settings = self.claude / "settings.json"
+        settings.write_text(json.dumps({"env": {"A_TOKEN": "x"}}))
+        made = [self.claude / "settings.json.bak-maisecrets-20260101-120000",
+                vault_refs.claude_json().with_name(vault_refs.claude_json().name + ".maisecrets-backup")]
+        kept = [self.claude / "settings.json.bak-mine", self.claude / "settings.json.bak-maisecrets-x", settings]
+        for f in made + kept[:2]:
+            f.write_text("{}")
+        with mock.patch.dict(os.environ, {"MAISECRETS_TEST_HOME_OWNED": "1"}):
+            _n, problems = vault.wipe_everything({"backend": "jsonfile", "allow_plaintext_store": True})
+        self.assertEqual(problems, [])
+        self.assertEqual([f.name for f in made if f.exists()], [])
+        self.assertEqual([f.name for f in kept if not f.exists()], [])
+
     def test_only_our_hook_object_is_ours(self):
         from maisecrets import cli
         wrapper = {"type": "command", "command": "/opt/tools/run-maisecrets-guard.py-audit"}

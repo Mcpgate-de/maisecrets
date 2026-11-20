@@ -1,0 +1,15 @@
+# c33-the-hooks-read-only-the-files-privacy-lists: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c33-the-hooks-read-only-the-files-privacy-lists"
+control = "C33"
+serves = ["M6.6"]
+statement = "Each hook event opens or lists only the files PRIVACY.md \"What it reads\" names: maisecrets' own files, the client's transcript and configuration, the file of a tool call, and files of Python and the system. A decoy in the project (.env, a source file) or in the home (~/.ssh, ~/Documents, ~/.aws) is never read; an audit hook in each process and in each Python child it starts sees every open and every listing."
+runner = ["tests/test_reads_only_listed_files.py::ReadsOnlyListedFilesTests::test_every_hook_event_reads_only_the_listed_files"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''def user_prompt(payload: dict) -> dict:
+    groups = check_value.parse_all(payload.get("prompt"))'''
+replace = '''def user_prompt(payload: dict) -> dict:
+    _env = os.path.join(str(payload.get("cwd") or "."), ".env")
+    os.path.isfile(_env) and open(_env).close()
+    groups = check_value.parse_all(payload.get("prompt"))'''
