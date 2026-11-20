@@ -871,14 +871,26 @@ resolve, output that prints the value shows the reference instead.
 
 1. Log in once: `/maisecrets:sref login` (in Codex: `run.sh sref login` in a
    terminal). Your browser opens; you log in to the gateway and give the
-   consent there. Nothing logs in by itself. `/maisecrets:sref` shows the
+   consent there. Nothing logs in by itself. When a server of your own
+   configuration first sends this session references and this computer has
+   no login at its gateway, a line says so, once per session and gateway, with
+   the command. In Claude Code the command `/maisecrets:sref login NAME` also
+   goes into the input box at the end of the AI's turn, when the box is empty
+   (else at the end of a later turn): your Enter starts the login. `/maisecrets:sref` shows the
    state, `/maisecrets:sref logout` forgets the login. The gateway gives a
    new refresh token at each renewal and ends the login when a spent one comes
-   back, so a renewal whose answer is lost (a crash, a killed process, a broken
-   connection) ends the login, and no client can prevent that. maisecrets then
-   never sends that token again: on the next use or renewal it tells you that
-   the last renewal did not finish and that you log in again. A login the
-   gateway refused is named as "the gateway ended the login".
+   back. When a renewal ends without a usable answer (a crash, a killed
+   process, a broken connection, an error of the gateway) and the gateway
+   names a reuse window (`sensitive_references.refresh_reuse_interval`),
+   maisecrets sends the same token once more and gets the same new pair: the
+   login stays. The retry goes out 3 s after the first request and 3 s after
+   its failure at the earliest, and only when it can end inside the window. A
+   gateway that needs more than about 7 s for one renewal still sees it as a
+   second use and ends the login. Without the window,
+   after that one retry, or when the window has ended, maisecrets never sends
+   that token again: on the next use or renewal it tells you that the last
+   renewal did not finish and that you log in again. A login the gateway
+   refused is named as "the gateway ended the login".
 2. A reference counts only when a tool result of a gateway that you added
    yourself (user scope) showed it in the same session in the last 24 hours. A
    reference from another session, or one the AI typed itself, gets a reason

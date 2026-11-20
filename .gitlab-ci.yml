@@ -319,6 +319,13 @@ beliefs_can_fail_replay:
     - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
     # the frontmatter belief runs the YAML test: without PyYAML it skips, and a skip is no evidence
     - pip install --quiet --disable-pip-version-check pyyaml==6.0.3
+    # a report, no gate: the mission parts this merge request touches (scripts/mission_touch.py); the base is the
+    # target branch tip, as in baseline_only, because a merged-results pipeline tests the merge commit
+    - |
+      BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}"
+      if [ -n "$BASE" ] && git fetch --quiet origin "$BASE"; then
+        python scripts/mission_touch.py "$BASE" HEAD || echo "mission_touch.py failed"
+      fi
     - python scripts/replay_can_fail.py
 
 # The hook harness: a real Claude Code / Codex binary, a fake upstream, every request body

@@ -32,6 +32,10 @@ output. `README.md` says what it does for users; `docs/USING.md`, `docs/ADMIN.md
   reviewer constructed. #15 took nine review rounds because each round found new long-tail forms; C21
   guards the ssh starts the command line shows to an agent that does not try to evade it
   (`docs/THREAT-MODEL.md`).
+- **Before and after a change to the code, run `python3 scripts/mission_touch.py`.** It names the mission
+  parts (`mission/`) whose guarded lines or belief tests the change touches. Read the sentence of each part and
+  check that the change still keeps it; adapt the beliefs it names. It names code that no belief guards, too.
+  The pre-push hook prints it as well.
 - **Commit subjects are release notes.** Write them for a user ("detects secrets in 245 more formats"),
   not for a developer ("a test value hides only its own type").
 

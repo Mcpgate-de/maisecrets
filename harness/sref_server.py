@@ -56,6 +56,14 @@ class SrefServer:
         self.token_answer = None         # (status, body): the token endpoint answers this to a refresh
         self.refresh_delay = 0.0         # seconds the token endpoint waits before it spends a refresh token
         self.refreshes: list = []        # every refresh token presented, in order (a reuse shows twice)
+        # ai-gateway #1933: a reuse window in seconds (None: none, and no field in the metadata). Inside it the token
+        # replaced last gets the same pair once more, until the new access token is first used; any other reuse
+        # revokes the whole family (every token of that client)
+        self.reuse_interval = None
+        self.reuse: dict = {}            # spent refresh token -> {"pair", "at", "used"}
+        self.families_revoked = 0
+        self.renewing: set = set()       # refresh tokens whose renewal runs now: a second use of one is a reuse
+        self.drop_answers = 0            # refreshes that rotate and then close the connection without an answer
         self.process_scope = True        # mcpgate 2.0.3815: the process sink needs its own scope
         self.display_scope = True        # ai-gateway #1804: the display sink needs its own scope
         self.scopes: dict = {}           # access or refresh token -> the scope it was granted
@@ -122,6 +130,8 @@ class SrefServer:
                                                  **({"process_scope": PROCESS_SCOPE} if server.process_scope else {}),
                                                  **({"display_scope": DISPLAY_SCOPE} if server.display_scope else {}),
                                                  "resolver_profiles": ["oauth-resolver-1"],
+                                                 **({"refresh_reuse_interval": server.reuse_interval}
+                                                    if server.reuse_interval is not None else {}),
                                                  "sink_profiles": server.sinks,
                                                  "sinks": {p: {"sink_type": t} for t, p in SINK_PROFILES.items()
                                                            if p in server.sinks},
@@ -192,13 +202,43 @@ class SrefServer:
                     if form.get("grant_type") == "refresh_token" and server.token_answer is not None:
                         return self._send(*server.token_answer)
                     if form.get("grant_type") == "refresh_token":
-                        server.refreshes.append(form.get("refresh_token", ""))
-                        time.sleep(server.refresh_delay)
-                        cid = server.refresh.pop(form.get("refresh_token", ""), None)   # it rotates: used once
+                        old = form.get("refresh_token", "")
+                        server.refreshes.append(old)
+                        if server.reuse_interval is not None and old in server.renewing:
+                            # the real gateway sees a second use while the first renewal runs: the family ends
+                            server.families_revoked += 1
+                            cid = server.refresh.get(old)
+                            for tok in [t for t, c in server.refresh.items() if c == cid]:
+                                server.refresh.pop(tok, None)
+                            return self._send(400, {"error": "invalid_grant"})
+                        server.renewing.add(old)
+                        try:
+                            time.sleep(server.refresh_delay)
+                        finally:
+                            server.renewing.discard(old)
+                        cid = server.refresh.pop(old, None)   # it rotates: used once
+                        if not cid and server.reuse_interval is not None and old in server.reuse:
+                            got = server._reuse(old, form.get("client_id"))
+                            if got and server.drop_answers > 0:
+                                server.drop_answers -= 1
+                                self.close_connection = True
+                                self.connection.close()
+                                return None
+                            return self._send(200, got) if got else self._send(400, {"error": "invalid_grant"})
                         if not cid or not server.consent or cid != form.get("client_id"):
                             return self._send(400, {"error": "invalid_grant"})
-                        return self._send(200, server._pair(cid, server.scopes.get(form["refresh_token"],
-                                                                                   "sensitive-references.resolve")))
+                        pair = server._pair(cid, server.scopes.get(old, "sensitive-references.resolve"))
+                        if server.reuse_interval is not None:
+                            # only the token replaced last keeps a window: an older one is a plain reuse now
+                            server.reuse = {k: {**v, "last": False} for k, v in server.reuse.items()}
+                            server.reuse[old] = {"pair": pair, "at": time.time(), "used": False, "last": True,
+                                                 "cid": cid}
+                        if server.drop_answers > 0:
+                            server.drop_answers -= 1
+                            self.close_connection = True
+                            self.connection.close()
+                            return None
+                        return self._send(200, pair)
                     return self._send(400, {"error": "unsupported_grant_type"})
                 if self.path == "/sensitive-references/resolve":
                     return self._resolve(raw)
@@ -226,6 +266,9 @@ class SrefServer:
             def _resolve(self, raw: bytes) -> None:
                 auth = self.headers.get("Authorization", "")
                 token = auth[7:] if auth.startswith("Bearer ") else ""
+                for entry in server.reuse.values():
+                    if entry["pair"]["access_token"] == token:
+                        entry["used"] = True       # the first use of the new access token ends the window
                 if not server.consent or server.access.get(token, 0) < time.time():
                     return self._send(401, {"error": "invalid_token"},
                                       {"WWW-Authenticate": 'Bearer error="invalid_token"'})
@@ -299,6 +342,21 @@ class SrefServer:
         self.scopes[access] = self.scopes[refresh] = scope
         return {"access_token": access, "token_type": "Bearer", "expires_in": self.access_ttl,
                 "refresh_token": refresh, "scope": scope, "account_hint": "ope\u2026@example.com"}
+
+    def _reuse(self, old: str, client_id: str | None):
+        """A spent refresh token presented again: the same pair inside the window (once), else the family ends."""
+        entry = self.reuse[old]
+        if (entry["last"] and not entry["used"] and entry.get("again") is None and client_id == entry["cid"]
+                and time.time() - entry["at"] <= self.reuse_interval
+                and entry["pair"]["refresh_token"] in self.refresh):
+            entry["again"] = time.time()
+            return entry["pair"]
+        self.families_revoked += 1
+        for tok in [t for t, c in self.refresh.items() if c == entry["cid"]]:
+            self.refresh.pop(tok, None)
+        for k in list(self.reuse):
+            self.reuse[k]["last"] = False
+        return None
 
     def __enter__(self) -> "SrefServer":
         self.thread.start()

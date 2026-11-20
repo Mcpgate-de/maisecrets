@@ -175,8 +175,12 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None, patient: bo
     scope = login_scope(resolve_scope, process_scope, display_scope=display_scope)
     if wants_ner and ner["scope"] not in scope.split():
         scope += " " + ner["scope"]
+    reuse = block.get("refresh_reuse_interval")
     return {"origin": origin, "resolve": block["resolve_endpoint"], "ner": ner,
             "scope": scope,
+            # ai-gateway #1933: the seconds in which a refresh token the gateway just replaced gets the same pair once
+            # more; None when the gateway names no window
+            "reuse": reuse if isinstance(reuse, int) and not isinstance(reuse, bool) and reuse > 0 else None,
             "process_scope": process_scope if isinstance(process_scope, str) else None,
             "display_scope": display_scope if isinstance(display_scope, str) else None,
             "sinks": sinks, "sink_types": types,
@@ -590,33 +594,49 @@ def _refresh_locked(cfg: dict, backend, found: dict, stale: str | None, deadline
         got = _fresh(rec, stale, margin)
         if got:
             return got
-        # The limit of a rotating refresh token without a grace window (ai-gateway #1933, closed as specified): when
-        # the answer of a refresh is lost after the gateway rotated (a kill, a crash, a broken connection), the new
-        # token is gone and the old one is spent, so no client can keep that login. An unfinished refresh of this
-        # very token is therefore never sent again (the gateway would end the login without a word): the login is
-        # forgotten and marked as ended, and the person is told at once to log in again.
+        # A rotating refresh token: when the answer of a refresh is lost after the gateway rotated (a kill, a crash,
+        # a broken connection), the new token is gone and the old one is spent. Where the gateway names a reuse
+        # window (ai-gateway #1933), the spent token is sent ONCE more inside it and gets the same pair (_retry_at).
+        # Else, or after that one retry, an unfinished refresh of this very token is never sent again (the gateway
+        # would end the login without a word): the login is forgotten and marked as ended, and the person is told at
+        # once to log in again.
         old = _digest(rec["refresh"])
-        if _inflight(found["origin"]) == old:
-            forget(backend, found["origin"])
-            _mark_ended(found["origin"], "uncertain")
-            _set_inflight(found["origin"], None)
-            raise _Revoked(f"the last renewal of the login at {host} did not finish, so its token may be spent; "
-                           "send /maisecrets:sref login again")
-        _set_inflight(found["origin"], old)
-        try:
-            data = _token(cfg, found, {"grant_type": "refresh_token", "refresh_token": rec["refresh"],
-                                       "client_id": rec.get("client_id", "")}, deadline)
-        except _Revoked:
-            forget(backend, found["origin"])
-            _mark_ended(found["origin"])
-            _set_inflight(found["origin"], None)
-            raise
-        except Refused as exc:
-            # only a request that surely never reached the gateway leaves the token unspent. Any answer may come
-            # after the gateway rotated (a 5xx, a cut or malformed 200, a 4xx), so the record stays for it
-            if getattr(exc, "unsent", False):
+        form = {"grant_type": "refresh_token", "refresh_token": rec["refresh"], "client_id": rec.get("client_id", "")}
+        pending = _inflight_entry(found["origin"])
+        if pending is not None and pending.get("old") == old:
+            sent_at = pending.get("at")
+            retry = _retry_at(found, sent_at, pending.get("retried"), deadline)
+            if retry is None and _retry_at(found, sent_at, pending.get("retried"), float("inf")) is not None:
+                # the window is still open, only this caller's deadline is too short: the record stays, and a
+                # renewal with time for it (the detached child) makes the one retry
+                raise Refused(f"the renewal of the login at {host} needs a retry that does not fit this call")
+            if retry is None:
+                forget(backend, found["origin"])
+                _mark_ended(found["origin"], "uncertain")
                 _set_inflight(found["origin"], None)
-            raise
+                raise _Revoked(f"the last renewal of the login at {host} did not finish, so its token may be spent; "
+                               "send /maisecrets:sref login again")
+            data = _retry(cfg, backend, found, form, old, sent_at, retry)
+        else:
+            sent_at = time.time()
+            _set_inflight(found["origin"], old, sent_at)
+            try:
+                data = _token(cfg, found, form, deadline)
+            except _Revoked:
+                forget(backend, found["origin"])
+                _mark_ended(found["origin"])
+                _set_inflight(found["origin"], None)
+                raise
+            except Refused as exc:
+                # only a request that surely never reached the gateway leaves the token unspent. Any answer may come
+                # after the gateway rotated (a 5xx, a cut or malformed 200, a 4xx), so the record stays for it
+                if getattr(exc, "unsent", False):
+                    _set_inflight(found["origin"], None)
+                    raise
+                retry = _retry_at(found, sent_at, False, deadline, lost=time.monotonic())
+                if retry is None:
+                    raise
+                data = _retry(cfg, backend, found, form, old, sent_at, retry)
         # a login or a logout that did not wait for this refresh (its wait ended) changed the record: this result
         # belongs to a login that is gone, and it never overwrites the newer state
         # under the store lock: the record read again, the new pair stored and the in-flight record cleared, with no
@@ -626,8 +646,8 @@ def _refresh_locked(cfg: dict, backend, found: dict, stale: str | None, deadline
                 _set_inflight(found["origin"], None)
                 raise Refused(f"the login at {host} changed while it was renewed; the new state stays")
             # the new pair goes into the store before the lock is released: no other process can read the spent
-            # token once the gateway rotated it (the gateway ends a login whose spent refresh token comes back,
-            # ai-gateway #1933: by design, no grace window)
+            # token once the gateway rotated it (the gateway ends a login whose spent refresh token comes back
+            # outside its reuse window, or after the new access token was used)
             _keep(backend, found["origin"], {**rec, "access": data["access_token"], "refresh": data["refresh_token"],
                                              "scope": _granted(data, str(rec.get("scope") or SCOPE)),
                                              "account": _hint(data) or rec.get("account", ""),
@@ -640,22 +660,78 @@ def _refresh_locked(cfg: dict, backend, found: dict, stale: str | None, deadline
         lock.__exit__(None, None, None)
 
 
+# #87: the retry goes out no sooner than RETRY_AFTER s after the lost request went out AND after its failure was seen.
+# A reuse while the gateway still runs the first renewal (about 0.3 s) revokes the family; a read ends after
+# SOCKET_TIMEOUT (4 s), so a retry comes 7 s after the send at the earliest when no answer came at all. A gateway
+# that takes longer than that for one renewal still sees the retry as a second use.
+RETRY_AFTER = 3.0
+RETRY_MIN = 3.0        # the least time the retry needs, inside the reuse window and inside the caller's deadline
+
+
+def _retry_at(found: dict, sent_at: object, retried: object, deadline: float, lost: float | None = None):
+    """(start, end) in monotonic time for the one retry of a lost refresh answer, or None when there is none: the
+    gateway names no reuse window (or one too short for it), this token was retried once already, or the retry
+    cannot start after RETRY_AFTER and still end, with RETRY_MIN s, 1 s before the window ends and inside
+    `deadline`. `sent_at`: the wall time the lost request went out. `lost`: the monotonic time its failure was seen."""
+    window = found.get("reuse")
+    import math
+    if retried or not isinstance(window, int) or isinstance(window, bool) \
+            or not isinstance(sent_at, (int, float)) or isinstance(sent_at, bool) or not math.isfinite(sent_at):
+        return None
+    now_wall, now = time.time(), time.monotonic()
+    if now_wall < sent_at - 1.0:
+        return None                     # the wall clock went back: the age of the record is unknown
+    start = now + max(0.0, sent_at + RETRY_AFTER - now_wall, (lost + RETRY_AFTER - now) if lost is not None else 0.0)
+    end = min(deadline, now + (sent_at + window - 1.0 - now_wall))
+    return (start, end) if end - start >= RETRY_MIN else None
+
+
+def _retry(cfg: dict, backend, found: dict, form: dict, old: str, sent_at: float, when: tuple) -> dict:
+    """The one retry of a refresh whose answer was lost, with the same refresh token, inside the gateway's reuse
+    window: the gateway gives the same pair once more. The record says it was retried, so a token is never sent a
+    third time. invalid_grant ends the login as before; any other failure keeps the record, and the next refresh
+    ends the login (\"did not finish\")."""
+    _set_inflight(found["origin"], old, sent_at, retried=True)
+    time.sleep(max(0.0, when[0] - time.monotonic()))
+    # the monotonic clock stops while the computer sleeps: the window is checked again by the wall clock
+    if time.time() + RETRY_MIN > sent_at + found["reuse"] - 1.0:
+        raise Refused(f"the reuse window of {urlsplit(found['origin']).hostname} ended before the retry")
+    try:
+        return _token(cfg, found, form, when[1])
+    except _Revoked:
+        forget(backend, found["origin"])
+        _mark_ended(found["origin"])
+        _set_inflight(found["origin"], None)
+        raise
+    except Refused as exc:
+        if getattr(exc, "unsent", False):
+            _set_inflight(found["origin"], old, sent_at)       # it never left: the one retry is still unused
+        raise
+
+
 def _inflight_path():
     from .vault import HOME
     return HOME / "sref-inflight.json"
 
 
-def _inflight(origin: str) -> str | None:
-    """The digest of the refresh token a refresh at this origin sent and did not finish, or None."""
+def _inflight_entry(origin: str) -> dict | None:
+    """The record of a refresh at this origin that was sent and did not finish: {"old": digest, "at": wall time,
+    "retried": bool}, or None."""
     try:
         data = json.loads(_inflight_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     got = data.get(origin) if isinstance(data, dict) else None
-    return got.get("old") if isinstance(got, dict) and isinstance(got.get("old"), str) else None
+    return got if isinstance(got, dict) and isinstance(got.get("old"), str) else None
 
 
-def _set_inflight(origin: str, old: str | None) -> None:
+def _inflight(origin: str) -> str | None:
+    """The digest of the refresh token a refresh at this origin sent and did not finish, or None."""
+    got = _inflight_entry(origin)
+    return got["old"] if got else None
+
+
+def _set_inflight(origin: str, old: str | None, at: float | None = None, retried: bool = False) -> None:
     """Record (old: the digest of the refresh token, never the token) or clear the refresh in flight. Under the
     refresh lock. A record that cannot be written stops the refresh: without it a lost answer would go unnoticed."""
     from .vault import atomic_write
@@ -670,12 +746,12 @@ def _set_inflight(origin: str, old: str | None) -> None:
     if old is None:
         data.pop(origin, None)
     else:
-        data[origin] = {"old": old, "at": time.time()}
+        data[origin] = {"old": old, "at": time.time() if at is None else at, **({"retried": True} if retried else {})}
     try:
         atomic_write(path, json.dumps(data))
     except OSError:
         if old is not None:
-            raise Refused("the record of a renewal cannot be written; nothing was sent") from None
+            raise Refused("the record of a renewal cannot be written; the token was not sent") from None
 
 
 CHILD_LIFETIME = RENEW_BUDGET + 5.0
