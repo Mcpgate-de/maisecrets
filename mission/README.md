@@ -25,6 +25,16 @@ brought control C33 into the threat model.
     python3 scripts/mission_coverage.py            # report
     python3 scripts/mission_coverage.py --strict   # exit 1 on a gap, an orphan, an unknown name or a claim
 
+Before a change, `scripts/mission_touch.py` turns the diff into the parts it touches: a belief whose guarded lines
+(`find` of its proof) or whose own test function the diff changes, read from the merge base, and the parts it serves.
+It counts the other beliefs of a changed file and names changed code that no belief guards. It only reports; the
+pre-push hook and the replay job print it. Measured on the 60 merge requests into `next` before it (the one that added
+`serves` to every belief left out): it named each of the 15 existing beliefs that a merge request edited, and 32 in
+all.
+
+    python3 scripts/mission_touch.py               # merge base with origin/next to the work tree
+    python3 scripts/mission_touch.py BASE HEAD     # merge base with BASE to HEAD
+
 The beliefs prove that each test can fail; this layer shows which promise each belief serves.
 `tests/test_mission_coverage.py` runs the strict check on the repository in CI: a gap, an orphan control, an
 unknown name or a claim finding turns it red. A thin part, a mission without an invariant and the measures are

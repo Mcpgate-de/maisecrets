@@ -34,4 +34,6 @@ python3 scripts/scan_tree.py >/dev/null || { python3 scripts/scan_tree.py | tail
 python3 scripts/lint_plugin.py >/dev/null || { echo "pre-push: plugin lint failed"; exit 1; }
 python3 scripts/check_release_sizes.py || { echo "pre-push: a file is over the size limit of the release tree"; exit 1; }
 python3 scripts/derived_counts.py >/dev/null || { python3 scripts/derived_counts.py | grep BAD; echo "pre-push: a number in the docs is stale"; exit 1; }
+# a report, no gate: the mission parts this push touches (scripts/mission_touch.py)
+python3 scripts/mission_touch.py origin/next HEAD || echo "pre-push: mission_touch.py failed; the push goes on"
 exit 0
