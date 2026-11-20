@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [0.9.20] - 2026-11-20
+
+### Features
+
+- when a gateway first sends you references and this computer has no login there, the login command waits in your input box (233b6c2)
+
+### Fixes
+
+- a login typed again while one waits starts over, for another browser or profile, and its end stays in the chat (8a09882)
+- the shortcut and forget answers no longer repeat a name or key you typed (082236e)
+- a gateway login stays when the answer of a renewal is lost on a bad connection, where the gateway allows one retry (9f1ce7f)
+
 ## [0.9.19] - 2026-11-19
 
 - `/maisecrets:ner local`, typed by you, starts the local name service at once, with a note on its size (about 690 MB) and how to turn the source off; a setting from a policy or an earlier session never starts a download.
