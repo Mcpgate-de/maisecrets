@@ -11,7 +11,8 @@ a tool call; and the files of Python and of the system that hold no data of the 
 
 What it does not check: a read that only a setting it leaves off starts (rule_dirs, value_files, a name service, a
 vault server); an installed plugin's marketplace layout (the test runs from the repository); a program the hooks start
-that is not Python; a read of a child more than 3 s after the last event (the children then end); and Windows. A `stat`
+that is not Python, and a Python child started with -S, which loads no .pth (user_rules.py checks a rule of rule_dirs
+so); a read of a child more than 3 s after the last event (the children are then stopped); and Windows. A `stat`
 or an `exists` is no read here: they show that a file is there, not what it holds."""
 from __future__ import annotations
 
@@ -107,7 +108,7 @@ class World:
         self.logs.mkdir()
         self.env = self.sb.env(PYTHONPATH=str(site_dir), MAISECRETS_GUARD_WAIT="0.5")
         # no pinned locale: on macOS the hooks then read the language setting of the account, as they do for a person
-        # who left `regions` empty
+        # who did not set MAISECRETS_LOCALE
         self.env.pop("MAISECRETS_LOCALE", None)
         self.project = root / "proj"
         self.decoys = [home / ".ssh" / "id_ed25519", home / "Documents" / "notes.txt", self.project / ".env",
@@ -134,13 +135,20 @@ class World:
                                                 encoding="utf-8")
         self.read_file = self.project / "README.md"           # the file of a Read tool call
         self.read_file.write_text("hello\n", encoding="utf-8")
+        # the values of the prompts stand in the transcripts already, as the client writes them: the scrub child then
+        # runs its branch that finds and masks a value, not only its polls
+        self.values = {k: fake_value(k) for k in ("Rd", "Rp", "Rx")}
         self.transcript = self.claude / "projects" / "proj" / "S1.jsonl"
         self.transcript.parent.mkdir(parents=True)
-        self.transcript.write_text("{}\n", encoding="utf-8")
+        self.transcript.write_text("".join(json.dumps({"type": "user", "message": {
+            "role": "user", "content": f"password: {self.values[k]}"}}) + "\n" for k in ("Rd", "Rp")), encoding="utf-8")
         self.rollout = self.codex / "sessions" / "2026" / "rollout-S2.jsonl"
         self.rollout.parent.mkdir(parents=True)
-        self.rollout.write_text(json.dumps({"type": "session_meta", "payload": {"source": "cli"}}) + "\n",
-                                encoding="utf-8")
+        self.rollout.write_text(json.dumps({"type": "session_meta", "payload": {"source": "cli"}}) + "\n" +
+                                json.dumps({"type": "response_item", "payload": {
+                                    "type": "message", "role": "user",
+                                    "content": [{"type": "input_text", "text": f"password: {self.values['Rx']}"}]}})
+                                + "\n", encoding="utf-8")
 
     def children(self) -> list[int]:
         """The Python processes that work in the sandbox folder: the children a hook left. By the working folder, not
@@ -270,7 +278,7 @@ def payloads(ref: str, key: str, world: World) -> list[tuple[str, dict]]:
     codex = {"session_id": "S2", "turn_id": "t", "model": "m", "transcript_path": str(world.rollout)}
     return [
         ("session-start", {"session_id": "S1", "source": "startup"}),
-        ("user-prompt", {"prompt": f"password: {fake_value('Rd')}", "session_id": "S1", "prompt_id": "p1"}),
+        ("user-prompt", {"prompt": f"password: {world.values['Rd']}", "session_id": "S1", "prompt_id": "p1"}),
         ("user-prompt", {"prompt": f"use {ref}", "session_id": "S1", "prompt_id": "p2"}),
         ("pre-tool", {"tool_name": "Bash", "tool_input": {"command": f"printf %s {ref}"}, "session_id": "S1",
                       "prompt_id": "p3"}),
@@ -287,13 +295,13 @@ def payloads(ref: str, key: str, world: World) -> list[tuple[str, dict]]:
         ("post-tool-failure", {"tool_name": "Bash", "tool_input": {"command": "false"}, "session_id": "S1",
                                "prompt_id": "p8", "error": f"api_key={fake_value('Rf')}"}),
         # the mod gets no transcript path: the scrub looks for the file by the session id
-        ("mod-prompt", {"prompt": f"password: {fake_value('Rp')}", "session_id": "S1", "transcript_path": None}),
+        ("mod-prompt", {"prompt": f"password: {world.values['Rp']}", "session_id": "S1", "transcript_path": None}),
         ("mod-values", {"keys": [key], "refs": [], "session_id": "S1", "transcript_path": None}),
         ("mod-reveal", {"ref": "⟦sref:secret:abc⟧", "session_id": "S1", "transcript_path": None}),
         ("mod-settings", {"session_id": "S1", "transcript_path": None}),
         ("mod-demo", {"session_id": "S1", "prompt": "hi", "origin": "composer", "transcript_path": None}),
         ("session-start", {**codex, "source": "startup"}),
-        ("user-prompt", {**codex, "prompt": f"password: {fake_value('Rx')}"}),
+        ("user-prompt", {**codex, "prompt": f"password: {world.values['Rx']}"}),
         ("post-tool", {**codex, "tool_name": "Bash", "tool_response": {"stdout": f"api_key={fake_value('Ry')}"}}),
         ("session-end", {"session_id": "S1", "reason": "clear"}),
     ]
@@ -356,7 +364,10 @@ class ReadsOnlyListedFilesTests(unittest.TestCase):
         pids = {}
         for log, pid, _w, _p in seen:
             pids.setdefault(log, set()).add(pid)
-        self.assertTrue([log for log, ps in pids.items() if len(ps) > 1], "no child of a hook wrote a read")
+        with_child = {log for log, ps in pids.items() if len(ps) > 1}
+        # each kind of child: the scrub of a prompt, the server of a value, the scrub the mod starts, the Codex scrub
+        for wanted_child in ("01-user-prompt", "03-pre-tool", "10-" + "mod-prompt", "16-user-prompt"):
+            self.assertIn(wanted_child, with_child, "this event's child wrote no read")
 
     def test_the_guard_reads_only_the_client_configuration(self):
         w = World(self, self.python, self.venv)

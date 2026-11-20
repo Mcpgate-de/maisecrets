@@ -2,7 +2,7 @@
 belief = "c33-a-child-of-a-hook-reads-only-the-files-privacy-lists"
 control = "C33"
 serves = ["M6.6"]
-statement = "A Python child that a hook starts with -I (the transcript scrub that looks for the transcript by the session id, the server of a value) reads only the files PRIVACY.md \"What it reads\" names: the audit loads from a .pth file of the interpreter, which -I does not drop, and the test waits for the children before it reads the logs."
+statement = "A Python child that a hook starts with -I (the transcript scrub that looks for the transcript by the session id, the server of a value) reads only the files PRIVACY.md \"What it reads\" names: the audit loads from a .pth file of the interpreter, which -I does not drop, and the test waits for the children before it reads the logs. A child started with -S loads no .pth and stays outside."
 runner = ["tests/test_reads_only_listed_files.py::ReadsOnlyListedFilesTests::test_every_hook_event_reads_only_the_listed_files"]
 
 [proof]
