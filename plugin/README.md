@@ -38,8 +38,8 @@ machine, and the output comes back masked again. More examples: [What it looks l
 - **Your own rules, terms and imports:** team rule folders, `/maisecrets:term add Jan Kowalski`, values from your
   own NER.
 - **PDFs and images:** a PDF goes to the model as masked text only, or you are asked first.
-- **Local and deterministic:** no model, no network request of its own unless a server you added offers
-  [vault references](docs/ADMIN.md#vault-references), no telemetry.
+- **Local and deterministic:** no model, no telemetry, no network request except for a service you set
+  up: a name service, a gateway, or a server with [vault references](docs/ADMIN.md#vault-references).
 
 ## Install
 
