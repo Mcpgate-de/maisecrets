@@ -2288,6 +2288,8 @@ def _names_its_label(text: str, start: int, secret: str) -> bool:
 # a run of capitals without a vowel or with a longer suffix is a value (review of 0.6.24)
 _CONSTANT_NAME_RE = _LazyRx(r"(?:[A-Z]*[AEIOUY][A-Z]*|DB)(?:[-_](?:[A-Z]*[AEIOUY][A-Z]*|DB))+_\d{1,2}")
 _TIME_OR_RATIO_RE = _LazyRx(r"\d+:[a-z]+")
+# a number and then `,name:number` fields: a log of timings after a field name such as secret_shape_scan (#92)
+_NUMBER_LIST_RE = _LazyRx(r"\d+(?:\.\d+)?(?:,[A-Za-z_][\w.-]*:\d+(?:\.\d+)?)+")
 _SECRET_WORD_LABEL_RE = _LazyRx(r"(?i)(?<![\w.-])secret(?:s|os?|as?)?:")
 # an article or a possessive, and at most one more word, right before the label: "Le secret:", "Notre grand secret:",
 # "The secret:", "El secreto:". It starts the line or follows the end of a sentence; after `INFO `, `# ` or `| ` it is a
@@ -2851,6 +2853,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue   # the name of a constant, not its value: PROD-DB-PASS_7
             if "time-or-ratio" in filters and _TIME_OR_RATIO_RE.fullmatch(secret.strip("\"'`")):
                 continue   # 0:default after `secret:`
+            if "number-list" in filters and _NUMBER_LIST_RE.fullmatch(secret.strip("\"'`")):
+                continue   # a list of timings after a field name such as secret_shape_scan, not one value
             if "word-after-secret" in filters and _word_after_secret(text, m.start(1), secret, end):
                 continue   # a sentence: an article, secret, a colon and one ordinary word (#26)
             if ("test-result" in filters and _TEST_NAME_RE.fullmatch(secret.strip("\"'`"))
