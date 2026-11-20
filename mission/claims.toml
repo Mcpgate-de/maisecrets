@@ -232,7 +232,7 @@ mission = "M6"
 
 [[claim]]
 source = "PRIVACY.md"
-quote = "holds the server tokens seen, the key ids and endpoints and each server's link state, never a value or a key; a value a server gave stays in the store for one hour"
+quote = "holds the server tokens seen, the key ids and endpoints, each server's link state and the copy of the Codex profile file (below), never a value or a key of maisecrets; a value a server gave stays in the store for one hour"
 kind = "promise"
 mission = "M4"
 
@@ -251,6 +251,18 @@ mission = "M6"
 [[claim]]
 source = "PRIVACY.md"
 quote = "It reads no other file of yours, except through a tool call that you or the agent makes."
-# a promise that no mission keeps yet: no control and no belief checks which files maisecrets reads. Kind "feature"
-# until one does; then make it a promise of that mission.
-kind = "feature"
+kind = "promise"
+mission = "M6"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "**The client's configuration:**"
+kind = "promise"
+mission = "M6"
+
+[[claim]]
+source = "PRIVACY.md"
+quote = "**The language setting of the system:**"
+kind = "promise"
+mission = "M6"
+

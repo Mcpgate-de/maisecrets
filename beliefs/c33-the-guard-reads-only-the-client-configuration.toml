@@ -1,0 +1,12 @@
+# c33-the-guard-reads-only-the-client-configuration: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c33-the-guard-reads-only-the-client-configuration"
+control = "C33"
+serves = ["M6.6"]
+statement = "The guard (hooks/guard.py) reads only maisecrets' own files and the client's configuration: the settings files of the user, of each project folder up to the repository root and of the machine, the client's config file and its plugin list. It reads no other file in the home folder (PRIVACY.md \"What it reads\")."
+runner = ["tests/test_reads_only_listed_files.py::ReadsOnlyListedFilesTests::test_the_guard_reads_only_the_client_configuration"]
+
+[proof]
+file = "hooks/guard.py"
+find = "    out = decide(payload if isinstance(payload, dict) else {}, wait)"
+replace = """    os.listdir(os.path.join(os.path.expanduser("~"), "Documents"))
+    out = decide(payload if isinstance(payload, dict) else {}, wait)"""
