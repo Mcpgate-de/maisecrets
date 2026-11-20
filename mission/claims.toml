@@ -184,6 +184,12 @@ mission = "M2"
 
 [[claim]]
 source = "PRIVACY.md"
+quote = "Before it changes a file of the client's configuration, the plugin keeps a copy beside it"
+kind = "promise"
+mission = "M4"
+
+[[claim]]
+source = "PRIVACY.md"
 quote = "Vault references (only after an MCP server you added yourself sent a server token and names a vault endpoint)"
 kind = "promise"
 mission = "M3"

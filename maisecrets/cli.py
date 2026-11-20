@@ -939,10 +939,10 @@ def install_guard(expect: str = "synced", root: str = "", keep_mode: bool = Fals
     if {e: v for e, v in ours.items() if v} != wanted:
         if settings.exists():
             backup = settings.with_name(f"settings.json.bak-maisecrets-{_t.strftime('%Y%m%d-%H%M%S')}")
-            # 0600 from the start: the settings may hold tokens, and a copy under the umask was 0644
-            fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(settings.read_bytes())
+            # 0600 from its first byte (the settings may hold tokens); a link at that name is removed, not followed,
+            # and an existing file is never written into (#90). /maisecrets:wipe deletes these copies
+            from .vault_refs import _backup
+            _backup(settings, backup)
             done.append(f"backed up {settings.name} to {backup.name}")
         for event, entries in wanted.items():
             hooks.setdefault(event, []).extend(entries)

@@ -47,13 +47,17 @@ It reads no other file of yours, except through a tool call that you or the agen
   for one hour so its echo in later output is masked. In the client's configuration the
   plugin adds one `Client-Vault` header (a hash of K, never K) to that server's entry, in
   Claude Code, or a header helper line, in Codex.
+- Before it changes a file of the client's configuration, the plugin keeps a copy beside it,
+  mode 0600: `<config>.maisecrets-backup` before it adds or removes that header, and
+  `settings.json.bak-maisecrets-<time>` for each `/maisecrets:guard install`. A copy holds
+  what the file holds, also its tokens. A link at a copy's name is removed, not followed.
 
 ## For how long
 
 A value expires after its TTL (24 hours by default, one hour for card numbers, at most 30
 days; renewed on use up to the cap) and is then deleted from the store. Metadata of an
 expired value is deleted 30 days later. The logs are capped (2 000 lines). `wipe` deletes
-everything at once.
+everything at once, also the copies of the client's configuration it made.
 
 ## What leaves the machine
 

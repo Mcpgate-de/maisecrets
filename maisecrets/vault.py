@@ -1658,6 +1658,28 @@ class Vault:
         return {"keys_seen": len(keys), "deleted": deleted, "counters": counters}
 
 
+def _outside_copies() -> list:
+    """The copies of the client's config files that maisecrets made outside its folder: `<config>.maisecrets-backup`
+    and `settings.json.bak-maisecrets-<time>`. Only where maisecrets may change that config (a test run touches its
+    own temp config only); a link is removed as a link. Codex keeps its copy in vault-refs/."""
+    import re as _re
+    from . import vault_refs
+    if vault_refs.is_codex() or not vault_refs._may_change_config():
+        return []
+    out = []
+    config = vault_refs.claude_json()
+    copy = config.with_name(config.name + ".maisecrets-backup")
+    if copy.exists() or copy.is_symlink():
+        out.append(copy)
+    folder = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        names = []
+    out += [folder / n for n in sorted(names) if _re.fullmatch(r"settings\.json\.bak-maisecrets-\d{8}-\d{6}", n)]
+    return out
+
+
 def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[str]]:
     """Delete every stored value of this vault's service, the metadata, the logs and the waiting
     prompts: the offboarding step. Works without a readable index (a damaged index is the case
@@ -1712,6 +1734,15 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
                             "run the wipe again)")
         # vault-refs: the server tokens seen and sent, the key ids and the endpoints (vault_refs.py); its keys
         # are in the store
+        # the copies maisecrets made beside the client's own files: the config copy before a header change
+        # (vault_refs) and the settings copies of /maisecrets:guard install. Both may hold tokens (#90)
+        for f in _outside_copies():
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                problems.append(f"{f.name} not deleted")
         dirs = [HOME / "pending", HOME / "run", HOME / "vault-refs"] + ([Path(run_dir)] if run_dir else [])
         for d in dirs:
             if d.is_dir():
