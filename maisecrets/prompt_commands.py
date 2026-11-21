@@ -181,12 +181,36 @@ def entry_alone(prompt) -> bool:
     return bool(m) and not m.group("name")
 
 
+_MS_RE = LazyRx(r"\A\s*/ms(?![\w:-])", re.I)
+
+
+def foreign_ms() -> bool:
+    """Whether the person's own /ms is a command of theirs, not the maisecrets shortcut: then `/ms NAME` is theirs.
+    In Cowork /ms is the plugin's entry (the person's commands folder of the computer does not reach it)."""
+    import os
+    from pathlib import Path
+    from . import cowork
+    if cowork.active():
+        return False
+    target = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "commands" / "ms.md"
+    try:
+        text = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    except (OSError, UnicodeDecodeError):
+        return True
+    from .cli import is_our_shortcut
+    return not is_our_shortcut(text)
+
+
 def with_canonical(payload: dict) -> dict:
     """The payload with its prompt in the colon form (canonical). Codex keeps its prompt: it has no slash commands,
-    and spaced_answer names its own form there."""
+    and spaced_answer names its own form there. `/ms NAME` stays as typed when the person's /ms is their own."""
     from . import hooks as h
     prompt = payload.get("prompt")
     if h.client_of(payload) == "codex":
+        return payload
+    if isinstance(prompt, str) and _MS_RE.match(prompt) and foreign_ms():
         return payload
     new = canonical(prompt)
     return payload if new is prompt else {**payload, "prompt": new}
@@ -369,7 +393,9 @@ def _command_route(payload: dict) -> dict:
         words = f"{m.group('name').lower()} {m.group('args') or ''}".strip() if m else ""
         typed = forms.cowork(f"/maisecrets {words}")
         if typed.startswith("/"):
-            typed = f"/maisecrets:maisecrets {words}"       # a plugin command: the person's Enter goes through the hook
+            # a plugin command the menu shows: the person's Enter goes through the prompt hook
+            typed = f"/maisecrets:{words}" if words.split()[:1] in (["sref"], ["report"]) else \
+                f"/maisecrets:maisecrets {words}"
         return {"drop": "maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. "
                         f"Nothing was changed. Send it as a prompt: {typed}"}
     out = mod_command({**payload, "origin": "composer", "source": _ROUTE_SOURCE})

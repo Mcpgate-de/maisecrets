@@ -569,9 +569,10 @@ const OWN_FAILED = 'maisecrets could not answer this command. Nothing was sent; 
 const OWN_ABOVE = 'maisecrets: answered without the AI, the output is above.'
 
 // Python's answer to a prompt, or null when none came (a failed start, a timeout, no JSON, another program's answer)
-async function askOwn($, text, origin) {
+// viaMs: the person typed `/ms NAME`; Python answers nothing when their /ms is a command of their own (hooks.py)
+async function askOwn($, text, origin, viaMs = false) {
   const r = await runDispatch($, JSON.stringify({ prompt: text, session_id: await $.session.id(),
-    cwd: await $.session.cwd(), origin }))
+    cwd: await $.session.cwd(), origin, ...(viaMs ? { via_ms: true } : {}) }))
   if (!r) return null
   let a = null
   try { a = JSON.parse(r.stdout) } catch { return null }
@@ -698,6 +699,7 @@ const SPACED_CMD = /^\s*\/maisecrets\s+([^\s]+)(.*)$/s
 // overview. `/maisecrets` alone is the mod's own command, the panel
 const ENTRY_CMD = /^\s*\/(?:maisecrets(?::(?:maisecrets|ms))?|ms)(?:[ \t]+([^\s]+)([^\r\n]*))?\s*$/i
 const ENTRY_ALONE = '/maisecrets:maisecrets'
+const MS_TYPED = /^\s*\/ms(?![\w:-])/i
 // the command meant by an entry form: its colon form, or null for no command of maisecrets
 function meantCommand(text) {
   const m = ENTRY_CMD.exec(typeof text === 'string' ? text : '')
@@ -1528,7 +1530,7 @@ function startOwn($, run, flight, title, entry = running.get(flight)) {
 
 // a command the mod runs itself, or Python's answer to an own-command shape: { drop } when it is answered here, else
 // { answer } with Python's answer for the steps of any prompt. `fill` empties the box for a prompt; a pane button leaves the box alone
-async function runOwn($, own, kind, runnable, ownCmd, fill) {
+async function runOwn($, own, kind, runnable, ownCmd, fill, viaMs = false) {
   let ownAnswer = null      // Python's answer to an own-command shape: the steps below use it, not a second ask
   // one run per flight, taken before the first await, so two quick prompts cannot both pass
   const flight = runnable ? flightOf(own) : null
@@ -1543,7 +1545,7 @@ async function runOwn($, own, kind, runnable, ownCmd, fill) {
   }
   const entry = flight ? { title: titleOf(own), stop: null, replaced: false } : null
   if (flight) running.set(flight, entry)
-  try { ownAnswer = await askOwn($, own, kind) } catch { ownAnswer = null }
+  try { ownAnswer = await askOwn($, own, kind, viaMs) } catch { ownAnswer = null }
   const run = ownAnswer?.run
   if (runnable && validRun(run)) {
     if (fill) fillSoon($, '')
@@ -1776,7 +1778,7 @@ export function register(on) {
     const runnable = RUN_ORIGINS.has(kind) && RUN_CMD.test(own)
     const ownCmd = OWN_CMD.test(own)
     if (ownCmd || runnable) {
-      const done = await runOwn($, own, kind, runnable, ownCmd, true)
+      const done = await runOwn($, own, kind, runnable, ownCmd, true, MS_TYPED.test(e.text))
       if (done.drop !== undefined) return { drop: done.drop }
       ownAnswer = done.answer
       // no command of the mod's: the steps below, as for any prompt (a slash command goes on to its command file)

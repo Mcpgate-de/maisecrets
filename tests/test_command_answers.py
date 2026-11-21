@@ -161,29 +161,63 @@ class ShortcutTests(unittest.TestCase):
         Path(HOME, "bin").mkdir(mode=0o700, parents=True, exist_ok=True)
         Path(HOME, "bin", "ms.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
+    # the text the shortcut of 0.9.21 wrote (cli.SHORTCUT_COMMAND of that version)
+    OLD_0921 = ("---\ndescription: Send the last blocked prompt as maisecrets rewrote it (short for /maisecrets:send)."
+                "\nallowed-tools: Bash(bash ~/.maisecrets/bin/ms.sh*)\n---\n\n!`bash ~/.maisecrets/bin/ms.sh`\n\n"
+                "The text above is the "
+                "prompt the user sent through maisecrets, with placeholders instead of\nvalues. Begin your reply with "
+                "one line `Sent: ` followed by that text as it is (clients such as\nRemote Control show neither the "
+                "blocked prompt nor a slash command's expansion), then answer it.\nIf the text above is exactly "
+                f"`{hooks.NOTHING_WAITING}`\nor exactly `{hooks.TWO_WAITING}`,\nit is a note of maisecrets, not a "
+                "prompt: show it to the user as is, and stop. Any other text is the\nprompt, also when it starts with "
+                "`(maisecrets:`.\n")
+
+    def test_the_old_text_is_one_the_upgrade_knows(self):
+        self.assertTrue(cli._old_template(self.OLD_0921.encode("utf-8")))
+        self.assertTrue(cli._old_template(self.OLD_0921.replace("\n", "\r\n").encode("utf-8")), "a Windows file")
+        self.assertFalse(cli._old_template((self.OLD_0921 + "my own line\n").encode("utf-8")))
+
     def test_an_old_shortcut_becomes_the_entry_and_a_command_of_the_user_stays(self):
-        self.old_shortcut()
-        self.old_shortcut("send2")
-        own = self.cfg / "commands" / "mine.md"
-        own.write_text("---\ndescription: mine\n---\nmy own command\n", encoding="utf-8")
-        Path(HOME, ".shortcut").write_text("installed\n", encoding="utf-8")
-        self.assertEqual(cli.upgrade_shortcuts(), [])        # no frontmatter: not the file the shortcut wrote
+        self.old_shortcut()            # the wrapper, and a file the shortcut never wrote
+        d = self.cfg / "commands"
+        own = d / "mine.md"
+        own.write_text("---\ndescription: mine\n---\n!`bash ~/.maisecrets/bin/ms.sh`\nmy own command\n",
+                       encoding="utf-8")
+        edited = d / "edited.md"
+        edited.write_text(self.OLD_0921 + "\nmy own line\n", encoding="utf-8")
         for name in ("ms", "send2"):
-            (self.cfg / "commands" / f"{name}.md").write_text(
-                "---\ndescription: Send the last blocked prompt\n---\n\n!`bash ~/.maisecrets/bin/ms.sh`\n",
-                encoding="utf-8")
+            (d / f"{name}.md").write_text(self.OLD_0921, encoding="utf-8")
+        linked = d / "linked.md"
+        target = self.cfg / "elsewhere.md"
+        target.write_text(self.OLD_0921, encoding="utf-8")
+        try:
+            linked.symlink_to(target)
+        except OSError:
+            linked = None
         # the harness and a test run the client with another maisecrets home: that store installed no shortcut
-        Path(HOME, ".shortcut").unlink()
         self.assertEqual(cli.upgrade_shortcuts(), [], "a store that installed no shortcut changes no file")
         Path(HOME, ".shortcut").write_text("installed\n", encoding="utf-8")
         self.assertEqual(cli.upgrade_shortcuts(), ["ms.md", "send2.md"])
         for name in ("ms", "send2"):
-            text = (self.cfg / "commands" / f"{name}.md").read_text(encoding="utf-8")
+            text = (d / f"{name}.md").read_text(encoding="utf-8")
             self.assertIn(cli.SHORTCUT_MARK, text)
             self.assertNotIn("ms.sh", text)
-        self.assertEqual(own.read_text(encoding="utf-8"), "---\ndescription: mine\n---\nmy own command\n")
-        self.assertFalse(Path(HOME, "bin", "ms.sh").exists(), "no shortcut uses the wrapper any more")
+        self.assertIn("my own command", own.read_text(encoding="utf-8"))
+        self.assertTrue(edited.read_text(encoding="utf-8").endswith("my own line\n"), "an edited text stays")
+        self.assertEqual(target.read_text(encoding="utf-8"), self.OLD_0921, "a link is never followed")
+        self.assertTrue(Path(HOME, "bin", "ms.sh").exists(), "a file of the old form still uses the wrapper")
         self.assertEqual(cli.upgrade_shortcuts(), [], "once")
+
+    def test_install_never_overwrites_a_command_of_the_person(self):
+        d = self.cfg / "commands"
+        d.mkdir(parents=True)
+        (d / "ms.md").write_text("my own command\n", encoding="utf-8")
+        rc, out = _run(cli.cmd_shortcut, [])
+        self.assertEqual(rc, 1)
+        self.assertIn("a command of your own has that name", out)
+        self.assertEqual((d / "ms.md").read_text(encoding="utf-8"), "my own command\n")
+        (d / "ms.md").write_text(cli._shortcut_text(), encoding="utf-8")
+        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0, "ours is written again")
 
     def test_status_says_incomplete_when_the_shared_wrapper_of_an_old_shortcut_is_missing(self):
         self.old_shortcut()

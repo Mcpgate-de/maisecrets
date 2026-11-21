@@ -1055,6 +1055,9 @@ class ShortcutTests(unittest.TestCase):
         self.assertNotIn("!`", cmd)
         self.assertNotIn("allowed-tools", cmd)
         self.assertNotIn("run.sh", cmd)
+        # report and sref: the person sends their own visible command
+        self.assertIn("`/maisecrets:report` or `/maisecrets:sref`", " ".join(cmd.split()))
+        self.assertNotIn("/maisecrets:maisecrets", cmd)
 
     def test_a_shortcut_of_the_old_form_is_still_ours(self):
         from maisecrets import cli

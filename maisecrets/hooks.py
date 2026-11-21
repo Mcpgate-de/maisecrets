@@ -723,6 +723,8 @@ def rewrite_prompt(payload: dict) -> dict:
     that turns the rewrite off. The answer carries placeholders, never a value."""
     if payload.get("fill_check") is True:
         return _pc().fill_check(payload)     # a command the mod puts into the box: its values masked, nothing run
+    if payload.get("via_ms") is True and _pc().foreign_ms():
+        return {}            # the mod read `/ms NAME` as the entry, but the person's /ms is a command of their own
     payload = _pc().with_canonical(payload)     # `/maisecrets status` and `/ms status` read as `/maisecrets:status`
     own = _pc().mod_command(payload)
     if own is not None:

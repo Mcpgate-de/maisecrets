@@ -159,6 +159,38 @@ class PersonOnlyThroughTheEntryTests(_HookBase):
         self.assertFalse((Path(HOME) / "terms.txt").exists() and NAME in (Path(HOME) / "terms.txt").read_text())
 
 
+class ForeignMsTests(_HookBase):
+    """A /ms of the person's own (not the maisecrets shortcut) keeps `/ms NAME`: maisecrets does not take it over."""
+
+    def own_ms(self, text: str) -> None:
+        d = Path(self.claude_dir, "commands")
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "ms.md").write_text(text, encoding="utf-8")
+
+    def test_a_foreign_ms_keeps_its_prompt(self):
+        self.own_ms("---\ndescription: my own\n---\nmy own command\n")
+        self.assertTrue(prompt_commands.foreign_ms())
+        payload = {"prompt": "/ms term add " + NAME, "prompt_id": "p"}
+        self.assertIs(prompt_commands.with_canonical(payload), payload)
+        out = self.hook("/ms term add " + NAME)
+        self.assertNotIn("on your list now", out.get("reason", ""))
+        self.assertEqual(hooks.rewrite_prompt({"prompt": "/maisecrets:list", "session_id": SESSION, "cwd": "",
+                                               "origin": "composer", "via_ms": True}), {})
+        # the other entry forms are maisecrets' own
+        self.assertEqual(prompt_commands.with_canonical({"prompt": "/maisecrets list", "prompt_id": "p"})["prompt"],
+                         "/maisecrets:list")
+
+    def test_the_shortcut_and_no_ms_at_all_are_the_entry(self):
+        self.assertFalse(prompt_commands.foreign_ms())
+        self.assertEqual(self.mod("/ms list"), {"run": {"argv": ["list", "--args-stdin"], "stdin": ""}})
+        from maisecrets import cli
+        self.own_ms(cli._shortcut_text())
+        self.assertFalse(prompt_commands.foreign_ms())
+        self.assertEqual(hooks.rewrite_prompt({"prompt": "/maisecrets:list", "session_id": SESSION, "cwd": "",
+                                               "origin": "composer", "via_ms": True}),
+                         {"run": {"argv": ["list", "--args-stdin"], "stdin": ""}})
+
+
 class CommandRouteTests(_HookBase):
     """The mod's command.run route (its own /maisecrets NAME, a hidden /maisecrets:NAME): the engine stamps every local
     command run `composer`, so Python makes no change there that only the person's own prompt may make (C22)."""
@@ -177,7 +209,7 @@ class CommandRouteTests(_HookBase):
                              ("/maisecrets:forget import:abc", "maisecrets: forget import:abc"),
                              ("/maisecrets:ner local", "maisecrets: ner local"),
                              ("/maisecrets:forget " + KEY, "/maisecrets:maisecrets forget " + KEY),
-                             ("/maisecrets:sref login gw", "/maisecrets:maisecrets sref login gw"),
+                             ("/maisecrets:sref login gw", "/maisecrets:sref login gw"),
                              ("/maisecrets:report incident", "maisecrets: report incident")):
             with self.subTest(prompt):
                 out = self.route(prompt)

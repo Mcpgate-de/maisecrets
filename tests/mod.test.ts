@@ -1008,6 +1008,22 @@ test('each entry form runs as the colon form', async ($, on) => {
   expect(st.downstream).toBe(0)
 })
 
+// a /ms of the person's own is theirs: Python answers nothing when it is not the shortcut (prompt_commands.foreign_ms)
+test('the question for /ms NAME says that the person typed /ms, and its empty answer passes the prompt on', async ($, on) => {
+  const st = runSetup(on, { answer: (q) => (q.via_ms === true ? {} : LIST) })
+  const r = await $.prompt.submit({ text: '/ms list', wait: false, origin: { kind: 'composer' } })
+  expect(r.drop).toBeUndefined()
+  expect(st.downstream).toBe(1)
+  expect(st.spawns.length).toBe(0)
+  expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin).via_ms).toBe(true)
+  for (const text of ['/maisecrets:ms list', '/maisecrets list', '/msx list']) {
+    st.checks.length = 0
+    await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    const q = st.checks.find(c => c.argv[2] === 'mod-prompt')
+    if (q) expect(JSON.parse(q.init.stdin).via_ms).toBeUndefined()
+  }
+})
+
 test('the entry alone asks for the entry run: the blocked prompt goes into the box, else the overview shows',
   async ($, on) => {
     const waiting = 'see ' + String.fromCharCode(0x27e6) + KEY1 + String.fromCharCode(0x27e7)
