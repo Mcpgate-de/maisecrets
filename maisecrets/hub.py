@@ -113,7 +113,9 @@ def pane_status(session: str, tool_call_at: float = 0.0) -> dict:
     if failed:
         head += " \u2192 /maisecrets status (" + ", ".join(failed) + ")"
     notes = [{"name": c.name, "fact": c.fact, "next": c.next or ""} for c in checks if c.state == "warn"]
-    return {"line": head, "notes": notes, "ms": round((time.time() - t0) * 1000)}
+    from .hooks import pending_waits
+    return {"line": head, "notes": notes, "ms": round((time.time() - t0) * 1000),
+            "pending": pending_waits(session)}
 
 
 def _age(seconds: float) -> str:

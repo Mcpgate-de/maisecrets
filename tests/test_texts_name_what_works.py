@@ -50,7 +50,8 @@ class SendCommandTests(unittest.TestCase):
         commands.mkdir()
         Path(commands, "ms.md").write_text("!`bash ~/.maisecrets/bin/ms.sh`\n", encoding="utf-8")
         # the column width follows the paste key (⌘V on macOS, Ctrl+V elsewhere)
-        self.assertRegex(self._notice(True), r"\n  /ms +send the cleaned prompt now")
+        # /ms is the same as /maisecrets: /ms alone opens the panel, /ms send sends
+        self.assertRegex(self._notice(True), r"\n  /ms send +send the cleaned prompt now")
         # a command file of the person's own with that name is no maisecrets shortcut
         Path(commands, "ms.md").write_text("my own command\n", encoding="utf-8")
         self.assertRegex(self._notice(True), r"\n  /maisecrets send +send the cleaned prompt now")

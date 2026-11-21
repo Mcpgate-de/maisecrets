@@ -1024,32 +1024,33 @@ test('the question for /ms NAME says that the person typed /ms, and its empty an
   }
 })
 
-test('the entry alone asks for the entry run: the blocked prompt goes into the box, else the overview shows',
-  async ($, on) => {
-    const waiting = 'see ' + String.fromCharCode(0x27e6) + KEY1 + String.fromCharCode(0x27e7)
-    const out = { text: '(maisecrets: the blocked prompt follows)\n' + waiting + '\n' }
-    const st = runSetup(on, { answer: { run: { argv: ['entry'], fill: true } }, chunks: () => [out.text] })
-    for (const text of ['/ms', '/maisecrets:ms', '/maisecrets:maisecrets']) {
-      const n = st.ended
-      st.checks.length = 0
-      st.fills.length = 0
-      const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
-      expect(r.drop).toBe('maisecrets: /maisecrets runs without the AI; its output opens in a panel.')
-      expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin).prompt).toBe('/maisecrets:maisecrets')
-      expect(await until(() => st.ended === n + 1)).toBe(true)
-      // the prompt goes into the box once the drop landed (a wait of $.clock.after never ends here)
-      expect(await until(() => st.toasts.includes('maisecrets: the cleaned prompt is in your input box. Press Enter to ' +
-        'send it.'))).toBe(true)
-      st.toasts.length = 0
-    }
-    // no blocked prompt: the overview opens in the entry's pane, and the box gets nothing
-    out.text = 'maisecrets protects this session\nCommands: status\n'
-    st.fills.length = 0
+test('the entry alone opens the panel as /maisecrets does; where none is placed the overview runs', async ($, on) => {
+  const PANEL = { run: { argv: ['entry'], view: 'panel' } }
+  // the panel's own questions (mod-settings) get rows; the prompt's question gets the plan
+  const st = runSetup(on, { answer: (q, e) => (e.argv[2] === 'mod-' + 'settings' ? { groups: [] } : PANEL),
+    placed: true })
+  for (const text of ['/ms', '/maisecrets:ms', '/maisecrets:maisecrets', '  /MS  ']) {
+    st.checks.length = 0
     st.opens.length = 0
-    await $.prompt.submit({ text: '/ms', wait: false, origin: { kind: 'composer' } })
-    expect(await until(() => st.opens.some(o => o.id === paneOf('cmd:maisecrets')))).toBe(true)
-    expect(st.toasts).toEqual([])
-  })
+    const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBe('maisecrets: the panel opens. Esc closes it.')
+    expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin).prompt).toBe('/maisecrets:maisecrets')
+    expect(await until(() => st.opens.some(o => o.id === 'maisecrets-settings'))).toBe(true)
+  }
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(st.spawns.length).toBe(0)
+  expect(st.fills.filter(f => f)).toEqual([])
+})
+
+test('where no panel is placed the entry alone runs the overview, and nothing goes into the box', async ($, on) => {
+  const st = runSetup(on, { answer: { run: { argv: ['entry'], view: 'panel' } }, placed: false,
+    chunks: ['maisecrets protects this session\nA blocked prompt waits: /maisecrets send sends it.\n'] })
+  await $.prompt.submit({ text: '/ms', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.spawns.length === 1)).toBe(true)
+  expect(st.spawns[0].argv).toEqual(['python3', 'hooks/dispatch.py', 'entry'])
+  expect(await until(() => st.logs.some(l => l.includes('A blocked prompt waits')))).toBe(true)
+  expect(st.fills.filter(f => f)).toEqual([])
+})
 
 test('a command that needs the model is dropped, and the entry command file runs it after the hook', async ($, on) => {
   const answer = { now: { entry: 'status test' } as any }

@@ -850,6 +850,7 @@ async function refreshStatus($) {
   if (pane.statusSession !== id || gen !== pane.statusGen) return
   pane.status = a && typeof a.line === 'string' ? a.line : 'maisecrets: the status is unknown → /maisecrets status'
   pane.notes = a && Array.isArray(a.notes) ? a.notes.filter(n => n && typeof n.name === 'string') : []
+  pane.pending = a?.pending === true       // a blocked prompt waits: the panel offers to send it
   if (!pane.notes.length) pane.showNotes = false
   pane.statusMs = Math.round((await $.clock.now()) - t0)
   try { $.ui.log(`maisecrets hub: status in ${pane.statusMs} ms`, { to: 'debug' }) } catch { /* no log */ }
@@ -1160,7 +1161,7 @@ function drawNer($, e, Box, Text, Button) {
       choice('off', 'off', () => setNer($, 'off')),
       // the press is the person's choice: it starts the service at once, and the note says how to stop it
       choice('local', 'local', () => setNer($, 'local')),
-      choice('url', 'url…', () => fillPrompt($, '/maisecrets:ner url ')),
+      choice('url', 'url…', () => fillPrompt($, 'maisecrets: ner url ')),
       choice('gateway', n.source === 'gateway' && n.gateway_name ? `gateway: ${n.gateway_name}` : 'gateway…',
         () => { pane.nerSub = 'gateway'; $.ui.invalidate('ui.render') })))
   }
@@ -1206,7 +1207,8 @@ function drawSettings($, e) {
   }
   if (pane.error) rows.push(h(Text, { color: 'red', key: 'err' }, pane.error))
   else if (pane.note) rows.push(h(Text, { color: 'green', key: 'note' }, pane.note))
-  const foot = [['stored', 'Stored values', () => showValues($, 0)],
+  const foot = [...(pane.pending ? [['send', 'Send the blocked prompt', () => sendFromPane($)]] : []),
+    ['stored', 'Stored values', () => showValues($, 0)],
     ['names', 'Name service', () => showNer($)],
     ['leaks', 'Check old leaks', () => checkOldLeaks($)]]
     .map(([key, label, onPress]) => h(Box, { marginRight: 1, flexShrink: 0, key }, h(Button, { key, label, onPress })))
@@ -1225,10 +1227,10 @@ function drawSettings($, e) {
         cells.push(h(Box, { marginRight: 1, flexShrink: 1, key: 'v' },
           h(Text, { bold: true, wrap: 'truncate-end' }, it.value + (it.mark ? ` ${it.mark}` : ''))))
         cells.push(h(Box, { marginRight: 1, flexShrink: 0, key: 'add' }, h(Button, { key: `add:${it.key}`,
-          label: 'add…', onPress: () => fillPrompt($, `/maisecrets:settings ${it.key} add `) })))
+          label: 'add…', onPress: () => fillPrompt($, `maisecrets: set ${it.key} add `) })))
         if (it.count > 0) {
           cells.push(h(Box, { flexShrink: 0, key: 'rm' }, h(Button, { key: `remove:${it.key}`, label: 'remove…',
-            onPress: () => fillPrompt($, `/maisecrets:settings ${it.key} remove `) })))
+            onPress: () => fillPrompt($, `maisecrets: set ${it.key} remove `) })))
         }
       } else if (it.multi) {
         // the countries: compact here, the toggles in their own view
@@ -1431,6 +1433,15 @@ function startOwn($, run, flight, title, entry = running.get(flight)) {
     let result = null
     let out = null
     try {
+      if (run.view === 'panel') {
+        // the entry alone (/ms, as /maisecrets alone): the panel; where none is placed, the overview runs below
+        let opened = false
+        try { opened = await openSettings($) } catch { opened = false }
+        if (opened) {
+          takeKeysSoon($)
+          return
+        }
+      }
       if (run.view === 'ner') {
         // the change is made: the panel's name-service view shows the source, the login button and the start
         let opened = false
@@ -1627,6 +1638,15 @@ async function runTyped($, own) {
   return ownText(typeof done?.drop === 'string' ? done.drop : OWN_FAILED)
 }
 
+// the panel's send button (a blocked prompt waits): the person's press runs /maisecrets send as the typed command
+// would; the cleaned prompt goes into the box, and the person's Enter sends it
+async function sendFromPane($) {
+  try { await closePane($) } catch { /* closed already */ }
+  let done
+  try { done = await runOwn($, '/maisecrets:send', 'composer', true, false, false) } catch { done = undefined }
+  toast($, done?.drop ?? OWN_FAILED)
+}
+
 // a login button of the output pane of /maisecrets:sref: the person's press, which the AI cannot make, starts the login
 // as the typed command would (its checks in Python, one flight, a login again starts over). A server name of the output
 // only, in the form the box takes
@@ -1643,7 +1663,8 @@ async function loginFromPane($, id, name) {
 
 const startedLine = (run, title) => run.long
   ? `maisecrets: ${title} opens your browser; the status line shows the wait.`
-  : `maisecrets: ${title} runs without the AI; its output opens in a panel.`
+  : run.view === 'panel' ? 'maisecrets: the panel opens. Esc closes it.'
+    : `maisecrets: ${title} runs without the AI; its output opens in a panel.`
 
 function registerSettingsPane(on) {
   on('ui.render', { component: 'Pane', requestId: SETTINGS_PANE }, async ($, e) => drawSettings($, e))

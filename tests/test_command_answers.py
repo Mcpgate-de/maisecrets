@@ -491,7 +491,9 @@ class ArgumentTests(unittest.TestCase):
         rule = "it is a note of maisecrets, not a prompt: show it to the user as is, and stop"
         self.assertIn(rule, (ROOT / "commands" / "send.md").read_text(encoding="utf-8"))
         # the shortcut sends through send.md (cli.SHORTCUT_COMMAND)
-        self.assertIn("run the `maisecrets:send` command", cli.SHORTCUT_COMMAND)
+        # /ms is the same as /maisecrets: /ms alone shows an overview, `/ms send` sends (cli.SHORTCUT_COMMAND)
+        self.assertIn("`/ms send` sends a blocked prompt", " ".join(cli.SHORTCUT_COMMAND.split()))
+        self.assertNotIn("maisecrets:send", cli.SHORTCUT_COMMAND)
 
 
 if __name__ == "__main__":

@@ -679,11 +679,12 @@ def is_our_shortcut(text: str) -> bool:
     return any(mark in text for mark in SHORTCUT_MARKS)
 
 
-# the personal /ms in the terminal is the entry (commands/maisecrets.md). It runs the single maisecrets commands by
-# their names, which the model may start: an argument never goes on a shell line, and the blocked prompt is taken only
-# by /ms alone (maisecrets:send). With the mod, the mod runs /ms NAME itself and this file is not read
+# the personal /ms in the terminal is the entry (commands/maisecrets.md), an alias of /maisecrets: /ms alone shows an
+# overview (the mod opens the panel), /ms NAME runs the command of that name. It runs the single maisecrets commands
+# by their names, which the model may start: an argument never goes on a shell line, and a blocked prompt is sent only
+# by /ms send. With the mod, the mod runs /ms and /ms NAME itself and this file is not read
 SHORTCUT_COMMAND = """---
-description: "maisecrets: /ms NAME runs a maisecrets command, such as /ms status; /ms alone sends the blocked prompt"
+description: "maisecrets: /ms NAME runs a maisecrets command, such as /ms status; /ms alone shows an overview"
 argument-hint: "[status | list | term add NAME | forget KEY | send | ...]"
 ---
 
@@ -691,7 +692,8 @@ argument-hint: "[status | list | term add NAME | forget KEY | send | ...]"
 
 The arguments are: `$ARGUMENTS`
 
-If there are no arguments, run the `maisecrets:send` command and do what it says.
+If there are no arguments, run the `maisecrets:status` command and show its output. Then tell the user, in one line,
+that `/ms NAME` runs a maisecrets command and that `/ms send` sends a blocked prompt.
 
 Otherwise the first word of the arguments names a maisecrets command. If it is one of {names}, run the
 `maisecrets:` command of that name with the rest of the arguments, and do what it says. If it is `report` or `sref`,
@@ -702,10 +704,11 @@ other word is no maisecrets command: tell the user so, then stop.
 
 
 def install_shortcut(name: str = "ms", only_if_absent: bool = False) -> "tuple[str, str] | None":
-    """Write the personal `/ms` command (`~/.claude/commands/ms.md`), the entry in the terminal: `/ms status`, and
-    `/ms` alone for the blocked prompt. It names the plugin's commands, never the plugin folder, which moves with every
-    version. With ``only_if_absent`` an existing command file of that name is left alone (it may be the user's own).
-    Returns (command file, "") or None when nothing was written. Field request, 2026-09-26."""
+    """Write the personal `/ms` command (`~/.claude/commands/ms.md`), the entry in the terminal, the same as
+    /maisecrets: `/ms status`, and `/ms` alone for an overview. It names the plugin's commands, never the plugin
+    folder, which moves with every version. With ``only_if_absent`` an existing command file of that name is left
+    alone (it may be the user's own). Returns (command file, "") or None when nothing was written. Field request,
+    2026-09-26."""
     from pathlib import Path as _P
     commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
     target = commands / f"{name}.md"
@@ -1388,14 +1391,22 @@ ENTRY_SEND_HEAD = "(maisecrets: the blocked prompt follows)"
 _TYPED_ONLY = {"demo": "/maisecrets demo on", "not-a-secret": "/maisecrets not-a-secret KEY"}
 
 
+ENTRY_WAITING = "A blocked prompt waits: /maisecrets send sends it."
+
+
 def _entry_overview() -> int:
-    """The entry with no command name and no blocked prompt: the protection of this session, and the commands."""
+    """The entry with no command name (/maisecrets, /ms) where no panel opens: the protection of this session, a line
+    when a blocked prompt waits, and the commands. It takes and sends nothing."""
     from . import hub, prompt_commands
+    from .hooks import pending_waits
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
     try:
-        line = hub.pane_status(os.environ.get("CLAUDE_CODE_SESSION_ID") or "").get("line")
+        line = hub.pane_status(session or "").get("line")
     except Exception:  # noqa: BLE001 - the list below still helps
         line = None
     print(line or "maisecrets: /maisecrets status shows the protection of this session.")
+    if pending_waits(session):
+        print(ENTRY_WAITING)
     print("Commands: /maisecrets NAME, for example /maisecrets status test.")
     print("  " + ", ".join(prompt_commands.COMMANDS))
     return 0
@@ -1403,20 +1414,12 @@ def _entry_overview() -> int:
 
 def cmd_entry(args: list[str]) -> int:
     """The one entry of every client (commands/maisecrets.md, commands/ms.md): the first word names the command, the
-    rest are its arguments. With no word: the blocked prompt when one waits (as /maisecrets send), else an overview.
-    It accepts only the command names (prompt_commands.COMMANDS) and runs what their command files run."""
+    rest are its arguments. With no word: the overview (a blocked prompt waits for /maisecrets send). It accepts only
+    the command names (prompt_commands.COMMANDS) and runs what their command files run."""
     from . import prompt_commands
     from .hooks import take_pending
     if not args:
-        text = take_pending(os.environ.get("CLAUDE_CODE_SESSION_ID") or None)
-        if text is None:
-            return _entry_overview()
-        if text == TWO_WAITING:
-            print(text)
-            return 0
-        print(ENTRY_SEND_HEAD)
-        print(text)
-        return 0
+        return _entry_overview()
     name, rest = args[0].lower(), args[1:]
     if name not in prompt_commands.COMMANDS:
         # the word is never echoed: a placeholder resolved into it (as for `list bogus`)

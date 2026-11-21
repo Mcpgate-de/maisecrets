@@ -739,7 +739,8 @@ class StateMatrixTests(unittest.TestCase):
         sb, r = self._run("live", "entry", "--args-stdin", stdin="term add Wibbleton Q\n")
         self.assertNotIn("Wibbleton", r.stdout + r.stderr)
 
-    def test_the_entry_alone_sends_the_blocked_prompt_or_shows_the_overview(self):
+    def test_the_entry_alone_shows_the_overview_and_names_a_waiting_prompt_without_sending_it(self):
+        # /ms and /maisecrets alone, where no panel opens: an overview; a blocked prompt waits for /maisecrets send
         sb = base_state("live").copy()
         self.addCleanup(sb.remove)
         pending = sb.home / "pending"
@@ -748,11 +749,16 @@ class StateMatrixTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Commands: /maisecrets NAME", r.stdout)
         self.assertIn("not-a-secret", r.stdout)
+        self.assertNotIn("A blocked prompt waits", r.stdout)
         pending.mkdir(mode=0o700, exist_ok=True)
         (pending / "S1.txt").write_text("deploy with the key", encoding="utf-8")
         env = sb.env()
         env["CLAUDE_CODE_SESSION_ID"] = "S1"
         r = sb.run("entry", "--args-stdin", stdin="\n", env=env)
+        self.assertIn("A blocked prompt waits: /maisecrets send sends it.", r.stdout)
+        self.assertNotIn("deploy with the key", r.stdout, "the overview sends nothing")
+        self.assertTrue((pending / "S1.txt").exists(), "the prompt still waits")
+        r = sb.run("entry", "--args-stdin", stdin="send\n", env=env)
         self.assertEqual(r.stdout, "(maisecrets: the blocked prompt follows)\ndeploy with the key\n")
         self.assertFalse((pending / "S1.txt").exists(), "a sent prompt is sent once")
 

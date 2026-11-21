@@ -13,7 +13,7 @@ TIPS = [
     "Tip: /maisecrets list uses shows where stored values went.",
     "Tip: /maisecrets report sends a false alarm to the maintainers, without the value.",
     "Tip: /maisecrets term add NAME masks a word of your own.",
-    "Tip: /maisecrets shortcut adds /ms for /maisecrets send.",
+    "Tip: /maisecrets shortcut adds /ms, a short /maisecrets: /ms status, /ms send.",
     'Tip: rules for the tokens of your own services: /maisecrets rules (README "Rules of your own").',
     "Tip: secrets that leaked before stay valid until you rotate them: /maisecrets:secret-hygiene.",
 ]

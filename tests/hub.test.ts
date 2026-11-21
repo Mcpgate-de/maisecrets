@@ -49,7 +49,7 @@ async function mountWhen($, query) {
 // opts: a clock the test moves, a status line per ask, the waits of $.clock.after (a recorded wait never ends)
 function engine(on, calls: any[], opened: { placed: boolean },
   opts: { clock?: { t: number }, line?: (n: number) => string, waits?: number[], delay?: (n: number) => number,
-    offer?: string | null, connector?: any, logs?: string[] } = {}) {
+    offer?: string | null, connector?: any, logs?: string[], pending?: boolean } = {}) {
   let asked = 0
   on('clock.now', () => ({ value: opts.clock ? opts.clock.t : 1_000_000 }))
   on('session.id', () => ({ value: 'sess-1' }))
@@ -81,7 +81,8 @@ function engine(on, calls: any[], opened: { placed: boolean },
     if (q.action === 'status') await new Promise(resolve => setTimeout(resolve, opts.delay ? opts.delay(n) : 30))
     if (q.action === 'status') return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({
       maisecrets: ENTRY, line: opts.line ? opts.line(n) : '🔒 maisecrets 0.9.12 protects this session', ms: 8,
-      notes: [{ name: 'store', fact: 'test file, 0 values', next: 'set backend in config.json' }] }) } }
+      notes: [{ name: 'store', fact: 'test file, 0 values', next: 'set backend in config.json' }],
+      pending: opts.pending === true }) } }
     const answer = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: ENTRY, ...o }) } })
     const VALUES = { rows: [{ key: 'SECRET_c1', type: 'SECRET', shown: '-', age: '2h', uses: 1, expires: '22h',
       live: true }], total: 1, offset: 0 }
@@ -168,6 +169,30 @@ test('/maisecrets alone opens the same pane: a status line, the views, and the o
   await back.unmount()
 })
 
+// /ms alone opens this panel as /maisecrets alone does: a blocked prompt that waits is offered here, never sent by it
+test('a blocked prompt that waits gets a send button; the press asks Python for /maisecrets send', async ($, on) => {
+  const calls: any[] = []
+  engine(on, calls, { placed: true }, { pending: true })
+  on('command.run', () => ({ text: 'engine' }))
+  await $.command.run({ command: 'maisecrets' })
+  const ui = await mountWhen($, { key: 'send' })
+  expect((await ui.find({ key: 'send' }))?.text).toMatch(/Send the blocked prompt/)
+  await ui.press({ key: 'send' })
+  await ui.unmount()
+  await settle()
+  const asked = calls.filter(c => c.argv.includes('mod-' + 'prompt')).map(c => JSON.parse(c.init.stdin))
+  expect(asked.map(q => [q.prompt, q.origin])).toContainEqual(['/maisecrets:send', 'composer'])
+})
+
+test('no blocked prompt: no send button', async ($, on) => {
+  engine(on, [], { placed: true })
+  on('command.run', () => ({ text: 'engine' }))
+  await $.command.run({ command: 'maisecrets' })
+  const ui = await mountWhen($, { type: 'Text', text: /protects this session/ })
+  expect(await ui.find({ key: 'send' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('the notes of the status are a button that opens and closes them', async ($, on) => {
   engine(on, [], { placed: true })
   on('command.run', () => ({ text: 'engine' }))
@@ -194,7 +219,7 @@ test('a list setting fills the prompt box; the countries open their own view', a
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ key: 'remove:rule_dirs' })).toBeUndefined()        // nothing to remove yet
   await ui.press({ key: 'add:rule_dirs' })
-  expect(filled).toContain('/maisecrets:settings rule_dirs add ')
+  expect(filled).toContain('maisecrets: set rule_dirs add ')
   await ui.unmount()
   await $.command.run({ command: 'maisecrets' })
   const main = await $.ui.mount({ ...PANE, surface: 'terminal' })

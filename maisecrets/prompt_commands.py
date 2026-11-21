@@ -243,9 +243,9 @@ def run_plan(prompt) -> dict | None:
     name, args = m.group("name").lower(), (m.group("args") or "").strip()
     words = args.split()
     if name in ENTRIES:
-        # the entry alone (the mod gives `/ms` alone as `/maisecrets:maisecrets`): the blocked prompt goes into the box
-        # when one waits, else the overview shows
-        return {"argv": ["entry"], "fill": True} if not words else None
+        # the entry alone (the mod gives `/ms` alone as `/maisecrets:maisecrets`): the panel, as /maisecrets alone;
+        # where no panel is placed, the overview (cli.cmd_entry)
+        return {"argv": ["entry"], "view": "panel"} if not words else None
     if name == "status":
         return {"argv": ["status", *words]} if words in ([], ["all"]) else None
     if name == "rules":

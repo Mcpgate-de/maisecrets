@@ -1047,8 +1047,10 @@ class ShortcutTests(unittest.TestCase):
             self.assertEqual(cli.cmd_shortcut([]), 0)
             cmd = (cfg_dir / "commands" / "ms.md").read_text(encoding="utf-8")
         self.assertTrue(cli.is_our_shortcut(cmd))
-        # /ms alone sends the blocked prompt; /ms NAME runs the command of that name, which the model may start
-        self.assertIn("run the `maisecrets:send` command", cmd)
+        # /ms alone shows an overview (as /maisecrets alone); /ms NAME runs the command of that name, which the model
+        # may start; nothing sends the blocked prompt but /ms send
+        self.assertIn("If there are no arguments, run the `maisecrets:status` command", " ".join(cmd.split()))
+        self.assertNotIn("maisecrets:send", cmd)
         for name in prompt_commands.COMMANDS:
             self.assertIn(f"`{name}`", cmd, name)
         # no shell line and no `!` expansion: an argument never reaches a shell, and no plugin folder is named

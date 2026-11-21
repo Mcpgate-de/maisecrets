@@ -1,5 +1,5 @@
 ---
-description: "Setup: a personal /ms in the terminal: /ms status runs a command, /ms alone sends the blocked prompt"
+description: "Setup: a personal /ms in the terminal, the same as /maisecrets: /ms status runs a command"
 argument-hint: "[install] [name] | remove [name] | status [name] | --remove [name]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" shortcut *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" shortcut *)
 user-invocable: false
@@ -26,5 +26,5 @@ If `${CLAUDE_PLUGIN_ROOT}` is still written like that when the command runs, put
 The arguments go in the quoted heredoc as they are, so the shell never reads them as code. Do not move them onto the command line, and do not add quotes.
 
 It writes `~/.claude/commands/ms.md` (or the name given): the entry in the terminal. `/ms status` runs a
-maisecrets command, and `/ms` alone sends the blocked prompt. `remove` takes it away again and keeps it away; `status`
+maisecrets command, and `/ms` alone opens the panel (an overview where no panel opens), as `/maisecrets` does. `remove` takes it away again and keeps it away; `status`
 says whether it is installed.

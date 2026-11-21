@@ -421,6 +421,20 @@ TWO_WAITING = ("(maisecrets: blocked prompts of two sessions are waiting; paste 
                "cleaned prompt from the block message)")
 
 
+def pending_waits(session: str | None = None) -> bool:
+    """Whether a blocked prompt waits for /maisecrets send, as take_pending would find it; nothing is taken."""
+    from .vault import HOME
+    d = HOME / "pending"
+    try:
+        if session:
+            own = _pending_path(session)
+            return bool(_SESSION_ID_RE.fullmatch(session)) and own.exists() and \
+                time.time() - own.stat().st_mtime < 15 * 60
+        return d.exists() and any(time.time() - c.stat().st_mtime < 15 * 60 for c in d.glob("*.txt"))
+    except OSError:
+        return False
+
+
 def take_pending(session: str | None = None) -> str | None:
     """Return and delete the pending prompt. With a session id, that session's own and nothing else:
     another session's prompt holds another conversation's text. Without one (a client that names no

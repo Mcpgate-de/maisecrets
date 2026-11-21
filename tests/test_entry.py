@@ -151,7 +151,7 @@ class PersonOnlyThroughTheEntryTests(_HookBase):
                                  {"run": {"argv": ["list", "--args-stdin"], "stdin": ""}})
                 self.assertEqual(self.mod(form.format("status test")), {"entry": "status test"})
         # the mod gives the entry alone (`/ms`, `/maisecrets:ms`) as `/maisecrets:maisecrets` (tests/mod.test.ts)
-        self.assertEqual(self.mod("/maisecrets:maisecrets"), {"run": {"argv": ["entry"], "fill": True}})
+        self.assertEqual(self.mod("/maisecrets:maisecrets"), {"run": {"argv": ["entry"], "view": "panel"}})
 
     def test_codex_keeps_its_answer_for_the_slash_form(self):
         # Codex has no slash commands: its prompt is not read as the entry, and it adds nothing
@@ -292,6 +292,22 @@ class InvocabilityTests(unittest.TestCase):
         (root / "commands" / "x.md").write_text('---\ndescription: "x"\ndisable-model-invocation: true\n'
                                                 'user-invocable: true\n---\nbody\n', encoding="utf-8")
         self.assertFalse(any("unreachable" in e for e in lint_plugin.check_frontmatter(root)[0]))
+
+
+class PendingTests(unittest.TestCase):
+    """The panel and the overview offer a blocked prompt that waits; neither takes it (/ms alone sends nothing)."""
+
+    def test_the_panel_status_says_whether_a_prompt_waits_and_takes_nothing(self):
+        from maisecrets import hub
+        session = "0b6f1c2e-0000-4000-8000-0000000000e9"
+        path = hooks._pending_path(session)
+        path.unlink(missing_ok=True)
+        self.addCleanup(path.unlink, missing_ok=True)
+        self.assertFalse(hub.pane_status(session)["pending"])
+        hooks._save_pending("deploy with the key", session)
+        self.assertTrue(hooks.pending_waits(session))
+        self.assertTrue(hub.pane_status(session)["pending"])
+        self.assertEqual(hooks.take_pending(session), "deploy with the key", "the status took nothing")
 
 
 class EntryCliTests(unittest.TestCase):

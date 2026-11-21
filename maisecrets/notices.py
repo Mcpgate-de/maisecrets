@@ -55,8 +55,8 @@ def _hours(seconds: int) -> str:
 
 
 def send_command() -> str:
-    """The command that sends the blocked prompt: `/ms` only when the person installed the shortcut (its command file
-    calls the maisecrets wrapper, cli.install_shortcut), else `/maisecrets send`. The plugin ships no `/ms`: without
+    """The command that sends the blocked prompt: `/ms send` only when the person installed the shortcut
+    (cli.install_shortcut; /ms is the same as /maisecrets), else `/maisecrets send`. The plugin ships no `/ms`: without
     the shortcut it is an unknown command."""
     import os
     from pathlib import Path
@@ -64,7 +64,7 @@ def send_command() -> str:
     try:
         from .cli import is_our_shortcut
         if is_our_shortcut((commands / "ms.md").read_text(encoding="utf-8")):
-            return "/ms"
+            return "/ms send"
     except (OSError, UnicodeDecodeError):
         pass
     return "/maisecrets send"
