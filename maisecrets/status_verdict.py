@@ -1,7 +1,7 @@
-"""The checks on top of /maisecrets:status: one line per check, each `ok`, `warn`, `FAIL` (or `n/a`), with a short
+"""The checks on top of /maisecrets status: one line per check, each `ok`, `warn`, `FAIL` (or `n/a`), with a short
 fact, and for `warn` or `FAIL` the next command. The head line says whether this session is protected. Every fact
 claims only what was checked: "the prompt hook ran 3 min ago", never "the protection works". The longer facts of a
-check (Check.detail) go to `/maisecrets:status all`; what each check means is in docs/HOW-IT-WORKS.md, "Status".
+check (Check.detail) go to `/maisecrets status all`; what each check means is in docs/HOW-IT-WORKS.md, "Status".
 
 The version line reads the marketplace copy the client fetched itself (Claude Code: `plugins/known_marketplaces.json`
 and its `installLocation`; Codex: `.tmp/marketplaces/<name>`, measured on codex-cli 0.169.0). It makes no network
@@ -315,7 +315,7 @@ def store_verdict() -> Check:
     except ConfigError:
         raise                         # the command prints the configuration error alone (cli.main)
     except Exception as exc:  # noqa: BLE001 - the verdict names the failure; the details say more
-        return Check("FAIL", "store", "no answer", "/maisecrets:report incident",
+        return Check("FAIL", "store", "no answer", "/maisecrets report incident",
                      f"the store did not answer a read ({type(exc).__name__}); every prompt with a value is blocked "
                      "until it does")
     name = {"KeychainBackend": "macOS keychain", "WindowsVaultBackend": "Windows Credential Locker",
@@ -331,7 +331,7 @@ def incidents_verdict() -> Check:
     groups, damaged = incidents.load()
     days = incidents.WINDOW_DAYS
     if damaged:
-        return Check("warn", "incidents", "record damaged", "/maisecrets:report incident",
+        return Check("warn", "incidents", "record damaged", "/maisecrets report incident",
                      "the incident record is damaged")
     closed = sum(int(g.get("count", 0)) for g in groups.values() if g.get("class") == "fail-closed")
     other = sum(int(g.get("count", 0)) for g in groups.values() if g.get("class") != "fail-closed")
@@ -345,7 +345,7 @@ def incidents_verdict() -> Check:
         parts.append(f"{other} times a side step failed (a cleanup or a record)")
     if markers:
         parts.append(f"{markers} not yet counted")
-    return Check("warn", "incidents", f"{closed + other + markers} in {days} days", "/maisecrets:report incident",
+    return Check("warn", "incidents", f"{closed + other + markers} in {days} days", "/maisecrets report incident",
                  "; ".join(parts))
 
 
@@ -358,7 +358,7 @@ def _guarded(fn, *args) -> Check:
         raise
     except Exception as exc:  # noqa: BLE001 - one line that fails must not hide the others
         name = getattr(fn, "__name__", "check").replace("_verdict", "")
-        return Check("warn", name if name in NAMES else "check", "not checked", "/maisecrets:report incident",
+        return Check("warn", name if name in NAMES else "check", "not checked", "/maisecrets report incident",
                      f"could not be checked ({type(exc).__name__})")
 
 
@@ -412,7 +412,7 @@ def older_verdict() -> Check | None:
 
 
 def names_verdict() -> Check | None:
-    """The name source of /maisecrets:ner (ner_health.verdict): a warn with the cause and the step when it is set and
+    """The name source of /maisecrets ner (ner_health.verdict): a warn with the cause and the step when it is set and
     cannot be used, never a FAIL. None without a source, or when the check itself fails."""
     try:
         from . import ner_health
@@ -433,10 +433,10 @@ def demo_verdict(sessions) -> Check | None:
     if not on:
         return None
     if demo.damaged():
-        return Check("warn", "demo", "state unreadable", "/maisecrets:demo off",
+        return Check("warn", "demo", "state unreadable", "/maisecrets demo off",
                      "the demo state cannot be read, so maisecrets sends no prompt of any session; "
-                     "/maisecrets:demo off resets it")
-    return Check("warn", "demo", "on, none sent to AI", "/maisecrets:demo off",
+                     "/maisecrets demo off resets it")
+    return Check("warn", "demo", "on, none sent to AI", "/maisecrets demo off",
                  "the demo is on: maisecrets answers each prompt itself, and no prompt reaches the AI")
 
 
@@ -464,7 +464,8 @@ def check_lines(checks: list, client: str | None = None) -> list[str]:
     """One line per check: mark, name, fact, and for warn and FAIL the next command, the arrows in one column.
     In Codex a command is typed as `maisecrets: status test`."""
     if client == "codex":
-        checks = [c._replace(next=c.next.replace("/maisecrets:", "maisecrets: ")) if c.next else c for c in checks]
+        from .forms import codex
+        checks = [c._replace(next=codex(c.next)) if c.next else c for c in checks]
     out = []
     for c in checks:
         line = f" {MARK.get(c.state, '?')} {c.name:<{NAME_COL}} {c.fact}"
@@ -499,9 +500,9 @@ def summary_line(conf, probe, rules: int, active) -> str:
 
 
 def form(command: str, client: str | None) -> str:
-    """`status all` as the person types it: /maisecrets:status all, in Codex `maisecrets: status all`, and both when
+    """`status all` as the person types it: /maisecrets status all, in Codex `maisecrets: status all`, and both when
     the client is not known."""
-    slash, typed = f"/maisecrets:{command}", f"maisecrets: {command}"
+    slash, typed = f"/maisecrets {command}", f"maisecrets: {command}"
     if client == "codex":
         return typed
     return slash if client == "claude" else f"{slash} (Codex: {typed})"

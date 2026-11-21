@@ -179,7 +179,7 @@ class Caps(_Files):
             r = self.imported([{"value": f"Wertname Nummer{i:03d}", "type": "NAME"} for i in range(10)])
         self.assertEqual(r.added, 3)
         self.assertIn("line 4 and later not imported", r.stopped)
-        self.assertIn("/maisecrets:forget import:ID", r.stopped)
+        self.assertIn("/maisecrets forget import:ID", r.stopped)
 
     def test_the_cap_of_all_imports_holds(self):
         with mock.patch.object(values, "MAX_VALUES", 4):
@@ -378,7 +378,7 @@ class Removal(_Files):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.assertEqual(cli.main(["values", "remove", r.id]), 1)
-        self.assertIn("/maisecrets:forget import:ID", buf.getvalue())
+        self.assertIn("/maisecrets forget import:ID", buf.getvalue())
         self.assertEqual(len(values.rows()), 1)
 
     def test_a_tool_call_that_carries_the_removal_is_refused(self):

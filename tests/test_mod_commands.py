@@ -149,13 +149,16 @@ class CodexFormTests(_Base):
             for name in names:
                 with self.subTest(name):
                     out = _mod(f"maisecrets: {name}")
-                    self.assertIsInstance(out.get("drop"), str, out)
+                    self.assertTrue(isinstance(out.get("drop"), str) or out.get("entry") == name, out)
                     self.assertNotIn("text", out)
 
-    def test_a_form_that_needs_the_model_puts_its_slash_form_into_the_box(self):
-        out = _mod("maisecrets: status test")
-        self.assertEqual(out.get("fill"), "/maisecrets:status test")
-        self.assertIn("/maisecrets:status test", out["drop"])
+    def test_a_form_that_needs_the_model_runs_through_the_entry(self):
+        self.assertEqual(_mod("maisecrets: status test"), {"entry": "status test"})
+        self.assertEqual(_mod("/maisecrets:status test"), {"entry": "status test"})
+
+    def test_the_skill_form_puts_its_slash_form_into_the_box(self):
+        out = _mod("maisecrets: secret-hygiene")
+        self.assertEqual(out.get("fill"), "/maisecrets:secret-hygiene")
 
     def test_another_word_after_maisecrets_is_a_question_for_the_ai(self):
         self.assertNotIn("drop", _mod("maisecrets: why was my prompt blocked"))

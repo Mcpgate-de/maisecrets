@@ -8,8 +8,8 @@ runner = ["tests/test_reads_only_listed_files.py::ReadsOnlyListedFilesTests::tes
 [proof]
 file = "maisecrets/hooks.py"
 find = '''def user_prompt(payload: dict) -> dict:
-    groups = check_value.parse_all(payload.get("prompt"))'''
+    typed_form = payload'''
 replace = '''def user_prompt(payload: dict) -> dict:
     _env = os.path.join(str(payload.get("cwd") or "."), ".env")
     os.path.isfile(_env) and open(_env).close()
-    groups = check_value.parse_all(payload.get("prompt"))'''
+    typed_form = payload'''

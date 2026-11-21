@@ -75,13 +75,13 @@ keeps its hooks. The install from this repository (`main`) keeps the refusal.
   - A synced maisecrets sets it up by itself: its session start places the script
     and, once, registers it in `~/.claude/settings.json` (a backup first, only the
     hooks change, one line in the session-start message says so). It protects the
-    sessions after that one. `/maisecrets:guard remove` takes it away and it stays
+    sessions after that one. `/maisecrets guard remove` takes it away and it stays
     away; `"guard": false` in `~/.maisecrets/config.json` or in the machine policy
     keeps it off. A `settings.json` that is not valid JSON is left alone.
   - An admin who prefers central settings can register it in the Claude Code
     managed settings instead (`python3 -m maisecrets.cli guard managed` prints the
     entries); on a machine where maisecrets never ran that command answers `{}`.
-  - Installed another way: `/maisecrets:guard install` does the same by hand.
+  - Installed another way: `/maisecrets guard install` does the same by hand.
   - Its cost: each prompt and tool call waits for the heartbeat, which the
     maisecrets hook of the same call writes as it starts (both run in parallel);
     without maisecrets it waits 5 s and then refuses. The refusal names
@@ -93,7 +93,7 @@ keeps its hooks. The install from this repository (`main`) keeps the refusal.
     the synced copy registered under, so a second Claude profile is not blocked.
     On a Mac without the Command Line Tools there is no `python3`, and the guard
     answers nothing. It needs a claude.ai login: with an API key there is no
-    account to compare, and `/maisecrets:guard status` says "expected: no".
+    account to compare, and `/maisecrets guard status` says "expected: no".
     After an organisation takes maisecrets out of its sync the guard stops
     expecting it within 15 minutes; until then `--off` lets you work.
 - For a team, an admin can roll out this marketplace with managed settings
@@ -115,7 +115,7 @@ in Codex and trust the maisecrets entries. Until then nothing is protected and
 the plugin cannot tell you so, because no hook of it runs. From Codex 0.164 the
 trust also covers the contents of the plugin folder (openai/codex#54619): after
 each maisecrets update, Codex shows the hooks as failed and lets every prompt and
-tool call through until you trust them again in `/hooks`. `/maisecrets:status`
+tool call through until you trust them again in `/hooks`. `/maisecrets status`
 reads Codex's `config.toml` and says whether Codex runs the hooks of the
 installed version, and whether a second maisecrets is installed. A workspace admin
 can ship the hooks as managed hooks (`requirements.toml`, MDM), which are
@@ -134,7 +134,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 60 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 19 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 501 proofs: each control's test, and each path of the 17 invariant beliefs, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 506 proofs: each control's test, and each path of the 17 invariant beliefs, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -163,7 +163,7 @@ policy.
 org-synced plugin, with `claude plugin update` otherwise. A session start says
 nothing while all is well (only the first start in a maisecrets folder shows a
 welcome), so its silence proves nothing. To check that the plugin loaded, run
-`/maisecrets:status` (Codex: `maisecrets: status`) in the session, or look for
+`/maisecrets status` (Codex: `maisecrets: status`) in the session, or look for
 the `session-start` row of that session in `~/.maisecrets/hooks.log`. A rollback is a `git revert` on `main`: the pipeline releases it as the
 next patch version.
 
@@ -188,7 +188,7 @@ that looks like a misspelled `rehydration`, `resolve_in_files` or
 Two keys add to what the user has instead of replacing it: `rule_dirs`, rule
 folders that every user reads and cannot remove, and `allow`, lines of the
 allow list (both lists of strings; see "Rules of your own").
-`/maisecrets:status all` names the keys that come from the policy. The plaintext
+`/maisecrets status all` names the keys that come from the policy. The plaintext
 `jsonfile` store is refused unless the policy or the user sets
 `allow_plaintext_store`.
 
@@ -214,16 +214,16 @@ refused. maisecrets itself sends nothing to a
 server: no hook opens a network connection. Two exceptions to state to a data-protection
 officer: the Windows Credential Locker can roam through a Microsoft account on
 a machine that is not domain-joined (set `backend` to `encrypted-file` by
-policy if that matters), and `/maisecrets:report` prints an issue text and a
+policy if that matters), and `/maisecrets report` prints an issue text and a
 link to `report_url`. It opens no browser and files nothing: you open the link
 and decide in GitHub's form. Set `report_url` to your tracker, or set it to
 `null` to turn reporting off.
 
-**Diagnosis.** `/maisecrets:status` fits on one screen: a head line that says
+**Diagnosis.** `/maisecrets status` fits on one screen: a head line that says
 whether this session is protected, one short line per check (`✓` ok, `!` warn,
 `✗` FAIL, with the next command) and one line of key facts.
-`/maisecrets:status all` adds version, plugin folder, Python, store, policy keys
-and log counts (docs/HOW-IT-WORKS.md, "Status", says what each check means). `/maisecrets:audit` prints the last
+`/maisecrets status all` adds version, plugin folder, Python, store, policy keys
+and log counts (docs/HOW-IT-WORKS.md, "Status", says what each check means). `/maisecrets audit` prints the last
 resolves. `MAISECRETS_DEBUG_LOG=<file>` in the client's environment records one
 line per hook call (event, client, duration, answer; never a value).
 `bash <plugin folder>/hooks/run.sh wipe --yes` is the offboarding step; a
@@ -243,7 +243,7 @@ run on most events, but not on two of them. For maisecrets, the plugin page (`/p
 > Claude Code, these events pass over the plugins you install. Only a plugin that counts as your
 > organization's own runs hooks on these events. An administrator sets that up in managed settings.
 
-maisecrets has these two hooks only for the demo mode (`/maisecrets:demo on`). In the demo they stop
+maisecrets has these two hooks only for the demo mode (`/maisecrets demo on`). In the demo they stop
 `/compact` and the requests Claude Code makes on its own (`/rename`, `/btw`, `/recap`, the next-prompt
 suggestion). Where they do not run, these requests go to the AI. They carry the conversation as it is: the
 prompts with placeholders and the demo lines, never a stored value. The turns of the demo stay local,
@@ -271,7 +271,7 @@ the plugins). Not yet tested in a managed organization.
 
 ### Settings the panel does not offer
 
-The `/maisecrets` panel and the `/maisecrets:settings` table leave out the settings that only weaken a protection
+The `/maisecrets` panel and the `/maisecrets settings` table leave out the settings that only weaken a protection
 when a person changes them: `strip_hidden_characters`, `scrub_transcript`, `block_at_mentions`, `client_header`,
 `ssh_via_sandbox`, `pass_agent_reports`, `max_keys_per_session`, `max_resolves_per_hour`. Set them in
 `config.json` or in the machine policy; a policy value cannot be changed by the person. The typed command still
@@ -283,7 +283,7 @@ An agent with your SSH keys can run any command on any host it reaches, also
 when no secret is in the command. Claude Code's own `permissions.ask:
 ["Bash(ssh:*)"]` matches only the start of a command, so `cd x && ssh …`,
 `bash -c "ssh …"` and `timeout 30 ssh …` pass it. With `ssh_consent` on (send
-`/maisecrets:settings ssh_consent on` as your prompt, see ["Settings you decide"](USING.md#settings-you-decide);
+`/maisecrets settings ssh_consent on` as your prompt, see ["Settings you decide"](USING.md#settings-you-decide);
 a policy can set it; it is off by default),
 maisecrets reads every ssh-family call (`ssh`, `scp`, `sftp`, `rsync` to a
 host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
@@ -313,7 +313,7 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   that carries the sentence is refused.
 - **Hosts where the AI may work on its own.** Your own lab or ops servers can
   be autonomous: writes there never ask, in any session, while every other
-  host asks for each write. Send `/maisecrets:settings ssh_autonomous_hosts add
+  host asks for each write. Send `/maisecrets settings ssh_autonomous_hosts add
   ops1` (or `maisecrets: ssh autonomous ops1`), and `remove ops1` (or
   `maisecrets: ssh ask ops1`) to take one off. The host is as the ssh call
   writes it (`root@lab:2323` is not `lab`), or the name of a group in
@@ -322,7 +322,7 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   the deny list holds there too. Limit: maisecrets reads commands as text, so
   a program that builds the sentence at run time and feeds it to a nested
   client (Codex does not say who wrote a prompt) can add a host; check the
-  list in `/maisecrets:settings`.
+  list in `/maisecrets settings`.
 - **A form maisecrets cannot read asks every time.** A host built at run
   time (`ssh $HOST`), two users or
   ports for one connection, `sudo -u` (another user's ssh config), an option that sends the
@@ -437,13 +437,13 @@ valid JSON, or holds no JSON object, blocks rehydration until it is fixed (it ma
 have said `block`), and
 one ignored for a wrong type keeps what it made stricter (`rehydration`,
 `resolve_in_files: false`, `ssh_via_sandbox: false`), so a typo never loosens
-a setting. The refusal and `/maisecrets:status` name the file. In an unattended run (`claude -p`) nobody can answer a confirm, so the
+a setting. The refusal and `/maisecrets status` name the file. In an unattended run (`claude -p`) nobody can answer a confirm, so the
 call is refused and the model reads the reason, never the value. The whole
 matrix, path by path: `tests/test_rehydration_matrix.py`.
 - **Under a cap.** `max_keys_per_session` (200) distinct values per session and
   hour, and `max_resolves_per_hour` (1000) in total; above that the call is
   denied, and the reason names the command that raises the cap, for example
-  `/maisecrets:settings max_resolves_per_hour 2000` (in Codex
+  `/maisecrets settings max_resolves_per_hour 2000` (in Codex
   `maisecrets: set max_resolves_per_hour 2000`), typed as your own prompt. The cap
   is a brake for a session that would send all of its values out at once; the
   session rule above keeps every other value closed anyway. Replayed over five
@@ -493,7 +493,7 @@ let single values through. maisecrets reads the rules from three places:
   team's rule repository. Type the change as your own prompt:
 
   ```
-  /maisecrets:settings rule_dirs add ~/src/team-rules
+  /maisecrets settings rule_dirs add ~/src/team-rules
   maisecrets: set rule_dirs add ~/src/team-rules     (the same, and the form for Codex)
   ```
 
@@ -501,7 +501,7 @@ let single values through. maisecrets reads the rules from three places:
   prompt changes it (C22). When the folder has a subfolder `rules/`, as a
   team repository from `maisecrets rules init` has, maisecrets reads that
   subfolder; else it reads the folder itself. A folder with no rule file
-  gets a note when you add it and in `/maisecrets:rules`.
+  gets a note when you add it and in `/maisecrets rules`.
 - each folder of `rule_dirs` in the machine policy. You cannot remove those.
 
 A folder holds three kinds of file, and maisecrets reads nothing else from it
@@ -513,7 +513,7 @@ A folder holds three kinds of file, and maisecrets reads nothing else from it
   `"type"` (`SECRET`, the default, or `NAME`, `EMAIL`, `PHONE`, `IBAN`, `CARD`,
   `IP`) sets the placeholder type. An allowlist with `"condition": "AND"`
   and more than one part is dropped (the stricter side), and
-  `/maisecrets:rules` says so.
+  `/maisecrets rules` says so.
 - `*.prefixes`, one rule per line, as in
   `maisecrets/detection/rules/prefixes.txt`: `id  PREFIX  REST`, where
   maisecrets adds the edges to the literal prefix, or `id  regex`. The whole
@@ -552,7 +552,7 @@ A rule that fails a check is left out, with its reason; the rest of the file
 still loads. A refused rule is named by its place (`rule 3`, `line 7`), never
 by its text: a refused line can be a pasted value. A broken file or folder
 never stops a hook and never costs the rules of another folder. The session
-start names a new failure once, and `/maisecrets:rules` shows each folder,
+start names a new failure once, and `/maisecrets rules` shows each folder,
 its rule count, a hash of its files, and each rule that was left out. Your
 rules run after every built-in rule, the personal-data rules too, so a rule
 of your own never cuts a part out of an e-mail address or an IBAN; a hit
@@ -595,19 +595,19 @@ rule off (`rule: user:acme-token`, or a built-in id from
 same lines in `allow` of the machine policy. A folder of `rule_dirs` carries
 no allow list: the AI can write a shared checkout, and the AI may only make
 detection stricter. A value that is already stored stays redacted by its
-exact match; `/maisecrets:forget` deletes it. The list holds for the name
-service too (`/maisecrets:ner`).
+exact match; `/maisecrets forget` deletes it. The list holds for the name
+service too (`/maisecrets ner`).
 
-**A wrong hit in one step.** Type `/maisecrets:not-a-secret KEY` as your own
+**A wrong hit in one step.** Type `/maisecrets not-a-secret KEY` as your own
 prompt (Codex: `maisecrets: not a secret KEY`), with the key from
-`/maisecrets:list` or the placeholder you copied. It deletes the stored value
+`/maisecrets list` or the placeholder you copied. It deletes the stored value
 and adds its exact value to `allow.txt`, under a comment line with the key. The
 answer names the key and the masked form, never the value. A secret, a card
 number, an IBAN or an official, tax or bank number needs the same command
 twice within 2 minutes. Only your typed prompt counts: a subagent, a program,
 a scheduled prompt, another session or a tool call changes nothing.
-`/maisecrets:list` shows each such allowance with its key, type, date and
-masked form; `/maisecrets:not-a-secret undo KEY` (Codex: `maisecrets: undo
+`/maisecrets list` shows each such allowance with its key, type, date and
+masked form; `/maisecrets not-a-secret undo KEY` (Codex: `maisecrets: undo
 not a secret KEY`) takes it back. Undo deletes only the line it wrote, directly under its
 comment line; a line you wrote yourself stays, and the answer says so when it
 cannot tell the two apart. The line that tells you what was masked
@@ -637,7 +637,7 @@ maisecrets reads only `value` and `type`; it ignores every other field.
 - In a terminal: `bash hooks/run.sh values import FILE` (in the plugin
   folder). It prints the id of the import and its counts, and the number and
   reason of each line it refused. It never prints a value or the file name.
-- As a setting: `/maisecrets:settings value_files add ~/work/ner-out.jsonl`
+- As a setting: `/maisecrets settings value_files add ~/work/ner-out.jsonl`
   (type it as your own prompt). maisecrets imports the file at each session
   start when its content changed.
 
@@ -678,7 +678,7 @@ make detection stricter, never weaker.
   value file.
 - A value that a rule finds (an email address, an IBAN) keeps the span, the
   type and the placeholder of that rule. A value that the store holds
-  already (a password from `/maisecrets:put`) keeps its own placeholder,
+  already (a password from `/maisecrets put`) keeps its own placeholder,
   its type and its lifetime, and it still resolves into your commands. An
   import never turns a resolvable value into a masked-only one. Only the
   parts of an imported phrase outside such a value get the import's
@@ -686,7 +686,7 @@ make detection stricter, never weaker.
 - No field of a line can switch a rule off, allow a value or change a
   lifetime: maisecrets reads `value` and `type` only.
 
-**Only you remove an import.** Type `/maisecrets:forget import:ID` as your
+**Only you remove an import.** Type `/maisecrets forget import:ID` as your
 own prompt (in Codex: `maisecrets: forget import:ID`). maisecrets does not
 send that prompt to the model. A prompt from a scheduled task, a subagent or
 a program that started the client removes nothing. A tool call that carries
@@ -700,7 +700,7 @@ imports the file again as it is now (also when you removed it in another
 session). So to drop a few values from a value file, edit the file, then
 remove its import.
 
-**What you see.** `/maisecrets:list` shows each import: its id, the number of
+**What you see.** `/maisecrets list` shows each import: its id, the number of
 values per type, its age, and whether it came from a value file or a
 command. It never shows a value. The session start names each new import
 once, with its id and count, also an import that the AI ran.
@@ -778,7 +778,7 @@ How it works (`docs/PROTOCOL.md` section 4):
    Claude Code itself uses: `~/.claude/.config.json` when that file is not
    empty, else `~/.claude.json` (both in `CLAUDE_CONFIG_DIR` when it is set;
    the rule of 2.1.301). The other file is then an old copy, and maisecrets
-   never reads or writes it. `/maisecrets:status all` names the file. It
+   never reads or writes it. `/maisecrets status all` names the file. It
    changes nothing else in the file and keeps a backup beside it. You see a
    notice once, with one step: type `/mcp reconnect <server name>` (or start
    Claude Code again). The reconnect reads the server entry again, its
@@ -797,7 +797,7 @@ How it works (`docs/PROTOCOL.md` section 4):
    values or none. If the server refuses, the call is denied, and the reason
    names the state of the server and your next step (the table below).
 
-`/maisecrets:status all` groups the servers by state ("active: …", "not used
+`/maisecrets status all` groups the servers by state ("active: …", "not used
 yet: …"); a server in a state that needs a step of yours keeps its own line,
 with the time of the last answer. It asks once per server origin that has a key on this
 computer (an empty request that can return no value); two entries on one
@@ -821,7 +821,7 @@ revoked" now, any other key is "header written". A key that a server bound
 and quarantined before maisecrets asked it once reads as "header written".
 A revoke alone makes maisecrets make a new key at the next start. To stop
 the link for good, turn the feature off: `client_header:
-false` (`/maisecrets:settings client_header false`) turns it off (in Codex at
+false` (`/maisecrets settings client_header false`) turns it off (in Codex at
 the next connection to the server) and removes
 the header again. A server behind a
 certificate authority of your own needs `client_vault_cafile`. On Windows a
@@ -870,15 +870,15 @@ computer, at the moment of the call, from the gateway's resolver. A file keeps
 the value, so the AI sees it if it reads that file later; for one hour after a
 resolve, output that prints the value shows the reference instead.
 
-1. Log in once: `/maisecrets:sref login` (in Codex: `run.sh sref login` in a
+1. Log in once: `/maisecrets sref login` (in Codex: `run.sh sref login` in a
    terminal). Your browser opens; you log in to the gateway and give the
    consent there. Nothing logs in by itself. When a server of your own
    configuration first sends this session references and this computer has
    no login at its gateway, a line says so, once per session and gateway, with
-   the command. In Claude Code the command `/maisecrets:sref login NAME` also
+   the command. In Claude Code the command `/maisecrets sref login NAME` also
    goes into the input box at the end of the AI's turn, when the box is empty
-   (else at the end of a later turn): your Enter starts the login. `/maisecrets:sref` shows the
-   state, `/maisecrets:sref logout` forgets the login. The gateway gives a
+   (else at the end of a later turn): your Enter starts the login. `/maisecrets sref` shows the
+   state, `/maisecrets sref logout` forgets the login. The gateway gives a
    new refresh token at each renewal and ends the login when a spent one comes
    back. When a renewal ends without a usable answer (a crash, a killed
    process, a broken connection, an error of the gateway) and the gateway
@@ -899,16 +899,16 @@ resolve, output that prints the value shows the reference instead.
    Claude Code, after a connector showed a reference, the mod asks that
    connector's tool `sensitive_references_resource` for its gateway at the end
    of the turn. Its answer is only a proposal (for an hour): the input box
-   gets `/maisecrets:sref login NAME` and a line that names the connector and
+   gets `/maisecrets sref login NAME` and a line that names the connector and
    the host, and only a login you type (or press in the panel) binds the
-   connector to that gateway; the AI cannot run `/maisecrets:sref`. What stays:
+   connector to that gateway; the AI cannot run `/maisecrets sref`. What stays:
    a connector you added that is not your gateway can name your gateway's URL.
    Log in only when the named connector is your gateway (a check by the
    gateway itself is planned). Before that, its
    references do not count; ask for them again after the login. A binding is
    never re-pointed, never takes a gateway that a server of your
    configuration or another connector holds, and never a name of your own
-   configuration (also `claude_ai_…` names); `/maisecrets:sref logout NAME`
+   configuration (also `claude_ai_…` names); `/maisecrets sref logout NAME`
    undoes it. A reference that two gateways showed in a session resolves at
    neither. The connector's name in commands is its tool-name spelling
    without `claude_ai_` (`claude.ai Team GW` is `Team_GW`). Codex has no
@@ -922,7 +922,7 @@ resolve, output that prints the value shows the reference instead.
    command scope too, and the consent page names it ("may also put real
    values into commands"). A login from before 0.9.0, or one on Windows, fills
    files only: the command then prints the gateway's reason and ends with exit
-   code 97, without the value; `/maisecrets:sref login` again allows
+   code 97, without the value; `/maisecrets sref login` again allows
    commands. In the content of Write,
    Edit, MultiEdit, NotebookEdit or a Codex patch the file gets the value, and
    maisecrets sends the path as the target (sink `local_file`); mcpgate checks
@@ -933,7 +933,7 @@ resolve, output that prints the value shows the reference instead.
    (another MCP server, WebFetch, a subagent) it stays text.
 4. For an hour after a resolve, output that prints the value shows the
    reference instead. An error names the reason and a count, never a value. The
-   audit (`/maisecrets:audit`) names each resolve with the kind of the
+   audit (`/maisecrets audit`) names each resolve with the kind of the
    reference and 4 characters of its id. When the gateway sends the id of its
    own audit event for the release (`audit_id`), the line shows it as
    `(gateway audit <id>)`, so you can find the same release in the gateway's
@@ -951,16 +951,16 @@ a source, with one command typed as your own prompt:
 
 | Command | Source |
 |---|---|
-| `/maisecrets:ner local` | the service on this computer, `http://127.0.0.1:8765/` (`on` is the same) |
-| `/maisecrets:ner url URL` | a service of your team on a private network |
-| `/maisecrets:ner gateway URL` | the gateway of your `/maisecrets:sref login`, when it offers name detection (log in once more after the switch) |
-| `/maisecrets:ner gateway NAME` | the same, by the name of an MCP server of your configuration (the list of `/maisecrets:sref`); the name alone, `/maisecrets:ner NAME`, is the same when it is no word of the command |
-| `/maisecrets:ner off` | the rules alone (the default) |
-| `/maisecrets:ner fallback url URL` | a second service for tool results while the local one is not running (`fallback off` removes it) |
-| `/maisecrets:ner unavailable withhold` | while the service gives no answer, a tool result is kept from the AI; by default (`unavailable rules`) the rules alone mask it |
-| `/maisecrets:ner updates off` | the image of the local service stays as it is; by default it follows the plugin (`updates on` turns that back on) |
-| `/maisecrets:ner` | one screen: a head line (the source and whether it answers), then one line per check, marked as in `/maisecrets:status` (✓ ok, ! warn, ✗ FAIL, – n/a), with the next command after → for a warn or a FAIL. The checks: the source and what it reads; for `local` the service (and its secret), the image and the load; for `url` whether it is reachable; for `gateway` the login with the name scope and your quota; and today's count from `ner.log` (a warn when the rules alone took at least 10 texts and at least a fifth of all) |
-| `/maisecrets:ner all` | the same, then the details: what the service reads, what a tool result gets while it does not answer, the model and types, the image against the pin, the load from `GET /metrics` (workers in use, requests that wait, CPU and memory of its container; numbers only) and today's counts per service |
+| `/maisecrets ner local` | the service on this computer, `http://127.0.0.1:8765/` (`on` is the same) |
+| `/maisecrets ner url URL` | a service of your team on a private network |
+| `/maisecrets ner gateway URL` | the gateway of your `/maisecrets sref login`, when it offers name detection (log in once more after the switch) |
+| `/maisecrets ner gateway NAME` | the same, by the name of an MCP server of your configuration (the list of `/maisecrets sref`); the name alone, `/maisecrets ner NAME`, is the same when it is no word of the command |
+| `/maisecrets ner off` | the rules alone (the default) |
+| `/maisecrets ner fallback url URL` | a second service for tool results while the local one is not running (`fallback off` removes it) |
+| `/maisecrets ner unavailable withhold` | while the service gives no answer, a tool result is kept from the AI; by default (`unavailable rules`) the rules alone mask it |
+| `/maisecrets ner updates off` | the image of the local service stays as it is; by default it follows the plugin (`updates on` turns that back on) |
+| `/maisecrets ner` | one screen: a head line (the source and whether it answers), then one line per check, marked as in `/maisecrets status` (✓ ok, ! warn, ✗ FAIL, – n/a), with the next command after → for a warn or a FAIL. The checks: the source and what it reads; for `local` the service (and its secret), the image and the load; for `url` whether it is reachable; for `gateway` the login with the name scope and your quota; and today's count from `ner.log` (a warn when the rules alone took at least 10 texts and at least a fifth of all) |
+| `/maisecrets ner all` | the same, then the details: what the service reads, what a tool result gets while it does not answer, the model and types, the image against the pin, the load from `GET /metrics` (workers in use, requests that wait, CPU and memory of its container; numbers only) and today's counts per service |
 
 In Codex, send `maisecrets: ner local` (or `url URL`, `off`) alone as your
 prompt. An argument the command does not know gets an answer with the valid
@@ -971,26 +971,26 @@ maisecrets does not verify that it is `mcpgate/ner`.
 
 - **local**: the service is the container `mcpgate/ner` (the model D3 of the
   NER experiment as ONNX; AFL-3.0 and Apache-2.0, its notices are in the
-  image). When the person types `/maisecrets:ner local` (in Codex `maisecrets: ner local`) or presses
+  image). When the person types `/maisecrets ner local` (in Codex `maisecrets: ner local`) or presses
   `local` in the panel, maisecrets starts it at once in the background with docker or podman, with no
   question first, and says so (about 690 MB to download, 1 to 2 GB on disk, about 250 MB of memory
   while it runs, at most 1.5 GB and half the cores, 2 to 4). No second download or container start runs at
   the same time: a start holds the lock of the start, and a second one that comes while it runs waits for
-  it or ends with a note. `/maisecrets:ner off` turns the source off, as before; it
+  it or ends with a note. `/maisecrets ner off` turns the source off, as before; it
   does not stop a download or a start that runs. While one runs, the answer says that the start ends by itself
-  and to send `/maisecrets:ner off` again after it. Only that typed choice starts a
+  and to send `/maisecrets ner off` again after it. Only that typed choice starts a
   download: a source set by a policy or in an earlier session does not, and the session start then says that
-  the service is not running and names `/maisecrets:ner local`. The start is
+  the service is not running and names `/maisecrets ner local`. The start is
   `run.sh ner start`, which runs the container `ner` with a secret of its own
   (in its environment, never on a command line) and keeps that secret in your
   store. Before each text the container must prove the secret (a fresh
   challenge each time); a process that holds the port without it gets no text,
   and maisecrets tells you once. A container you started by hand keeps working,
-  unchecked; `/maisecrets:ner` says which one runs. The proof and the text use
+  unchecked; `/maisecrets ner` says which one runs. The proof and the text use
   two connections, so a process that takes the port in the moment between them
   is not stopped; only one that can stop the container can do that.
   If the kept secret is lost or cannot be read, the container gets no text
-  until you run `/maisecrets:ner` again. Each tool result reads the secret from
+  until you run `/maisecrets ner` again. Each tool result reads the secret from
   your store (on macOS the keychain), which costs a little time. A process of
   your own user that deletes maisecrets' files can switch the check off, as it
   can change any setting; the check stops a listener that holds the port, not
@@ -1012,8 +1012,8 @@ maisecrets does not verify that it is `mcpgate/ner`.
   the rules work alone. The image only moves forward: a session that still
   runs an older plugin version never takes a newer image back. This applies
   only to a container that `run.sh ner start` set up; a container you started
-  by hand is never replaced, and `/maisecrets:ner` says which image runs and
-  which one the plugin pins. `/maisecrets:ner updates off` keeps the image as
+  by hand is never replaced, and `/maisecrets ner` says which image runs and
+  which one the plugin pins. `/maisecrets ner updates off` keeps the image as
   it is; it counts as a weaker setting, because the old image keeps its old
   fixes.
 - **url**: the text of each tool result goes to that service, with each value
@@ -1030,7 +1030,7 @@ maisecrets does not verify that it is `mcpgate/ner`.
   2 s (Windows retries it), so with the default `timeout_ms` of 300 it counts
   as slow and the fallback does not take over; a `timeout_ms` of 3000 lets the
   refusal arrive in time.
-- **Which service read what**: `/maisecrets:ner` and `/maisecrets:status all`
+- **Which service read what**: `/maisecrets ner` and `/maisecrets status all`
   count today's requests per service, from `ner.log` (time, service, tool
   result or prompt, characters, names, plugin version; never text). The counts
   are those of all your sessions on this computer, not of one session, as far
@@ -1041,13 +1041,13 @@ maisecrets does not verify that it is `mcpgate/ner`.
 - **Names in lower case**: the model of `mcpgate/ner` is cased, and a capital
   letter is its main sign of a name. `Peter Pan` becomes a placeholder,
   `peter pan` mostly stays text. A name that must always be masked belongs in
-  your term list (`/maisecrets:term add NAME`).
+  your term list (`/maisecrets term add NAME`).
 - **Product names**: the model takes some product and model names for a
   person. A product word that stands alone (Claude, Copilot, GitHub, Jenkins,
   Jira and a few more) is never masked as a name; a full name that holds one
   is. It can still mark another product name as a person.
 - **When the service does not answer**, the rules mask the tool result alone,
-  as without it, and the AI tells you once per session. `/maisecrets:status`
+  as without it, and the AI tells you once per session. `/maisecrets status`
   shows the source and whether it answers.
 
 The command writes the setting `remote_detector` in `~/.maisecrets/config.json`
@@ -1082,10 +1082,10 @@ and keeps its other keys. Written by hand, the setting looks like this:
   the prompt with the rules' findings and your stored values as filler (threat model, C30a). Codex prompts keep
   the rules alone (Codex cannot rewrite a prompt, so it can only block one). A prompt of a program (`claude -p`,
   the Agent SDK) never goes to a service on the network, and a fallback never gets a prompt. Until 0.9.14,
-  `/maisecrets:ner prompts on|off` turned the prompt part on or off; that form now gets the list of valid forms,
+  `/maisecrets ner prompts on|off` turned the prompt part on or off; that form now gets the list of valid forms,
   and a `"prompts"` key in `~/.maisecrets/config.json` is ignored. Only an administrator can keep prompts from
   the service: a `remote_detector` in the machine policy with `"prompts": false` (the whole setting then comes
-  from the policy). `/maisecrets:ner` shows `prompts: policy` then. A person who had a `url` or `gateway` source before this
+  from the policy). `/maisecrets ner` shows `prompts: policy` then. A person who had a `url` or `gateway` source before this
   change sees one note at the next session start in Claude Code: the name service now checks prompts too.
   One request per tool call or prompt. A tool result waits `timeout_ms`
   (300 by default, at most 5000; the name lookup and a slow answer count too), plus a share
@@ -1093,7 +1093,7 @@ and keeps its other keys. Written by hand, the setting looks like this:
   from its last answers; 60 until it has five, the rate of the reference setup) per 1,000
   characters, at most `max_timeout_ms` (3000 by default, at most 5000). `"timeout_scales": false`
   keeps the fixed `timeout_ms`. `ner.log` names the reason of each result that the rules took
-  alone (timeout, too_long, refused …), and `/maisecrets:ner` counts the reasons. A prompt waits
+  alone (timeout, too_long, refused …), and `/maisecrets ner` counts the reasons. A prompt waits
   `prompt_timeout_ms` (1000 by default for a service on this computer, never less than its `timeout_ms`;
   2000 in total for a service on the network, the gateway's discovery and token included, plus at most about 0.1 s that a thread needs to end; at most 5000): you wait for
   your prompt anyway. If the service gives no answer in time, the prompt goes on with the rules alone,
@@ -1108,17 +1108,17 @@ and keeps its other keys. Written by hand, the setting looks like this:
   confused service changes nothing: the rules' result stays as it is. A result
   longer than `max_chars` is not sent.
 - When a source is set and cannot be used, you see one line with the cause and the step, for example
-  `⚠️ maisecrets: names are NOT checked — the gateway ended the login → /maisecrets:sref login NAME`. The session
+  `⚠️ maisecrets: names are NOT checked — the gateway ended the login → /maisecrets sref login NAME`. The session
   start checks the source (the gateway: a login in the store; a url or the local container: an answer within a
-  second; a Unix socket: a connection within a second), and a tool result names it once per session, again only when the cause changes. `/maisecrets:status`
+  second; a Unix socket: a connection within a second), and a tool result names it once per session, again only when the cause changes. `/maisecrets status`
   and the panel show it as a `names` note, and the head line then says "protects secrets in this session; names
   are not checked". The AI is told at each such result that names may stand in clear text; a name it then
   writes in clear text came through that result; it is not made up. A text longer than the service takes still
-  gets its own line under that result. With `/maisecrets:ner unavailable withhold`
+  gets its own line under that result. With `/maisecrets ner unavailable withhold`
   such a result does not reach the AI at all (a text longer than the service takes is named, not withheld). The
   output of a failed command (Bash with an exit code other than 0) is neither checked by the service nor
   withheld: Claude Code does not let a hook replace it (threat model, PostToolUseFailure).
-- **gateway**: the gateway of your `/maisecrets:sref login` finds the names, when its protected resource metadata
+- **gateway**: the gateway of your `/maisecrets sref login` finds the names, when its protected resource metadata
   names `ner_endpoint` and `ner_scope`. The login asks for that scope only while this source is set, so you log in
   once more after the switch. The text goes over https with your access token, the rules' findings as filler.
   A tool result waits 3,000 ms by default (`timeout_ms`); measured from a laptop against the reference gateway:

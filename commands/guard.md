@@ -2,6 +2,7 @@
 description: "Setup: block the session when an update stops maisecrets"
 argument-hint: "[install | remove | status]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" guard *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" guard *)
+user-invocable: false
 ---
 
 Run exactly this command and show the user its output, then stop:

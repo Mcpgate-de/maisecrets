@@ -101,7 +101,7 @@ class State(unittest.TestCase):
         self.assertNotIn("not decided", text)
         self.assertNotIn("allow_plaintext_store", text, "an internal key is not shown")
         self.assertNotIn("`renew_on_use`", text, "an advanced setting only with all")
-        self.assertIn("More: `/maisecrets:settings all`", text)
+        self.assertIn("More: `/maisecrets settings all`", text)
         full = settings.render(show_all=True)
         self.assertIn("`renew_on_use`", full)
         self.assertIn("| Value lifetime | **24 h** |", full, "a lifetime reads as hours, not JSON")
@@ -110,7 +110,7 @@ class State(unittest.TestCase):
         card = settings.render(only="ssh_consent").splitlines()
         at = card.index("  SSH consent (ssh_consent) · off · set by you")
         self.assertEqual(card[at + 1].strip(), settings.MEANING["ssh_consent"])
-        self.assertEqual(card[at + 2].strip(), "Turn on: /maisecrets:settings ssh_consent on")
+        self.assertEqual(card[at + 2].strip(), "Turn on: /maisecrets settings ssh_consent on")
         rehydration = settings.render(only="rehydration")
         for mode in ("automatic", "confirm", "block"):
             self.assertIn(f"    {mode}", rehydration, "rehydration explains its three modes together")
@@ -121,7 +121,7 @@ class State(unittest.TestCase):
         self.assertIn("Change: `maisecrets: set KEY VALUE`", settings.render(codex=True), "Codex gets its own form")
 
 class EveryShownCommandWorks(unittest.TestCase):
-    """Every /maisecrets:settings command the list prints runs through the hook and the command without an error.
+    """Every /maisecrets settings command the list prints runs through the hook and the command without an error.
     The list told the user `ssh_autonomous_hosts add HOST`, and the command then exited 1 (field report on 0.6.6):
     each part had a test, the path the user types had none."""
 
@@ -133,20 +133,23 @@ class EveryShownCommandWorks(unittest.TestCase):
         text = "\n".join(settings.render(only=k) for k in keys)
         _reset(ssh_autonomous_hosts=["ops1"], secret_destinations="off", ssh_consent=True)
         text += "\n".join(settings.render(only=k) for k in keys)   # the commands a card shows only in another state
-        shown = sorted(set(_re.findall(r"(/maisecrets:settings [^\n(]+?)\s*(?:\(|$|  )", text, _re.M)))
+        shown = sorted(set(_re.findall(r"(/maisecrets settings [^\n(]+?)\s*(?:\(|$|  )", text, _re.M)))
         commands = [c.replace("HOST", "ops2").replace("KEY default", "ssh_consent default")
                     .replace(" DIR", " " + str(Path(_isolate.TMP, "team-rules").resolve()))
                     .replace(" FILE", " " + str(Path(_isolate.TMP, "values.jsonl").resolve())).strip() for c in shown]
         self.assertGreater(len(commands), 10, commands)
-        for must in ("/maisecrets:settings secret_destinations observe", "/maisecrets:settings ssh_consent off",
-                     "/maisecrets:settings ssh_autonomous_hosts add ops2", "/maisecrets:settings ttl_seconds 7d"):
+        for must in ("/maisecrets settings secret_destinations observe", "/maisecrets settings ssh_consent off",
+                     "/maisecrets settings ssh_autonomous_hosts add ops2", "/maisecrets settings ttl_seconds 7d"):
             self.assertIn(must, commands, "a command of a card is missing from the population")
         for command in commands:
             with self.subTest(command):
                 _reset(ssh_autonomous_hosts=["ops1"])
                 out = _prompt(command)
                 self.assertNotEqual(out.get("decision"), "block", out)
-                args = command.split()[1:]
+                # in Cowork the card names the text form, which the prompt hook reads as the same change
+                from maisecrets import forms
+                self.assertTrue(settings.parse_prompt(forms.cowork(command)), forms.cowork(command))
+                args = command.split()[2:]
                 with mock.patch("sys.stdout") as stdout:
                     rc = cli.main(["settings", *args])
                 said = "".join(c.args[0] for c in stdout.write.call_args_list)
@@ -179,7 +182,7 @@ class Change(unittest.TestCase):
             self.assertEqual(cli.main(["settings", "ssh_consent", "on"]), 0)
         shown = "".join(c.args[0] for c in stdout.write.call_args_list)
         self.assertIn("SSH consent (ssh_consent) · on · set by you", shown)
-        self.assertIn("Turn off: /maisecrets:settings ssh_consent off", shown)
+        self.assertIn("Turn off: /maisecrets settings ssh_consent off", shown)
         # a mistake still stops: there is nothing to show
         self.assertEqual(_prompt("/maisecrets:settings ssh_consent maybe")["decision"], "block")
 
@@ -226,9 +229,9 @@ class Change(unittest.TestCase):
         self.assertEqual(load_config()["max_resolves_per_hour"], 1000, "the default")
         # not in the table (it only weakens protection when raised); its card still names the command
         self.assertNotIn("max_keys_per_session", settings.render(show_all=True))
-        self.assertIn("Raise: /maisecrets:settings max_keys_per_session 400",
+        self.assertIn("Raise: /maisecrets settings max_keys_per_session 400",
                       settings.render(only="max_keys_per_session"), "the card names the command")
-        self.assertIn("Raise: /maisecrets:settings max_resolves_per_hour 2000",
+        self.assertIn("Raise: /maisecrets settings max_resolves_per_hour 2000",
                       settings.render(only="max_resolves_per_hour"))
 
     def test_a_tool_call_that_carries_a_limit_change_is_refused(self):
@@ -407,7 +410,7 @@ class Hint(unittest.TestCase):
                     if client == "codex":
                         self.assertNotIn("/maisecrets:", text, "Codex has no slash command for plugins")
                     else:
-                        self.assertIn(f"/maisecrets:settings {feature} ", text, "the exact command")
+                        self.assertIn(f"/maisecrets settings {feature} ", text, "the exact command")
 
     def test_codex_gets_its_sentence_and_an_unread_form_is_no_case(self):
         # an unread form shares its class with a plain mention (`echo ssh`), so it gives no hint

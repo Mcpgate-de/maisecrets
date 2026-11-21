@@ -67,6 +67,7 @@ MAY_START = {
                                "the server of a value through a FIFO, the scrub of a failed prompt"),
     "maisecrets/ner_setup.py": (36, "the container tool of the name service the person set up, its keeper, and its "
                                     "typed start"),
+    "maisecrets/prompt_commands.py": (4, "hooks/dispatch.py sref, for a gateway status the person typed in Cowork"),
     "maisecrets/sref_client.py": (5, "a Python child that serves a gateway value through a FIFO"),
     "maisecrets/user_rules.py": (6, "a Python child that checks a rule of the person"),
     "maisecrets/vault.py": (34, "the tool of the operating system's store"),

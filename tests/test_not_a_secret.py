@@ -342,7 +342,7 @@ class NotASecretTests(_ServiceBase):
         with contextlib.redirect_stdout(buf):
             cli.cmd_list([])
         text = buf.getvalue()
-        self.assertIn("Allowed by you with /maisecrets:not-a-secret (1)", text)
+        self.assertIn("Allowed by you with /maisecrets not-a-secret (1)", text)
         row = next(line for line in text.splitlines() if line.startswith(key + " "))
         self.assertIn(time.strftime("%Y-%m-%d"), row)
         self.assertNotIn(NAME, text)
@@ -352,10 +352,10 @@ class NotASecretTests(_ServiceBase):
     def test_the_masking_line_has_one_hint(self):
         self.on()
         one = _post(f"please ask {NAME} today\n")
-        self.assertRegex(one["systemMessage"], r"Wrong\? Type /maisecrets:not-a-secret NAME_c\d+\Z")
+        self.assertRegex(one["systemMessage"], r"Wrong\? Type /maisecrets not-a-secret NAME_c\d+\Z")
         many = _post(f"ask {NAME} and {LONGER}\n")
         self.assertEqual(many["systemMessage"].count("Wrong?"), 1)
-        self.assertTrue(many["systemMessage"].endswith("Wrong? Type /maisecrets:not-a-secret KEY"))
+        self.assertTrue(many["systemMessage"].endswith("Wrong? Type /maisecrets not-a-secret KEY"))
         self.assertNotIn("Wrong?", _post(f"please ask {NAME} today\n", client=CODEX).get("reason", ""))
 
     def test_no_hint_for_a_key_type(self):
@@ -386,7 +386,8 @@ class NotASecretTests(_ServiceBase):
     def test_usage_and_unknown_keys(self):
         self.assertIn("name one stored value", _prompt("/maisecrets:not-a-secret")["reason"])
         self.assertIn("name one stored value", _prompt("/maisecrets:not-a-secret two words")["reason"])
-        self.assertIn("there is no stored value NAME_c999", _prompt("/maisecrets:not-a-secret NAME_c999")["reason"])
+        self.assertIn("there is no stored value with this key",
+                      _prompt("/maisecrets:not-a-secret NAME_c999")["reason"])
 
     def test_parse(self):
         p = not_a_secret.parse

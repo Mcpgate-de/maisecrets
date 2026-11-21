@@ -2,7 +2,7 @@
 Mcpgate-de/maisecrets#13.
 
 This module never decides whether a call runs. It notes, on this computer only, each destination a stored secret
-went to, and shows it in /maisecrets:list. With observe a seen destination is a record, never a permission. With
+went to, and shows it in /maisecrets list. With observe a seen destination is a record, never a permission. With
 protect the hook asks before a network destination that new_hosts() names: a host the secret was never `seen` at,
 after its first call. `allowed` is kept apart in the store and is not used by any decision yet.
 
@@ -141,7 +141,7 @@ def _save(data: dict) -> None:
 
 def _load_for_write() -> dict:
     """Under the lock: the store to change. A corrupt file is moved aside (destinations.json.corrupt) and a new one
-    begins, so nothing the person had is overwritten unseen; /maisecrets:status lists the file."""
+    begins, so nothing the person had is overwritten unseen; /maisecrets status lists the file."""
     try:
         return _load(strict=True)
     except Corrupt:
@@ -171,7 +171,7 @@ _UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-
 
 def clean_label(text: str) -> str:
     """One printable line of at most 80 characters: a label comes from a call the model wrote (a service field, a
-    path), and a newline or a terminal escape in it must not draw lines into /maisecrets:list (codex review)."""
+    path), and a newline or a terminal escape in it must not draw lines into /maisecrets list (codex review)."""
     text = _UNPRINTABLE.sub("?", str(text))
     text = re.sub(r"\s+", " ", text).strip()
     text = "".join(c if c.isprintable() else "?" for c in text)   # format characters too: U+2060, U+00AD (codex)

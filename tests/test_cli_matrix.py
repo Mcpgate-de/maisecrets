@@ -503,7 +503,7 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
         unchanged("audit")
         return p
     if usage:
-        text = {"forget": ("", "usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)\n"),
+        text = {"forget": ("", "usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets list shows them)\n"),
                 "wipe": (_NOTICE, "")}[command]
         expect((r.stdout, r.stderr) == text, f"{command} usage")
         unchanged(f"{command} without its argument")
@@ -572,7 +572,7 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
             others = sorted(k for k in ret if k != key)
             expect(sorted(after_entries) == others, f"forget left {sorted(after_entries)}, expected {others}")
         else:
-            expect(r.stdout == "That key is not stored (see /maisecrets:list).\n", "forget of an unknown key")
+            expect(r.stdout == "That key is not stored (see /maisecrets list).\n", "forget of an unknown key")
             expect(after.store == before.store and after_entries == (before.index or {}).get("entries", {}),
                    "forget of an unknown key changed the store")
         return p
@@ -608,7 +608,7 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
                "status counts")
     elif command == "status":
         # the default: the checks and one line of facts; the details only under `status all`
-        expect("\nstored values:" not in r.stdout and "all details: /maisecrets:status all" in r.stdout,
+        expect("\nstored values:" not in r.stdout and "all details: /maisecrets status all" in r.stdout,
                "status shows no details")
     elif command == "expire":
         expect(r.stdout == f"purged {len(newly)} expired value(s)\n", f"expire should purge {newly}")
@@ -719,6 +719,48 @@ class StateMatrixTests(unittest.TestCase):
         sb = base_state(state).copy()
         self.addCleanup(sb.remove)
         return sb, sb.run(*args, stdin=stdin)
+
+    def test_the_entry_runs_the_command_its_first_word_names(self):
+        # commands/maisecrets.md: `run.sh entry --args-stdin` with the typed words on stdin
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="list\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r"SECRET_c1\s+SECRET")
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="status\n")
+        self.assertIn("maisecrets", r.stdout)
+        # a word that is no command runs nothing and is never echoed
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="wibblewobble SECRET_c1\n")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no maisecrets command. Nothing ran.", r.stdout)
+        self.assertNotIn("wibblewobble", r.stdout + r.stderr)
+        # a command only the person's prompt gives changes nothing here, and its words are never echoed
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="not-a-secret SECRET_c1\n")
+        self.assertIn("only when you type it as your own prompt", r.stdout)
+        self.assertNotIn("not_a_secret", " ".join(p.name for p in sb.home.iterdir()))
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="term add Wibbleton Q\n")
+        self.assertNotIn("Wibbleton", r.stdout + r.stderr)
+
+    def test_the_entry_alone_shows_the_overview_and_names_a_waiting_prompt_without_sending_it(self):
+        # /ms and /maisecrets alone, where no panel opens: an overview; a blocked prompt waits for /maisecrets send
+        sb = base_state("live").copy()
+        self.addCleanup(sb.remove)
+        pending = sb.home / "pending"
+        shutil.rmtree(pending, ignore_errors=True)
+        r = sb.run("entry", "--args-stdin", stdin="\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Commands: /maisecrets NAME", r.stdout)
+        self.assertIn("not-a-secret", r.stdout)
+        self.assertNotIn("A blocked prompt waits", r.stdout)
+        pending.mkdir(mode=0o700, exist_ok=True)
+        (pending / "S1.txt").write_text("deploy with the key", encoding="utf-8")
+        env = sb.env()
+        env["CLAUDE_CODE_SESSION_ID"] = "S1"
+        r = sb.run("entry", "--args-stdin", stdin="\n", env=env)
+        self.assertIn("A blocked prompt waits: /maisecrets send sends it.", r.stdout)
+        self.assertNotIn("deploy with the key", r.stdout, "the overview sends nothing")
+        self.assertTrue((pending / "S1.txt").exists(), "the prompt still waits")
+        r = sb.run("entry", "--args-stdin", stdin="send\n", env=env)
+        self.assertEqual(r.stdout, "(maisecrets: the blocked prompt follows)\ndeploy with the key\n")
+        self.assertFalse((pending / "S1.txt").exists(), "a sent prompt is sent once")
 
     def test_list_and_status_show_an_expired_entry_as_expired(self):
         sb, r = self._run("expired-purged", "list")
@@ -903,7 +945,7 @@ class StateMatrixTests(unittest.TestCase):
         r = sb.run("shortcut", "../evil")
         # a path as a name is refused with the usage, and nothing is written (UX test, 2026-11-17: it installed /ms)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("usage: /maisecrets:shortcut", r.stdout)
+        self.assertIn("usage: /maisecrets shortcut", r.stdout)
         self.assertFalse((sb.user_home / ".claude" / "commands").exists())
         r = sb.run("shortcut")
         self.assertEqual(r.returncode, 0)
@@ -913,7 +955,8 @@ class StateMatrixTests(unittest.TestCase):
         self.assertFalse((sb.user_home / ".claude" / "evil.md").exists())
         self.assertEqual((sb.home / ".shortcut").read_text().strip(), "installed")
         r = sb.run("shortcut", "--remove")
-        self.assertIn("removed: the command file and the shared wrapper", r.stdout)
+        # the shortcut of 0.9.22 and later needs no wrapper (cli.SHORTCUT_COMMAND)
+        self.assertIn("removed: the command file\n", r.stdout)
         self.assertFalse((commands / "ms.md").exists())
         self.assertEqual((sb.home / ".shortcut").read_text().strip(), "removed")
 
@@ -982,7 +1025,7 @@ class StateMatrixTests(unittest.TestCase):
         newest = max(entries, key=lambda k: entries[k]["created"])
         before = set(entries)
         r = sb.run("report", "last", "a product word, not a password")
-        self.assertIn(f"/maisecrets:forget {newest}", r.stdout)
+        self.assertIn(f"/maisecrets forget {newest}", r.stdout)
         # the events are shared by all sessions, and a model can run this command: nothing goes by itself
         self.assertEqual(set(sb.index()["entries"]), before)
 
@@ -1121,7 +1164,7 @@ class SessionStartTests(unittest.TestCase):
         (sb.home / ".tip").write_text("2000-01-01 1\n")
         msg = _start(self, sb, CLAUDECODE="1")["systemMessage"]
         self.assertIn(f"1 stored word(s) are program code, not secrets ({old})", msg)
-        self.assertIn("/maisecrets:forget deletes them", msg)
+        self.assertIn("/maisecrets forget deletes them", msg)
         entries = sb.index()["entries"]
         self.assertEqual(sorted(entries), sorted([old, real]), "nothing is deleted")
         self.assertIs(entries[old].get("weak"), True)
@@ -1153,7 +1196,7 @@ class SessionStartTests(unittest.TestCase):
         at = tips.TIPS.index(next(t for t in tips.TIPS if tips.SHORTCUT in t))
         (sb.home / ".tip").write_text(f"2000-01-01 {at - 1}\n")
         msg = _start(self, sb, CLAUDECODE="1")["systemMessage"]
-        self.assertNotIn("/maisecrets:shortcut", msg)
+        self.assertNotIn("/maisecrets shortcut", msg)
         self.assertEqual(msg, tips.TIPS[(at + 1) % len(tips.TIPS)])
         self.assertFalse((sb.home / ".shortcut").exists())
     def test_a_config_warning_is_shown_and_a_config_error_blocks(self):
@@ -1689,7 +1732,7 @@ class TipsTests(unittest.TestCase):
     def test_each_pool_has_a_tip_about_rules_of_your_own_with_a_step_that_works_in_its_client(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         admin = (ROOT / "docs" / "ADMIN.md").read_text(encoding="utf-8")
-        for pool, step in ((self.tips.TIPS, "/maisecrets:rules"),
+        for pool, step in ((self.tips.TIPS, "/maisecrets rules"),
                            (self.tips.TIPS_CODEX, "maisecrets: set rule_dirs add")):
             (tip,) = [t for t in pool if "rules for the tokens of your own services" in t]
             self.assertIn(step, tip)

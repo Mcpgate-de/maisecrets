@@ -1,0 +1,11 @@
+# c4-a-placeholder-in-a-cowork-answer-is-no-typed-one: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c4-a-placeholder-in-a-cowork-answer-is-no-typed-one"
+control = "C4"
+serves = ["M3.1"]
+statement = "A placeholder in the answer that Cowork shows through the model reaches the prompt hook as plain brackets, so it never counts as a placeholder the person typed and resolves in no session."
+runner = ["tests/test_cowork.py::HookAnswerTests::test_a_placeholder_in_the_answer_is_no_placeholder_the_person_typed"]
+
+[proof]
+file = "maisecrets/cowork.py"
+find = '''    text = _SHOW + forms.cowork(answer).replace(OPEN, "[").replace(CLOSE, "]")'''
+replace = '''    text = _SHOW + forms.cowork(answer)'''

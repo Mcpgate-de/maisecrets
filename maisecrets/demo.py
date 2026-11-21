@@ -1,4 +1,4 @@
-"""/maisecrets:demo on (Codex: `maisecrets: demo on`): the person tries maisecrets with real data, and nothing goes to
+"""/maisecrets demo on (Codex: `maisecrets: demo on`): the person tries maisecrets with real data, and nothing goes to
 the AI. In a session in the demo each prompt takes the normal way of a prompt: maisecrets stores its values and puts
 placeholders in place of them, and in Claude Code the mod lets the masked prompt enter, so the person's row shows as
 on a sent prompt (show_values draws the values with a lock). No model request goes out: the mod answers each step of
@@ -10,13 +10,13 @@ SDKs), a scheduled prompt, another session or a tool call changes nothing. It st
 yet (has_turns: the transcript holds no model answer), because the only way out is /clear, which starts a new session
 and leaves this conversation behind. The demo rows stay in the session's transcript, so the demo does not end with
 `off` and not with SessionEnd (a resumed session must stay in the demo, or its rows would go to the AI with the next
-real request). The transcript is the lasting truth: a session whose last answer is the demo answer (DEMO_LINE, which
-only the mod writes) is in the demo whatever demo.json says. STATE (the maisecrets home: a session id and a time,
-never a prompt) carries it from `demo on` to the first demo answer. The only extra record is one events.log line for
-each switch (events.record_demo).
+real request). The transcript is the lasting truth: a session whose last answer is the mod's demo answer (DEMO_LINE,
+or in Cowork a text that ends with DEMO_LINE_COWORK; the model cannot write a mod's answer) is in the demo whatever
+demo.json says. STATE (the maisecrets home: a session id and a time, never a prompt) carries it from `demo on` to the
+first demo answer. The only extra record is one events.log line for each switch (events.record_demo).
 
 A demo.json that cannot be read or has another shape blocks every session (fail closed) until the person types
-/maisecrets:demo off, which resets it.
+/maisecrets demo off, which resets it.
 """
 from __future__ import annotations
 
@@ -35,6 +35,12 @@ PASS_SECONDS = 120
 DEMO_LINE = "Demo mode: nothing was sent to the AI. /clear to switch it off."
 TITLE = "maisecrets demo"
 DEMO_LINE_CODEX = "Demo mode: nothing was sent to the AI. A new session switches it off."
+# Cowork has no /clear and draws no row under a prompt: its demo answer ends with this line, after what the AI would
+# have got (cowork_show), and it is forms.cowork(DEMO_LINE)
+DEMO_LINE_COWORK = "Demo mode: nothing was sent to the AI. Start a new task to switch it off."
+# the row that enters a Cowork demo session for the person's own command, so that the demo answer can show its output
+# (Cowork shows no dropped prompt); it carries no command, so the prompt hook reads none in it
+COWORK_ROW = "(maisecrets answered this in the demo)"
 # Claude Code 2.1.327 and later: where an organization manages Claude Code, the hooks of a plugin the person installed
 # do not run on session.compact and on the engine's http.fetch (the plugin page says so). The mod then cannot stop
 # /compact and the side requests; they carry only placeholders. docs/ADMIN.md, "The demo where an organization manages
@@ -57,10 +63,11 @@ _CMD_RE = _LazyRx(r"\A\s*(?:/maisecrets:demo|maisecrets:[ \t]*demo)(?:[ \t]+(?P<
 # skip the prompt. A text match (the C22 class): a form built at run time is not seen
 # and a call of the demo's writers or of the mod's questions: the module by name (maisecrets.demo, `from maisecrets
 # import demo`, `import demo`), the pass writer, the dispatcher entries mod-demo and mod-prompt (Gate A, demo turn)
-IN_A_COMMAND_RE = _LazyRx(r"/maisecrets:demo\b|maisecrets:\s*demo\b|\bswitch_typed\b|\b_write_pass\b|"
+from .forms import SLASH as _SLASH  # noqa: E402 - each slash form of a command (the entry forms too)
+IN_A_COMMAND_RE = _LazyRx(_SLASH + r"demo\b|maisecrets:\s*demo\b|\bswitch_typed\b|\b_write_pass\b|"
                           r"\bmaisecrets\s*\.\s*demo\b|\bfrom\s+maisecrets\s+import\b[^\n;]*\bdemo\b|"
                           r"\bimport\s+demo\b|\bmod-demo\b|\bmod-prompt\b", re.I)
-IN_A_COMMAND = ("maisecrets: this command carries /maisecrets:demo or calls the demo's writers; only the person "
+IN_A_COMMAND = ("maisecrets: this command carries /maisecrets demo or calls the demo's writers; only the person "
                 "switches the demo, as their own prompt. The command did not run. Tell the user the prompt to send.")
 _KEY = r"(?:⟦)?[A-Z][A-Z0-9_]*_c\d+(?:⟧)?"
 # the person's own maisecrets commands that pass the demo, in their exact forms only: a command name of commands/*.md
@@ -183,9 +190,11 @@ def _find_transcript(session: str) -> str | None:
 
 
 def has_demo_rows(session: str, transcript: str | None = None) -> bool:
-    """Whether the session is in the demo by its transcript: its last assistant text is DEMO_LINE, which only the mod
-    writes (its answer to a model step). A demo session is left only with /clear, a new session id, so once it has a
-    demo row no real answer can follow in it: the last answer tells. Only the tail is read (TAIL bytes, widened while
+    """Whether the session is in the demo by its transcript: its last assistant text is an answer of the mod (its
+    answer to a model step, which the model cannot write: _last_answer) that is DEMO_LINE or, in Cowork, ends with
+    DEMO_LINE_COWORK (after what the AI would have got or a command's output, cowork_show and cowork_own). A demo
+    session is left only with /clear, a new session id, so once it has a demo row no real answer can follow in it: the
+    last answer tells. Only the tail is read (TAIL bytes, widened while
     it holds no answer). A transcript that exists but cannot be read counts as in the demo: it can hold demo rows, and
     its prompt would carry them to the AI (fail closed; /clear starts a new, empty one). No transcript: no demo row
     (Codex never has one: its demo prompts are blocked and never enter the history)."""
@@ -203,7 +212,9 @@ def has_demo_rows(session: str, transcript: str | None = None) -> bool:
                 chunk = f.read(size - start)
                 last = _last_answer(chunk if start == 0 else chunk[chunk.find(b"\n") + 1:])
                 if last is not None or start == 0:
-                    return last == ("mod", DEMO_LINE)
+                    # Cowork's demo answer ends with its own line (cowork_show); only the mod writes either
+                    return last == ("mod", DEMO_LINE) or (last is not None and last[0] == "mod"
+                                                          and last[1].endswith(DEMO_LINE_COWORK))
                 want *= 4
     except FileNotFoundError:
         return False
@@ -239,7 +250,7 @@ def _last_answer(chunk: bytes) -> tuple | None:
 
 
 def active_in(sessions) -> bool:
-    """active() for any of these session ids (/maisecrets:status gets a list)."""
+    """active() for any of these session ids (/maisecrets status gets a list)."""
     return any(active(s) for s in sessions or [])
 
 
@@ -296,7 +307,7 @@ def switch_typed(verb: str, session: str, route: str, codex: bool, payload: dict
             if verb != "off":
                 # only off resets it: an `on` that wrote a valid state would let the prompts of every other
                 # session through (Gate A round 5 of #57)
-                return DAMAGED.format(off="maisecrets: demo off" if codex else "/maisecrets:demo off")
+                return DAMAGED.format(off="maisecrets: demo off" if codex else "/maisecrets demo off")
             data, reset = {}, True          # the person's off rewrites it: never locked out
         if verb == "off":
             if not reset:
@@ -336,13 +347,13 @@ def answer(payload: dict, verb: str, typed: bool, codex: bool) -> dict:
     session = payload.get("session_id")
     if verb == "show":
         if damaged():
-            return _block(DAMAGED.format(off="maisecrets: demo off" if codex else "/maisecrets:demo off"), codex)
+            return _block(DAMAGED.format(off="maisecrets: demo off" if codex else "/maisecrets demo off"), codex)
         reason = ((ON_CODEX if codex else ON) if active(session, payload.get("transcript_path")) else
-                  "Demo mode is off in this session. /maisecrets:demo on, in a new session, keeps what you send here "
+                  "Demo mode is off in this session. /maisecrets demo on, in a new session, keeps what you send here "
                   "and sends no prompt to the AI (Codex: maisecrets: demo on).")
     elif not typed:
         from .settings import came_from
-        reason = ("maisecrets: /maisecrets:demo counts only when you type it as your prompt; this one came from "
+        reason = ("maisecrets: /maisecrets demo counts only when you type it as your prompt; this one came from "
                   f"{came_from(payload)}, so nothing was changed.")
     elif not isinstance(session, str) or not session:
         reason = "maisecrets: this prompt names no session, so the demo cannot be switched. Nothing was changed."
@@ -358,7 +369,7 @@ def answer(payload: dict, verb: str, typed: bool, codex: bool) -> dict:
 # ------------------------------------------------------------ the gate of the prompt hook --
 def gate(payload: dict, cfg: dict, typed: bool) -> dict | None:
     """The prompt hook's step for the demo, after the subagent report pass and the person's own commands: the answer
-    to /maisecrets:demo, the demo answer for a prompt of a session in the demo, or None."""
+    to /maisecrets demo, the demo answer for a prompt of a session in the demo, or None."""
     prompt = payload.get("prompt")
     if not isinstance(prompt, str):
         # no text: an image alone gives "[Image #1]" in the terminal and "" in claude -p (measured on 2.1.325); a
@@ -375,7 +386,7 @@ def gate(payload: dict, cfg: dict, typed: bool) -> dict | None:
         # only the person's exact typed own commands pass a damaged state: no report, no message of another session
         if typed and not payload.get("agent_id") and own_command(prompt):
             return None
-        return _block(DAMAGED.format(off="maisecrets: demo off" if codex else "/maisecrets:demo off"), codex)
+        return _block(DAMAGED.format(off="maisecrets: demo off" if codex else "/maisecrets demo off"), codex)
     if passes(payload, prompt, typed and not payload.get("agent_id")):
         return None
     if not codex and _took_pass(payload.get("session_id"), prompt) and not _has_value(prompt, cfg):
@@ -413,7 +424,7 @@ def passes(payload: dict, prompt: str, typed: bool) -> bool:
 def _hook_text(payload: dict, cfg: dict, typed: bool, codex: bool) -> str:
     """The normal steps of hooks.user_prompt for a prompt the demo blocks (the {{name}} marker, the placeholders the
     person typed, the values taken out and stored, the transcript scrub, the events line); the masked text. No blocked
-    prompt is kept for /maisecrets:send."""
+    prompt is kept for /maisecrets send."""
     from . import events, hooks, term_files
     from .placeholder import find_refs
     from .settings import peer_sender
@@ -459,9 +470,11 @@ def mod_answer(payload: dict, cfg: dict) -> dict | None:
     if parse(prompt) or _answered_by_the_hook(prompt):
         return {}
     if typed and own_command(prompt):
+        if _in_cowork():
+            return cowork_own(payload, own_answer(prompt, session))
         return {"drop": own_answer(prompt, session)}
     if damaged():
-        return {"drop": DAMAGED.format(off="/maisecrets:demo off")}     # before the report pass: none passes
+        return {"drop": DAMAGED.format(off="/maisecrets demo off")}     # before the report pass: none passes
     if _only_reports(prompt):
         return {}
     from . import hooks
@@ -478,8 +491,41 @@ def mod_answer(payload: dict, cfg: dict) -> dict | None:
     else:
         text = prompt       # nothing to mask
     _write_pass(session, text)
-    return {"text": text, "count": out.get("count", 0), "demo": True, "masked": masked_line(prompt, text),
-            "namesUnchecked": not _names_checked(cfg, hooks.LAST_NAMES_WHY[0])}
+    answer = {"text": text, "count": out.get("count", 0), "demo": True, "masked": masked_line(prompt, text),
+              "namesUnchecked": not _names_checked(cfg, hooks.LAST_NAMES_WHY[0])}
+    if _in_cowork():
+        answer["show"] = cowork_show(text, answer["masked"], answer["namesUnchecked"])
+    return answer
+
+
+def _in_cowork() -> bool:
+    from . import cowork
+    return cowork.active()
+
+
+def cowork_show(text: str, masked: str, names_unchecked: bool = False) -> str:
+    """The demo answer in Cowork, which draws no row under a prompt: what the AI would have got (placeholders only, the
+    text that entered), what was masked, and the line that ends it."""
+    notes = [n for n in (masked, "names: not checked" if names_unchecked else "") if n]
+    return ("What the AI would have got:\n\n" + text + "\n\n" + (" · ".join(notes) + "\n\n" if notes else "")
+            + DEMO_LINE_COWORK)
+
+
+def cowork_own(payload: dict, output: str) -> dict:
+    """A Cowork demo session's answer to text that maisecrets answers itself (the person's own command, the demo
+    command): a neutral row enters, with a pass for the prompt hook, and the demo answer shows the output (Cowork shows
+    no dropped prompt), masked as a prompt is (cowork.masked_output): the output can echo a typed word, and the demo
+    answer stays in the transcript. No request goes out: the session is in the demo."""
+    from . import cowork
+    session = payload.get("session_id")
+    _INSIDE.append(1)           # the mask's rewrite is no demo prompt: no pass of its own, no demo answer
+    try:
+        shown = cowork.masked_output(payload, output)
+    finally:
+        _INSIDE.pop()
+    _write_pass(session, COWORK_ROW)
+    return {"text": COWORK_ROW, "count": 0, "demo": True, "inDemo": True, "masked": "",
+            "show": shown.rstrip() + "\n\n" + DEMO_LINE_COWORK}
 
 
 _KINDS = {"SECRET": ("secret", "secrets"), "EMAIL": ("e-mail", "e-mails"), "NAME": ("name", "names"),
@@ -540,7 +586,10 @@ def own_answer(prompt: str, session) -> str:
     import sys
     argv = own_argv(prompt)
     if argv is None:
-        return NEEDS_THE_AI.format(cmd=" ".join(prompt.split()[:2])[:80])
+        # the command's name only, never a typed word: the arguments can hold a value
+        m = _OWN_SPLIT.match(prompt)
+        name = m.group("name").lower() if m else ""
+        return NEEDS_THE_AI.format(cmd=name if name in FORMS or name in _ARGV else "this command")
     from . import cli
     old_env = os.environ.get("CLAUDE_CODE_SESSION_ID")
     if isinstance(session, str) and session:

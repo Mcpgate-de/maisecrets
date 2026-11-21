@@ -97,20 +97,20 @@ maisecrets has no server, no account, no API key and no telemetry. It needs no c
   (user scope, an `https` URL) and that names a vault endpoint, maisecrets makes a random key per server and asks
   that same server over HTTPS for the values behind its own tokens. No request goes to any other host.
   `client_header: false` turns this off.
-- `/maisecrets:report` prints an issue text and a prefilled link. It opens no browser and sends nothing.
+- `/maisecrets report` prints an issue text and a prefilled link. It opens no browser and sends nothing.
 
 Details: `PRIVACY.md` and `SECURITY.md` in this folder.
 
 ## Commands
 
 ```
-/maisecrets:status        does it protect this session? one line per check (all: the details)
-/maisecrets:list          the stored values (placeholders and masked displays, never a secret)
-/maisecrets:settings      the choices you make
-/maisecrets:forget        delete a stored value
-/maisecrets:not-a-secret  a wrong hit: delete it and never mask that exact value again
-/maisecrets:demo          try it with real data, in a new session: no prompt goes to the AI until /clear
-/maisecrets:report        an issue text for a problem
+/maisecrets status        does it protect this session? one line per check (all: the details)
+/maisecrets list          the stored values (placeholders and masked displays, never a secret)
+/maisecrets settings      the choices you make
+/maisecrets forget        delete a stored value
+/maisecrets not-a-secret  a wrong hit: delete it and never mask that exact value again
+/maisecrets demo          try it with real data, in a new session: no prompt goes to the AI until /clear
+/maisecrets report        an issue text for a problem
 ```
 
 ## License

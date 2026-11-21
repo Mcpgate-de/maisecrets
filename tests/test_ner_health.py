@@ -77,9 +77,9 @@ class CauseTests(Base):
 
     def test_the_step_names_the_server_of_the_gateway_and_codex_gets_its_prompt_form(self):
         self.assertEqual(H.line("login_ended", GATEWAY), "⚠️ maisecrets: names are NOT checked — the "
-                         "gateway ended the login → /maisecrets:sref login team-gateway")
+                         "gateway ended the login → /maisecrets sref login team-gateway")
         self.assertTrue(H.line("no_login", GATEWAY, codex=True).endswith("→ maisecrets: sref login team-gateway"))
-        self.assertTrue(H.line("local_down", {"url": "http://127.0.0.1:8765/"}).endswith("→ /maisecrets:ner local"))
+        self.assertTrue(H.line("local_down", {"url": "http://127.0.0.1:8765/"}).endswith("→ /maisecrets ner local"))
 
 
 class OnceTests(Base):
@@ -136,7 +136,7 @@ class StartTests(Base):
         cfg = self.cfg(GATEWAY)
         line = H.start_line(cfg, P("s1"), self.backend)
         self.assertEqual(line, "⚠️ maisecrets: names are NOT checked — the gateway ended the login "
-                         "→ /maisecrets:sref login team-gateway")
+                         "→ /maisecrets sref login team-gateway")
         self.assertIsNone(H.start_line(cfg, P("s1"), self.backend), "the same session: not again")
         with mock.patch.dict(ner_gateway.LAST, {"cause": "login_ended"}):
             self.assertIsNone(H.result_line(cfg, P("s1"), "setup"), "no repeat at the first result")
@@ -146,7 +146,7 @@ class StartTests(Base):
         S._mark_ended(ORIGIN, "uncertain")
         self.assertEqual(H.start_line(cfg, P("s1"), self.backend),
                          "\u26a0\ufe0f maisecrets: names are NOT checked \u2014 the last renewal did not finish; log "
-                         "in again \u2192 /maisecrets:sref login team-gateway")
+                         "in again \u2192 /maisecrets sref login team-gateway")
         self.assertEqual(H.verdict(cfg, self.backend).fact, "the last renewal did not finish; log in again")
         S._mark_ended(ORIGIN, "revoked")
         self.assertIn("the gateway ended the login \u2192", H.start_line(cfg, P("s2"), self.backend))
@@ -163,7 +163,7 @@ class StartTests(Base):
     def test_a_local_container_that_does_not_answer_and_one_that_is_starting(self):
         cfg = self.cfg({"url": "http://127.0.0.1:8765/"})
         with mock.patch("maisecrets.ner_setup.probe", return_value=(False, "")):
-            self.assertTrue(H.start_line(cfg, P("s1"), self.backend).endswith("→ /maisecrets:ner local"))
+            self.assertTrue(H.start_line(cfg, P("s1"), self.backend).endswith("→ /maisecrets ner local"))
             self.assertIsNone(H.start_line(cfg, P("s2"), self.backend, starting=True), "being started")
         with mock.patch("maisecrets.ner_setup.probe", return_value=(True, "")):
             self.assertIsNone(H.start_line(cfg, P("s3"), self.backend))
@@ -171,7 +171,7 @@ class StartTests(Base):
     def test_a_url_that_does_not_answer_within_a_second(self):
         cfg = self.cfg({"url": _free_url()})
         t0 = time.monotonic()
-        self.assertIn("the name service does not answer → /maisecrets:ner", H.start_line(cfg, P("s1"), self.backend))
+        self.assertIn("the name service does not answer → /maisecrets ner", H.start_line(cfg, P("s1"), self.backend))
         self.assertLess(time.monotonic() - t0, 2.5)
 
     @unittest.skipIf(os.name == "nt", "run.sh: the session start of a POSIX launcher")
@@ -200,7 +200,7 @@ class StartTests(Base):
                 return json.loads(r.stdout).get("systemMessage", "")
             first = start()
             self.assertTrue(first.startswith("⚠️ maisecrets: names are NOT checked — the gateway ended "
-                                             "the login → /maisecrets:sref login"), first)
+                                             "the login → /maisecrets sref login"), first)
             self.assertNotIn("names are NOT checked", start(), "once per session")
 
     @unittest.skipUnless(hasattr(__import__("socket"), "AF_UNIX"), "no Unix sockets here (Windows Python)")
@@ -359,7 +359,7 @@ class StatusTests(Base):
         S._mark_ended(ORIGIN)
         check = H.verdict(self.cfg(GATEWAY), self.backend)
         self.assertEqual((check.state, check.name, check.fact, check.next),
-                         ("warn", "names", "the gateway ended the login", "/maisecrets:sref login team-gateway"))
+                         ("warn", "names", "the gateway ended the login", "/maisecrets sref login team-gateway"))
         ok = sv.Check("ok", "store", "answers", None, None)
         head = sv.head_line("9.9.9", [ok, check], "claude")
         self.assertIn("protects secrets in this session; names are not checked", head)

@@ -218,7 +218,7 @@ class AlwaysBlockedTests(_Base):
     def test_a_check_saves_no_pending_prompt_and_copies_nothing(self):
         _prompt(f"ms:({GLPAT})")
         _prompt(f"ms:({UNSEEN})")
-        self.assertFalse(Path(HOME, "pending").exists(), "/maisecrets:send must have nothing of a check to send")
+        self.assertFalse(Path(HOME, "pending").exists(), "/maisecrets send must have nothing of a check to send")
         self.assertEqual(self.copied, [])
 
 
@@ -450,7 +450,7 @@ class StoreTests(_Base):
         self.assertNotIn("From now on", out["reason"], "the store keeps it for its lifetime, not for good")
         self.assertEqual(Vault().get("SECRET_c1", session="S1"), (UNSEEN, "ok"))
         meta = json.loads(Path(HOME, "index.json").read_text())["entries"]["SECRET_c1"]
-        self.assertEqual((meta["type"], meta["kind"]), ("SECRET", "manual"), "as /maisecrets:put stores it")
+        self.assertEqual((meta["type"], meta["kind"]), ("SECRET", "manual"), "as /maisecrets put stores it")
         self.assertEqual(_prompt(f"please use {UNSEEN} here")["decision"], "block")
         again = _prompt(f"ms:({UNSEEN})")
         self.assertIn("This value is already stored as " + OPEN + "SECRET_c1" + CLOSE, again["reason"])
@@ -464,7 +464,7 @@ class StoreTests(_Base):
     def test_ordinary_text_is_not_stored(self):
         # a check of ordinary words stored them, and every later prompt with them was blocked (live finding, 0.6.32)
         want = (check_value.NOT_CAUGHT + " It looks like ordinary text, so it was not stored. If it is a secret, store "
-                "it with /maisecrets:put.\n\n" + check_value.NOT_SENT)
+                "it with /maisecrets put.\n\n" + check_value.NOT_SENT)
         for text in ORDINARY_TEXTS:
             with self.subTest(text[:12]):
                 self.assertEqual(_prompt(f"ms:({text})")["reason"], want)

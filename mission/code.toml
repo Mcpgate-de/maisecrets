@@ -46,6 +46,7 @@
 "maisecrets/codex_vault.py" = { controls = ["C27"] }
 "maisecrets/consent_report.py" = { none = "a report the person runs over the ssh consent check (C21) of earlier sessions; it changes no setting, consent or decision" }
 "maisecrets/consent_store.py" = { controls = ["C21"] }
+"maisecrets/cowork.py" = { controls = ["C1", "C4"] }
 "maisecrets/debug_log.py" = { none = "appends the line its caller gives to the debug log of the harness; each caller writes no value" }
 "maisecrets/demo.py" = { controls = ["C22"] }
 "maisecrets/destinations.py" = { controls = ["C23"] }
@@ -90,6 +91,7 @@
 "maisecrets/events.py" = { controls = ["C22"] }
 "maisecrets/exit_wrap.py" = { controls = ["C27"] }
 "maisecrets/file_reads.py" = { controls = ["C28"] }
+"maisecrets/forms.py" = { none = "rewrites the command forms and /clear in a text for the person (a hint, a command's output, the answer cowork.show_answer sends) to the form that works in each client (terminal, Cowork, Codex); it decides nothing, and the mask runs after it on the text it gives (cowork.py, C1)" }
 "maisecrets/guarded_paths.py" = { controls = ["C27", "I3"] }
 "maisecrets/home.py" = { controls = ["C15", "C16", "C33", "I1"] }
 "maisecrets/hooks.py" = { controls = ["C1", "C2", "C3", "C4", "C5", "C6", "C8", "C13", "C14", "C16", "C18", "C20", "C21", "C22", "C23", "C24", "C26", "C27", "C28", "C29", "C31", "C33", "I1", "I2", "I3", "I4", "I5"] }

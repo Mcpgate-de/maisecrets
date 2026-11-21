@@ -17,7 +17,7 @@ const PANE = {
   },
 } as const
 
-function rows(rehydration: string, mark = '') {
+function rows(rehydration: string, mark = '', regionsMark = '') {
   return [
     { title: 'Protection', items: [
       { key: 'ssh_consent', label: 'Ask before ssh changes a host', value: 'off', choices: ['on', 'off'], mark: '',
@@ -30,26 +30,26 @@ function rows(rehydration: string, mark = '') {
         list: true, count: 0 }] },
     { title: 'Personal data', items: [
       { key: 'regions', label: 'Countries for personal data', value: 'auto', values: ['auto'], multi: true,
-        choices: ['auto', 'de', 'fr'], labels: {}, mark: '', locked: false }] },
+        choices: ['auto', 'de', 'fr'], labels: {}, mark: regionsMark, locked: false }] },
   ]
 }
 
 const filled: string[] = []
 
 // the panel draws at once and its status line follows in the background: draw it again until the query finds it
-async function mountWhen($, query) {
+async function mountWhen($, query, surface: 'terminal' | 'desktop' = 'terminal') {
   for (let i = 0; i < 100; i++) {
-    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const ui = await $.ui.mount({ ...PANE, surface })
     if (await ui.find(query)) return ui
     await ui.unmount()
     await new Promise(resolve => setTimeout(resolve, 10))
   }
-  return $.ui.mount({ ...PANE, surface: 'terminal' })
+  return $.ui.mount({ ...PANE, surface })
 }
 // opts: a clock the test moves, a status line per ask, the waits of $.clock.after (a recorded wait never ends)
 function engine(on, calls: any[], opened: { placed: boolean },
   opts: { clock?: { t: number }, line?: (n: number) => string, waits?: number[], delay?: (n: number) => number,
-    offer?: string | null, connector?: any, logs?: string[] } = {}) {
+    offer?: string | null, connector?: any, logs?: string[], pending?: boolean, regionsMark?: string } = {}) {
   let asked = 0
   on('clock.now', () => ({ value: opts.clock ? opts.clock.t : 1_000_000 }))
   on('session.id', () => ({ value: 'sess-1' }))
@@ -81,7 +81,8 @@ function engine(on, calls: any[], opened: { placed: boolean },
     if (q.action === 'status') await new Promise(resolve => setTimeout(resolve, opts.delay ? opts.delay(n) : 30))
     if (q.action === 'status') return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({
       maisecrets: ENTRY, line: opts.line ? opts.line(n) : '🔒 maisecrets 0.9.12 protects this session', ms: 8,
-      notes: [{ name: 'store', fact: 'test file, 0 values', next: 'set backend in config.json' }] }) } }
+      notes: [{ name: 'store', fact: 'test file, 0 values', next: 'set backend in config.json' }],
+      pending: opts.pending === true }) } }
     const answer = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: ENTRY, ...o }) } })
     const VALUES = { rows: [{ key: 'SECRET_c1', type: 'SECRET', shown: '-', age: '2h', uses: 1, expires: '22h',
       live: true }], total: 1, offset: 0 }
@@ -94,7 +95,7 @@ function engine(on, calls: any[], opened: { placed: boolean },
     if (q.action === 'ner_set') return answer({ ...NER, source: 'gateway', gateway_name: 'team-gw', note: 'set',
       login: 'team-gw' })
     return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({
-      maisecrets: ENTRY, groups: rows(set ? q.value : 'automatic', set ? '✎' : ''),
+      maisecrets: ENTRY, groups: rows(set ? q.value : 'automatic', set ? '✎' : '', opts.regionsMark ?? ''),
       note: set ? 'Saved. Stored values in tool calls is confirm (set by you).' : null, more: 11, config_only: [],
     }) } }
   })
@@ -134,7 +135,10 @@ test('the pane lists the settings, and a press changes the value through the ent
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /Put values into tool calls/ })).toBeDefined()
-    expect((await ui.find({ key: 'set:rehydration:automatic' }))?.text).toMatch(/● automatic/)
+    // the terminal marks the chosen button with a dot; the desktop app fills it, so its label is the word alone
+    const chosen = await ui.find({ key: 'set:rehydration:automatic' })
+    if (surface === 'terminal') expect(chosen?.text).toMatch(/● automatic/)
+    else expect(chosen?.text).toBe('automatic')
     await ui.unmount()
   }
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -145,7 +149,28 @@ test('the pane lists the settings, and a press changes the value through the ent
   const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await again.find({ key: 'set:rehydration:confirm' }))?.text).toMatch(/● confirm ✎/)
   expect(await again.find({ type: 'Text', text: /^Saved\./ })).toBeDefined()
+  expect(await again.find({ type: 'Text', text: /^set by you$/ })).toBeUndefined()
   await again.unmount()
+  // the desktop app: "set by you" is grey text after the buttons, not a mark in the chosen one
+  const desk = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await desk.find({ key: 'set:rehydration:confirm' }))?.text).toBe('confirm')
+  expect(await desk.find({ type: 'Text', text: /^set by you$/ })).toBeDefined()
+  await desk.unmount()
+})
+
+test('in the desktop app the countries set to auto by the person are a filled button without a dot', async ($, on) => {
+  engine(on, [], { placed: true }, { regionsMark: '✎' })
+  await $.prompt.submit({ text: '/maisecrets:settings', wait: false, origin: { kind: 'composer' },
+    command: { name: 'maisecrets:settings', args: '' } })
+  // the rows of an earlier answer draw first; the fresh answer follows in the background
+  const desk = await mountWhen($, { type: 'Text', text: /^set by you$/ }, 'desktop')
+  expect(await desk.find({ type: 'Text', text: /^set by you$/ })).toBeDefined()
+  expect((await desk.find({ key: 'set:regions:auto' }))?.text).toBe('auto')
+  await desk.unmount()
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await term.find({ key: 'set:regions:auto' }))?.text).toMatch(/● auto ✎/)
+  expect(await term.find({ type: 'Text', text: /^set by you$/ })).toBeUndefined()
+  await term.unmount()
 })
 
 test('/maisecrets alone opens the same pane: a status line, the views, and the old-leaks button', async ($, on) => {
@@ -166,6 +191,30 @@ test('/maisecrets alone opens the same pane: a status line, the views, and the o
   await back.press({ key: 'leaks' })
   expect(filled).toContain('/maisecrets:secret-hygiene')
   await back.unmount()
+})
+
+// /ms alone opens this panel as /maisecrets alone does: a blocked prompt that waits is offered here, never sent by it
+test('a blocked prompt that waits gets a send button; the press asks Python for /maisecrets send', async ($, on) => {
+  const calls: any[] = []
+  engine(on, calls, { placed: true }, { pending: true })
+  on('command.run', () => ({ text: 'engine' }))
+  await $.command.run({ command: 'maisecrets' })
+  const ui = await mountWhen($, { key: 'send' })
+  expect((await ui.find({ key: 'send' }))?.text).toMatch(/Send the blocked prompt/)
+  await ui.press({ key: 'send' })
+  await ui.unmount()
+  await settle()
+  const asked = calls.filter(c => c.argv.includes('mod-' + 'prompt')).map(c => JSON.parse(c.init.stdin))
+  expect(asked.map(q => [q.prompt, q.origin])).toContainEqual(['/maisecrets:send', 'composer'])
+})
+
+test('no blocked prompt: no send button', async ($, on) => {
+  engine(on, [], { placed: true })
+  on('command.run', () => ({ text: 'engine' }))
+  await $.command.run({ command: 'maisecrets' })
+  const ui = await mountWhen($, { type: 'Text', text: /protects this session/ })
+  expect(await ui.find({ key: 'send' })).toBeUndefined()
+  await ui.unmount()
 })
 
 test('the notes of the status are a button that opens and closes them', async ($, on) => {
@@ -194,7 +243,7 @@ test('a list setting fills the prompt box; the countries open their own view', a
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ key: 'remove:rule_dirs' })).toBeUndefined()        // nothing to remove yet
   await ui.press({ key: 'add:rule_dirs' })
-  expect(filled).toContain('/maisecrets:settings rule_dirs add ')
+  expect(filled).toContain('maisecrets: set rule_dirs add ')
   await ui.unmount()
   await $.command.run({ command: 'maisecrets' })
   const main = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -498,24 +547,19 @@ test('the panel asks for the status again when it takes the keys back', async ($
   await ui.unmount()
 })
 
-// `/maisecrets sref login`, typed with a space: when the prompt check gives no answer, the command with its colon goes
-// into the box, and nothing is sent (with an answer it runs as the colon form: tests/mod.test.ts)
-test('a maisecrets command typed after /maisecrets with a space goes into the box with its colon', async ($, on) => {
+// `/maisecrets sref login` in prompt.submit (Cowork, where it is the plugin's entry): when the prompt check gives no
+// answer, it goes on as typed, and the prompt hook decides it (with an answer it runs as the colon form:
+// tests/mod.test.ts). Nothing goes into the box
+test('a maisecrets command typed after /maisecrets with a space and no answer goes on as typed', async ($, on) => {
   const calls: any[] = []
   engine(on, calls, { placed: true })
   filled.length = 0
   const r = await $.prompt.submit({ text: '/maisecrets sref login', wait: false, origin: { kind: 'composer' },
     command: { name: 'maisecrets', args: 'sref login' } })
-  expect(r.drop).toBe('maisecrets: I put /maisecrets:sref login into the input box. Press Enter to run it, or clear '
-    + 'the box.')
+  expect(r.drop).toBeUndefined()
   await settle()
-  expect(filled).toContain('/maisecrets:sref login')
-  // the demo's question for an own command (as for the colon form), then the value check of the filled command; no
-  // settings entry (the demo's question tries each Python: this engine answers none of them)
-  expect(calls.length).toBeGreaterThan(1)
-  expect([...new Set(calls.map(c => c.argv[c.argv.length - 1]))]).toEqual(['mod-' + 'demo', 'mod-' + 'prompt'])
-  expect(JSON.parse(calls[calls.length - 1].init.stdin)).toMatchObject({ prompt: '/maisecrets:sref login',
-    fill_check: true })
+  expect(filled).toEqual([])
+  expect(calls.some(c => JSON.parse(c.init.stdin || '{}').fill_check === true)).toBe(false)
 })
 
 test('/maisecrets settings with a space opens the panel as the colon form does; /maisecrets alone goes to the menu',

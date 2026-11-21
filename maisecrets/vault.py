@@ -57,7 +57,7 @@ def describe_backend(backend) -> str:
 
 def intro_line(backend, names: bool = True, codex: bool = False) -> str:
     """The first session start, for a person: what maisecrets does and where values stay. The
-    paths, the backend switch and the file names are in /maisecrets:status (UX review,
+    paths, the backend switch and the file names are in /maisecrets status (UX review,
     2026-09-27: JSON and file paths at the first start told a non-developer to change a setting
     their IT owns)."""
     where = {
@@ -73,7 +73,7 @@ def intro_line(backend, names: bool = True, codex: bool = False) -> str:
             "Text without a placeholder the AI reads as it is."
             + ("" if names else " It finds a name only after a label or on your term list. \U0001F4A1 To find names "
                "too, turn on NER" + (" (a local model, needs Docker; README, \"Names from a service\")." if codex else
-                                     ": /maisecrets:ner local (a local model, needs Docker).")))
+                                     ": /maisecrets ner local (a local model, needs Docker).")))
 
 
 FP_KEY_ENTRY = "_maisecrets_fpkey"   # backend key that holds the fingerprint key (32 random bytes, hex)
@@ -120,7 +120,7 @@ class Entry:
     def from_meta(cls, meta: dict) -> "Entry":
         """An Entry from an index record, ignoring fields this version does not know. expire wrote
         `purged_at` into the index while Entry had no such field, so every read of an expired
-        entry raised TypeError: /maisecrets:status and list failed, and a value pasted again after
+        entry raised TypeError: /maisecrets status and list failed, and a value pasted again after
         it expired blocked the prompt (field report, 2026-09-27). A record written by a newer
         version must not break an older one either."""
         names = {f.name for f in fields(cls)}

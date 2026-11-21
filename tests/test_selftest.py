@@ -405,7 +405,7 @@ class VerdictTests(_Clean):
         self.assertIn("the prompt hook stopped it", c.detail)
 
     def test_each_state_that_is_no_ok_names_the_next_command(self):
-        self.assertEqual(selftest.verdict().next, "/maisecrets:status test")
+        self.assertEqual(selftest.verdict().next, "/maisecrets status test")
         self.arm()
         c = selftest.verdict(client="claude")
         self.assertEqual((c.state, c.next), ("FAIL", "start a new session"))

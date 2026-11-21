@@ -113,8 +113,8 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(cli.cmd_sref(["login"]), 2)
         login.assert_not_called()
         lines = out.getvalue().splitlines()
-        self.assertIn("  /maisecrets:sref login team-gw", lines)
-        self.assertIn("  /maisecrets:sref login other-gw", lines)
+        self.assertIn("  /maisecrets sref login team-gw", lines)
+        self.assertIn("  /maisecrets sref login other-gw", lines)
 
     def test_the_ready_command_quotes_a_server_name_as_the_argument_parser_reads_it(self):
         import io
@@ -133,8 +133,8 @@ class CommandTests(unittest.TestCase):
                                                                     "allow_plaintext_store": True}), \
                 redirect_stdout(out):
             self.assertEqual(cli.cmd_sref(["login"]), 2)
-        names = [shlex.split(line.split(":sref ", 1)[1])
-                 for line in out.getvalue().splitlines() if ":sref " in line]
+        names = [shlex.split(line.split("/maisecrets sref ", 1)[1])
+                 for line in out.getvalue().splitlines() if "/maisecrets sref " in line]
         self.assertEqual(sorted(names), [["login", "other;gw"], ["login", "team gw"]])
 
     def test_a_tool_call_that_carries_the_sentence_is_refused_like_the_others(self):
@@ -202,14 +202,14 @@ class GatewaySourceTests(unittest.TestCase):
         self.login({"client_vault_cafile": self.srv.cert})        # logged in before the source was set
         det, why = remote_layer.from_config(self.cfg)
         self.assertIsNone(det)
-        self.assertIn("/maisecrets:sref login", why)
+        self.assertIn("/maisecrets sref login", why)
         self.assertEqual(self.srv.ner_texts, [])
 
     def test_a_source_that_cannot_be_asked_leaves_its_results_unchecked_on_the_screen_and_withheld(self):
         conf = self.cfg["remote_detector"]           # no login: from_config gives a reason, no detector
         out = self.post_tool(conf)
         self.assertEqual(out.get("systemMessage"), "\u26a0\ufe0f maisecrets: names are NOT checked \u2014 not logged "
-                         "in at the gateway \u2192 /maisecrets:sref login", "the cause and the step")
+                         "in at the gateway \u2192 /maisecrets sref login", "the cause and the step")
         note = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("did not check the names", note, "the AI knows")
         self.assertIn("may stand in clear text", note)
@@ -386,7 +386,7 @@ class GatewaySourceTests(unittest.TestCase):
         self.login(self.cfg)
         self.srv.ner_answer = (503, {"error": "busy"})
         conf = self.cfg["remote_detector"]
-        line = "names are NOT checked \u2014 the gateway's name service is busy \u2192 /maisecrets:ner"
+        line = "names are NOT checked \u2014 the gateway's name service is busy \u2192 /maisecrets ner"
         for shown in (True, False):          # once per session, when the state turns bad
             out = self.post_tool(conf)
             self.assertEqual(line in out.get("systemMessage", ""), shown, out.get("systemMessage"))
@@ -448,7 +448,7 @@ class GatewaySourceTests(unittest.TestCase):
         conf = ner_setup.updated(self.cfg["remote_detector"], "unavailable:withhold")
         self.assertEqual(conf["unavailable"], "withhold")
         self.srv.ner_answer = (503, {"error": "busy"})
-        cause = "names are NOT checked \u2014 the gateway's name service is busy \u2192 /maisecrets:ner"
+        cause = "names are NOT checked \u2014 the gateway's name service is busy \u2192 /maisecrets ner"
         for first, tool in ((True, "Bash"), (False, "Read")):
             with self.subTest(tool=tool):
                 out = self.post_tool(conf, tool)

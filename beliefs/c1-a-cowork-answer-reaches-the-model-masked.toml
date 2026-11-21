@@ -1,0 +1,11 @@
+# c1-a-cowork-answer-reaches-the-model-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-cowork-answer-reaches-the-model-masked"
+control = "C1"
+serves = ["M1.1"]
+statement = "In Cowork the answer of a command the prompt hook answered goes to the model as a request to show it, and each value in that answer is masked as in any prompt the mod passes on; an answer that could not be checked is a fixed line."
+runner = ["tests/test_cowork.py::HookAnswerTests::test_a_value_in_an_answer_reaches_the_model_masked"]
+
+[proof]
+file = "maisecrets/cowork.py"
+find = '''    masked = hooks.rewrite_prompt({**payload, "prompt": text, "origin": None})'''
+replace = '''    masked = {}'''

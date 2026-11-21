@@ -28,7 +28,7 @@ a person or a data-protection officer can check it against the source.
   compares), its settings files (user, project and managed: the guard checks whether
   maisecrets is switched on), its plugin list, its `commands/` folder, and the marketplace
   copy that the client fetched or a local marketplace folder you added (for the version
-  that `/maisecrets:status` shows). In Codex: `config.toml` with its profile files, the hook
+  that `/maisecrets status` shows). In Codex: `config.toml` with its profile files, the hook
   trust and the marketplace copy.
 - **The language setting of the system:** on macOS, the language and region of your account
   (`~/Library/Preferences/.GlobalPreferences.plist`), to choose the label languages and the
@@ -63,7 +63,7 @@ It reads no other file of yours, except through a tool call that you or the agen
   Claude Code, or a header helper line, in Codex.
 - Before it changes a file of the client's configuration, the plugin keeps a copy beside it,
   mode 0600: `<config>.maisecrets-backup` before it adds or removes that header, and
-  `settings.json.bak-maisecrets-<time>` for each `/maisecrets:guard install`. A copy holds
+  `settings.json.bak-maisecrets-<time>` for each `/maisecrets guard install`. A copy holds
   what the file holds, also its tokens. A link at a copy's name is removed, not followed.
   The copy of the config file goes when maisecrets next finds that no header needs a
   change. For a Codex profile file, the copy lies in `~/.maisecrets/vault-refs/` instead.
@@ -81,9 +81,9 @@ files, the list of values that are no secret) and some state files of its own.
 ## What leaves the machine
 
 No telemetry. The hooks and the mod send nothing to a server of their own. The one download
-is the image of a name service on this computer that you set up (`/maisecrets:ner local` or
+is the image of a name service on this computer that you set up (`/maisecrets ner local` or
 `run.sh ner start` pulls it first): at a session start, the plugin gives that container the image
-its version pins, with the docker or podman on your PATH (`/maisecrets:ner updates off` keeps the
+its version pins, with the docker or podman on your PATH (`/maisecrets ner updates off` keeps the
 image). Connections start only from a command you run, or go to a service you set up yourself:
 
 - Your own ssh command inside the Claude Code sandbox goes through Claude Code's local
@@ -94,7 +94,7 @@ image). Connections start only from a command you run, or go to a service you se
   that connector once per session which gateway it belongs to (its tool
   `sensitive_references_resource`, with no argument). It sends no text of yours; the answer is a
   proposal that only a login you type takes.
-- `/maisecrets:report` prints the issue text and a prefilled link to the configured
+- `/maisecrets report` prints the issue text and a prefilled link to the configured
   `report_url`. It opens no browser and files nothing: the connection starts when you open
   the link, and you decide in GitHub's form. A prefilled GitHub link carries the issue text,
   the plugin version, your platform and the rule name of a detection or the closed codes of an
@@ -108,17 +108,17 @@ image). Connections start only from a command you run, or go to a service you se
   before such a server sent a token. `client_header: false` turns this off and removes the
   header.
 - A named-entity service (`remote_detector`, off by default): only when you chose a source
-  (`/maisecrets:ner local`, `url URL` or `gateway URL`, or `config.json` names its `url`), the text of a tool result goes to that service after the rules ran, with
+  (`/maisecrets ner local`, `url URL` or `gateway URL`, or `config.json` names its `url`), the text of a tool result goes to that service after the rules ran, with
   every value the rules found replaced by filler of the same length (a service on this
   computer gets them as they are only when the setting says `"mask": false`). A typed prompt goes
   there too, with the same filler, but only in Claude Code with the mod (which rewrites the prompt),
   and not when a machine policy sets `"prompts": false`. A prompt of a program (`claude -p`, the
-  Agent SDK) never goes to a service on the network. The gateway source sends the text with the access token of your own `/maisecrets:sref login`.
-  A fallback you add (`/maisecrets:ner fallback url URL`) gets tool results only while the
+  Agent SDK) never goes to a service on the network. The gateway source sends the text with the access token of your own `/maisecrets sref login`.
+  A fallback you add (`/maisecrets ner fallback url URL`) gets tool results only while the
   service on this computer is not running, and never a prompt. `ner.log` in the store folder
   records per request the time, the service, the kind, the length and the count of names, never text. The plugin accepts only a loopback address (127.0.0.0/8, `::1`, `localhost`)
   or a Unix socket, so the text stays on this computer, unless you set `allow_network: true`
-  in that setting (`/maisecrets:ner url URL` sets it for a host that is not on this
+  in that setting (`/maisecrets ner url URL` sets it for a host that is not on this
   computer); then it goes to the host you named. What the service finds is stored like
   any other value and masked only where the service found it, unless a rule that searches for
   its own findings finds the same value later.

@@ -22,7 +22,7 @@ def _age(ts: float) -> str:
 
 
 def cmd_list(args: list[str]) -> int:
-    """What is stored, masked: the same view a person gets from /maisecrets:list. No value.
+    """What is stored, masked: the same view a person gets from /maisecrets list. No value.
     `list uses [n]`: the last uses of stored values (the same as `audit`)."""
     if args and args[0].lower() == "uses":
         return cmd_audit(args[1:], usage="usage: list uses [n]")
@@ -73,8 +73,13 @@ def _list_values() -> int:
         except ValueError:
             shown = str(home)
         print(f"\nbackend: jsonfile (TEST MODE, plaintext under {shown})")
-    print(f"\nTo delete one: /maisecrets:forget <placeholder>. To delete everything, run in a terminal: {_launcher()} "
-          "wipe --yes")
+    from . import cowork
+    if cowork.active():
+        # Cowork has no terminal of the person, and each task starts with an empty store in a new VM
+        print("\nTo delete one: /maisecrets forget <placeholder>. In Cowork each new task starts with an empty store.")
+    else:
+        print(f"\nTo delete one: /maisecrets forget <placeholder>. To delete everything, run in a terminal: "
+              f"{_launcher()} wipe --yes")
     return 0
 
 
@@ -125,7 +130,8 @@ def _destination_lines(rec: dict, shown_before: float, protect: bool = False) ->
                    else "    Sent to (a record only; it allows nothing)")
         out += [row(d) for d in network]
     if local:
-        out.append("    Used on this computer")
+        from . import cowork
+        out.append("    Used in this Cowork task" if cowork.active() else "    Used on this computer")
         out += [row(d) for d in local]
     return out
 
@@ -135,7 +141,7 @@ _ROUTE = {"v": "cli"}
 
 def cmd_forget(args: list[str]) -> int:
     if not args:
-        print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
+        print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets list shows them)", file=sys.stderr)
         return 2
     v, rc = Vault(), 0
     # keys as a person types them (events.forget_keys, #44)
@@ -154,7 +160,7 @@ def cmd_forget(args: list[str]) -> int:
         # Only the key from the index is printed, never the given spelling: a placeholder can resolve into it (Gate A)
         same = [k for k in v._index["entries"] if k.lower() == key.lower() and k != key]
         if same and key not in v._index["entries"]:
-            print(f"That key is not stored in this spelling (see /maisecrets:list). Did you mean {same[0]}?")
+            print(f"That key is not stored in this spelling (see /maisecrets list). Did you mean {same[0]}?")
             rc = 1
             continue
         # the person typed /maisecrets:forget with this key in the session that runs this command (the prompt hook
@@ -165,12 +171,12 @@ def cmd_forget(args: list[str]) -> int:
         status = v.forget(key, route=_ROUTE["v"], typed=typed)
         if getattr(v, "destinations_kept", False):
             print((f"The destination record of {key}" if stored else "A destination record") +
-                  " could not be deleted now; send the same /maisecrets:forget later.")
+                  " could not be deleted now; send the same /maisecrets forget later.")
         if status == "ok":
             print(f"Deleted {key}. A placeholder for it no longer works anywhere.")   # "ok": the index held it
         elif status == "unknown":
             # a fixed text: the given spelling is never printed (Gate A, 2026-11-17)
-            print("That key is not stored (see /maisecrets:list).")
+            print("That key is not stored (see /maisecrets list).")
             rc = 1
         else:
             print(f"The store refused to delete {key}; nothing was changed.")   # "store": the index holds it
@@ -261,7 +267,7 @@ def cmd_put(args: list[str]) -> int:
         value = sys.stdin.read()
     value = value.strip()
     if not value:
-        print("maisecrets: the clipboard is empty. Copy the value first, then run /maisecrets:put again."
+        print("maisecrets: the clipboard is empty. Copy the value first, then run /maisecrets put again."
               if source == "clipboard" else "maisecrets: no value came on stdin; nothing was stored.", file=sys.stderr)
         return 2
     # a second put found the placeholder the first one copied, and stored it as a new secret (UX test, 2026-11-17).
@@ -272,7 +278,7 @@ def cmd_put(args: list[str]) -> int:
     rest = SREF_RE.sub("", REF_RE.sub("", value))
     if (REF_RE.search(value) or SREF_RE.search(value)) and not any(c.isalnum() for c in rest):
         where = "the clipboard holds" if source == "clipboard" else "the input holds"
-        again = "Copy the real value first, then run /maisecrets:put again" if source == "clipboard" else \
+        again = "Copy the real value first, then run /maisecrets put again" if source == "clipboard" else \
             "Pass the real value on stdin"
         print(f"maisecrets: {where} a placeholder, not a value. {again}. Nothing was stored.", file=sys.stderr)
         return 2
@@ -328,8 +334,8 @@ def cmd_report(args: list[str]) -> int:
         for i, e in enumerate(evs, 1):
             hits = ", ".join(f"{h['type']}/{h['kind']}" for h in e.get("hits", []))
             print(f"{i:<3} {e.get('ts', ''):<20} {e.get('hook', ''):<17} {e.get('client', ''):<7} {hits}")
-        print("\n/maisecrets:report last <why it is wrong> | /maisecrets:report <n> <why> | /maisecrets:report bug "
-              "<text> | /maisecrets:report feature <text> | /maisecrets:report incident")
+        print("\n/maisecrets report last <why it is wrong> | /maisecrets report <n> <why> | /maisecrets report bug "
+              "<text> | /maisecrets report feature <text> | /maisecrets report incident")
         return 0
     if args[0] == "last":
         # a removal of invisible characters is no detection to report as a false alarm; the list shows it. The
@@ -344,7 +350,7 @@ def cmd_report(args: list[str]) -> int:
     else:
         ev = evs[int(args[0]) - 1]
         if not any(h.get("type") not in ("HIDDEN", "RULE") for h in ev.get("hits", [])):
-            what = ("only left out a rule of your own (/maisecrets:rules says why)"
+            what = ("only left out a rule of your own (/maisecrets rules says why)"
                     if any(h.get("type") == "RULE" for h in ev.get("hits", []))
                     else "only removed invisible characters")
             print(f"that event {what}; there is no detection to report as a false alarm")
@@ -368,7 +374,7 @@ def _forget_the_false_positive(ev: dict) -> None:
     keys = list(dict.fromkeys(h.get("key") for h in ev.get("hits", []) if h.get("key")))
     if keys:
         print("If this is not a secret, delete its stored value so it is not masked or blocked again: "
-              + " ".join(f"/maisecrets:forget {k}" for k in keys))
+              + " ".join(f"/maisecrets forget {k}" for k in keys))
 
 
 def _report_incident(kind: str, selector: str | None) -> int:
@@ -380,7 +386,7 @@ def _report_incident(kind: str, selector: str | None) -> int:
         print(incidents.USAGE)
         return 0
     if not sys.stdout.isatty():
-        print("maisecrets: the incident report is shown to a person only: type /maisecrets:report incident in "
+        print("maisecrets: the incident report is shown to a person only: type /maisecrets report incident in "
               "Claude Code, or run this command in a terminal.")
         return 0
     if kind == "clear":
@@ -454,7 +460,7 @@ def cmd_values(args: list[str]) -> int:
         return 0
     if args[0] in ("remove", "forget", "delete"):
         print("maisecrets: no command removes an import; only the person does, as their own prompt: "
-              "/maisecrets:forget import:ID (in Codex: maisecrets: forget import:ID).")
+              "/maisecrets forget import:ID (in Codex: maisecrets: forget import:ID).")
         return 1
     print("usage: maisecrets values [import FILE]", file=sys.stderr)
     return 2
@@ -465,7 +471,7 @@ def _print_imports(rows: list, always: bool = False) -> None:
     if not rows:
         if always:
             print("No values are imported. A tool of yours writes JSON lines ({\"value\": ..., \"type\": ...}); "
-                  "/maisecrets:settings value_files add FILE adds them.")
+                  "/maisecrets settings value_files add FILE adds them.")
         return
     from .values import type_text
     print(f"\nImported values (mask only): {sum(r['count'] for r in rows)} in {len(rows)} import(s)")
@@ -473,7 +479,7 @@ def _print_imports(rows: list, always: bool = False) -> None:
         origin = {"file": "a value file", "run": "a command", "damaged": "DAMAGED"}.get(r["origin"], r["origin"])
         age = _age(r["at"]) if r["at"] else "?"
         print(f"  import:{r['id']} · {r['count']} value(s) ({type_text(r['types']) or '-'}) · {age} · from {origin}")
-    print("  To remove one: type /maisecrets:forget import:ID as your own prompt.")
+    print("  To remove one: type /maisecrets forget import:ID as your own prompt.")
 
 
 def cmd_terms(args: list[str]) -> int:
@@ -514,10 +520,10 @@ def cmd_settings(args: list[str]) -> int:
         # a list takes add or remove and one entry (Gate A, 2026-11-17)
         # Codex has no slash commands: its own form, as settings.render gives it
         if key == "ssh_autonomous_hosts":
-            form = "maisecrets: ssh autonomous|ask HOST" if codex else f"/maisecrets:settings {key} add|remove HOST"
+            form = "maisecrets: ssh autonomous|ask HOST" if codex else f"/maisecrets settings {key} add|remove HOST"
         else:
             tail = "add|remove FOLDER" if folder else "VALUE (one value)"
-            form = f"maisecrets: set {key} {tail}" if codex else f"/maisecrets:settings {key} {tail}"
+            form = f"maisecrets: set {key} {tail}" if codex else f"/maisecrets settings {key} {tail}"
         print(f"maisecrets settings: too many words. Nothing was changed. Send {form} as your own prompt.")
         return 1
     if rest:
@@ -596,7 +602,7 @@ def cmd_status(args: list[str]) -> int:
     from . import user_rules
     own = user_rules.load()
     print(f"rules of your own: {len(own.rules)} from {sum(f.state == 'ok' for f in own.folders)} folder(s), "
-          f"{sum(not q.kept for q in own.quarantined)} left out; /maisecrets:rules shows them")
+          f"{sum(not q.kept for q in own.quarantined)} left out; /maisecrets rules shows them")
     from . import terms
     print(terms.summary())
     from . import value_files
@@ -632,7 +638,7 @@ def cmd_status(args: list[str]) -> int:
     groups, damaged = incidents.load()
     markers = incidents.unfolded_markers()
     print(f"incidents: {len(groups)} group(s)" + (f", {len(markers)} not yet folded" if markers else "")
-          + (", the record is damaged" if damaged else "") + "; /maisecrets:report incident shows them")
+          + (", the record is damaged" if damaged else "") + "; /maisecrets report incident shows them")
     return 0
 
 
@@ -656,44 +662,119 @@ def cmd_wipe(args: list[str]) -> int:
     return 0
 
 
+# the marks of a shortcut of ours: the one of 0.9.22 and later, and the wrapper the shortcut of 0.9.21 and before ran
+SHORTCUT_MARK = "maisecrets-shortcut"
+SHORTCUT_MARKS = (SHORTCUT_MARK, "maisecrets/bin/ms.sh")
+
+
+# the sha256 of each personal /ms text the shortcut of 0.9.21 and before wrote (from the history of this file; line
+# ends as LF): only a file equal to one of them is upgraded, so an edit of the person stays theirs
+OLD_SHORTCUT_SHA256 = frozenset({
+    "bdaa15ee525f3508461a1e12981d434174d9a297f2d3e9dfa8b3c12b2f743e56",
+    "c27ab46da4b8ac21709f23d930dc03c8eff390eb62285607c10812f0e006924e",
+    "796abf4f2a085192bf283186f161094313f37b97d2d4ab875f96f954906b4e1a",
+})
+
+
+def _old_template(raw: bytes) -> bool:
+    import hashlib
+    return hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest() in OLD_SHORTCUT_SHA256
+
+
+def is_our_shortcut(text: str) -> bool:
+    return any(mark in text for mark in SHORTCUT_MARKS)
+
+
+# the personal /ms in the terminal is the entry (commands/maisecrets.md), an alias of /maisecrets: /ms alone shows an
+# overview (the mod opens the panel), /ms NAME runs the command of that name. It runs the single maisecrets commands
+# by their names, which the model may start: an argument never goes on a shell line, and a blocked prompt is sent only
+# by /ms send. With the mod, the mod runs /ms and /ms NAME itself and this file is not read
 SHORTCUT_COMMAND = """---
-description: Send the last blocked prompt as maisecrets rewrote it (short for /maisecrets:send).
-allowed-tools: Bash(bash ~/.maisecrets/bin/ms.sh*)
+description: "maisecrets: /ms NAME runs a maisecrets command, such as /ms status; /ms alone shows an overview"
+argument-hint: "[status | list | term add NAME | forget KEY | send | ...]"
 ---
 
-!`bash ~/.maisecrets/bin/ms.sh`
+<!-- maisecrets-shortcut: written by /maisecrets shortcut -->
 
-The text above is the prompt the user sent through maisecrets, with placeholders instead of
-values. Begin your reply with one line `Sent: ` followed by that text as it is (clients such as
-Remote Control show neither the blocked prompt nor a slash command's expansion), then answer it.
-If the text above is exactly `{nothing}`
-or exactly `{two}`,
-it is a note of maisecrets, not a prompt: show it to the user as is, and stop. Any other text is the
-prompt, also when it starts with `(maisecrets:`.
-""".format(nothing=NOTHING_WAITING, two=TWO_WAITING)
+The arguments are: `$ARGUMENTS`
+
+If there are no arguments, run the `maisecrets:status` command and show its output. Then tell the user, in one line,
+that `/ms NAME` runs a maisecrets command and that `/ms send` sends a blocked prompt.
+
+Otherwise the first word of the arguments names a maisecrets command. If it is one of {names}, run the
+`maisecrets:` command of that name with the rest of the arguments, and do what it says. If it is `report` or `sref`,
+only the user may start it: tell the user to send `/maisecrets:report` or `/maisecrets:sref` with the arguments,
+then stop. Any
+other word is no maisecrets command: tell the user so, then stop.
+"""
 
 
 def install_shortcut(name: str = "ms", only_if_absent: bool = False) -> "tuple[str, str] | None":
-    """Write the personal `/ms` command (`~/.claude/commands/ms.md`) and the stable wrapper
-    `~/.maisecrets/bin/ms.sh`, which finds the newest installed plugin copy at run time (the
-    plugin folder moves with every version). With ``only_if_absent`` an existing command file
-    of that name is left alone (it may be the user's own). Returns (command file, wrapper) or
-    None when nothing was written. Field request, 2026-09-26."""
+    """Write the personal `/ms` command (`~/.claude/commands/ms.md`), the entry in the terminal, the same as
+    /maisecrets: `/ms status`, and `/ms` alone for an overview. It names the plugin's commands, never the plugin
+    folder, which moves with every version. With ``only_if_absent`` an existing command file of that name is left
+    alone (it may be the user's own). Returns (command file, "") or None when nothing was written. Field request,
+    2026-09-26."""
     from pathlib import Path as _P
-    from .vault import HOME
-    root = _P(__file__).resolve().parent.parent
     commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
     target = commands / f"{name}.md"
     if only_if_absent and target.exists():
         return None
-    bin_dir = HOME / "bin"
-    bin_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    wrapper = bin_dir / "ms.sh"
-    wrapper.write_text((root / "hooks" / "ms.sh").read_text(encoding="utf-8"), encoding="utf-8")
-    wrapper.chmod(0o700)
-    commands.mkdir(parents=True, exist_ok=True)
-    target.write_text(SHORTCUT_COMMAND, encoding="utf-8")
-    return str(target), str(wrapper)
+    # a command file of that name that is not ours is the person's: it is never overwritten (nor a link)
+    if target.is_symlink():
+        return None
+    if target.is_file():
+        try:
+            if not is_our_shortcut(target.read_text(encoding="utf-8")):
+                return None
+        except (OSError, UnicodeDecodeError):
+            return None
+    from .home import atomic_write
+    atomic_write(target, _shortcut_text(), 0o644)
+    return str(target), ""
+
+
+def _shortcut_text() -> str:
+    from . import prompt_commands
+    names = ", ".join(f"`{n}`" for n in prompt_commands.COMMANDS if n not in ("report", "sref"))
+    return SHORTCUT_COMMAND.replace("{names}", names)
+
+
+def upgrade_shortcuts() -> list[str]:
+    """A shortcut of 0.9.21 and before (it only sent the blocked prompt, through the wrapper) becomes the entry, under
+    its own name; the wrapper goes when no shortcut uses it. Only a file that is equal to a text the shortcut wrote
+    (OLD_SHORTCUT_SHA256), no link, and only for the store that installed it. The names of the files it rewrote."""
+    from pathlib import Path as _P
+    from .home import atomic_write
+    from .vault import HOME
+    done = []
+    # only for the store that installed the shortcut: a session start with another maisecrets home (a test, the
+    # harness against the person's own client) changes no command file of the person
+    try:
+        if (HOME / ".shortcut").read_text(encoding="utf-8").strip() != "installed":
+            return done
+    except (OSError, UnicodeDecodeError):
+        return done
+    commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
+    try:
+        files = sorted(commands.glob("*.md"))
+    except OSError:
+        return done
+    for p in files:
+        try:
+            if p.is_symlink() or not p.is_file() or not _old_template(p.read_bytes()):
+                continue
+            atomic_write(p, _shortcut_text(), 0o644)
+            done.append(p.name)
+        except OSError:
+            continue
+    wrapper = HOME / "bin" / "ms.sh"
+    if done and wrapper.exists() and not _shortcuts_using_the_wrapper(commands):
+        try:
+            wrapper.unlink()
+        except OSError:
+            pass
+    return done
 
 
 def remove_shortcut(name: str = "ms") -> list[str]:
@@ -705,13 +786,13 @@ def remove_shortcut(name: str = "ms") -> list[str]:
     commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
     target = commands / f"{name}.md"
     try:
-        if target.exists() and "maisecrets/bin/ms.sh" in target.read_text(encoding="utf-8"):
+        if target.exists() and is_our_shortcut(target.read_text(encoding="utf-8")):
             target.unlink()
             removed.append(str(target))
     except OSError:
         pass
     wrapper = HOME / "bin" / "ms.sh"
-    # the wrapper is shared: it stays while another shortcut of ours uses it (Gate A, 2026-11-17)
+    # the wrapper of 0.9.21 and before is shared: it stays while another shortcut of ours uses it (Gate A, 2026-11-17)
     if wrapper.exists() and not _shortcuts_using_the_wrapper(commands):
         wrapper.unlink()
         removed.append(str(wrapper))
@@ -739,7 +820,7 @@ def _shortcuts_using_the_wrapper(commands) -> list:
 
 SHORTCUT_WORDS = ("install", "remove", "--remove", "status")
 _SHORTCUT_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,31}")
-SHORTCUT_USAGE = ("usage: /maisecrets:shortcut [install] [NAME] | remove [NAME] | status [NAME] (--remove is "
+SHORTCUT_USAGE = ("usage: /maisecrets shortcut [install] [NAME] | remove [NAME] | status [NAME] (--remove is "
                   "remove). A NAME is one word of letters, digits and -, such as ms. Nothing was changed.")
 
 
@@ -759,31 +840,38 @@ def cmd_shortcut(args: list[str]) -> int:
         # the kind of each file, never its path: the path holds the given name, which can hold a resolved value (#82)
         kinds = ["the command file" if r.endswith(".md") else "the shared wrapper" for r in removed]
         print("removed: " + (" and ".join(kinds) if kinds else "nothing (no maisecrets shortcut found)"))
-        print("The session start will not install it again; type /maisecrets:shortcut to get it back.")
+        print("The session start will not install it again; type /maisecrets shortcut to get it back.")
         return 0
     if what == "status":
         from pathlib import Path as _P
         target = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands" / f"{name}.md"
         from .vault import HOME
         try:
-            ours = "maisecrets/bin/ms.sh" in target.read_text(encoding="utf-8")
+            text = target.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            ours = False
-        # no name and no path: the given name can hold a resolved value (Gate A, 2026-11-17)
-        if ours and (HOME / "bin" / "ms.sh").exists():
+            text = ""
+        ours = is_our_shortcut(text)
+        # no name and no path: the given name can hold a resolved value (Gate A, 2026-11-17). A shortcut of 0.9.21
+        # and before needs its wrapper
+        if ours and (SHORTCUT_MARK in text or (HOME / "bin" / "ms.sh").exists()):
             print("The shortcut is installed.")
         elif ours:
-            print("The shortcut is incomplete: its wrapper is missing. Install it again: /maisecrets:shortcut install "
+            print("The shortcut is incomplete: its wrapper is missing. Install it again: /maisecrets shortcut install "
                   "NAME")
         else:
-            print("The shortcut is not installed. Install it: /maisecrets:shortcut install NAME")
+            print("The shortcut is not installed. Install it: /maisecrets shortcut install NAME")
         return 0
     try:
-        install_shortcut(name)
+        written = install_shortcut(name)
     except OSError:
         # the path holds the given name, which can hold a resolved value: a fixed line, never the error's path (#82)
         print("maisecrets could not write the shortcut into the commands folder of Claude Code. Nothing was "
               "installed.")
+        return 1
+    if written is None:
+        # the name is never printed: it can hold a resolved value (#82)
+        print("maisecrets: a command of your own has that name, so nothing was written. Pick another name: "
+              "/maisecrets shortcut install NAME")
         return 1
     from .vault import HOME
     (HOME / ".shortcut").write_text("installed\n", encoding="utf-8")
@@ -1016,7 +1104,7 @@ def register_guard_for_a_synced_install() -> "str | None":
         return None
     if first and any(d.startswith("registered it") for d in done):
         return (f"maisecrets registered its guard in {settings}: it blocks a session in which a plugin update left "
-                "maisecrets not running. /maisecrets:guard remove takes it away.")
+                "maisecrets not running. /maisecrets guard remove takes it away.")
     return None
 
 
@@ -1094,7 +1182,7 @@ def cmd_guard(args: list[str]) -> int:
     from .vault import HOME
     # four facts and no verdict (UX test, 2026-11-17): the first line says what is the case and the next step
     on = script.exists() and guard_registered()
-    print("The guard is installed." if on else "The guard is not installed. Install it: /maisecrets:guard install")
+    print("The guard is installed." if on else "The guard is not installed. Install it: /maisecrets guard install")
     print(f"guard script: {script} ({'present' if script.exists() else 'missing'})")
     print(f"registered in {settings}: {'yes' if guard_registered() else 'no'}")
     print(f"maisecrets writes its sign of life for the guard: {'yes' if (HOME / 'guard.json').exists() else 'no'}")
@@ -1132,7 +1220,7 @@ def cmd_repair(_: list[str]) -> int:
 
 
 def cmd_ner(args: list[str]) -> int:
-    """The source of names (/maisecrets:ner): which one is set and whether it answers. It changes nothing: the
+    """The source of names (/maisecrets ner): which one is set and whether it answers. It changes nothing: the
     prompt hook already wrote a change the person typed (maisecrets/ner_setup.py). `--wait N` waits up to N seconds
     for the service, after a start."""
     from . import ner_setup
@@ -1161,13 +1249,16 @@ def cmd_ner(args: list[str]) -> int:
 # a command ends inside the 2 minutes a client gives it: the discovery of all servers (less for a login, which also
 # registers, waits for the browser and exchanges the code, each request with SREF_LOGIN_REQUEST_S)
 SREF_DISCOVERY_S = 60.0
+# Cowork: maisecrets runs the status inside the mod's budget for one prompt (prompt_commands.COWORK_SREF_S less
+# COWORK_SREF_MASK_S, with 1 s for the start of Python and the output)
+SREF_COWORK_DISCOVERY_S = 3.0
 SREF_LOGIN_DISCOVERY_S = 40.0
 SREF_LOGIN_REQUEST_S = 15.0
 SREF_LOGIN_END_S = 115.0
 
 
 def cmd_sref(args: list[str]) -> int:
-    """Sensitive References (/maisecrets:sref): `status` (the default) names each user-scope server whose gateway
+    """Sensitive References (/maisecrets sref): `status` (the default) names each user-scope server whose gateway
     offers a resolver and whether maisecrets is logged in there; `login [NAME]` logs in in the browser (the person
     gives the consent there; nothing starts without this command); `logout [NAME]` forgets the login. No token, id or
     value is printed."""
@@ -1191,7 +1282,7 @@ def cmd_sref(args: list[str]) -> int:
     if action == "status":
         for key, url in proposed.items():
             print(f"{key} ({urlsplit(url).hostname}): a claude.ai connector that names this gateway; not bound. "
-                  f"Only if it is your gateway: /maisecrets:sref login {shlex.quote(key)}")
+                  f"Only if it is your gateway: /maisecrets sref login {shlex.quote(key)}")
     if action == "logout" and name is not None and vault_refs.forget_connector(name):
         print(f"maisecrets: the claude.ai connector {name} is no longer bound to a gateway.")
         servers = {k: v for k, v in servers.items() if k == name}
@@ -1200,13 +1291,20 @@ def cmd_sref(args: list[str]) -> int:
     if name is not None:
         servers = {k: v for k, v in servers.items() if k == name}
         if not servers:
-            print(f"maisecrets: no MCP server named {name} in your user configuration.")
+            # never the typed name: only the names of the configuration are named
+            print("maisecrets: no MCP server of that name in your user configuration.")
             return 1
     start = time.monotonic()
     # the whole discovery ends after this, however many servers are slow: the client ends a command after 2 minutes,
     # and a login waits for the browser after it. Each server gets an equal share of the time that is left, so a slow
     # server never takes the time of the gateway after it (a login with a NAME asks that server only)
-    phase_end = start + (SREF_LOGIN_DISCOVERY_S if action == "login" else SREF_DISCOVERY_S)
+    # the short time only for the run of a typed `maisecrets: sref` in Cowork (prompt_commands._cowork_sref), which
+    # ends inside the mod's budget; the AI's own run through the entry keeps the time of a command
+    from . import cowork
+    from .prompt_commands import COWORK_SREF_ENV
+    quick = cowork.active() and os.environ.get(COWORK_SREF_ENV) == "1"
+    phase_end = start + (SREF_LOGIN_DISCOVERY_S if action == "login" else
+                         SREF_COWORK_DISCOVERY_S if quick else SREF_DISCOVERY_S)
     found, failed = {}, []
     for i, (server, url) in enumerate(servers.items()):
         now = time.monotonic()
@@ -1225,23 +1323,27 @@ def cmd_sref(args: list[str]) -> int:
     if not found:
         if failed:
             return 1
-        print("maisecrets: no MCP server of your user configuration offers Sensitive References, and no claude.ai "
-              "connector has named its gateway yet. Next step: use your gateway once in Claude Code (after a result "
-              "with a reference, a claude.ai connector is asked for its gateway at the end of the turn), or add it as "
-              "an MCP server of your user configuration; then send /maisecrets:sref login.")
+        if cowork.active():
+            print("maisecrets: in Cowork no gateway offers Sensitive References yet, and Sensitive References are not "
+                  "tested in Cowork. Use them in Claude Code in the terminal or in the desktop app's Code tab.")
+        else:
+            print("maisecrets: no MCP server of your user configuration offers Sensitive References, and no claude.ai "
+                  "connector has named its gateway yet. Next step: use your gateway once in Claude Code (after a "
+                  "result with a reference, a claude.ai connector is asked for its gateway at the end of the turn), or "
+                  "add it as an MCP server of your user configuration; then send /maisecrets sref login.")
         # no server with references is a state, not a failure; a login or logout cannot start without one
         return 0 if action == "status" else 1
     if action == "status":
         for server, f in found.items():
             if not sref_client.logged_in(backend, f["origin"]):
-                state = f"not logged in (/maisecrets:sref login {shlex.quote(server)})"
+                state = f"not logged in (/maisecrets sref login {shlex.quote(server)})"
             else:
                 now, then = sref_client.allows(backend, f), sref_client.could_allow(f)
                 state = "logged in; values go into " + ", ".join(now)
                 more = [w for w in then if w not in now]
                 if more:
                     state += (f" (log in again to allow {' and '.join(more)}: "
-                              f"/maisecrets:sref login {shlex.quote(server)})")
+                              f"/maisecrets sref login {shlex.quote(server)})")
             # the account goes to the person only (sref_hooks.account_notice): the AI reads this output
             who = sref_client.account(backend, f["origin"]) if sref_client.logged_in(backend, f["origin"]) else ""
             print(f"{server} ({urlsplit(f['origin']).hostname}): {state}"
@@ -1258,7 +1360,7 @@ def cmd_sref(args: list[str]) -> int:
         # one ready command per server: the person picks one (a login without a name never ends with nothing)
         print(f"maisecrets: {len(found)} servers offer Sensitive References. Pick one and send its command:")
         for server in found:
-            print(f"  /maisecrets:sref {action} {shlex.quote(server)}")
+            print(f"  /maisecrets sref {action} {shlex.quote(server)}")
         return 2
     server, f = next(iter(found.items()))
     host = urlsplit(f["origin"]).hostname
@@ -1288,7 +1390,7 @@ def cmd_sref(args: list[str]) -> int:
         # only a login the person typed (or pressed in the panel) binds: a command the AI ran does not
         if not (_ROUTE["v"] == "slash command" and events.take_typed_login(server, sessions_of_this_command())):
             print(f"maisecrets: logged in to {host}; the claude.ai connector {server} was not bound, because you did "
-                  f"not type this login. To bind it, type /maisecrets:sref login {server} yourself.")
+                  f"not type this login. To bind it, type /maisecrets sref login {server} yourself.")
             return 1
         if not vault_refs.bind_connector(server, proposed[server]):
             print(f"maisecrets: logged in to {host}, but the claude.ai connector {server} was not bound: another "
@@ -1301,6 +1403,86 @@ def cmd_sref(args: list[str]) -> int:
     return 0
 
 
+# the first line of `entry` alone when a blocked prompt waits: the lines after it are that prompt
+# (commands/maisecrets.md)
+ENTRY_SEND_HEAD = "(maisecrets: the blocked prompt follows)"
+# what a command answers that only the person's own prompt makes: the prompt hook answered it before the command file,
+# so a run here means that the hook did not see it typed
+_TYPED_ONLY = {"demo": "/maisecrets demo on", "not-a-secret": "/maisecrets not-a-secret KEY"}
+
+
+ENTRY_WAITING = "A blocked prompt waits: /maisecrets send sends it."
+
+
+def _entry_overview() -> int:
+    """The entry with no command name (/maisecrets, /ms) where no panel opens: the protection of this session, a line
+    when a blocked prompt waits, and the commands. It takes and sends nothing."""
+    from . import hub, prompt_commands
+    from .hooks import pending_waits
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
+    try:
+        line = hub.pane_status(session or "").get("line")
+    except Exception:  # noqa: BLE001 - the list below still helps
+        line = None
+    print(line or "maisecrets: /maisecrets status shows the protection of this session.")
+    if pending_waits(session):
+        print(ENTRY_WAITING)
+    print("Commands: /maisecrets NAME, for example /maisecrets status test.")
+    print("  " + ", ".join(prompt_commands.COMMANDS))
+    return 0
+
+
+def cmd_entry(args: list[str]) -> int:
+    """The one entry of every client (commands/maisecrets.md, commands/ms.md): the first word names the command, the
+    rest are its arguments. With no word: the overview (a blocked prompt waits for /maisecrets send). It accepts only
+    the command names (prompt_commands.COMMANDS) and runs what their command files run."""
+    from . import prompt_commands
+    from .hooks import take_pending
+    if not args:
+        return _entry_overview()
+    name, rest = args[0].lower(), args[1:]
+    if name not in prompt_commands.COMMANDS:
+        # the word is never echoed: a placeholder resolved into it (as for `list bogus`)
+        print("maisecrets: the first word is no maisecrets command. Nothing ran.")
+        _entry_overview()
+        return 2
+    if name == "report" or (name == "sref" and [w.lower() for w in rest[:1]] in (["login"], ["logout"])):
+        # the AI may not start these (disable-model-invocation): the entry file runs through the model, so a report
+        # or a login starts only from report.md, sref.md or the mod's own run of the person's prompt
+        what = "report" if name == "report" else rest[0].lower()  # a fixed word: login or logout
+        from . import cowork
+        if not cowork.active():
+            print(f"maisecrets: the AI does not start a {what}. Send /maisecrets:{name} with its words as your own "
+                  "prompt.")
+        elif what == "login":
+            # the typed text form gives the same answer (prompt_commands._cowork_sref): say it at once
+            print(prompt_commands.COWORK_SREF_LOGIN)
+        elif name == "sref":
+            # Cowork answers only the text form of sref (prompt_commands._cowork_sref)
+            print("maisecrets: the AI does not start a logout. Send maisecrets: sref logout as your own prompt.")
+        else:
+            print("maisecrets: the AI does not start a report. In Cowork send maisecrets: report incident as your own "
+                  "prompt; another report starts in Claude Code in the terminal.")
+        return 2
+    if name == "send":
+        text = take_pending(os.environ.get("CLAUDE_CODE_SESSION_ID") or None)
+        print(NOTHING_WAITING if text is None else text if text == TWO_WAITING else ENTRY_SEND_HEAD + "\n" + text)
+        return 0
+    if name in _TYPED_ONLY or (name == "term" and rest):
+        # the prompt hook answers these only for the person's own prompt; the words are never echoed
+        form = _TYPED_ONLY.get(name, "/maisecrets term add NAME")
+        print(f"maisecrets: this command counts only when you type it as your own prompt, for example {form}. "
+              "Nothing was changed.")
+        return 0 if name != "term" else cmd_terms([])
+    if name == "term":
+        return cmd_terms([])
+    if name == "put":
+        return cmd_put(["--clipboard", *rest])
+    if name == "ner":
+        return cmd_ner(["all"] if [w.lower() for w in rest] == ["all"] else [])
+    return COMMANDS[name](rest)
+
+
 def cmd_consent_report(args: list[str]) -> int:
     from . import consent_report
     return consent_report.run(args)
@@ -1311,7 +1493,7 @@ COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_res
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
             "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings,
             "consent-report": cmd_consent_report, "rules": cmd_rules, "terms": cmd_terms, "values": cmd_values,
-            "ner": cmd_ner, "sref": cmd_sref}
+            "ner": cmd_ner, "sref": cmd_sref, "entry": cmd_entry}
 
 
 def _stdin_words() -> list[str]:
@@ -1362,8 +1544,31 @@ def main(argv: list[str] | None = None) -> int:
               "store, so the store keeps its rights. Run it again outside the sandbox (Codex asks you to approve "
               "that), or in a terminal of your own.", file=sys.stderr)
         return 1
+    from . import cowork
+    if cowork.active() and argv[0] not in ("hook", "get", "resolve"):
+        return _in_cowork(fn, argv)
+    return _run(fn, argv)
+
+
+def _in_cowork(fn, argv: list[str]) -> int:
+    """In Cowork the command's output names each command the prompt hook answers in its text form (forms.cowork):
+    Cowork shows no answer to such a command typed with a slash."""
+    import contextlib
+    import io
+    from . import forms
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            return _run(fn, argv)
+    finally:
+        sys.stdout.write(forms.cowork(out.getvalue()))
+        sys.stderr.write(forms.cowork(err.getvalue()))
+        sys.stdout.flush()
+
+
+def _run(fn, argv: list[str]) -> int:
     # a damaged index or a wrong policy printed a Python traceback to the person who ran
-    # /maisecrets:list; the message of these two errors names the file and the fix, never a value
+    # /maisecrets list; the message of these two errors names the file and the fix, never a value
     try:
         return fn(argv[1:])
     except ConfigError as exc:

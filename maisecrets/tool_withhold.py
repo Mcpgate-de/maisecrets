@@ -24,7 +24,7 @@ def withheld(payload: dict, text: str, codex: bool) -> dict:
 
 
 def with_unchecked_names(payload: dict, result: dict, codex: bool, load_config) -> dict:
-    """A tool result whose names the service of /maisecrets:ner did not check: a note for the AI each time, a line
+    """A tool result whose names the service of /maisecrets ner did not check: a note for the AI each time, a line
     for the person once per session and cause (ner_health), and with `unavailable: withhold` the result kept from the
     AI. A text over the service's max_chars is named under that result but not withheld: each long file would be."""
     from . import remote_layer as _rl

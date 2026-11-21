@@ -214,7 +214,7 @@ class ReportTests(unittest.TestCase):
         code, out = self.run_ner()
         self.assertEqual(code, 0)
         self.assertIn("off", out)
-        self.assertIn("/maisecrets:ner local", out)
+        self.assertIn("/maisecrets ner local", out)
 
     def test_a_service_that_answers_names_its_model_and_types(self):
         svc = Service()
@@ -232,7 +232,7 @@ class ReportTests(unittest.TestCase):
             code, out = self.run_ner()
         self.assertEqual(code, 3)
         # a container with a secret (#1699)
-        self.assertRegex(out, r"\n \u2717 service +not running +\u2192  /maisecrets:ner local \(podman\)\n")
+        self.assertRegex(out, r"\n \u2717 service +not running +\u2192  /maisecrets ner local \(podman\)\n")
         self.assertIn("rules alone mask a tool result", self.run_ner("all")[1])
 
     def test_without_docker_it_names_the_three_ways(self):
@@ -242,7 +242,7 @@ class ReportTests(unittest.TestCase):
             code, out = self.run_ner("all")
         self.assertEqual(code, 1)
         self.assertNotIn("start:", out)
-        for words in ("Neither docker nor podman", "/maisecrets:ner url URL", "/maisecrets:ner off"):
+        for words in ("Neither docker nor podman", "/maisecrets ner url URL", "/maisecrets ner off"):
             self.assertIn(words, out)
 
     def test_a_line_of_info_cannot_add_a_start_line(self):
@@ -425,7 +425,7 @@ class DownNoteTests(unittest.TestCase):
 
     def assertNoted(self, message: str) -> None:
         self.assertIn(self.LINE, message)
-        self.assertTrue(message.endswith("\u2192 /maisecrets:ner"), message)
+        self.assertTrue(message.endswith("\u2192 /maisecrets ner"), message)
         if os.name != "nt":
             self.assertIn("does not answer", message)
 
@@ -672,7 +672,7 @@ class FallbackTests(unittest.TestCase):
         out = self.post()
         self.assertNotIn(NameService.NAME, out)
         self.assertEqual(len(self.fb.received), 1)
-        self.assertIn("the fallback set with /maisecrets:ner checked", out)
+        self.assertIn("the fallback set with /maisecrets ner checked", out)
         self.assertNotIn("the fallback set with", self.post())          # once per session
         self.assertEqual([x["source"] for x in self.log_lines()], ["fallback", "fallback"])
         self.assertFalse(any(NameService.NAME in json.dumps(x) for x in self.log_lines()))

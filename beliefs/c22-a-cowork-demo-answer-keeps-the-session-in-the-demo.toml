@@ -1,0 +1,11 @@
+# c22-a-cowork-demo-answer-keeps-the-session-in-the-demo: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-a-cowork-demo-answer-keeps-the-session-in-the-demo"
+control = "C22"
+serves = ["M4.2"]
+statement = "In Cowork the mod's demo answer ends with the Cowork demo line after what the AI would have got; a transcript whose last answer is such a mod answer keeps the session in the demo, and the same text from the model does not."
+runner = ["tests/test_demo.py::CoworkDemoTests::test_the_cowork_demo_answer_keeps_the_session_in_the_demo_only_as_the_mods_answer"]
+
+[proof]
+file = "maisecrets/demo.py"
+find = '''and last[1].endswith(DEMO_LINE_COWORK))'''
+replace = '''and False)'''

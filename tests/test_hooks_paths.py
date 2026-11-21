@@ -244,10 +244,10 @@ class ClientShapeTests(unittest.TestCase):
             codex = hooks.user_prompt({"prompt": "use " + GLPAT, "session_id": "U2", "turn_id": "t",
                                        "transcript_path": ""})
         self.assertTrue(claude["hookSpecificOutput"]["suppressOriginalPrompt"])
-        self.assertRegex(claude["reason"], r"\n  (/ms|/maisecrets:send) +send the cleaned prompt now\n")
+        self.assertRegex(claude["reason"], r"\n  (/ms|/maisecrets send) +send the cleaned prompt now\n")
         self.assertNotIn("hookSpecificOutput", codex)
         self.assertIn("paste the cleaned prompt, then send it", codex["reason"])
-        self.assertNotIn("/maisecrets:send", codex["reason"], "Codex has no /ms")
+        self.assertNotIn("/maisecrets send", codex["reason"], "Codex has no /ms")
         for out in (claude, codex):
             self.assertNotIn(GLPAT, json.dumps(out))
         typed = hooks.user_prompt({"prompt": "print " + self.e.ref, "session_id": "U3", "prompt_id": "p"})
@@ -683,7 +683,7 @@ class BashPathTests(unittest.TestCase):
         v._save_index()
         out = _hso(_bash_pre("echo " + self.p.ref))
         self.assertIn(f"{self.p.key} (expired)", out["permissionDecisionReason"])
-        self.assertIn("/maisecrets:put", out["permissionDecisionReason"])
+        self.assertIn("/maisecrets put", out["permissionDecisionReason"])
         _cfg({"max_keys_per_session": 1})
         out = _hso(_bash_pre("echo " + self.e.ref))
         self.assertIn("updatedInput", out)
@@ -694,7 +694,7 @@ class BashPathTests(unittest.TestCase):
         self.assertIn("limit: 1 different placeholders", out["permissionDecisionReason"])
         self.assertIn("do not change maisecrets settings yourself", out["permissionDecisionReason"])
         # 0.6.9: the person learns how to raise the cap (a typed prompt; the model may not type it for them)
-        self.assertIn("/maisecrets:settings max_keys_per_session NUMBER", out["permissionDecisionReason"])
+        self.assertIn("/maisecrets settings max_keys_per_session NUMBER", out["permissionDecisionReason"])
         _cfg()
         with mock.patch.object(Vault, "_record", return_value=False):
             out = _hso(_bash_pre("echo " + third.ref))
@@ -952,7 +952,7 @@ class PayloadMatrixTests(unittest.TestCase):
         # the welcome of a new home names the check; here the home has had its first start
         self.assertNotIn("/maisecrets:", codex.get("systemMessage", ""), "Codex has no plugin slash commands")
         said = claude.get("systemMessage", "")
-        self.assertTrue("/maisecrets:status" in said or "is on" not in said, "the welcome names the check")
+        self.assertTrue("/maisecrets status" in said or "is on" not in said, "the welcome names the check")
         for garbage in ("{}", "{not json", "", "null", "[1]", "7"):
             with self.subTest(garbage):
                 out = self._one(_dispatch("session-start", garbage))

@@ -407,18 +407,18 @@ class HiddenCharacterTests(unittest.TestCase):
     def test_a_value_and_hidden_characters_make_one_event_that_names_the_key(self):
         self.post({"stdout": f"token {GLPAT}" + tags("x"), "stderr": ""}, tool="Bash")
         self.assertEqual(len(Path(_TMP, "events.log").read_text(encoding="utf-8").splitlines()), 1)
-        self.assertIn("/maisecrets:forget SECRET_c1", self.report_last())
+        self.assertIn("/maisecrets forget SECRET_c1", self.report_last())
 
     def test_report_last_skips_a_removal_and_takes_the_last_detection(self):
         self.post({"stdout": f"token {GLPAT}", "stderr": ""}, tool="Bash")
         self.post({"result": "a" + tags("hidden")})
-        self.assertIn("/maisecrets:forget SECRET_c1", self.report_last())
+        self.assertIn("/maisecrets forget SECRET_c1", self.report_last())
 
     def test_report_last_finds_a_detection_behind_many_removals(self):
         self.post({"stdout": f"token {GLPAT}", "stderr": ""}, tool="Bash")
         for _ in range(25):
             self.post({"result": "a" + tags("hidden")})
-        self.assertIn("/maisecrets:forget SECRET_c1", self.report_last())
+        self.assertIn("/maisecrets forget SECRET_c1", self.report_last())
 
     def test_a_value_in_a_repeated_key_is_counted_where_it_stands(self):
         out = self.post({"a": {GLPAT: 1}, "b": {GLPAT: 2}}, tool="mcp__x__y")
@@ -436,7 +436,7 @@ class HiddenCharacterTests(unittest.TestCase):
         self.post({"stdout": f"token {GLPAT}", "stderr": ""}, tool="Bash")
         for _ in range(events.KEEP + 5):
             self.post({"result": "a" + tags("h")})
-        self.assertIn("/maisecrets:forget SECRET_c1", self.report_last())
+        self.assertIn("/maisecrets forget SECRET_c1", self.report_last())
 
     def test_a_new_removal_does_not_push_out_a_log_full_of_detections(self):
         # codex review, 2026-10-06: only the old lines were searched for a removal to drop
