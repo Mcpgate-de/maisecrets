@@ -930,11 +930,16 @@ class CoworkDemoTests(_Base):
         self.on(session=session)
         cfg = tempfile.mkdtemp(prefix="ms-demo-cfg-")
         self.addCleanup(shutil.rmtree, cfg, True)
+        import subprocess
+        # the sref answer never repeats a typed name (cli.cmd_sref), so its run here is an output that repeats a value
+        # as a gateway's answer could
+        echo = subprocess.CompletedProcess([], 0, stdout=f"maisecrets: the gateway answered for {TOKEN}\n", stderr="")
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
-            for prompt, said in ((f"maisecrets: sref status {TOKEN}", "no MCP server of that name"),
-                                 (f"maisecrets: ner url https://{TOKEN}.example", "names from a service")):
-                with self.subTest(prompt):
+            for prompt, said, run in ((f"maisecrets: sref status {TOKEN}", "the gateway answered for", echo),
+                                      (f"maisecrets: ner url https://{TOKEN}.example", "names from a service", None)):
+                with self.subTest(prompt), mock.patch("subprocess.run", return_value=run) as ran:
                     out = _mod(prompt, session)
+                    self.assertEqual(ran.called, run is not None)
                     self.assertIn(said, out["show"])
                     self.assertNotIn(TOKEN, out["show"])
                     self.assertTrue(out["show"].endswith(demo.DEMO_LINE_COWORK))
@@ -953,6 +958,13 @@ class CoworkDemoTests(_Base):
         out = demo.cowork_own({"session_id": "no valid id"}, f"maisecrets: done with {TOKEN}")
         self.assertNotIn(TOKEN, out["show"])
         self.assertTrue(out["show"].startswith(cowork.OUTPUT_UNCHECKED), out["show"])
+
+    def test_an_output_with_a_mention_and_a_value_is_not_shown(self):
+        # the rewrite leaves a text with an @mention to the prompt hook ({}), and no prompt hook reads a demo answer:
+        # the check of the rules and the store keeps the value out (cowork.masked_output)
+        payload = {"session_id": UUID.format(47), "cwd": ""}
+        self.assertEqual(cowork.masked_output(payload, f"see @x and {TOKEN}"), cowork.OUTPUT_UNCHECKED)
+        self.assertEqual(cowork.masked_output(payload, "see @x and nothing else"), "see @x and nothing else")
 
     def test_an_error_in_the_mask_of_an_output_shows_nothing_of_it(self):
         from maisecrets.vault import LockTimeout

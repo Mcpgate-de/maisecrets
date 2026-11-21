@@ -1,0 +1,11 @@
+# c1-a-cowork-demo-output-with-a-mention-is-not-shown: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-cowork-demo-output-with-a-mention-is-not-shown"
+control = "C1"
+serves = ["M1.1"]
+statement = "In a Cowork demo session a command's output that the rewrite leaves to the prompt hook, such as a text with an @mention, is checked by the rules and the store before the demo answer shows it; an output with a value is the fixed line, because no prompt hook reads a demo answer."
+runner = ["tests/test_demo.py::CoworkDemoTests::test_an_output_with_a_mention_and_a_value_is_not_shown"]
+
+[proof]
+file = "maisecrets/cowork.py"
+find = '''        if _has_value(text, hooks.load_config()):'''
+replace = '''        if False:'''
