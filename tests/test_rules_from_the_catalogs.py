@@ -143,6 +143,8 @@ TOKENS = {
     # Cal.com: cal_ (self-hosted default), cal_live_ or cal_test_, then 32 hex digits; the look-alike has 16
     "cal-api-key": lambda r: (J(["ca", "l_", r.choice(["", "live_", "test_"])]) + rd(r, 32, HEXL),
                               J(["ca", "l_live_"]) + rd(r, 16, HEXL)),
+    # Daytona: dtn_ and 64 hex digits (betterleaks daytona-api-key); the look-alike has 63
+    "daytona-api-key": lambda r: (J(["dt", "n_"]) + rd(r, 64, HEXL), J(["dt", "n_"]) + rd(r, 63, HEXL)),
     # Composio: oak_ needs a capital and a digit among its 20 characters; the look-alikes have 20 without one
     "oak-api-key": lambda r: (J(["o", "ak_"]) + rd(r, 1, D) + rd(r, 18, B64U) + rd(r, 1, U),
                                        J(["o", "ak_"]) + rd(r, 20, r.choice((L + D, string.ascii_letters + "_-")))),
@@ -249,6 +251,14 @@ class TokenFormatTests(unittest.TestCase):
                      J(["od", "t_"]) + rd(r, 64, HEXL)):
             with self.subTest(text=text[:8]):
                 self.assertEqual(found(f"see {text} there"), [])
+
+    def test_a_daytona_key_takes_64_lower_case_hex_digits_only(self):
+        r = random.Random(46)
+        dtn = J(["dt", "n_"])
+        for miss in (dtn + rd(r, 63, HEXL) + "g", dtn + rd(r, 64, HEXU), dtn + rd(r, 65, HEXL),
+                     dtn + "workspace_snapshot_loader_config"):
+            with self.subTest(miss=miss[-6:]):
+                self.assertNotIn("daytona-api-key", [k for k, _t, _v in found(f"see {miss} there", "tool")])
 
     def test_stripe_and_other_sk_keys_stay_with_their_own_rules(self):
         r = random.Random(21)
@@ -497,6 +507,34 @@ class BetterleaksPatchTests(unittest.TestCase):
                 for text in (tok, f"here it is: {tok} thanks\n", f"echo '{tok}' | tool\n"):
                     with self.subTest(rule=rule_id, text=text[:12]):
                         self.assertIn(rule_id, kinds_over(text, tok, "tool"))
+
+    def test_a_coveralls_personal_token_of_36_or_37_characters_is_found(self):
+        # betterleaks main after v1.10.1: 36 or 37 characters; the vendored rule took 37 only
+        rule = "coveralls-personal-api-token"
+        r = random.Random(44)
+        for n in (36, 37):
+            for form in ("coveralls: {t}", "f(coveralls={t})", "COVERALLS_API={t}\n", "coveralls, {t} next"):
+                tok = rd(r, n, AN)
+                with self.subTest(n=n, form=form):
+                    self.assertIn((rule, "SECRET", tok), found(form.format(t=tok), "tool"))
+        for text in ("coveralls: " + rd(r, 35, AN), "coveralls: " + rd(r, 38, AN),
+                     "coveralls: the coverage report of this branch is up again"):
+            with self.subTest(miss=text[:14]):
+                self.assertNotIn(rule, [k for k, _t, _v in found(text, "tool")])
+
+    def test_an_influxdb_token_after_a_label_joined_with_an_underscore_is_found(self):
+        # betterleaks main after v1.10.1: INFLUX_TOKEN and influxdb_api_key are labels too; the vendored rule wanted
+        # a word boundary after "influx" and before "token"
+        rule = "influxdb-api-token"
+        r = random.Random(45)
+        for form in ("influx_token {t}", "INFLUX_API_KEY {t}\n", "f(influxdb_token={t})", "INFLUXDB_TOKEN {t}"):
+            tok = rd(r, 86, B64U) + "=="
+            with self.subTest(form=form):
+                self.assertIn((rule, "SECRET", tok), found(form.format(t=tok), "tool"))
+        for text in ("influx_token " + rd(r, 87, AN), "influx_token is set in the README of the deployment",
+                     "bareinflux_token " + rd(r, 88, AN)):
+            with self.subTest(miss=text[:14]):
+                self.assertNotIn(rule, [k for k, _t, _v in found(text, "tool")])
 
     def test_a_posix_class_of_re2_becomes_a_python_class(self):
         self.assertEqual(detect._re2_to_python(r"\b(pat[[:alnum:]]{14})"), r"\b(pat[A-Za-z0-9]{14})")

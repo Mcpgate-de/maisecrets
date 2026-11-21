@@ -63,6 +63,20 @@ BETTERLEAKS_PATCHES = {
     # after oy2, so the vendored copy is left out. Of 20,000 random keys in the upstream shape the own rule found all
     # but 6, each without a digit (the own rule wants one); NuGet issues the key in lower case (0.9.7)
     "nuget-api-key": {"skip": "the own rule nuget-api-key covers it (0.9.7)"},
+    # betterleaks main after v1.10.1 (format watch, 2026-11-21): a Coveralls personal token has 36 or 37 characters;
+    # the vendored rule took 37 only
+    "coveralls-personal-api-token": {
+        "expect": r"""(?i)(?:coveralls)(?:[ \t\w.-]{0,20})[\s'"]{0,3}(?:=|>|:{1,3}=|\|\||:|=>|\?=|,)"""
+                  r"""[\x60'"\s=]{0,5}([A-Za-z0-9-]{37})(?:\\?['"\x60]|[\s;]|\\[nr]|$)""",
+        "regex": r"""(?i)(?:coveralls)(?:[ \t\w.-]{0,20})[\s'"]{0,3}(?:=|>|:{1,3}=|\|\||:|=>|\?=|,)"""
+                 r"""[\x60'"\s=]{0,5}([A-Za-z0-9-]{36,37})(?:\\?['"\x60]|[\s;]|\\[nr]|$)"""},
+    # betterleaks main after v1.10.1 (format watch, 2026-11-21): the label may join "influx" and "token" with "_"
+    # (INFLUX_TOKEN, influxdb_api_key); the vendored rule wanted a word boundary on both sides of each word
+    "influxdb-api-token": {
+        "expect": r"""(?i)(?:\binflux(?:db)?\b(?:.|[\n\r]){0,64}?\b(?:token|api[_-]?key)\b(?:.|[\n\r]){0,32}?)"""
+                  r"""[=:"'\s]{1,8}([A-Za-z0-9+/=_-]{88,})(?:\\?['"\x60]|[\s;]|\\[nr]|$)""",
+        "regex": r"""(?i)(?:\binflux(?:db)?(?:.|[\n\r]){0,64}?(?:\b|_)(?:token|api[_-]?key)\b(?:.|[\n\r]){0,32}?)"""
+                 r"""[=:"'\s]{1,8}([A-Za-z0-9+/=_-]{88,})(?:\\?['"\x60]|[\s;]|\\[nr]|$)"""},
 }
 
 
