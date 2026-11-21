@@ -62,7 +62,8 @@ def send_command() -> str:
     from pathlib import Path
     commands = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "commands"
     try:
-        if "maisecrets/bin/ms.sh" in (commands / "ms.md").read_text(encoding="utf-8"):
+        from .cli import is_our_shortcut
+        if is_our_shortcut((commands / "ms.md").read_text(encoding="utf-8")):
             return "/ms"
     except (OSError, UnicodeDecodeError):
         pass

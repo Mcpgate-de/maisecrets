@@ -1038,30 +1038,28 @@ class ResolvedValueRedactionTests(unittest.TestCase):
 
 class ShortcutTests(unittest.TestCase):
     @unittest.skipIf(BASH is None, "no bash")
-    def test_shortcut_installs_command_and_wrapper_that_finds_the_newest_copy(self):
+    def test_shortcut_installs_the_entry_that_names_the_commands_and_no_folder(self):
         from unittest import mock
-        from maisecrets import cli
+        from maisecrets import cli, prompt_commands
         home = Path(tempfile.mkdtemp(prefix="maisecrets-shortcut-"))
         cfg_dir = home / ".claude"
-        # two installed copies; the wrapper must pick 0.3.10 over 0.3.9 (numeric, not lexical)
-        for v in ("0.3.9", "0.3.10"):
-            d = home / ".claude" / "plugins" / "cache" / "mp" / "maisecrets" / v
-            (d / ".claude-plugin").mkdir(parents=True)
-            (d / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "maisecrets", "version": v}))
-            (d / "hooks").mkdir()
-            (d / "hooks" / "run.sh").write_text('#!/usr/bin/env bash\necho "ran $0 $*"\n')
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(cfg_dir), "HOME": str(home)}):
             self.assertEqual(cli.cmd_shortcut([]), 0)
             cmd = (cfg_dir / "commands" / "ms.md").read_text(encoding="utf-8")
-            self.assertIn("allowed-tools: Bash(bash ~/.maisecrets/bin/ms.sh*)", cmd)
-            self.assertIn("!`bash ~/.maisecrets/bin/ms.sh`", cmd)
-            self.assertIn("Sent: ", cmd)
-            wrapper = Path(_TMP, "bin", "ms.sh")
-            self.assertTrue(wrapper.exists())
-            r = subprocess.run([BASH, str(wrapper)], capture_output=True, text=True,
-                               env={**os.environ, "HOME": str(home)})
-        self.assertIn("/0.3.10/hooks/run.sh pending", r.stdout.replace("\\", "/"), r.stderr)
-        self.assertNotIn("$(", cmd.split("---")[2].split("\n")[1], "the ! line is a fixed path, never a substitution")
+        self.assertTrue(cli.is_our_shortcut(cmd))
+        # /ms alone sends the blocked prompt; /ms NAME runs the command of that name, which the model may start
+        self.assertIn("run the `maisecrets:send` command", cmd)
+        for name in prompt_commands.COMMANDS:
+            self.assertIn(f"`{name}`", cmd, name)
+        # no shell line and no `!` expansion: an argument never reaches a shell, and no plugin folder is named
+        self.assertNotIn("!`", cmd)
+        self.assertNotIn("allowed-tools", cmd)
+        self.assertNotIn("run.sh", cmd)
+
+    def test_a_shortcut_of_the_old_form_is_still_ours(self):
+        from maisecrets import cli
+        self.assertTrue(cli.is_our_shortcut("!`bash ~/.maisecrets/bin/ms.sh`\n"))
+        self.assertFalse(cli.is_our_shortcut("my own command\n"))
 
     def test_session_start_installs_no_shortcut_and_codex_gets_no_slash_command(self):
         cfg_dir = Path(tempfile.mkdtemp(prefix="maisecrets-cfg-"))

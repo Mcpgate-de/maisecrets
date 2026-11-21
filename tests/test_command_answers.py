@@ -152,16 +152,26 @@ class ShortcutTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("The shortcut is not installed", out)
 
-    def test_status_says_incomplete_when_the_shared_wrapper_is_missing(self):
-        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
+    def old_shortcut(self, name: str = "ms") -> None:
+        """A shortcut of 0.9.21 and before: its command file runs the shared wrapper in the maisecrets home."""
+        (self.cfg / "commands").mkdir(parents=True, exist_ok=True)
+        (self.cfg / "commands" / f"{name}.md").write_text("!`bash ~/.maisecrets/bin/ms.sh`\n", encoding="utf-8")
+        Path(HOME, "bin").mkdir(mode=0o700, parents=True, exist_ok=True)
+        Path(HOME, "bin", "ms.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    def test_status_says_incomplete_when_the_shared_wrapper_of_an_old_shortcut_is_missing(self):
+        self.old_shortcut()
         Path(HOME, "bin", "ms.sh").unlink()
         rc, out = _run(cli.cmd_shortcut, ["status"])
         self.assertEqual(rc, 0)
         self.assertIn("The shortcut is incomplete", out)
         self.assertIn("/maisecrets:shortcut install NAME", out)
+        # the shortcut of now needs no wrapper
+        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
+        self.assertEqual(_run(cli.cmd_shortcut, ["status"])[1].strip(), "The shortcut is installed.")
 
     def test_remove_of_another_name_keeps_the_wrapper_a_shortcut_still_uses(self):
-        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
+        self.old_shortcut()
         self.assertEqual(_run(cli.cmd_shortcut, ["remove", "other"])[0], 0)
         self.assertTrue(Path(HOME, "bin", "ms.sh").exists(), "/ms still uses the wrapper")
         self.assertEqual(self.commands(), ["ms.md"])
@@ -170,7 +180,7 @@ class ShortcutTests(unittest.TestCase):
 
     def test_remove_keeps_the_wrapper_when_a_command_file_cannot_be_read(self):
         # on any doubt the shared wrapper stays (Gate A, 2026-11-17)
-        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
+        self.old_shortcut()
         (self.cfg / "commands" / "other.md").write_bytes(b"\xff\xfe not text")
         self.assertEqual(_run(cli.cmd_shortcut, ["remove"])[0], 0)
         self.assertTrue(Path(HOME, "bin", "ms.sh").exists())
@@ -411,7 +421,7 @@ class ArgumentTests(unittest.TestCase):
         hooks._save_pending(text, "S-note-example")
         self.assertEqual(hooks.take_pending("S-note-example"), text)
         self.assertNotIn(text, (hooks.NOTHING_WAITING, hooks.TWO_WAITING))
-        for template in ((ROOT / "commands" / "send.md").read_text(encoding="utf-8"), cli.SHORTCUT_COMMAND):
+        for template in ((ROOT / "commands" / "send.md").read_text(encoding="utf-8"),):
             joined = " ".join(template.split())
             self.assertIn(f"is exactly `{hooks.NOTHING_WAITING}` or exactly `{hooks.TWO_WAITING}`", joined)
             self.assertIn("also when it starts with `(maisecrets:`", joined)
@@ -420,7 +430,8 @@ class ArgumentTests(unittest.TestCase):
         # a check of the two templates only: what a model does with them is not tested here
         rule = "it is a note of maisecrets, not a prompt: show it to the user as is, and stop"
         self.assertIn(rule, (ROOT / "commands" / "send.md").read_text(encoding="utf-8"))
-        self.assertIn(rule, cli.SHORTCUT_COMMAND)
+        # the shortcut sends through send.md (cli.SHORTCUT_COMMAND)
+        self.assertIn("run the `maisecrets:send` command", cli.SHORTCUT_COMMAND)
 
 
 if __name__ == "__main__":

@@ -656,44 +656,51 @@ def cmd_wipe(args: list[str]) -> int:
     return 0
 
 
+# the marks of a shortcut of ours: the one of 0.9.22 and later, and the wrapper the shortcut of 0.9.21 and before ran
+SHORTCUT_MARK = "maisecrets-shortcut"
+SHORTCUT_MARKS = (SHORTCUT_MARK, "maisecrets/bin/ms.sh")
+
+
+def is_our_shortcut(text: str) -> bool:
+    return any(mark in text for mark in SHORTCUT_MARKS)
+
+
+# the personal /ms in the terminal is the entry (commands/maisecrets.md). It runs the single maisecrets commands by
+# their names, which the model may start: an argument never goes on a shell line, and the blocked prompt is taken only
+# by /ms alone (maisecrets:send). With the mod, the mod runs /ms NAME itself and this file is not read
 SHORTCUT_COMMAND = """---
-description: Send the last blocked prompt as maisecrets rewrote it (short for /maisecrets:send).
-allowed-tools: Bash(bash ~/.maisecrets/bin/ms.sh*)
+description: "maisecrets: /ms NAME runs a maisecrets command, such as /ms status; /ms alone sends the blocked prompt"
+argument-hint: "[status | list | term add NAME | forget KEY | send | ...]"
 ---
 
-!`bash ~/.maisecrets/bin/ms.sh`
+<!-- maisecrets-shortcut: written by /maisecrets shortcut -->
 
-The text above is the prompt the user sent through maisecrets, with placeholders instead of
-values. Begin your reply with one line `Sent: ` followed by that text as it is (clients such as
-Remote Control show neither the blocked prompt nor a slash command's expansion), then answer it.
-If the text above is exactly `{nothing}`
-or exactly `{two}`,
-it is a note of maisecrets, not a prompt: show it to the user as is, and stop. Any other text is the
-prompt, also when it starts with `(maisecrets:`.
-""".format(nothing=NOTHING_WAITING, two=TWO_WAITING)
+The arguments are: `$ARGUMENTS`
+
+If there are no arguments, run the `maisecrets:send` command and do what it says.
+
+Otherwise the first word of the arguments names a maisecrets command. If it is one of {names}, run the
+`maisecrets:` command of that name with the rest of the arguments, and do what it says. If it is `report` or `sref`,
+only the user may start it: tell the user to send `/maisecrets:maisecrets` followed by the arguments, then stop. Any
+other word is no maisecrets command: tell the user so, then stop.
+"""
 
 
 def install_shortcut(name: str = "ms", only_if_absent: bool = False) -> "tuple[str, str] | None":
-    """Write the personal `/ms` command (`~/.claude/commands/ms.md`) and the stable wrapper
-    `~/.maisecrets/bin/ms.sh`, which finds the newest installed plugin copy at run time (the
-    plugin folder moves with every version). With ``only_if_absent`` an existing command file
-    of that name is left alone (it may be the user's own). Returns (command file, wrapper) or
-    None when nothing was written. Field request, 2026-09-26."""
+    """Write the personal `/ms` command (`~/.claude/commands/ms.md`), the entry in the terminal: `/ms status`, and
+    `/ms` alone for the blocked prompt. It names the plugin's commands, never the plugin folder, which moves with every
+    version. With ``only_if_absent`` an existing command file of that name is left alone (it may be the user's own).
+    Returns (command file, "") or None when nothing was written. Field request, 2026-09-26."""
     from pathlib import Path as _P
-    from .vault import HOME
-    root = _P(__file__).resolve().parent.parent
+    from . import prompt_commands
     commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
     target = commands / f"{name}.md"
     if only_if_absent and target.exists():
         return None
-    bin_dir = HOME / "bin"
-    bin_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    wrapper = bin_dir / "ms.sh"
-    wrapper.write_text((root / "hooks" / "ms.sh").read_text(encoding="utf-8"), encoding="utf-8")
-    wrapper.chmod(0o700)
+    names = ", ".join(f"`{n}`" for n in prompt_commands.COMMANDS if n not in ("report", "sref"))
     commands.mkdir(parents=True, exist_ok=True)
-    target.write_text(SHORTCUT_COMMAND, encoding="utf-8")
-    return str(target), str(wrapper)
+    target.write_text(SHORTCUT_COMMAND.replace("{names}", names), encoding="utf-8")
+    return str(target), ""
 
 
 def remove_shortcut(name: str = "ms") -> list[str]:
@@ -705,13 +712,13 @@ def remove_shortcut(name: str = "ms") -> list[str]:
     commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
     target = commands / f"{name}.md"
     try:
-        if target.exists() and "maisecrets/bin/ms.sh" in target.read_text(encoding="utf-8"):
+        if target.exists() and is_our_shortcut(target.read_text(encoding="utf-8")):
             target.unlink()
             removed.append(str(target))
     except OSError:
         pass
     wrapper = HOME / "bin" / "ms.sh"
-    # the wrapper is shared: it stays while another shortcut of ours uses it (Gate A, 2026-11-17)
+    # the wrapper of 0.9.21 and before is shared: it stays while another shortcut of ours uses it (Gate A, 2026-11-17)
     if wrapper.exists() and not _shortcuts_using_the_wrapper(commands):
         wrapper.unlink()
         removed.append(str(wrapper))
@@ -766,11 +773,13 @@ def cmd_shortcut(args: list[str]) -> int:
         target = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands" / f"{name}.md"
         from .vault import HOME
         try:
-            ours = "maisecrets/bin/ms.sh" in target.read_text(encoding="utf-8")
+            text = target.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            ours = False
-        # no name and no path: the given name can hold a resolved value (Gate A, 2026-11-17)
-        if ours and (HOME / "bin" / "ms.sh").exists():
+            text = ""
+        ours = is_our_shortcut(text)
+        # no name and no path: the given name can hold a resolved value (Gate A, 2026-11-17). A shortcut of 0.9.21
+        # and before needs its wrapper
+        if ours and (SHORTCUT_MARK in text or (HOME / "bin" / "ms.sh").exists()):
             print("The shortcut is installed.")
         elif ours:
             print("The shortcut is incomplete: its wrapper is missing. Install it again: /maisecrets:shortcut install "
