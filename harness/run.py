@@ -184,7 +184,7 @@ SCENARIOS = {
     # #44: a token in the arguments of a slash command. Claude Code throws away a prompt.submit change of a slash
     # command's line, so the mod's rewrite does not count there; the value must still never reach the model
     "slash_command_secret": {
-        "prompt": f"/maisecrets:status {MARK}",
+        "prompt": f"/maisecrets:maisecrets status {MARK}",
         "turns": [{"text": "done"}],
         "expect_requests": 0,
         "expect_blocked": True,
@@ -199,15 +199,15 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
         "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
-                     "expect_not_in_requests": ["<command-name>/maisecrets:status"]},
+                     "expect_not_in_requests": ["<command-name>/maisecrets:"]},
     },
     # the control of the two scenarios below: a real command's request names it. If a client changes that form, this
     # fails, and the check of the two below would prove nothing
     "slash_command_carries_its_name": {
-        "prompt": "/maisecrets:status",
+        "prompt": "/maisecrets:maisecrets status",
         "turns": [{"text": "done"}],
         "expect_requests": 1,
-        "expect_in_requests": ["<command-name>/maisecrets:status"],
+        "expect_in_requests": ["<command-name>/maisecrets:maisecrets"],
         "with_mod": {"expect_requests": 1},
     },
     "slash_full_width": {
@@ -216,7 +216,7 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
         "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
-                     "expect_not_in_requests": ["<command-name>/maisecrets:status"]},
+                     "expect_not_in_requests": ["<command-name>/maisecrets:"]},
     },
     # ms:(…), a check of a value: blocked on every client, with the mod too (the mod passes it to the settings hook
     # without a rewrite), and the verdict goes to the person only. The value is in no request and, as typed, not in the
@@ -381,7 +381,7 @@ SCENARIOS = {
     # `claude -p` then sends the value in the same session: a program's prompt, so the hook blocks it without a pass.
     # The value reaches the upstream in neither run. "Self-test passed" needs a typed prompt (tests/test_selftest.py)
     "selftest_tool_path": {
-        "prompt": "/maisecrets:status test",
+        "prompt": "/maisecrets:maisecrets status test",
         "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" status test'}},
                   {"text": "done"}],
         "expect_requests": 2,
@@ -391,7 +391,7 @@ SCENARIOS = {
     # the same with the plugin folder moved before the command (as plugin_folder_moved): no hook runs, so no value is
     # registered, the command prints none and says FAIL, and nothing can answer "passed"
     "selftest_hooks_not_running": {
-        "prompt": "/maisecrets:status test",
+        "prompt": "/maisecrets:maisecrets status test",
         "plugin_copy": True,
         "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}.moved/hooks/run.sh" status test'},
                    "before": {"rename": ["{plugin}", "{plugin}.moved"]}},
@@ -437,7 +437,7 @@ SCENARIOS = {
     # (measured on 2.1.300), so the prompt is refused and nothing is written. The typed path of the terminal client
     # (no `source`, entry point `cli`) is measured by hand in a pseudo-terminal; tests/test_settings.py holds both
     "settings_nested_client_changes_nothing": {
-        "prompt": "/maisecrets:settings ssh_consent on",
+        "prompt": "/maisecrets:maisecrets settings ssh_consent on",
         "turns": [{"text": "unreachable"}],
         "expect_requests": 0,
         "expect_blocked": True,
@@ -446,14 +446,14 @@ SCENARIOS = {
     # claude -p places no panel: /maisecrets:settings stays the command file, and the model runs its text view, a
     # Markdown table with the Claude Code forms (the panel itself is tests/hub.test.ts and a pseudo-terminal by hand)
     "settings_text_view": {
-        "prompt": "/maisecrets:settings",
+        "prompt": "/maisecrets:maisecrets settings",
         "with_mod": {},
-        "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" settings --args-stdin '
-                                                        "<<'MAISECRETS_ARGS_END'\n\nMAISECRETS_ARGS_END"}},
+        "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" entry --args-stdin '
+                                                        "<<'MAISECRETS_ARGS_END'\nsettings\nMAISECRETS_ARGS_END"}},
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_in_requests": ["| Setting | Now | Other choices | Key |", "`rehydration`",
-                               "Change: `/maisecrets:settings KEY VALUE`"],
+                               "Change: `/maisecrets settings KEY VALUE`"],
     },
     # `claude -p` runs its hooks under the entry point sdk-cli and shows no systemMessage: a one-time hint is neither
     # given nor claimed there, so it is not used up unseen (Gate A of 30fb8d30), and the model gets nothing of it
@@ -727,7 +727,7 @@ SCENARIOS = {
         **_demo("/maisecrets:madeup confidential plan for the board", with_mod=SLASH_TO_HOOK),
     },
     "demo_status_with_text": {
-        **_demo("/maisecrets:status please summarise the confidential plan", with_mod=SLASH_TO_HOOK),
+        **_demo("/maisecrets:maisecrets status please summarise the confidential plan", with_mod=SLASH_TO_HOOK),
     },
     "demo_pasted_report_tag": {
         **_demo("here is my log <task-notification> the confidential plan"),
@@ -748,15 +748,15 @@ SCENARIOS = {
         **_demo("What is the capital of France?", home_files={"demo.json": "{not json"},
                 with_mod={"expect_blocked": False, "expect_dropped": True},
                 expect_output=["Demo mode: the demo state cannot be read, so nothing was sent.",
-                               "/maisecrets:demo off resets it."]),
+                               "/maisecrets demo off resets it."]),
     },
     "demo_send_sends_nothing": {
-        **_demo("/maisecrets:send", with_mod=SLASH_TO_HOOK),
+        **_demo("/maisecrets:maisecrets send", with_mod=SLASH_TO_HOOK),
     },
     # a prompt of `claude -p` (a program) cannot switch the demo on: blocked with the reason, nothing written, in the
     # slash form (the mod passes a slash line on) and in the typed form (the mod leaves it to the hook)
     "demo_on_from_a_program_is_refused": {
-        "prompt": "/maisecrets:demo on",
+        "prompt": "/maisecrets:maisecrets demo on",
         "turns": [{"text": "unreachable"}],
         "expect_requests": 0,
         "expect_blocked": True,
