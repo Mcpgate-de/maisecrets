@@ -29,11 +29,11 @@ claude plugin install maisecrets@maisecrets     # then start a new session
 ```
 
 ```text
-/maisecrets:status        what runs, which version
+/maisecrets status        what runs, which version
 ms:(your value)           would this value be caught?
 … ms:(your value) …       inside a prompt: stored, the AI gets a placeholder
-/maisecrets:settings      the choices you make
-/maisecrets:not-a-secret KEY   a wrong hit: never mask this exact value again
+/maisecrets settings      the choices you make
+/maisecrets not-a-secret KEY   a wrong hit: never mask this exact value again
 /maisecrets:secret-hygiene   secrets that leaked before you installed it
 ```
 
@@ -72,13 +72,13 @@ You paste a token into the prompt by accident:
 > please check why my GitLab token glpat-… fails in CI
 maisecrets kept a secret from the AI.
 
-  /maisecrets:send   send the cleaned prompt now
+  /maisecrets send   send the cleaned prompt now
   ⌘V                 paste it to edit it first
 
-A wrong hit? /maisecrets:not-a-secret SECRET_c3
+A wrong hit? /maisecrets not-a-secret SECRET_c3
 ```
 
-With `/maisecrets:shortcut` installed, the first step names the short `/ms`.
+With `/maisecrets shortcut` installed, the first step names the short `/ms`.
 Where no clipboard exists (Remote Control, SSH), the notice shows the cleaned
 prompt under the `/ms` line instead of the paste line. The last line names the
 stored value when there is one, else `KEY`; Codex has no `/ms` and names
@@ -147,15 +147,15 @@ The first session start in a maisecrets folder shows three lines:
 
 ```
 maisecrets is on: passwords, keys and personal data reach the AI only as ⟦…⟧; the value stays on this computer. 🔒 marks such a value.
-Try it: /maisecrets:demo on in a new session · Check: /maisecrets:status
-Names too: /maisecrets:ner local · Old leaks: /maisecrets:secret-hygiene
+Try it: /maisecrets demo on in a new session · Check: /maisecrets status
+Names too: /maisecrets ner local · Old leaks: /maisecrets:secret-hygiene
 ```
 
 Codex shows the same with its sentence forms (`maisecrets: status`). After
 that, a start says nothing while all is well. It shows at most one short tip a
 day (`"tips": false` turns them off), and one line for each warning: the
 protection is not active (`⚠️ maisecrets is NOT protecting this session →
-/maisecrets:status`), the test store keeps values as plain text, a
+/maisecrets status`), the test store keeps values as plain text, a
 configuration problem, a rule folder that is missing, or a protection that
 was loosened since the last start. The AI's instructions about placeholders
 come at every start; only the lines for you changed.
@@ -163,11 +163,11 @@ come at every start; only the lines for you changed.
 ### The /maisecrets panel (Claude Code)
 
 `/maisecrets`, typed alone, opens a panel in Claude Code (with the mod, in the
-terminal and the desktop app); `/maisecrets:settings` opens the same panel. It
+terminal and the desktop app); `/maisecrets settings` opens the same panel. It
 opens at once: no model turn, nothing goes to the AI. From top to bottom:
 
 - **The status line.** It starts as `maisecrets: checking…` and becomes the
-  first line of `/maisecrets:status` for this session: 🔒 protects, or ⚠️ NOT
+  first line of `/maisecrets status` for this session: 🔒 protects, or ⚠️ NOT
   protecting with the names of the failed checks. `[ 3 notes ]` opens the
   notes of the check (name, fact, next step); a second press closes them.
 - **Stored values.** The stored values, the newest 20 first, in their masked
@@ -179,11 +179,11 @@ opens at once: no model turn, nothing goes to the AI. From top to bottom:
 - **Name service.** The source as buttons: `off`, `local` (it starts the
   service at once and says so: the image is about 690 MB, 1 to 2 GB on disk,
   and runs on 127.0.0.1 only; `off` turns the source off, and a download
-  that runs ends by itself first), `url…` (puts `/maisecrets:ner url ` into the prompt box
+  that runs ends by itself first), `url…` (puts `/maisecrets ner url ` into the prompt box
   for you to complete) and `gateway…` (the MCP servers of your configuration
   that have an https address; after a pick, `[ log in ]` puts
-  `/maisecrets:sref login NAME` into the prompt box). Under them, the checks
-  of `/maisecrets:ner`.
+  `/maisecrets sref login NAME` into the prompt box). Under them, the checks
+  of `/maisecrets ner`.
 - **Check old leaks.** Closes the panel and puts `/maisecrets:secret-hygiene`
   into the prompt box; press Enter to start it.
 - **Your settings**, in groups, each with its choices as buttons: the current
@@ -201,17 +201,19 @@ names the panel's entry is refused. Each change goes through the same checks
 as the typed command (the policy, the allowed values, the two steps of
 `not a secret` for a key), and a loosened protection is named at the next
 start with the route `settings pane`. In Codex, in `claude -p` and without the
-mod, `/maisecrets:settings` shows the text view below.
+mod, `/maisecrets settings` shows the text view below.
 
 ### Your own commands in Claude Code
+
+Every command is the entry `/maisecrets NAME`, for example `/maisecrets status test`; `/ms NAME` is the same, and in the terminal so are `/maisecrets:maisecrets NAME` and `/maisecrets:ms NAME`. The / menu shows only the entry and `/maisecrets:report` and `/maisecrets:sref`, which only you start. The older form `/maisecrets:NAME` still runs where the client loads the mod (Claude Code 2.1.287 and later); without the mod the client answers that only Claude can run it, so type the entry there. A command that changes what maisecrets does (a setting, a term, not-a-secret, the demo, a forget) counts only from your own prompt: typed as `/maisecrets NAME` in the terminal, maisecrets names the prompt that makes the change. In Cowork, which shows no answer to such a command typed with a slash, send its text form, for example `maisecrets: term add NAME`.
 
 With the mod (the terminal and the desktop app), maisecrets answers your own
 commands itself. Nothing goes to the AI, and the answer is one line under
 your prompt, not "operation blocked by hook". The mod then empties the input
 box, so the command does not mix into your next prompt; if the client refuses
 that, the text stays in the box. This applies
-to `/maisecrets:term add|remove`, `/maisecrets:not-a-secret` (and `undo`),
-`/maisecrets:demo`, `/maisecrets:forget import:ID`, `/maisecrets:report
+to `/maisecrets term add|remove`, `/maisecrets not-a-secret` (and `undo`),
+`/maisecrets demo`, `/maisecrets forget import:ID`, `/maisecrets report
 incident`, and to every Codex form: `maisecrets: status`,
 `maisecrets: list`, `maisecrets: set KEY VALUE`, `maisecrets: term add NAME`,
 `maisecrets: demo on` and the others. The self-test value is not one of them:
@@ -226,7 +228,7 @@ hook answers these commands as before.
 
 With the mod, the commands that only show something or run one maisecrets
 step also run without the AI, when you type them yourself (or send them
-through Remote Control): `/maisecrets:status` (and `status all`), `list`,
+through Remote Control): `/maisecrets status` (and `status all`), `list`,
 `audit`, `rules`, `term` (the lists), `sref` (`status`, `login NAME`, `logout
 NAME`), `ner` (and `ner all`; after a change such as `ner local`), `settings
 KEY` and `settings KEY VALUE`, `forget KEY`, `put`, `shortcut`, `guard`,
@@ -237,9 +239,9 @@ background, and the input box is free at once. The output opens in a panel
 (Esc closes it); where no panel can open, it stands above the prompt. The
 output holds no value, and it never goes to the AI.
 
-- `/maisecrets:sref` shows each gateway and its login, with a button `log in: NAME`
+- `/maisecrets sref` shows each gateway and its login, with a button `log in: NAME`
   for each one that needs a login: a press starts it, as the typed command does.
-- `/maisecrets:sref login NAME` opens the browser at once. While the login
+- `/maisecrets sref login NAME` opens the browser at once. While the login
   waits for your consent (up to 110 seconds), the status line says
   `maisecrets: waiting for your consent in the browser (NAME)`, and you can
   go on working. At the end a note says `maisecrets: logged in at NAME`, or
@@ -248,17 +250,17 @@ output holds no value, and it never goes to the AI.
   that waits and opens the browser again. To use another browser, copy the
   login URL from the panel into it. A logout while a login waits starts
   nothing.
-- `/maisecrets:ner` and its changes open the name-service view of the panel.
-- `/maisecrets:send` puts the cleaned prompt into the input box: press Enter
+- `/maisecrets ner` and its changes open the name-service view of the panel.
+- `/maisecrets send` puts the cleaned prompt into the input box: press Enter
   to send it.
-- `/maisecrets:status test` keeps its old way: its test value comes only from
+- `/maisecrets status test` keeps its old way: its test value comes only from
   the hook of a tool call, and the test proves the path of the tool output.
 
 The form with a space, such as `/maisecrets sref login NAME`, runs the same
 (see below). In Codex, in `claude -p` and without the mod, each command runs
 through its command file, as before.
 
-`/maisecrets demo on` is `/maisecrets:demo on`: the Tab completion of
+`/maisecrets demo on` is `/maisecrets demo on`: the Tab completion of
 `/maise` gives `/maisecrets` and a space, so a command after `/maisecrets`
 with a space counts as the command with its colon, when you type it as your
 own prompt. The commands maisecrets answers itself (the panel of `settings`,
@@ -268,7 +270,7 @@ colon form; so do the commands above that the mod runs without the AI. A
 command that still needs the AI and its command file (`status test`, or any
 command when maisecrets cannot check it in time) runs only from the typed form
 with the colon. maisecrets puts that form into the input box and says so in one
-line, for example `maisecrets: I put /maisecrets:status into the input box.
+line, for example `maisecrets: I put /maisecrets status into the input box.
 Press Enter to run it, or clear the box.` Before that, it masks each value in
 the command, as it does for a prompt, so the box never gets a value back; the
 line then adds how many it masked. If it cannot check the command, it empties
@@ -283,22 +285,22 @@ suggestion: the panel opens with a line that names the commands, as for any
 other word. A prompt that is not your own (a subagent, another session, a
 program) gets none of this. In Codex, in `claude -p` without the mod and in a
 client without mods, the prompt hook keeps such a prompt from the AI and names
-the form that runs it (`/maisecrets:demo on`, in Codex `maisecrets: demo on`).
+the form that runs it (`/maisecrets demo on`, in Codex `maisecrets: demo on`).
 
 ### Settings you decide
 
 Without the panel (Codex, `claude -p`, a client without the mod),
-`/maisecrets:settings` shows the settings that are yours to decide as a table,
+`/maisecrets settings` shows the settings that are yours to decide as a table,
 one row each: the setting, its value (`✎` when you changed it, `⚙` when a
 policy sets it), the other choices and the key. `all` (or `--all`) adds the
-advanced ones. `/maisecrets:settings KEY` shows the card of one setting: the
+advanced ones. `/maisecrets settings KEY` shows the card of one setting: the
 value, its state (`(default)`, `set by you`, `set by a policy`), what it does,
 and the command for the next step:
 
 ```
   SSH consent (ssh_consent) · off · (default)
     Ask before each ssh command that changes something on a host.
-    Turn on: /maisecrets:settings ssh_consent on
+    Turn on: /maisecrets settings ssh_consent on
 ```
 
 A key that is missing from `config.json` reads the default; `false` written
@@ -312,7 +314,7 @@ and `config.json` or a policy sets them (docs/ADMIN.md).
 To change one, send the change as your own prompt, alone:
 
 ```
-/maisecrets:settings ssh_consent on
+/maisecrets settings ssh_consent on
 maisecrets: set ssh_consent on          (the same, and the form for Codex)
 ```
 
@@ -333,14 +335,14 @@ threat model).
 
 **You see each loosened protection.** A change that loosens a protection (a
 setting in the looser direction, such as `rehydration automatic`, a higher
-cap or a new autonomous host) and each `/maisecrets:forget` write one line
+cap or a new autonomous host) and each `/maisecrets forget` write one line
 in `~/.maisecrets/events.log`: the time, the kind, the key or setting (never
 a value) and the route (typed prompt, slash command, cli). The next session
 start shows you one sentence that lists them, once:
 
 ```
 maisecrets: since the last session start, 2 protections were loosened: setting rehydration (typed prompt),
-forget SECRET_c3 (cli). If you did not do this, check /maisecrets:settings and /maisecrets:list.
+forget SECRET_c3 (cli). If you did not do this, check /maisecrets settings and /maisecrets list.
 ```
 
 A program that runs as you can also change that file; the line makes an
@@ -349,7 +351,7 @@ ordinary agent's action visible, it does not stop one that evades.
 **Hints.** maisecrets stays quiet until a case comes up that one of these
 settings is about. Then you get one fixed line from maisecrets, such as
 `maisecrets: images go to the AI as they are; maisecrets cannot mask inside
-them. /maisecrets:settings read_image ask asks you each time; block stops
+them. /maisecrets settings read_image ask asks you each time; block stops
 them.` The line goes to you only, not to the AI, so the AI does not word it
 again or repeat it later. Codex shows it as a hook message in its terminal
 UI. A run without a screen for it (`claude -p`, an Agent SDK program, `codex
@@ -361,8 +363,8 @@ through another event). A hint comes once, also when hooks run at the same
 time; if maisecrets cannot record it, it does not come at all. It does not come again after you decided, and
 it does not come again because time passed: only a real change of the
 feature brings it back, once. `"tips": false` turns hints off with the tips.
-`/maisecrets:settings hints` shows each hint as `not shown yet` or `shown`
-with its date; `/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
+`/maisecrets settings hints` shows each hint as `not shown yet` or `shown`
+with its date; `/maisecrets settings hints reset` (or `maisecrets: reset hints`) lets them
 come once more and changes no protection setting.
 
 ### Where your secrets went
@@ -372,7 +374,7 @@ to a tool call: a host named in the call (from a URL, also one in quoted text,
 not one in a shell comment), an ssh host, or an MCP server and tool. In a Bash
 command every host it names counts for each secret in it, also a second URL
 that the value does not reach. A file or a command without a host is listed
-apart, as a local use. `/maisecrets:list`
+apart, as a local use. `/maisecrets list`
 shows it under each secret:
 
 ```
@@ -398,7 +400,7 @@ once, in a sentence; this note does not come again. maisecrets does not
 judge whether a destination is safe.
 
 To be asked before a secret goes to a host it never went to, send
-`/maisecrets:settings secret_destinations protect` as your own prompt. The hosts
+`/maisecrets settings secret_destinations protect` as your own prompt. The hosts
 of a secret's first call are its own; a first call that only writes a file
 has none, and a second call that starts before the first one ran gets no
 first call of its own. If you decline that first call, it holds the secret's
@@ -412,7 +414,7 @@ it and the call runs, the host is known and asks no more; a call you decline
 leaves it new. Codex cannot ask with a rewritten input, so there the call is
 refused before any value is resolved; run that step yourself, or switch back
 to `observe` for it. A file or a command without a host never asks. What the
-record already holds when you switch counts as known. `/maisecrets:settings`
+record already holds when you switch counts as known. `/maisecrets settings`
 shows about how often protect would have asked in your own last 30 days:
 once per call that took a secret to a host it never went to. It is an
 estimate from the record: a call you declined is not in it. Protect binds
@@ -423,7 +425,7 @@ proxy shows none, and the port of a URL does not count, so for a hard limit
 use the sandbox's allowed hosts too. If the destination record cannot be
 read, the call asks, and the question says so; if the first use of a secret
 cannot be recorded, it is refused, and you try once more.
-`/maisecrets:settings secret_destinations off` stops the
+`/maisecrets settings secret_destinations off` stops the
 record; nothing leaves the computer either way. When a value expires, its
 record goes with it (if the record is busy at that moment, it goes 30 days
 later with the metadata); forget and wipe delete it too.
@@ -473,8 +475,8 @@ Polish, Portuguese, Russian, Spanish, Swedish, Thai and Turkish. With Chinese or
 Japanese on, the fullwidth colon (`密码：`, `パスワード：`) and a sentence with no
 space (`密码是…`, `パスワードは…`) count as a label too. Each word comes from
 a reviewed translation of an open-source project, and
-`docs/label-sources.md` names the source of each word. `/maisecrets:status` shows the regions and
-the number of label languages; `/maisecrets:status all` also shows where they came from and each language.
+`docs/label-sources.md` names the source of each word. `/maisecrets status` shows the regions and
+the number of label languages; `/maisecrets status all` also shows where they came from and each language.
 
 Every entry has a TTL. Each use renews it, up to `max_ttl_seconds`. On
 expiry the value is deleted and the metadata stays as a record. Commands:
@@ -508,7 +510,7 @@ This prompt was not sent. The value did not reach the AI.
 
 ```
 > ms:(two words)
-⚠ maisecrets did not catch this value. It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets:put.
+⚠ maisecrets did not catch this value. It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets put.
 
 This prompt was not sent. The value did not reach the AI.
 ```
@@ -549,7 +551,7 @@ This prompt was not sent. The value did not reach the AI.
   characters or more, a mix of letters, digits and signs or the randomness
   of a key; no word, no hex value, no id in capitals and digits, no date,
   version, file name or `name=value`), maisecrets stores it as
-  `/maisecrets:put` does (type SECRET) and names its placeholder, so it is masked from then on wherever it
+  `/maisecrets put` does (type SECRET) and names its placeholder, so it is masked from then on wherever it
   stands as a word of its own (glued to other letters, it is not found). A
   passphrase with spaces is stored only when each word has a letter and a
   digit or a sign; it is found again alone on a line or after `:` or `=`, not
@@ -557,7 +559,7 @@ This prompt was not sent. The value did not reach the AI.
   allows it (the answer names the line), when it is shorter than 8
   characters or has more than one line (maisecrets could not find it again),
   when it looks like ordinary text (words, a sentence, a hash, an id, a
-  command: the answer says so; store such a password with `/maisecrets:put`),
+  command: the answer says so; store such a password with `/maisecrets put`),
   when it looks like a test value (only words such as super, secret, geheim
   or test, and digits, also after a label: `passwort: supergeheim123`; the
   rules leave such a value alone on purpose, and the answer says so),
@@ -565,11 +567,11 @@ This prompt was not sent. The value did not reach the AI.
   scheduled prompt, a subagent, `claude -p`). The client's own list of earlier
   prompts (the up arrow) may keep the prompt as typed; that is not measured.
 - **Inside a prompt** (`log in with ms:(Kx7-value) and deploy`), `ms:(…)`
-  marks a value as a secret. maisecrets stores it as `/maisecrets:put` does
+  marks a value as a secret. maisecrets stores it as `/maisecrets put` does
   and puts its placeholder in place of the whole mark, also for a value no
   rule would catch. In Claude Code with the mod the prompt then goes to the AI
   with the placeholder. In Codex and without the mod the prompt is blocked,
-  and `/maisecrets:send` (or the cleaned prompt in the clipboard) sends it
+  and `/maisecrets send` (or the cleaned prompt in the clipboard) sends it
   with the placeholder. Only the exact `ms:(` counts, not glued to a word
   before it. The value ends at the first `)` before a blank, a punctuation
   sign or the end; without one at the last `)` of its line; without a `)` at
@@ -581,8 +583,8 @@ This prompt was not sent. The value did not reach the AI.
   program's prompt with `ms:(…)` stores the value too.
 - **Finding it.** Claude Code names `ms:(…)` once, under the first prompt that
   was blocked or rewritten because it carried a value; Codex names it once at
-  a session start. `/maisecrets:settings` lists it under "Feature hints", and
-  `/maisecrets:settings hints reset` shows it again.
+  a session start. `/maisecrets settings` lists it under "Feature hints", and
+  `/maisecrets settings hints reset` shows it again.
 
 In Remote Control the block notice is not shown (see "Sending a blocked
 prompt" below), so the verdict is not visible there; the value is still not
@@ -595,7 +597,7 @@ as a real customer mail, start a new session (or type `/clear`) and switch the
 demo mode on. Type it as your own prompt:
 
 ```
-/maisecrets:demo on          (Codex: maisecrets: demo on)
+/maisecrets demo on          (Codex: maisecrets: demo on)
 ```
 
 From then on, what you send stays in this session, and no prompt goes to the AI.
@@ -632,7 +634,7 @@ locked, and one line answers it:
 - **One line under your message says what was masked**, for example
   `maisecrets: demo · masked: 1 secret, 1 e-mail`. Once per session it adds
   `names: not checked` when no name service read the prompt.
-- **Names.** A name service (`/maisecrets:ner`) takes part as for a normal
+- **Names.** A name service (`/maisecrets ner`) takes part as for a normal
   prompt, also a service on the network. A name that no rule and no service
   finds stays in clear.
 - **It starts only in a new session** (or after `/clear`), so a conversation you
@@ -640,7 +642,7 @@ locked, and one line answers it:
   "Start the demo in a new session (or after /clear), so this conversation stays
   as it is."
 - **It ends only with `/clear`**, which starts a new conversation, so the demo
-  lines never go to the AI. `/maisecrets:demo off` changes nothing and says so
+  lines never go to the AI. `/maisecrets demo off` changes nothing and says so
   (in a session that is not in the demo it says "Demo mode is off in this
   session").
   A session you resume (`claude --resume`) is still in the demo: its last
@@ -650,20 +652,20 @@ locked, and one line answers it:
   you and hides what it does can still change maisecrets' files; maisecrets
   does not stop that.
 - **Your own commands keep working, in their exact form:** the settings,
-  `ms:(…)`, `/maisecrets:term`, `/maisecrets:not-a-secret`, and for example
-  `/maisecrets:status`, `/maisecrets:list`, `/maisecrets:forget KEY` or
-  `/maisecrets:put`. In Claude Code they run without the AI and show their
+  `ms:(…)`, `/maisecrets term`, `/maisecrets not-a-secret`, and for example
+  `/maisecrets status`, `/maisecrets list`, `/maisecrets forget KEY` or
+  `/maisecrets put`. In Claude Code they run without the AI and show their
   output in place of the answer; a settings change says what it changed.
-  `/maisecrets:status test`, `/maisecrets:report` and `/maisecrets:sref login`
+  `/maisecrets status test`, `/maisecrets report` and `/maisecrets sref login`
   need the AI or a browser: they say so and do not run. `status`, `ner` and
   `sref status` may check whether your name service or gateway answers; they
   send none of your text. A command with other
-  text after it gets the demo line. `/ms` and `/maisecrets:send` send nothing.
-  `/maisecrets:status` shows a `!` line while the demo is on.
+  text after it gets the demo line. `/ms` and `/maisecrets send` send nothing.
+  `/maisecrets status` shows a `!` line while the demo is on.
 - **A pasted image** goes nowhere: no request is made (measured on Claude Code
   2.1.326). maisecrets does not read the image.
 - **If the demo state cannot be read** (a damaged file), maisecrets sends no
-  prompt of any session until you type `/maisecrets:demo off`, which resets it.
+  prompt of any session until you type `/maisecrets demo off`, which resets it.
   A session whose last answer is the demo line stays in the demo after the
   reset. A session whose transcript cannot be read counts as in the demo;
   `/clear` starts a new one.
@@ -680,7 +682,7 @@ a shape needs a label or the vault command:
 - label it: `password: …`, `passwort: …`, `api_key=…` (labels in 19 languages are
   recognised; a value that is no word counts from 4 characters, after the weak label `pass`
   from 8, so `password: yes` is not a hit);
-- or copy the value and run `/maisecrets:put` in Claude Code; the placeholder
+- or copy the value and run `/maisecrets put` in Claude Code; the placeholder
   replaces the value in your clipboard. Paste the placeholder into your next
   message, and Claude uses it in commands and tool calls. Over SSH and in a
   headless session there is no clipboard: type the value after a label
@@ -762,7 +764,7 @@ shows on the screen in any mode, so a screenshot or a shared screen does not
 carry it. Its placeholder stays, with a 🔒 where the value is at hand, and a
 click copies it.
 
-Change it with `/maisecrets:settings show_values click` as your own prompt. A
+Change it with `/maisecrets settings show_values click` as your own prompt. A
 policy can set `click` or `off` for everyone. A change towards `always` is
 logged as a loosened protection.
 
@@ -794,9 +796,9 @@ logged as a loosened protection.
   2026-11-08: a memory plugin wrote the search text of its recall, built from
   tool output, into its own event log. Check what your other plugins log.
 
-**Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
+**Sending a blocked prompt.** `/maisecrets send` sends the rewritten prompt as
 it is, without the clipboard. A plugin cannot register a command without its
-namespace, so `/maisecrets:shortcut [name]` writes a personal `/ms` for it
+namespace, so `/maisecrets shortcut [name]` writes a personal `/ms` for it
 into `~/.claude/commands` when you ask for it (a fixed wrapper in
 `~/.maisecrets/bin` finds the installed plugin at run time, so it survives
 updates); an existing `/ms` is left alone, `--remove` takes it away. The first
@@ -810,9 +812,9 @@ either (reported to the vendor).
 
 Every block and every redaction leaves an event in `~/.maisecrets/events.log`
 (hook, client, rule name, type, plugin version; never a value). In Claude Code,
-`/maisecrets:report last <why it is wrong>` prepares an issue from the last
-event; `/maisecrets:report bug <what happened>` and
-`/maisecrets:report feature <what it should do>` prepare one without an event.
+`/maisecrets report last <why it is wrong>` prepares an issue from the last
+event; `/maisecrets report bug <what happened>` and
+`/maisecrets report feature <what it should do>` prepare one without an event.
 The command prints the text and a prefilled link, so it also works over ssh and
 in Remote Control. It opens no browser and files nothing: you open the link,
 check the text in GitHub's form and decide there (`--create` is gone; to file
@@ -821,7 +823,7 @@ a quoted heredoc, so a shell never reads a reported command as code.
 The CLI form is `python3 -m maisecrets.cli report …`. The value is not in the
 event, so it cannot be in the issue; describe its shape in words.
 
-A wrong hit that should stay unmasked from now on: type `/maisecrets:not-a-secret KEY` as your own prompt
+A wrong hit that should stay unmasked from now on: type `/maisecrets not-a-secret KEY` as your own prompt
 (Codex: `maisecrets: not a secret KEY`). ["A wrong hit in one step"](ADMIN.md#rules-of-your-own) says what
 it does and how `undo` takes it back.
 
@@ -835,7 +837,7 @@ plugin version. It never holds an error text, a path, a prompt, a command, a
 tool's input or output, a session id or a value; a field outside its closed
 form drops the entry. Nothing is sent.
 
-In Claude Code, type `/maisecrets:report incident`. The prompt hook shows the
+In Claude Code, type `/maisecrets report incident`. The prompt hook shows the
 report to you only; the model sees neither the report nor the link, and it works
 also while the store is damaged. Open the link, check the text in GitHub's form
 and decide there. In Codex and in a terminal, run
@@ -876,7 +878,7 @@ does not need to look like a real secret, and these forms are never a hit:
   URL, `Credential=AKIA…` in an `Authorization` header. The id names the key; it is not
   the secret half. The same id anywhere else is still found.
 
-If maisecrets stops something that is not a secret, `/maisecrets:report last <why>`
+If maisecrets stops something that is not a secret, `/maisecrets report last <why>`
 sends the rule name, never the value.
 
 ## PDFs and images
@@ -893,7 +895,7 @@ along. You decide what happens, per type:
 Send one setting as your own prompt, for example:
 
 ```
-/maisecrets:settings read_pdf convert
+/maisecrets settings read_pdf convert
 maisecrets: set read_pdf convert          (the same, and the form for Codex)
 ```
 
@@ -978,7 +980,7 @@ holds for a later Claude Code session.
 
 `clean_dirs` lists folders whose PDFs and images you know are clean (your own
 screenshots, for example). A read there is allowed:
-`/maisecrets:settings clean_dirs add ~/Pictures/Screenshots`, and `remove` the
+`/maisecrets settings clean_dirs add ~/Pictures/Screenshots`, and `remove` the
 same way. maisecrets resolves links and `..` first, so a link inside a clean
 folder that points out of it does not count. A file counts only if it was in
 the folder before the session began and has no second name (hard link): a
@@ -1035,7 +1037,7 @@ his file form, his match modes, and his rule that no message shows a term.
 **Add a name.** Type it as your own prompt:
 
 ```
-/maisecrets:term add Jan Kowalski
+/maisecrets term add Jan Kowalski
 maisecrets: term add Jan Kowalski          (the same, and the form for Codex)
 ```
 
@@ -1061,9 +1063,9 @@ A name inside a value that maisecrets stores never splits it. A password such
 as `Kowalski#Lato2024` stays one value: it is masked whole, in the prompt and
 in every later tool result, and never as a name with the rest in clear.
 
-`/maisecrets:term remove Jan Kowalski` (or
+`/maisecrets term remove Jan Kowalski` (or
 `remove ⟦NAME_c3⟧`, the placeholder copied from a result) takes it off.
-`/maisecrets:term` alone shows your lists. Only your typed prompt changes the
+`/maisecrets term` alone shows your lists. Only your typed prompt changes the
 list, as with a setting (C22): a removal in a tool call is refused.
 
 **Mark a name once.** Write `{{Jan Kowalski}}` in a prompt. maisecrets masks
@@ -1075,7 +1077,7 @@ inside a word), and one word starts with a capital letter. So
 and one common word alone (`{{A}}`, `{{The}}`). One word alone with a space
 inside the braces or with a capital inside it (`{{ Title }}`,
 `{{FirstName}}`) is the form of a template and stays text; mark a one-word
-name such as `{{McDonald}}` with `/maisecrets:term add`. A name of two or
+name such as `{{McDonald}}` with `/maisecrets term add`. A name of two or
 more words is marked in any of these forms (`{{Ronald McDonald}}`,
 `{{ Jan Kowalski }}`). A marker counts only in a
 prompt that you typed at the composer or over Remote Control, not in one that
@@ -1135,7 +1137,7 @@ fewer than 5 letters (`ret*`, `*ing`), and a stem that 3 or more words of
 that list share (`*ation*`), are left out. A line
 that fails is left out with its reason; the rest of the file loads, and a bad
 team file never stops a hook. The session start says when a team list
-changed. `/maisecrets:rules` and `maisecrets terms` show the counts, the
+changed. `/maisecrets rules` and `maisecrets terms` show the counts, the
 files and each line left out, never a term. All the team lists together
 can be up to 4 MB and 150,000 entries. A variant that an earlier entry holds
 (your own list first) is left out, and at most 16 team variants share one
@@ -1144,7 +1146,7 @@ of entries. These caps count the team lists together, in the order of
 `rule_dirs` (the folders of the machine policy first): a list that the AI
 can write can use them up and push out a list after it, as it can also
 delete lines of its own folder. The lines pushed out are named in
-`/maisecrets:rules`. A `*.terms` file that is a symbolic link is not read.
+`/maisecrets rules`. A `*.terms` file that is a symbolic link is not read.
 
 **Where the terms run.** The terms are a pass of the rule registry, after
 the built-in rules and the rules of your own; `maisecrets rules list` shows
@@ -1185,7 +1187,7 @@ lists in `~/.maisecrets/.terms-cache`.
 With 100,000 entries a new hook process loads it in about 30 ms and scans
 10 KB in 3 to 10 ms (measured on Python 3.9 and 3.14).
 After you change a list, maisecrets builds the index again at the next
-session start, or right after `/maisecrets:term add` or `remove`, so a tool
+session start, or right after `/maisecrets term add` or `remove`, so a tool
 hook only loads it. Measured for 100,000 two-word entries (3.8 MB): 1.4 s on
 Python 3.14, 2.2 s on Python 3.9. If a team list changes while a session
 runs, the next hook builds the index.

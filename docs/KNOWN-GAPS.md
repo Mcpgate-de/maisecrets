@@ -38,8 +38,8 @@ a to-do.
   maisecrets did not mask: when maisecrets stores a value later, it replaces
   the value in the transcript files on disk with `*` of the same length, but
   the AI saw it in clear text before. If maisecrets missed a name, add it with
-  `/maisecrets:term add NAME`. Without
-  NER (`/maisecrets:ner local`) maisecrets finds a name only after a label
+  `/maisecrets term add NAME`. Without
+  NER (`/maisecrets ner local`) maisecrets finds a name only after a label
   (such as `Kontaktperson:` or a
   salutation) or on your term list, and a stored name of one word only in
   the same case.

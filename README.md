@@ -35,7 +35,7 @@ machine, and the output comes back masked again. More examples: [What it looks l
 - **Checks a value first:** `ms:(your value)` tells you whether it would be caught, without sending it.
 - **Finds what leaked before:** maisecrets protects from the moment it runs. `/maisecrets:secret-hygiene` checks a
   repository, its git history and your earlier sessions for secrets that got out before; rotate what it finds.
-- **Your own rules, terms and imports:** team rule folders, `/maisecrets:term add Jan Kowalski`, values from your
+- **Your own rules, terms and imports:** team rule folders, `/maisecrets term add Jan Kowalski`, values from your
   own NER.
 - **PDFs and images:** a PDF goes to the model as masked text only, or you are asked first.
 - **Local and deterministic:** no model, no telemetry, no network request except for a service you set
@@ -85,7 +85,7 @@ codex plugin remove maisecrets@maisecrets
 
 Uninstalling keeps the stored values until their TTL ends. To delete them,
 the metadata and the logs at once, run `maisecrets wipe --yes` from the plugin
-folder (`/maisecrets:status` prints the folder):
+folder (`/maisecrets status` prints the folder):
 
 ```bash
 bash <plugin folder>/hooks/run.sh wipe --yes
@@ -96,10 +96,10 @@ the `~/.maisecrets` folder by hand. `wipe` reports when an item refused to go.
 
 ## Check that it works
 
-Start a new session and run `/maisecrets:status test` (in Codex, send `maisecrets: status test`). It prints a test
+Start a new session and run `/maisecrets status test` (in Codex, send `maisecrets: status test`). It prints a test
 value that the AI only sees as `⟦SELFTEST⟧`; type that value as your next prompt, and maisecrets answers "Self-test
-passed" without sending it. `/maisecrets:status` alone fits on one screen: a lock in the head line says whether this
-session is protected, then one short line per check (`✓`, `!` or `✗`, with the next step); `/maisecrets:status all`
+passed" without sending it. `/maisecrets status` alone fits on one screen: a lock in the head line says whether this
+session is protected, then one short line per check (`✓`, `!` or `✗`, with the next step); `/maisecrets status all`
 adds the details.
 
 ## Where you can use it today
@@ -115,17 +115,17 @@ Not yet: Gemini CLI, Cursor, Copilot CLI, OpenCode. Why: [docs/CLIENTS.md](docs/
 
 ## Everyday commands
 
-In Claude Code (Codex has no plugin slash commands; [docs/USING.md](docs/USING.md) names its forms):
+In Claude Code (`/ms NAME` is the same; `/maisecrets:NAME` needs the mod; Codex forms: [docs/USING.md](docs/USING.md)):
 
-- `/maisecrets:status`: does it protect this session? One short line per check; `/maisecrets:status all` adds the details.
+- `/maisecrets status`: does it protect this session? One short line per check; `/maisecrets status all` adds the details.
 - `ms:(your value)`: would this value be caught? Nothing is sent. [More](docs/USING.md#check-a-value-first-ms).
-- `/maisecrets:demo on`, in a new session: try it with real data. Your messages show with their values locked,
+- `/maisecrets demo on`, in a new session: try it with real data. Your messages show with their values locked,
   and no prompt goes to the AI until `/clear` (a managed Claude Code may still send `/compact`, with placeholders).
   [More](docs/USING.md#try-it-with-real-data-the-demo-mode).
 - `/maisecrets`: one panel in Claude Code for your settings, stored values and the name service, with no model turn. [More](docs/USING.md#the-maisecrets-panel-claude-code).
-- `/maisecrets:settings`: the choices you make. [More](docs/USING.md#options).
-- `/maisecrets:list`: the stored values in masked form, never a secret. [More](docs/USING.md#vault).
-- `/maisecrets:not-a-secret KEY`: a wrong hit; never mask this exact value again.
+- `/maisecrets settings`: the choices you make. [More](docs/USING.md#options).
+- `/maisecrets list`: the stored values in masked form, never a secret. [More](docs/USING.md#vault).
+- `/maisecrets not-a-secret KEY`: a wrong hit; never mask this exact value again.
   [More](docs/USING.md#reporting-a-wrong-detection).
 - `/maisecrets:secret-hygiene`: the secrets that leaked before you installed maisecrets.
   [More](docs/USING.md#secret-hygiene-skill).
@@ -150,10 +150,10 @@ In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. Th
   session id and, for a prompt, the working directory and where the prompt came from (for example the prompt box or
   Remote Control), goes to that local Python process on stdin, as JSON. The mod itself makes no network request.
   The Python process sends text off this computer only to a service you set up: the name service of
-  `/maisecrets:ner`, or a server you added that offers vault references or Sensitive References
-  (`/maisecrets:sref login`). The details:
+  `/maisecrets ner`, or a server you added that offers vault references or Sensitive References
+  (`/maisecrets sref login`). The details:
   [What the plugin runs, sends and fetches](docs/HOW-IT-WORKS.md#what-the-plugin-runs-sends-and-fetches).
-- **The demo** (`/maisecrets:demo on`): in a session in the demo, the `http.fetch` hook refuses every request that
+- **The demo** (`/maisecrets demo on`): in a session in the demo, the `http.fetch` hook refuses every request that
   Claude Code itself sends (the turns, and side requests such as the title or the next-prompt guess), and each model
   step gets one line from the mod instead of a request. The `session.compact` hook skips a compaction in that
   session, because a compaction is a model request of its own; the conversation stays as it is. When the plugin's
