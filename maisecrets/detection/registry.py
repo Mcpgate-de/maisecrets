@@ -85,10 +85,11 @@ FILTERS = {
     # JSON inside a string: the value must be escaped too. A constant's name (PROD-DB-PASS_7) and a time or a ratio
     # (0:default) after the label are no value (from a fork, danszymkowiak/maisecrets f2c9ee2, Apache-2.0)
     "ds-keyword-colon": ("escaped-label-quote", "constant-name", "time-or-ratio", "test-result", "word-after-secret",
-                         "number-list"),
-    "ds-keyword-colon-quotes-required": ("escaped-label-quote", "constant-name", "time-or-ratio", "test-result"),
-    "ds-keyword-equal-signs": ("constant-name",),
-    "generic-api-key": ("word-path", "derived-label"),
+                         "number-list", "census-count"),
+    "ds-keyword-colon-quotes-required": ("escaped-label-quote", "constant-name", "time-or-ratio", "test-result",
+                                         "census-count"),
+    "ds-keyword-equal-signs": ("constant-name", "census-count"),
+    "generic-api-key": ("word-path", "derived-label", "census-count"),   # token bound=1234 unbound=5 (#96)
     "url-query-secret": ("template-value",),                    # ?token={...}
     "auth-scheme": ("words-not-token",),                        # Bearer and words joined by - or _
     "ds-basic-auth": ("user-equals-password",),

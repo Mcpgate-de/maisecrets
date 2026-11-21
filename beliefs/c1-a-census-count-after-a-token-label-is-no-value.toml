@@ -1,0 +1,11 @@
+# c1-a-census-count-after-a-token-label-is-no-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-census-count-after-a-token-label-is-no-value"
+control = "C1"
+serves = ["M1.3"]
+statement = "After a label such as token, a lower-case word=digits with another word=digits as the next field on the line (a census of records such as bound=1234 unbound=5) is no value for generic-api-key and the colon and equal-sign keyword rules; a labelled random value stays a hit, also a digit-only one and a word=<random> one (#96)."
+runner = ["tests/test_census_count.py::CensusCountTests::test_a_census_count_after_the_word_token_is_no_secret"]
+
+[proof]
+file = "maisecrets/detection/core.py"
+find = '''            if "census-count" in filters and _census_count(text, secret, end):'''
+replace = '''            if False:'''
