@@ -1445,8 +1445,17 @@ def cmd_entry(args: list[str]) -> int:
         # the AI may not start these (disable-model-invocation): the entry file runs through the model, so a report
         # or a login starts only from report.md, sref.md or the mod's own run of the person's prompt
         what = "report" if name == "report" else "login"
-        print(f"maisecrets: the AI does not start a {what}. Send /maisecrets:{name} with its words as your own prompt "
-              f"(in Cowork: /{name}).")
+        from . import cowork
+        if not cowork.active():
+            print(f"maisecrets: the AI does not start a {what}. Send /maisecrets:{name} with its words as your own "
+                  "prompt.")
+        elif name == "sref":
+            # Cowork answers only the text form of sref (prompt_commands._cowork_sref); the word is a fixed one
+            print(f"maisecrets: the AI does not start a {what}. Send maisecrets: sref {rest[0].lower()} as your own "
+                  "prompt.")
+        else:
+            print("maisecrets: the AI does not start a report. In Cowork send maisecrets: report incident as your own "
+                  "prompt; another report starts in Claude Code in the terminal.")
         return 2
     if name == "send":
         text = take_pending(os.environ.get("CLAUDE_CODE_SESSION_ID") or None)

@@ -326,6 +326,22 @@ class EntryCliTests(unittest.TestCase):
                     self.assertEqual(cli.cmd_entry(args), 2)
                 self.assertEqual(called, [])
                 self.assertIn("as your own prompt", out.getvalue())
+                self.assertNotIn("Cowork", out.getvalue())
+
+    def test_in_cowork_the_refusal_names_the_text_form_and_no_slash_form(self):
+        # Cowork answers sref only in its text form (prompt_commands._cowork_sref): a slash form there does nothing
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"}):
+            for args, form in ((["sref", "login", "gw"], "maisecrets: sref login as your own prompt"),
+                               (["sref", "LOGOUT"], "maisecrets: sref logout as your own prompt"),
+                               (["report", "bug", "x"], "maisecrets: report incident as your own prompt")):
+                with self.subTest(args):
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        self.assertEqual(cli.cmd_entry(args), 2)
+                    said = out.getvalue()
+                    self.assertIn(form, said)
+                    self.assertNotIn("/", said.replace("maisecrets: ", ""))
+                    self.assertNotIn("gw", said)
 
 
 if __name__ == "__main__":
