@@ -41,7 +41,8 @@ def _server_fetch(cfg: dict, vault: Vault, keys: list[str], session: str | None,
 
 
 def _server_release(vault: Vault, got: dict, session: str | None, tool: str, context: str) -> tuple[dict, str | None]:
-    """The limiter record and one audit line per server value (`KEY@host`, rotated like every audit line), then
+    """The limiter record and one audit line per server value (`KEY@host`, and the gateway's audit id of a Sensitive
+    Reference's release when it sent one; rotated like every audit line), then
     the values are kept for an hour, so an echo in a later tool result is redacted to the server's token.
     Returns (key -> value, None) or ({}, the reason)."""
     if not got:
@@ -49,9 +50,10 @@ def _server_release(vault: Vault, got: dict, session: str | None, tool: str, con
     from urllib.parse import urlsplit
 
     from . import vault_refs
-    status = vault.record_server([f"{_audit_name(k)}@{urlsplit(o).hostname}" for k, (_v, o) in got.items()], session,
-                                 tool,
-                                 context)
+    names = {k: f"{_audit_name(k)}@{urlsplit(o).hostname}" for k, (_v, o) in got.items()}
+    # the gateway's audit id of a Sensitive Reference's release (sref_hooks.Got), so the person can match its audit
+    status = vault.record_server(list(names.values()), session, tool, context,
+                                 {names[k]: getattr(g, "audit_id", None) for k, g in got.items()})
     if status != "ok":
         return {}, (f"maisecrets: no value from the server is released ({status}). Tell the user.")
     vault_refs.remember_released(vault.backend, session, got)

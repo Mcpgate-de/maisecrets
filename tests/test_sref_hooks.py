@@ -724,6 +724,96 @@ class SrefBashTests(unittest.TestCase):
         self.assertIn("sref:email:" + rid[:4], audit)
         self.assertNotIn(rid, audit)
 
+    def audit_lines(self) -> list:
+        path = HOME / "audit.log"
+        return [x.split("\t") for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+    def audit_output(self) -> str:
+        import contextlib
+        import io
+
+        from maisecrets import cli
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cli.cmd_audit([]), 0)
+        return out.getvalue()
+
+    def test_the_audit_line_and_the_audit_output_name_the_gateway_audit_id(self):
+        # RESOLVER-PROFILE 12.4 (SC-28): the person finds the same release in the gateway's audit
+        self.login()
+        self.result()
+        run = self.run_command(f"printf %s {self.shown}")
+        self.assertEqual(run.stdout, VALUE)
+        self.assertEqual(len(self.srv.audit_ids), 1)
+        gid = self.srv.audit_ids[0]
+        lines = [x for x in self.audit_lines() if x[2].startswith("sref:email:")]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(len(lines[0]), 6)
+        self.assertEqual(lines[0][5], gid)
+        self.assertIn(f"(gateway audit {gid})", self.audit_output())
+
+    def test_a_file_write_names_the_gateway_audit_id_too(self):
+        self.login()
+        self.result()
+        self.write(str(self.profile / "invite.txt"), "To: " + self.shown + "\n")
+        lines = [x for x in self.audit_lines() if x[2].startswith("sref:email:")]
+        self.assertEqual([x[3] for x in lines], ["Write"])
+        self.assertEqual(lines[0][5:], self.srv.audit_ids)
+
+    def test_without_a_gateway_audit_id_the_audit_line_keeps_its_five_fields(self):
+        # an older gateway, or an id maisecrets ignores: the line is as before, and the output shows it
+        for gid in (None, "evt 1"):
+            with self.subTest(gid=gid):
+                (HOME / "audit.log").unlink(missing_ok=True)
+                self.srv.audit_id = gid
+                self.login()
+                self.result()
+                run = self.run_command(f"printf %s {self.shown}")
+                self.assertEqual(run.stdout, VALUE)
+                lines = [x for x in self.audit_lines() if x[2].startswith("sref:email:")]
+                self.assertEqual([len(x) for x in lines], [5])
+                out = self.audit_output()
+                self.assertIn("sref:email:", out)
+                self.assertNotIn("gateway audit", out)
+
+
+class AuditIdLineTests(unittest.TestCase):
+    """vault.record_server writes the gateway's audit id only with the charset of sref_client.AUDIT_ID_RE, whoever
+    calls it."""
+
+    def setUp(self) -> None:
+        HOME.mkdir(parents=True, exist_ok=True)
+        (HOME / "audit.log").unlink(missing_ok=True)
+        self.addCleanup((HOME / "audit.log").unlink, missing_ok=True)
+
+    def record(self, gid: object) -> list:
+        from maisecrets.vault import Vault
+        key = "sref:email:abcd\u2026@gw.example"
+        (HOME / "audit.log").unlink(missing_ok=True)
+        self.assertEqual(Vault({"backend": "jsonfile", "allow_plaintext_store": True}).record_server(
+            [key], "s1", "Bash", "printf x", {key: gid}), "ok")
+        return (HOME / "audit.log").read_text(encoding="utf-8").splitlines()[-1].split("\t")
+
+    def test_a_valid_id_is_the_sixth_field_and_any_other_is_left_out(self):
+        self.assertEqual(self.record("evt_7.a-B")[5:], ["evt_7.a-B"])
+        for bad in (None, 7, "", "e" * 129, "evt 7", "evt_7\tx", "evt_7\n"):
+            with self.subTest(bad=bad):
+                self.assertEqual(len(self.record(bad)), 5)
+
+
+    def test_the_audit_view_shows_a_sixth_field_only_with_the_id_charset(self):
+        import contextlib
+        import io
+        from maisecrets import cli
+        (HOME / "audit.log").write_text("t\ts1\tsref:x\tBash\tprintf x\tevt_7.a-B\n"
+                                        "t\ts1\tsref:y\tBash\tprintf y\tevil text\x1b[31m\n", encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cli.cmd_audit([]), 0)
+        self.assertIn("(gateway audit evt_7.a-B)", out.getvalue())
+        self.assertNotIn("evil text", out.getvalue())
+        self.assertNotIn("\x1b", out.getvalue())
+        self.assertIn("printf y", out.getvalue(), "the line shows, without the field")
 
 
 class ServerFormTests(unittest.TestCase):

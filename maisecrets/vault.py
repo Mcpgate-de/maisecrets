@@ -1389,9 +1389,11 @@ class Vault:
                     "(max_resolves_per_hour))"]
         return []
 
-    def _record(self, key: str, session: str | None, tool: str, context: str) -> bool:
+    def _record(self, key: str, session: str | None, tool: str, context: str, audit_id: str | None = None) -> bool:
         """One audit line per resolve. False when the line could not be written: the README
-        promises the line, so a resolve without it does not happen (review, 2026-09-26)."""
+        promises the line, so a resolve without it does not happen (review, 2026-09-26). audit_id: the gateway's
+        audit id of a Sensitive Reference's release, a sixth field only with the charset of
+        sref_client.AUDIT_ID_RE."""
         now = time.time()
         self._index.setdefault("resolves", []).append({"ts": now, "session": session, "key": key})
         try:
@@ -1405,7 +1407,11 @@ class Vault:
                     from .sref_client import SREF_RE
                     context = SREF_RE.sub(lambda m: f"⟦sref:{m.group('kind')}:{m.group('id')[:4]}…⟧", context)
                 ctx = context.replace("\n", " ").replace("\t", " ")[:160]
-                f.write(f"{stamp}\t{(session or '-')[:8]}\t{key}\t{tool}\t{ctx}\n")
+                gid = ""
+                if audit_id is not None:
+                    from .sref_client import AUDIT_ID_RE
+                    gid = f"\t{audit_id}" if isinstance(audit_id, str) and AUDIT_ID_RE.fullmatch(audit_id) else ""
+                f.write(f"{stamp}\t{(session or '-')[:8]}\t{key}\t{tool}\t{ctx}{gid}\n")
             self._rotate_audit(path)
             return True
         except OSError:
@@ -1424,14 +1430,16 @@ class Vault:
             pass
 
     @_mutating
-    def record_server(self, keys: list[str], session: str | None, tool: str, context: str) -> str:
+    def record_server(self, keys: list[str], session: str | None, tool: str, context: str,
+                      audit_ids: dict | None = None) -> str:
         """Values a server gave (vault_refs.py), named `KEY@host`: the limiter for all of them together, then one
-        audit line each. They have no entry, so the session rule of the store does not apply; vault_refs does it."""
+        audit line each. They have no entry, so the session rule of the store does not apply; vault_refs does it.
+        audit_ids: `KEY@host` -> the gateway's audit id of its release (Sensitive References), written in its line."""
         failed = self._limit_all(keys, session)
         if failed:
             return failed[0]
         for key in dict.fromkeys(keys):
-            if not self._record(key, session, tool, context):
+            if not self._record(key, session, tool, context, (audit_ids or {}).get(key)):
                 return "audit log not writable"
         self._save_index()
         return "ok"

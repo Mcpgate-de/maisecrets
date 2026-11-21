@@ -44,7 +44,8 @@ It reads no other file of yours, except through a tool call that you or the agen
   display for personal data (never for a secret), timestamps, and the session ids that may
   resolve it. It never holds a value.
 - `~/.maisecrets/audit.log` holds one line per resolve (time, session, key, tool, the
-  command with placeholders). `events.log` holds the last detections (rule and type).
+  command with placeholders; for a Sensitive Reference also the gateway's audit id of the release, when the
+  gateway sends one of 1 to 128 characters of `A-Z a-z 0-9 . _ -` that holds none of the values this gateway released). `events.log` holds the last detections (rule and type).
   `hooks.log` holds one line per hook run. `pending/` holds a blocked prompt with
   placeholders for 15 minutes. `incidents.json` and the `incident-marker.*` folders hold
   maisecrets' own internal failures as closed codes (code, cause, client, tool class, a

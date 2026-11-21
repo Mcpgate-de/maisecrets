@@ -1,0 +1,11 @@
+# c31-a-resolve-keeps-only-an-audit-id-of-the-profile-charset: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-resolve-keeps-only-an-audit-id-of-the-profile-charset"
+control = "C31"
+serves = ["M5.1"]
+statement = "A resolve keeps the audit_id of the gateway's answer only when it is a text of 1 to 128 characters of A-Z a-z 0-9 . _ -; an answer without one or with any other still gives its values."
+runner = ["tests/test_sref_client.py::SrefClientTests::test_an_audit_id_of_another_type_or_charset_or_length_is_ignored"]
+
+[proof]
+file = "maisecrets/sref_client.py"
+find = '''    return got if isinstance(got, str) and AUDIT_ID_RE.fullmatch(got) else None'''
+replace = '''    return got if isinstance(got, str) else None'''
