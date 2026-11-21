@@ -1249,12 +1249,14 @@ function drawSettings($, e) {
         const isAuto = Array.isArray(it.values) && it.values.length === 1 && it.values[0] === 'auto'
         if (isAuto) {
           cells.push(h(Box, { marginRight: 1, flexShrink: 0, key: 'auto' }, h(Button, { key: 'set:regions:auto',
-            label: `● auto${it.mark ? ' ' + it.mark : ''}`, variant: 'primary', onPress: () => pick($, 'regions', 'auto') })))
+            label: desk ? 'auto' : `● auto${it.mark ? ' ' + it.mark : ''}`, variant: 'primary',
+            onPress: () => pick($, 'regions', 'auto') })))
         } else {
           cells.push(h(Box, { marginRight: 1, key: 'v' }, h(Text, { bold: true }, it.value + (it.mark ? ` ${it.mark}` : ''))))
         }
         cells.push(h(Box, { flexShrink: 0, key: 'choose' }, h(Button, { key: 'regions:choose',
           label: isAuto ? 'choose…' : 'change…', onPress: () => { pane.sub = 'regions'; $.ui.invalidate('ui.render') } })))
+        if (desk && isAuto && it.mark === '✎') cells.push(h(Text, { dimColor: true, key: 'mark' }, 'set by you'))
       } else if (!it.choices.length) {
         cells.push(h(Text, { bold: true, key: 'v' }, it.value + (it.mark ? ` ${it.mark}` : '')))
       } else {

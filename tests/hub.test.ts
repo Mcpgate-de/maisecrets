@@ -17,7 +17,7 @@ const PANE = {
   },
 } as const
 
-function rows(rehydration: string, mark = '') {
+function rows(rehydration: string, mark = '', regionsMark = '') {
   return [
     { title: 'Protection', items: [
       { key: 'ssh_consent', label: 'Ask before ssh changes a host', value: 'off', choices: ['on', 'off'], mark: '',
@@ -30,26 +30,26 @@ function rows(rehydration: string, mark = '') {
         list: true, count: 0 }] },
     { title: 'Personal data', items: [
       { key: 'regions', label: 'Countries for personal data', value: 'auto', values: ['auto'], multi: true,
-        choices: ['auto', 'de', 'fr'], labels: {}, mark: '', locked: false }] },
+        choices: ['auto', 'de', 'fr'], labels: {}, mark: regionsMark, locked: false }] },
   ]
 }
 
 const filled: string[] = []
 
 // the panel draws at once and its status line follows in the background: draw it again until the query finds it
-async function mountWhen($, query) {
+async function mountWhen($, query, surface: 'terminal' | 'desktop' = 'terminal') {
   for (let i = 0; i < 100; i++) {
-    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const ui = await $.ui.mount({ ...PANE, surface })
     if (await ui.find(query)) return ui
     await ui.unmount()
     await new Promise(resolve => setTimeout(resolve, 10))
   }
-  return $.ui.mount({ ...PANE, surface: 'terminal' })
+  return $.ui.mount({ ...PANE, surface })
 }
 // opts: a clock the test moves, a status line per ask, the waits of $.clock.after (a recorded wait never ends)
 function engine(on, calls: any[], opened: { placed: boolean },
   opts: { clock?: { t: number }, line?: (n: number) => string, waits?: number[], delay?: (n: number) => number,
-    offer?: string | null, connector?: any, logs?: string[], pending?: boolean } = {}) {
+    offer?: string | null, connector?: any, logs?: string[], pending?: boolean, regionsMark?: string } = {}) {
   let asked = 0
   on('clock.now', () => ({ value: opts.clock ? opts.clock.t : 1_000_000 }))
   on('session.id', () => ({ value: 'sess-1' }))
@@ -95,7 +95,7 @@ function engine(on, calls: any[], opened: { placed: boolean },
     if (q.action === 'ner_set') return answer({ ...NER, source: 'gateway', gateway_name: 'team-gw', note: 'set',
       login: 'team-gw' })
     return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({
-      maisecrets: ENTRY, groups: rows(set ? q.value : 'automatic', set ? '✎' : ''),
+      maisecrets: ENTRY, groups: rows(set ? q.value : 'automatic', set ? '✎' : '', opts.regionsMark ?? ''),
       note: set ? 'Saved. Stored values in tool calls is confirm (set by you).' : null, more: 11, config_only: [],
     }) } }
   })
@@ -156,6 +156,21 @@ test('the pane lists the settings, and a press changes the value through the ent
   expect((await desk.find({ key: 'set:rehydration:confirm' }))?.text).toBe('confirm')
   expect(await desk.find({ type: 'Text', text: /^set by you$/ })).toBeDefined()
   await desk.unmount()
+})
+
+test('in the desktop app the countries set to auto by the person are a filled button without a dot', async ($, on) => {
+  engine(on, [], { placed: true }, { regionsMark: '✎' })
+  await $.prompt.submit({ text: '/maisecrets:settings', wait: false, origin: { kind: 'composer' },
+    command: { name: 'maisecrets:settings', args: '' } })
+  // the rows of an earlier answer draw first; the fresh answer follows in the background
+  const desk = await mountWhen($, { type: 'Text', text: /^set by you$/ }, 'desktop')
+  expect(await desk.find({ type: 'Text', text: /^set by you$/ })).toBeDefined()
+  expect((await desk.find({ key: 'set:regions:auto' }))?.text).toBe('auto')
+  await desk.unmount()
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await term.find({ key: 'set:regions:auto' }))?.text).toMatch(/● auto ✎/)
+  expect(await term.find({ type: 'Text', text: /^set by you$/ })).toBeUndefined()
+  await term.unmount()
 })
 
 test('/maisecrets alone opens the same pane: a status line, the views, and the old-leaks button', async ($, on) => {
