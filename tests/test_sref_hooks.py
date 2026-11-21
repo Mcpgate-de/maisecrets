@@ -801,6 +801,20 @@ class AuditIdLineTests(unittest.TestCase):
                 self.assertEqual(len(self.record(bad)), 5)
 
 
+    def test_the_audit_view_shows_a_sixth_field_only_with_the_id_charset(self):
+        import contextlib
+        import io
+        from maisecrets import cli
+        (HOME / "audit.log").write_text("t\ts1\tsref:x\tBash\tprintf x\tevt_7.a-B\n"
+                                        "t\ts1\tsref:y\tBash\tprintf y\tevil text\x1b[31m\n", encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cli.cmd_audit([]), 0)
+        self.assertIn("(gateway audit evt_7.a-B)", out.getvalue())
+        self.assertNotIn("evil text", out.getvalue())
+        self.assertNotIn("\x1b", out.getvalue())
+        self.assertIn("printf y", out.getvalue(), "the line shows, without the field")
+
 
 class ServerFormTests(unittest.TestCase):
     def test_an_encoded_form_of_a_short_server_value_is_not_encoded_again(self):

@@ -1056,7 +1056,10 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
         values = answer.get("values")
         if isinstance(values, dict) and all(isinstance(values.get(r), str) for r in canon):
             out = Resolved((r, values[r]) for r in canon)
-            out.audit_id = audit_id_of(answer)
+            gid = audit_id_of(answer)
+            # an id that holds a released value is dropped: the audit never holds a value (C9), also when a gateway
+            # sends one by mistake
+            out.audit_id = None if gid is not None and any(v and v in gid for v in out.values()) else gid
             return out
         raise Refused(f"{host} gave no usable answer (a value is missing or not text)")
     code = answer.get("error")

@@ -150,6 +150,15 @@ class SrefClientTests(unittest.TestCase):
         got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
         self.assertEqual(got.audit_id, "e" * 128)
 
+    def test_an_audit_id_that_holds_a_released_value_is_dropped(self):
+        # the audit never holds a value (C9): a gateway that sends a value as the id by mistake gets no id kept
+        self.login()
+        ref = self.srv.mint("token", "tok_" + "Rx7Qm2Vb4Np8")
+        self.srv.audit_id = "evt-" + "tok_" + "Rx7Qm2Vb4Np8"
+        got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+        self.assertEqual(got, {ref: "tok_" + "Rx7Qm2Vb4Np8"})
+        self.assertIsNone(got.audit_id)
+
     def test_a_refusal_carries_no_audit_id_and_refuses_as_before(self):
         # every refusal of the gateway (409, 429, ...) comes without an audit_id; the client refuses as before
         self.login()

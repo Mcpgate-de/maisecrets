@@ -229,7 +229,10 @@ def cmd_audit(args: list[str], usage: str = "usage: audit [n]") -> int:
         parts = line.split("\t")
         if len(parts) in (5, 6):
             # a sixth field: the gateway's audit id of a Sensitive Reference's release, to find it in that audit
-            gid = f"  (gateway audit {parts[5]})" if len(parts) == 6 else ""
+            # checked again here: a line of the file with any other sixth field shows without it
+            from .sref_client import AUDIT_ID_RE
+            gid = (f"  (gateway audit {parts[5]})" if len(parts) == 6 and AUDIT_ID_RE.fullmatch(parts[5])
+                   else "")
             print(f"{parts[0]:<20} {parts[1]:<8} {parts[2]:<14} {parts[3][:15]:<15} {parts[4]}{gid}")
     return 0
 
