@@ -8,6 +8,11 @@ For each scenario:
      expected placeholders do; the transcript on disk carries no secret either
   4. diff hook payload keys against harness/golden/<event>.json
 
+The client runs with a client configuration folder of its own: when CLAUDE_CONFIG_DIR is not set, the harness makes a
+new temp folder for it (and gives the client a dummy API key for the fake upstream), so no session start and no
+scenario reads or writes the person's own Claude Code configuration (~/.claude: settings, commands, sessions). A
+session start of the plugin under test writes there (the /ms shortcut upgrade rewrote a person's own command once).
+
 Usage: python3 harness/run.py [--update-golden] [scenario ...]
 """
 from __future__ import annotations
@@ -875,7 +880,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # the production rule: the account the synced copy registered under must be the one Claude Code runs
         # as. Its ids come from the account file the real client uses; without one (CI) the rule is "always"
         try:
-            acc = json.loads((Path.home() / ".claude.json").read_text()).get("oauthAccount") or {}
+            acc = json.loads((_client_dir() / ".claude.json").read_text()).get("oauthAccount") or {}
             account = f"{acc['organizationUuid']}_{acc['accountUuid']}"
         except (OSError, ValueError, KeyError, TypeError):
             account = ""
@@ -1106,12 +1111,12 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         if sid:
             session_ids.add(sid)
     time.sleep(2)   # the blocked prompt's record is scrubbed by a detached child shortly after the session ends
-    transcripts = [t for sid in session_ids for t in (Path.home() / ".claude" / "projects").glob(f"*/{sid}.jsonl")]
+    transcripts = [t for sid in session_ids for t in (_client_dir() / "projects").glob(f"*/{sid}.jsonl")]
     if not session_ids and sc.get("expect_dropped"):
         # a prompt the mod dropped reaches no hook, so no payload names the session: the project folder of this
         # run's working directory does (Claude Code writes '_' as '-')
         slug = re.sub(r"[^A-Za-z0-9-]", "-", work.name)
-        transcripts = list((Path.home() / ".claude" / "projects").glob(f"*{slug}-proj/*.jsonl"))
+        transcripts = list((_client_dir() / "projects").glob(f"*{slug}-proj/*.jsonl"))
         if not transcripts:
             fails.append("transcript not found for the dropped prompt; the on-disk check did not run")
     if session_ids and not transcripts:
@@ -1222,7 +1227,7 @@ def _selftest_second_prompt(sc: dict, home: Path, first: str, r, settings: Path,
     # the client's own record of the session on disk: measured, not asserted (a hook cannot replace what the
     # client writes there before it runs)
     sids = {json.loads(pf.read_text()).get("session_id") for pf in Path(env["MAISECRETS_DUMP"]).glob("*.json")}
-    held = [t.name for sid in sids if sid for t in (Path.home() / ".claude" / "projects").glob(f"*/{sid}.jsonl")
+    held = [t.name for sid in sids if sid for t in (_client_dir() / "projects").glob(f"*/{sid}.jsonl")
             if value in t.read_text(errors="ignore")]
     if held:
         print(f"     ~ the test value stands in {len(held)} local transcript(s) of this run (not sent upstream)")
@@ -1239,7 +1244,26 @@ def _installed_guard() -> bool:
     return "maisecrets-guard.py" in text and (claude / "maisecrets-guard.py").is_file()
 
 
+def _client_dir() -> Path:
+    """The client configuration folder the scenarios run with (client_config): its transcripts are this run's."""
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
+def client_config() -> Path:
+    """The client configuration folder of this run: CLAUDE_CONFIG_DIR as given, else a new temp folder (with the
+    onboarding done and a dummy API key for the fake upstream). Never the person's own ~/.claude."""
+    given = os.environ.get("CLAUDE_CONFIG_DIR")
+    if given:
+        return Path(given)
+    cfg = Path(tempfile.mkdtemp(prefix="maisecrets-harness-client-"))
+    (cfg / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True, "numStartups": 5}))
+    os.environ["CLAUDE_CONFIG_DIR"] = str(cfg)
+    os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-harness-dummy")
+    return cfg
+
+
 def main() -> int:
+    print(f"client configuration: {client_config()}")
     update = "--update-golden" in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith("--")] or list(SCENARIOS)
     if shutil.which("claude") is None:
