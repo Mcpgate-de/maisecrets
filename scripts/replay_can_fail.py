@@ -170,7 +170,7 @@ def restored_on_any_exit(target: Path, original: str):
     previous = {}
 
     def restore_and_die(signum, _frame):
-        target.write_text(original, encoding="utf-8")
+        target.write_bytes(original.encode("utf-8"))
         signal.signal(signum, previous.get(signum, signal.SIG_DFL))
         raise SystemExit(128 + signum)
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
@@ -181,7 +181,7 @@ def restored_on_any_exit(target: Path, original: str):
     try:
         yield
     finally:
-        target.write_text(original, encoding="utf-8")
+        target.write_bytes(original.encode("utf-8"))
         for sig, handler in previous.items():
             signal.signal(sig, handler)
 
@@ -232,18 +232,18 @@ def _check_mutation(target: Path, mutated: str) -> str | None:
 def _replay_one(belief: dict, proof: dict, root: Path = ROOT) -> tuple[bool, str, set[str]]:
     """Apply one mutation, run the owning tests, restore. Returns (red, why, the red test ids)."""
     target = root / proof["file"]
-    original = target.read_text(encoding="utf-8")
+    original = target.read_bytes().decode("utf-8")   # bytes: a CRLF file comes back byte for byte
     n = original.count(proof["find"])
     if n != 1:
         return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)", set()
     with restored_on_any_exit(target, original):
         mutated = original.replace(proof["find"], proof["replace"], 1)
-        target.write_text(mutated, encoding="utf-8")
+        target.write_bytes(mutated.encode("utf-8"))
         bad = _check_mutation(target, mutated)
         if bad:
             return False, bad, set()
         rc, outcomes = run_tests(belief["runner"], root, belief["belief"])
-    if target.read_text(encoding="utf-8") != original:
+    if target.read_bytes().decode("utf-8") != original:
         return False, "the file was not restored", set()
     if rc == SKIPPED:
         return False, "an owning test was skipped under the mutation; a skip is no evidence", set()
