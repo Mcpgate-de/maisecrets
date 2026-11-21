@@ -220,8 +220,13 @@ def audit_name(key: str) -> str:
     return key
 
 
+class Got(tuple):
+    """(value, origin) of one released reference, with `audit_id`: the gateway's audit id of the release, or None."""
+    audit_id: str | None = None
+
+
 def fetch(cfg: dict, backend, keys: list[str], session: str | None, sink: tuple[str, str]) -> dict:
-    """key -> (value, origin) for each Sensitive Reference, from the resolver of the gateway that sent it, all or
+    """key -> Got (value, origin) for each Sensitive Reference, from the resolver of the gateway that sent it, all or
     none; raises Refused (fixed text and counts only) otherwise."""
     from urllib.parse import urlsplit
 
@@ -242,7 +247,9 @@ def fetch(cfg: dict, backend, keys: list[str], session: str | None, sink: tuple[
                                       "once (in Codex: run.sh sref login)")
         canon = {k: sref_client.find(f"⟦{k}⟧")[0][1] for k in ks}
         values = sref_client.resolve(cfg, backend, found, list(dict.fromkeys(canon.values())), sink[0], sink[1])
-        out.update({k: (values[c], origin) for k, c in canon.items()})
+        for k, c in canon.items():
+            out[k] = Got((values[c], origin))
+            out[k].audit_id = getattr(values, "audit_id", None)
     return out
 
 

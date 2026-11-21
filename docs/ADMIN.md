@@ -134,7 +134,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 60 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 19 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 498 proofs: each control's test, and each path of the 17 invariant beliefs, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 500 proofs: each control's test, and each path of the 17 invariant beliefs, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -195,7 +195,8 @@ allow list (both lists of strings; see "Rules of your own").
 **What is written where.** `~/.maisecrets/index.json` holds metadata and keyed
 fingerprints, a masked display for PII, and session ids; metadata of an expired
 value is deleted after `keep_purged_days` (30). `audit.log` holds one line per
-resolve (time, session, key, tool, the command with placeholders; capped at
+resolve (time, session, key, tool, the command with placeholders; for a Sensitive
+Reference also the gateway's audit id of the release, when the gateway sends one; capped at
 `audit_max_lines`). `events.log` holds the last 200 detections (rule name and
 type). `pending/` holds a blocked prompt with placeholders for 15 minutes.
 `incidents.json` holds maisecrets' own internal failures as closed codes (at most
@@ -933,7 +934,11 @@ resolve, output that prints the value shows the reference instead.
 4. For an hour after a resolve, output that prints the value shows the
    reference instead. An error names the reason and a count, never a value. The
    audit (`/maisecrets:audit`) names each resolve with the kind of the
-   reference and 4 characters of its id.
+   reference and 4 characters of its id. When the gateway sends the id of its
+   own audit event for the release (`audit_id`), the line shows it as
+   `(gateway audit <id>)`, so you can find the same release in the gateway's
+   audit. maisecrets keeps only an id of 1 to 128 characters of `A-Z a-z 0-9 . _ -`
+   and ignores any other.
 
 The gateway decides who may resolve and which sinks it allows; maisecrets
 adds the session rule on your computer (`docs/THREAT-MODEL.md`, C31).

@@ -47,6 +47,8 @@ SINKS = {"local_file": "local-file-1", "process": "process-1", "display": "displ
 _PROFILE_TYPES = {"local-file-1": "local_file", "process-1": "process", "mcpgate-process-1": "process",
                   "display-1": "display"}
 MAX_REFS = 100
+# the id of the audit event the gateway wrote for a release (RESOLVER-PROFILE 12.4, SC-28): opaque, only this charset
+AUDIT_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
 MAX_REQUEST_BYTES = 64 * 1024
 BUDGET = 8.0
 # a command the person typed (sref login, sref status): no hook watchdog waits, and a slow mobile network needed more
@@ -996,14 +998,27 @@ def _counts(reasons: object, batch: int) -> str:
     return ", ".join(parts)
 
 
+def audit_id_of(answer: object) -> str | None:
+    """The gateway's audit id of a resolve answer, or None: only a text of 1 to 128 characters of A-Z a-z 0-9 . _ -.
+    An older gateway sends none; anything else is ignored, so the audit never carries a text the gateway chose."""
+    got = answer.get("audit_id") if isinstance(answer, dict) else None
+    return got if isinstance(got, str) and AUDIT_ID_RE.fullmatch(got) else None
+
+
+class Resolved(dict):
+    """canonical reference -> value, with `audit_id`: the gateway's audit id of this release, or None."""
+    audit_id: str | None = None
+
+
 def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destination: str,
             deadline: float | None = None) -> dict:
     """canonical reference -> value for every reference, or Refused (with counts, never a value or an id). All or
-    nothing. sink_type is "local_file" (destination: the file's path) or "process" (the command's name)."""
+    nothing. sink_type is "local_file" (destination: the file's path) or "process" (the command's name). The answer
+    is a Resolved: its audit_id is the gateway's audit id of the release, when the gateway sent a valid one."""
     deadline = deadline if deadline is not None else time.monotonic() + BUDGET
     canon = list(dict.fromkeys(refs))
     if not canon:
-        return {}
+        return Resolved()
     host = urlsplit(found["origin"]).hostname
     if sink_type not in SINKS:
         raise Refused("unknown sink type")
@@ -1040,7 +1055,9 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
     if status == 200:
         values = answer.get("values")
         if isinstance(values, dict) and all(isinstance(values.get(r), str) for r in canon):
-            return {r: values[r] for r in canon}
+            out = Resolved((r, values[r]) for r in canon)
+            out.audit_id = audit_id_of(answer)
+            return out
         raise Refused(f"{host} gave no usable answer (a value is missing or not text)")
     code = answer.get("error")
     if status == 409 and code == "unresolvable":

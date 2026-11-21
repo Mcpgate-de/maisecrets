@@ -1,0 +1,11 @@
+# c31-the-audit-writes-only-a-gateway-audit-id-of-the-profile-charset: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-the-audit-writes-only-a-gateway-audit-id-of-the-profile-charset"
+control = "C31"
+serves = ["M5.1"]
+statement = "An audit line names the gateway's audit id of a release only when it is a text of 1 to 128 characters of A-Z a-z 0-9 . _ -; any other id leaves the line at its five fields, so the audit carries no text the gateway chose."
+runner = ["tests/test_sref_hooks.py::AuditIdLineTests::test_a_valid_id_is_the_sixth_field_and_any_other_is_left_out"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = '''                    gid = f"\t{audit_id}" if isinstance(audit_id, str) and AUDIT_ID_RE.fullmatch(audit_id) else ""'''
+replace = '''                    gid = f"\t{audit_id}"'''

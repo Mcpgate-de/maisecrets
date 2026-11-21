@@ -137,6 +137,53 @@ class SrefClientTests(unittest.TestCase):
         self.assertEqual([(r["sink_type"], r["destination"], r["count"]) for r in self.srv.resolved],
                          [("local_file", "/tmp/invite.txt", 2), ("process", "curl", 1)])
 
+    def test_a_resolve_keeps_the_audit_id_of_the_gateway(self):
+        # RESOLVER-PROFILE 12.4 (SC-28): the id of the audit event the gateway wrote for this release
+        self.login()
+        ref = self.srv.mint("email", VALUE_MAIL)
+        got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+        self.assertEqual(got, {ref: VALUE_MAIL})
+        self.assertEqual(len(self.srv.audit_ids), 1)
+        self.assertEqual(got.audit_id, self.srv.audit_ids[0])
+        self.assertRegex(got.audit_id, r"\A[A-Za-z0-9_-]{22}\Z", "the gateway's form, token_urlsafe(16)")
+        self.srv.audit_id = "e" * 128                      # the longest id the profile allows
+        got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+        self.assertEqual(got.audit_id, "e" * 128)
+
+    def test_a_refusal_carries_no_audit_id_and_refuses_as_before(self):
+        # every refusal of the gateway (409, 429, ...) comes without an audit_id; the client refuses as before
+        self.login()
+        good, gone = self.srv.mint("email", VALUE_MAIL), self.srv.mint("name", VALUE_NAME)
+        self.srv.revoke(gone)
+        with self.assertRaises(S.Refused) as cm:
+            S.resolve(self.cfg, self.backend, self.found, [good, gone], "local_file", "/tmp/a.txt")
+        self.assertIn("resolved none of the 2 references (1 revoked)", str(cm.exception))
+        self.srv.quota = 0
+        with self.assertRaises(S.Refused) as cm:
+            S.resolve(self.cfg, self.backend, self.found, [good], "process", "mail")
+        self.assertIn("daily limit", str(cm.exception))
+        self.assertEqual(self.srv.audit_ids, [], "no release, no audit event of the gateway")
+        self.assertEqual(self.srv.resolved, [])
+
+    def test_a_resolve_without_an_audit_id_still_gives_the_values(self):
+        # an older gateway sends no audit_id
+        self.login()
+        self.srv.audit_id = None
+        ref = self.srv.mint("email", VALUE_MAIL)
+        got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+        self.assertEqual(got, {ref: VALUE_MAIL})
+        self.assertIsNone(got.audit_id)
+
+    def test_an_audit_id_of_another_type_or_charset_or_length_is_ignored(self):
+        self.login()
+        ref = self.srv.mint("email", VALUE_MAIL)
+        for bad in (123, ["evt_1"], {"id": "evt_1"}, True, "", "e" * 129, "evt 1", "evt_1\n", "evt/1", "evt:1",
+                    "évt_1", "evt_1\t" + VALUE_MAIL):
+            self.srv.audit_id = bad
+            got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+            self.assertEqual(got, {ref: VALUE_MAIL}, repr(bad))
+            self.assertIsNone(got.audit_id, repr(bad))
+
     def test_one_bad_reference_refuses_the_whole_batch_with_counts_only(self):
         self.login()
         good, gone = self.srv.mint("email", VALUE_MAIL), self.srv.mint("name", VALUE_NAME)

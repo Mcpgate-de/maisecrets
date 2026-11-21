@@ -208,7 +208,8 @@ def cmd_resolve(args: list[str]) -> int:
 
 def cmd_audit(args: list[str], usage: str = "usage: audit [n]") -> int:
     """The last resolves: when, which session, which key, which tool, the command with its
-    placeholders. Values are never written here. `usage`: the form the person typed (list uses)."""
+    placeholders, and the gateway's audit id of a Sensitive Reference's release. Values are never
+    written here. `usage`: the form the person typed (list uses)."""
     from .vault import HOME
     try:
         n = int(args[0]) if args else 20
@@ -226,8 +227,10 @@ def cmd_audit(args: list[str], usage: str = "usage: audit [n]") -> int:
     print("time                 session  placeholder    tool            command")
     for line in lines:
         parts = line.split("\t")
-        if len(parts) == 5:
-            print(f"{parts[0]:<20} {parts[1]:<8} {parts[2]:<14} {parts[3][:15]:<15} {parts[4]}")
+        if len(parts) in (5, 6):
+            # a sixth field: the gateway's audit id of a Sensitive Reference's release, to find it in that audit
+            gid = f"  (gateway audit {parts[5]})" if len(parts) == 6 else ""
+            print(f"{parts[0]:<20} {parts[1]:<8} {parts[2]:<14} {parts[3][:15]:<15} {parts[4]}{gid}")
     return 0
 
 

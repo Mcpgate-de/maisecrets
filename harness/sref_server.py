@@ -10,7 +10,8 @@
 - `POST /auth/token`: the code (with its verifier) or a refresh token for an access token of one hour and a refresh
   token that rotates on each use.
 - `POST /sensitive-references/resolve`: all values or one error with counts (`unresolvable` 409, `quota_exceeded`
-  429, `ineligible_sink` 403, `invalid_token` 401), as the contract says.
+  429, `ineligible_sink` 403, `invalid_token` 401), as the contract says. A success names the gateway's audit event
+  of the release (`audit_id`, RESOLVER-PROFILE 12.4); `audit_id = None` answers without it, as an older gateway.
 
 `mint(kind, value)` makes a canonical reference; `revoke(ref)` withdraws one; `withdraw()` ends the consent, so every
 token dies. Every resolve is recorded in `resolved` (sink type, destination, count; never a value). Standard library
@@ -72,6 +73,10 @@ class SrefServer:
         self.ner_texts: list = []        # every text the name endpoint got
         self.ner_word = "Okafor"         # the endpoint finds this word as a person
         self.ner_delay = 0.0             # seconds the endpoint waits before it answers
+        # RESOLVER-PROFILE 12.4 (SC-28): a success names the audit event of the release; a refusal never does. "auto":
+        # a new id per success (kept in `audit_ids`); None: no field, as an older gateway; anything else as it is
+        self.audit_id: object = "auto"
+        self.audit_ids: list = []
         # the protected resource document of /mcp: each GET takes the next delay of this list (seconds) before it
         # answers, and each GET while `discovery_drops` is above 0 closes the connection without an answer
         self.discovery_delays: list = []
@@ -314,7 +319,13 @@ class SrefServer:
                     return self._send(429, {"error": "quota_exceeded"})
                 server.used += len(refs)
                 server.resolved.append({"sink_type": sink, "destination": dest, "count": len(refs)})
-                return self._send(200, {"values": {r: server.values[r] for r in refs}})
+                answer = {"values": {r: server.values[r] for r in refs}}
+                if server.audit_id == "auto":
+                    answer["audit_id"] = secrets.token_urlsafe(16)    # the gateway's form: 22 of [A-Za-z0-9_-]
+                    server.audit_ids.append(answer["audit_id"])
+                elif server.audit_id is not None:
+                    answer["audit_id"] = server.audit_id
+                return self._send(200, answer)
 
         self.httpd = _QuietServer(("127.0.0.1", 0), Handler)
         ctx = __import__("ssl").SSLContext(__import__("ssl").PROTOCOL_TLS_SERVER)
