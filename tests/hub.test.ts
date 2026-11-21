@@ -498,24 +498,19 @@ test('the panel asks for the status again when it takes the keys back', async ($
   await ui.unmount()
 })
 
-// `/maisecrets sref login`, typed with a space: when the prompt check gives no answer, the command with its colon goes
-// into the box, and nothing is sent (with an answer it runs as the colon form: tests/mod.test.ts)
-test('a maisecrets command typed after /maisecrets with a space goes into the box with its colon', async ($, on) => {
+// `/maisecrets sref login` in prompt.submit (Cowork, where it is the plugin's entry): when the prompt check gives no
+// answer, it goes on as typed, and the prompt hook decides it (with an answer it runs as the colon form:
+// tests/mod.test.ts). Nothing goes into the box
+test('a maisecrets command typed after /maisecrets with a space and no answer goes on as typed', async ($, on) => {
   const calls: any[] = []
   engine(on, calls, { placed: true })
   filled.length = 0
   const r = await $.prompt.submit({ text: '/maisecrets sref login', wait: false, origin: { kind: 'composer' },
     command: { name: 'maisecrets', args: 'sref login' } })
-  expect(r.drop).toBe('maisecrets: I put /maisecrets:sref login into the input box. Press Enter to run it, or clear '
-    + 'the box.')
+  expect(r.drop).toBeUndefined()
   await settle()
-  expect(filled).toContain('/maisecrets:sref login')
-  // the demo's question for an own command (as for the colon form), then the value check of the filled command; no
-  // settings entry (the demo's question tries each Python: this engine answers none of them)
-  expect(calls.length).toBeGreaterThan(1)
-  expect([...new Set(calls.map(c => c.argv[c.argv.length - 1]))]).toEqual(['mod-' + 'demo', 'mod-' + 'prompt'])
-  expect(JSON.parse(calls[calls.length - 1].init.stdin)).toMatchObject({ prompt: '/maisecrets:sref login',
-    fill_check: true })
+  expect(filled).toEqual([])
+  expect(calls.some(c => JSON.parse(c.init.stdin || '{}').fill_check === true)).toBe(false)
 })
 
 test('/maisecrets settings with a space opens the panel as the colon form does; /maisecrets alone goes to the menu',

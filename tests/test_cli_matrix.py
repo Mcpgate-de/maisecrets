@@ -720,6 +720,42 @@ class StateMatrixTests(unittest.TestCase):
         self.addCleanup(sb.remove)
         return sb, sb.run(*args, stdin=stdin)
 
+    def test_the_entry_runs_the_command_its_first_word_names(self):
+        # commands/maisecrets.md: `run.sh entry --args-stdin` with the typed words on stdin
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="list\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r"SECRET_c1\s+SECRET")
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="status\n")
+        self.assertIn("maisecrets", r.stdout)
+        # a word that is no command runs nothing and is never echoed
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="wibblewobble SECRET_c1\n")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no maisecrets command. Nothing ran.", r.stdout)
+        self.assertNotIn("wibblewobble", r.stdout + r.stderr)
+        # a command only the person's prompt gives changes nothing here, and its words are never echoed
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="not-a-secret SECRET_c1\n")
+        self.assertIn("only when you type it as your own prompt", r.stdout)
+        self.assertNotIn("not_a_secret", " ".join(p.name for p in sb.home.iterdir()))
+        sb, r = self._run("live", "entry", "--args-stdin", stdin="term add Wibbleton Q\n")
+        self.assertNotIn("Wibbleton", r.stdout + r.stderr)
+
+    def test_the_entry_alone_sends_the_blocked_prompt_or_shows_the_overview(self):
+        sb = base_state("live").copy()
+        self.addCleanup(sb.remove)
+        pending = sb.home / "pending"
+        shutil.rmtree(pending, ignore_errors=True)
+        r = sb.run("entry", "--args-stdin", stdin="\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Commands: /maisecrets NAME", r.stdout)
+        self.assertIn("not-a-secret", r.stdout)
+        pending.mkdir(mode=0o700, exist_ok=True)
+        (pending / "S1.txt").write_text("deploy with the key", encoding="utf-8")
+        env = sb.env()
+        env["CLAUDE_CODE_SESSION_ID"] = "S1"
+        r = sb.run("entry", "--args-stdin", stdin="\n", env=env)
+        self.assertEqual(r.stdout, "(maisecrets: the blocked prompt follows)\ndeploy with the key\n")
+        self.assertFalse((pending / "S1.txt").exists(), "a sent prompt is sent once")
+
     def test_list_and_status_show_an_expired_entry_as_expired(self):
         sb, r = self._run("expired-purged", "list")
         self.assertIn("0 value(s) stored, 1 expired", r.stdout)

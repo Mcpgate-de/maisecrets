@@ -2,6 +2,7 @@
 description: "Show whether maisecrets protects this session now"
 argument-hint: "[all | test]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status), Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status all), Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status test), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status all), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status test)
+user-invocable: false
 ---
 
 The arguments are: `$ARGUMENTS`

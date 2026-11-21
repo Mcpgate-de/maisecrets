@@ -692,12 +692,23 @@ const SETTINGS_CMD = /^\s*\/maisecrets:settings(?:\s+(?:all|--all))?\s*$/i
 const COMMANDS = ['audit', 'demo', 'forget', 'guard', 'list', 'ner', 'not-a-secret', 'put', 'report', 'rules', 'send',
   'settings', 'shortcut', 'sref', 'status', 'term']
 const SPACED_CMD = /^\s*\/maisecrets\s+([^\s]+)(.*)$/s
-// the command meant by `/maisecrets WORD REST`: `/maisecrets:WORD REST`, or null for no command of maisecrets
+// the one entry (commands/maisecrets.md, commands/ms.md, prompt_commands.canonical): `/maisecrets NAME ARGS`, `/ms NAME
+// ARGS`, `/maisecrets:maisecrets NAME ARGS` and `/maisecrets:ms NAME ARGS` mean `/maisecrets:NAME ARGS`. The entry
+// alone (`/ms`, `/maisecrets:ms`, `/maisecrets:maisecrets`) is `/maisecrets:maisecrets`: the blocked prompt, else the
+// overview. `/maisecrets` alone is the mod's own command, the panel
+const ENTRY_CMD = /^\s*\/(?:maisecrets(?::(?:maisecrets|ms))?|ms)(?:[ \t]+([^\s]+)([^\r\n]*))?\s*$/i
+const ENTRY_ALONE = '/maisecrets:maisecrets'
+// the command meant by an entry form: its colon form, or null for no command of maisecrets
 function meantCommand(text) {
-  const m = SPACED_CMD.exec(typeof text === 'string' ? text : '')
-  if (!m || !COMMANDS.includes(m[1].toLowerCase())) return null
+  const m = ENTRY_CMD.exec(typeof text === 'string' ? text : '')
+  if (!m) return null
+  if (m[1] === undefined) return /^\s*\/maisecrets\s*$/i.test(text) ? null : ENTRY_ALONE
+  if (!COMMANDS.includes(m[1].toLowerCase())) return null
   return `/maisecrets:${m[1].toLowerCase()}${m[2].replace(/\s+$/, '')}`
 }
+// the commands whose command file the client refuses when the person types it (user-invocable: false): the mod's
+// command.run hook sees them first and runs them as their colon form. report and sref stay the person's own
+const HIDDEN = COMMANDS.filter(n => n !== 'report' && n !== 'sref')
 // the number of single-letter changes (insert, delete, replace, swap of two neighbours) from a to b
 function editDistance(a, b) {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
@@ -1279,12 +1290,12 @@ function takeKeysSoon($, args = openArgs) {
 // in a toast. Codex, claude -p (origin sdk) and a client without mods keep the command files.
 const RUN_ORIGINS = new Set(['composer', 'bridge'])
 const RUN_NAMES = ['audit', 'forget', 'guard', 'list', 'ner', 'put', 'report', 'rules', 'send', 'settings', 'shortcut',
-  'sref', 'status', 'term']
+  'sref', 'status', 'term', 'maisecrets']
 const RUN_CMD = new RegExp(`^\\s*/maisecrets:(?:${RUN_NAMES.join('|')})(?:[ \\t][^\\r\\n]*)?\\s*$`, 'i')
 // the entries of hooks/dispatch.py a run may start, and the words of its command line: fixed words only, the typed
 // arguments go on stdin (--args-stdin), as in the command files
 const RUN_ENTRIES = new Set(['audit', 'forget', 'guard', 'list', 'ner', 'put', 'report', 'rules', 'settings',
-  'shortcut', 'sref', 'status', 'terms', 'pending'])
+  'shortcut', 'sref', 'status', 'terms', 'pending', 'entry'])
 const RUN_WORD = /^(?:[a-z]+|--[a-z-]+)$/
 const RUN_MS = 30000
 const LONG_MS = 130000          // the login waits up to 110 s for the consent (cli.cmd_sref)
@@ -1295,6 +1306,9 @@ const SESSION_RE = /^[A-Za-z0-9_-]{1,128}$/
 const SERVER_RE = /^[\w.-]{1,64}$/
 // the notes of `run.sh pending` (hooks.NOTHING_WAITING, TWO_WAITING): any other output is the prompt
 const PENDING_NOTES = ['(maisecrets: no blocked prompt is waiting', '(maisecrets: blocked prompts of two sessions']
+// the first line of `run.sh entry` alone when a blocked prompt waits (cli.ENTRY_SEND_HEAD): the prompt follows it
+const ENTRY_SEND_HEAD = '(maisecrets: the blocked prompt follows)'
+
 const running = new Map()       // one run per flight at a time: flight -> { title, stop, replaced }
 // the output of each flight in a pane of its own: a login that waits and a list keep their own titles and lines
 const outputs = new Map()       // pane id -> { title, lines, markdown, done, note, waiting, placed }
@@ -1312,7 +1326,9 @@ function flightOf(text) {
 // the command as a title: its name and a first word of a fixed form (login, all), never a typed value
 function titleOf(text) {
   const m = /^\s*\/maisecrets:([a-z-]+)(?:[ \t]+([a-z-]{1,12})(?=\s|$))?/i.exec(text) || []
-  return `/maisecrets:${(m[1] || '').toLowerCase()}${m[2] ? ' ' + m[2].toLowerCase() : ''}`
+  const name = (m[1] || '').toLowerCase()
+  if (name === 'maisecrets') return '/maisecrets'
+  return `/maisecrets ${name}${m[2] ? ' ' + m[2].toLowerCase() : ''}`
 }
 
 function validRun(run) {
@@ -1321,7 +1337,7 @@ function validRun(run) {
     && (run.stdin === undefined || typeof run.stdin === 'string')
 }
 
-const LOGIN_TITLE = '/maisecrets:sref login'
+const LOGIN_TITLE = '/maisecrets sref login'
 const AGAIN_LINE = 'maisecrets: the earlier login was stopped, and a new one opens your browser. For another browser ' +
   'or profile, copy the login URL from the panel into it.'
 const busyLine = (flight) => flight === 'sref-login'
@@ -1482,8 +1498,11 @@ function startOwn($, run, flight, title, entry = running.get(flight)) {
       return toast($, `maisecrets: ${title} did not end within ${Math.round((run.long ? LONG_MS : RUN_MS) / 1000)} s and ` +
         'was stopped.')
     }
-    if (run.fill) {
-      const said = text.trim()
+    const sent = run.fill && text.trim().startsWith(ENTRY_SEND_HEAD)
+    if (run.fill && run.argv[0] === 'entry' && !sent) {
+      // the entry alone and no blocked prompt: its overview shows like any output (below)
+    } else if (run.fill) {
+      const said = sent ? text.trim().slice(ENTRY_SEND_HEAD.length).trim() : text.trim()
       if (!said || PENDING_NOTES.some(n => said.startsWith(n))) {
         fillSoon($, '')
         return toast($, said || 'maisecrets: no blocked prompt is waiting.')
@@ -1543,11 +1562,62 @@ async function runOwn($, own, kind, runnable, ownCmd, fill) {
     }
   }
   if (ownAnswer === null && ownCmd) return { drop: OWN_FAILED }
+  if (ownAnswer !== null && validEntry(ownAnswer.entry)) {
+    // a command that needs the model: the entry command file runs it, as the person's Enter on it would
+    if (fill) fillSoon($, '')
+    runEntrySoon($, ownAnswer.entry)
+    return { drop: `maisecrets: /maisecrets ${ownAnswer.entry.split(/\s+/)[0]} needs the AI; it runs now.` }
+  }
   if (ownAnswer !== null && typeof ownAnswer.drop === 'string') {
     if (fill) fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
     return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE) }
   }
   return { answer: ownAnswer }
+}
+
+// the words of the entry for a command that needs the model (prompt_commands.mod_command): one line, a command name first
+const ENTRY_FILE = 'maisecrets:maisecrets'
+function validEntry(words) {
+  return typeof words === 'string' && words.length <= 2000 && !/[\r\n]/.test(words) &&
+    COMMANDS.includes(words.split(/[ \t]+/)[0])
+}
+// the entry command file with these words, once the hook that asked has returned: a command.run inside a hook waits on
+// the turn that hook holds (measured on 2.1.330), so it starts after it
+function runEntrySoon($, words) {
+  try {
+    $.clock.after(60, () => {
+      void $.command.run({ command: ENTRY_FILE, args: words }).catch(() => toast($, OWN_FAILED))
+    })
+  } catch { toast($, OWN_FAILED) }
+}
+
+// the person's own command typed as the mod's `/maisecrets NAME` or as a hidden `/maisecrets:NAME` (the client refuses
+// a hidden command typed by the person; the command.run hook sees it first): the steps of a typed prompt for its colon
+// form `own`, with the answer as the command's output for the person alone. Measured on 2.1.330: neither line passes
+// prompt.submit or the settings hook
+const ownText = (line) => ({ text: String(line).replace(/^maisecrets: /, ''), isTextDisplayOnly: true })
+async function runTyped($, own, kind) {
+  if (DEMO_CMD.test(own)) {
+    try { demo.delete(await $.session.id()) } catch { /* the step asks */ }
+  }
+  afterPrompt($, own)
+  if (SETTINGS_CMD.test(own)) {
+    pane.hint = null
+    let opened = false
+    try { opened = await openSettings($) } catch { opened = false }
+    if (opened) {
+      takeKeysSoon($)
+      return {}
+    }
+  }
+  if (OWN_SLASH.test(own) && !DEMO_CMD.test(own)) {
+    let shown = null
+    try { shown = await ownInDemo($, own, kind) } catch { shown = null }
+    if (shown !== null) return ownText(showOwn($, shown))
+  }
+  let done = null
+  try { done = await runOwn($, own, kind, RUN_CMD.test(own), true, false) } catch { done = null }
+  return ownText(typeof done?.drop === 'string' ? done.drop : OWN_FAILED)
 }
 
 // a login button of the output pane of /maisecrets:sref: the person's press, which the AI cannot make, starts the login
@@ -1620,7 +1690,10 @@ function registerSettingsPane(on) {
     // `/maisecrets sref login` that no person's prompt brought (the prompt.submit hook drops a person's), or a
     // mistyped name: the box gets the command with its colon, and the person decides
     const spaced = `/maisecrets ${e?.args ?? ''}`
-    const meant = meantCommand(spaced) ?? nearCommand(spaced)
+    const typed = meantCommand(spaced)
+    // `/maisecrets status`, typed by the person: it runs now, as its colon form (no second Enter)
+    if (typed && RUN_ORIGINS.has(e?.origin?.kind)) return await runTyped($, typed, e.origin.kind)
+    const meant = typed ?? nearCommand(spaced)
     if (meant) {
       const a = await checkFill($, meant, e?.origin?.kind)
       if (!a) return { text: CHECK_FAILED }      // a command run: nothing was put into the box
@@ -1641,6 +1714,13 @@ function registerSettingsPane(on) {
 }
 
 export function register(on) {
+  // a hidden command the person typed (`/maisecrets:status`, the form of 0.9.21 and before): it runs as typed
+  on('command.run', async ($, e, next) => {
+    const name = typeof e?.command === 'string' && e.command.startsWith('maisecrets:') ? e.command.slice(11) : ''
+    if (!HIDDEN.includes(name) || !RUN_ORIGINS.has(e?.origin?.kind)) return next(e)
+    const args = typeof e.args === 'string' ? e.args.trim() : ''
+    return await runTyped($, `/maisecrets:${name}${args ? ' ' + args : ''}`, e.origin.kind)
+  })
   registerDemo(on)
   // the values on the person's screen (the part above): one hooks module per plugin, so it registers from here
   registerShowValues(on)
@@ -1696,12 +1776,8 @@ export function register(on) {
       ownAnswer = done.answer
       // no command of the mod's: the steps below, as for any prompt (a slash command goes on to its command file)
     }
-    if (meant) {
-      // a command that a command file runs (status, list, a settings change …): only a typed slash line makes the
-      // engine render it with the person's authority, and the engine throws away a change of a slash line (#44). Its
-      // colon form goes into the box once the drop landed, and the person's Enter sends it
-      return await offer($, e, meant)
-    }
+    // an entry form the mod did not answer (Cowork, where the command file shows the output) goes on as typed: the
+    // engine throws away a change of a slash line (#44), and the prompt hook reads the line as its colon form
     if (SLASH.test(e.text)) return next(e)
     if (CHECK.test(e.text)) {
       // a check of a value is never passed on: the verdict, or this sentence when Python gives none in time

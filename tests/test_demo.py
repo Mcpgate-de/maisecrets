@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import demo, detect, events, hooks, session_end, settings, status_verdict as sv  # noqa: E402
+from maisecrets import prompt_commands  # noqa: E402
 from maisecrets.placeholder import CLOSE, OPEN  # noqa: E402
 from maisecrets.vault import HOME, Vault, load_config  # noqa: E402
 from test_remote_detector import NAME  # noqa: E402
@@ -136,23 +137,26 @@ class _Base(unittest.TestCase):
 
 # ------------------------------------------------------------ `/maisecrets demo on`, with a space --
 class SpacedCommandTests(_Base):
-    """Without the mod (Codex, claude -p, a client without mods) the prompt hook sees `/maisecrets demo on` as text: it
-    keeps it from the AI and names the form that runs it. It changes nothing (prompt_commands.spaced_answer); with the
-    mod, the person's own prompt runs as the colon form (tests/mod.test.ts)."""
+    """In Claude Code `/maisecrets demo on` is the entry (prompt_commands.canonical): the prompt hook reads it as the
+    colon form. Codex has no slash commands: there it keeps the prompt from the AI and names its own form
+    (prompt_commands.spaced_answer)."""
 
-    def test_a_known_command_with_a_space_is_kept_from_the_ai_with_the_colon_form(self):
-        for typed, form in (("/maisecrets demo on", "/maisecrets:demo on"),
-                            ("  /maisecrets Status all ", "/maisecrets:status all"),
-                            ("/maisecrets not-a-secret SECRET_c1", "/maisecrets:not-a-secret SECRET_c1"),
-                            ("/maisecrets settings rehydration confirm", "/maisecrets:settings rehydration confirm")):
-            for source in ("user", None, "cron"):
-                out = _prompt(typed, source=source)
+    def test_each_entry_form_is_the_colon_form_for_the_prompt_hook(self):
+        # Claude Code: `/maisecrets demo on` is the entry (Cowork, the terminal's /maisecrets and /ms), and the hook
+        # answers it exactly as `/maisecrets:demo on`: only the person's own prompt switches it
+        for typed in ("/maisecrets demo on", "/ms demo on", "/maisecrets:maisecrets demo on", "/maisecrets:ms Demo on",
+                      "  /maisecrets demo on "):
+            with self.subTest(typed):
+                demo._write({})
+                out = _prompt(typed, source="user")
                 self.assertEqual(out["decision"], "block", typed)
-                self.assertEqual(out["reason"], f"maisecrets: send {form} with the colon to run it. This prompt was "
-                                                "not sent to the AI.")
-                self.assertTrue(out["hookSpecificOutput"]["suppressOriginalPrompt"])
-        self.assertFalse(demo.active(SESSION), "the space form switches nothing")
-        self.assertEqual(load_config().get("rehydration", "automatic"), "automatic", "and changes no setting")
+                self.assertTrue(demo.active(SESSION), typed)
+                demo._write({})
+                _prompt(typed, source="cron")
+                self.assertFalse(demo.active(SESSION), "a prompt the person did not type switches nothing")
+        demo._write({})
+        out = _prompt("/maisecrets settings rehydration confirm", source="user")
+        self.assertEqual(load_config().get("rehydration"), "confirm", out)
 
     def test_codex_gets_its_own_form(self):
         out = _prompt("/maisecrets demo on", source=None, client=CODEX)
@@ -506,7 +510,7 @@ class ExceptionTests(_Base):
                 self.assertTrue(_is_demo(out), out)
 
     def test_every_command_has_its_forms_or_is_left_out_on_purpose(self):
-        names = {p.stem for p in (ROOT / "commands").glob("*.md")}
+        names = {p.stem for p in (ROOT / "commands").glob("*.md")} - set(prompt_commands.ENTRIES)
         self.assertEqual(names - set(demo.FORMS), set(demo.NOT_PASSED))
 
     def test_an_image_alone_is_blocked_too(self):

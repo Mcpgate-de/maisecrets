@@ -2,6 +2,7 @@
 description: "Setup: a short /ms command for /maisecrets:send"
 argument-hint: "[install] [name] | remove [name] | status [name] | --remove [name]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" shortcut *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" shortcut *)
+user-invocable: false
 ---
 
 Run exactly this command and show the user its output, then stop:

@@ -14,7 +14,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
-from maisecrets import events, hooks, hub, not_a_secret, selftest, settings  # noqa: E402
+from maisecrets import events, hooks, hub, not_a_secret, prompt_commands, selftest, settings  # noqa: E402
 from maisecrets.home import HOME  # noqa: E402
 from maisecrets.vault import CONFIG, Vault, load_config  # noqa: E402
 from _hygiene import CLAUDE  # noqa: E402
@@ -354,13 +354,14 @@ class StatusTests(unittest.TestCase):
 
 class CommandNamesTests(unittest.TestCase):
     def test_the_mod_knows_each_command_of_the_plugin(self):
-        """`/maisecrets WORD` means `/maisecrets:WORD` for each command file, and for nothing else."""
+        """`/maisecrets WORD` means `/maisecrets:WORD` for each command file but the entry, and for nothing else."""
         import re
         mod = (ROOT / "claude-mod" / "maisecrets-mod.mjs").read_text(encoding="utf-8")
         listed = re.search(r"const COMMANDS = \[([^\]]*)\]", mod)
         self.assertIsNotNone(listed)
         self.assertEqual(sorted(re.findall(r"'([a-z-]+)'", listed.group(1))),
-                         sorted(f.stem for f in (ROOT / "commands").glob("*.md")))
+                         sorted(f.stem for f in (ROOT / "commands").glob("*.md")
+                                if f.stem not in prompt_commands.ENTRIES))
 
 # every action the panel sends, as a tool call would write it: none may run (C22)
 ACTIONS = [{"action": "set", "key": "rehydration", "value": "automatic"},

@@ -154,6 +154,44 @@ def take_inline(prompt: str, cfg: dict, session: str | None) -> tuple:
     return "".join(parts), entries, values
 
 
+# the one entry that every client shows (commands/maisecrets.md and commands/ms.md): `/maisecrets NAME ARGS` in Cowork
+# and in the terminal (there the mod's own /maisecrets), `/ms NAME ARGS` (Cowork, and the personal shortcut in the
+# terminal), `/maisecrets:maisecrets NAME ARGS` and `/maisecrets:ms NAME ARGS` (the plugin's names in the terminal)
+ENTRIES = ("maisecrets", "ms")
+# the names of the other commands/*.md: the entry takes each as its first word (tests/test_entry.py compares them)
+COMMANDS = ("audit", "demo", "forget", "guard", "list", "ner", "not-a-secret", "put", "report", "rules", "send",
+            "settings", "shortcut", "sref", "status", "term")
+_ENTRY_RE = LazyRx(r"\A\s*/(?:maisecrets(?::(?:maisecrets|ms))?|ms)(?:[ \t]+(?P<name>[A-Za-z][A-Za-z-]*)"
+                   r"(?P<rest>(?:[ \t][^\r\n]*)?))?\s*\Z", re.I)
+
+
+def canonical(prompt):
+    """`/maisecrets:NAME ARGS` for an entry form with a command name (`/maisecrets status test`, `/ms term add X`),
+    so every path reads it as the colon form; any other prompt as it is. The entry alone stays as it is."""
+    m = _ENTRY_RE.match(prompt) if isinstance(prompt, str) else None
+    name = (m.group("name") or "").lower() if m else ""
+    if name not in COMMANDS:
+        return prompt
+    return f"/maisecrets:{name}{m.group('rest').rstrip()}"
+
+
+def entry_alone(prompt) -> bool:
+    """The entry with no command name: `/maisecrets`, `/ms`, `/maisecrets:maisecrets`, `/maisecrets:ms`."""
+    m = _ENTRY_RE.match(prompt) if isinstance(prompt, str) else None
+    return bool(m) and not m.group("name")
+
+
+def with_canonical(payload: dict) -> dict:
+    """The payload with its prompt in the colon form (canonical). Codex keeps its prompt: it has no slash commands,
+    and spaced_answer names its own form there."""
+    from . import hooks as h
+    prompt = payload.get("prompt")
+    if h.client_of(payload) == "codex":
+        return payload
+    new = canonical(prompt)
+    return payload if new is prompt else {**payload, "prompt": new}
+
+
 # the Codex form of a maisecrets command, `maisecrets: NAME ARGS` (Codex has no plugin slash commands)
 _TYPED_FORM_RE = LazyRx(r"\A\s*maisecrets[ \t]*:[ \t]*(?P<name>[a-z][a-z-]*)(?:[ \t]+(?P<args>[^\r\n]*?))?\s*\Z",
                         re.I)
@@ -180,6 +218,10 @@ def run_plan(prompt) -> dict | None:
         return None
     name, args = m.group("name").lower(), (m.group("args") or "").strip()
     words = args.split()
+    if name in ENTRIES:
+        # the entry alone (the mod gives `/ms` alone as `/maisecrets:maisecrets`): the blocked prompt goes into the box
+        # when one waits, else the overview shows
+        return {"argv": ["entry"], "fill": True} if not words else None
     if name == "status":
         return {"argv": ["status", *words]} if words in ([], ["all"]) else None
     if name == "rules":
@@ -208,9 +250,10 @@ def run_plan(prompt) -> dict | None:
 def mod_command(payload: dict) -> dict | None:
     """The mod's answer to the person's own maisecrets command in Claude Code, so that none reaches the model and none
     reads as a block (night UX test, findings C and F): {"drop": answer} for a command the prompt hook answers (the
-    same call, hooks.user_prompt) and for a Codex form that runs without the model (demo.own_answer); {"drop": line,
-    "fill": the slash form} for a Codex form that needs the model. None for every other prompt, and for a prompt the
-    person did not type (the hook path stays as it is: Codex, claude -p, a client without the mod)."""
+    same call, hooks.user_prompt) and for a Codex form that runs without the model (demo.own_answer); {"run": plan}
+    for a command the mod runs itself (run_plan); {"entry": words} for a command that needs the model, which the mod
+    runs through the entry command file. None for every other prompt, and for a prompt the person did not type (the
+    hook path stays as it is: Codex, claude -p, a client without the mod)."""
     from . import hooks as h
     if payload.get("origin") not in ("composer", "bridge"):
         return None
@@ -244,59 +287,74 @@ def mod_command(payload: dict) -> dict | None:
     if in_cowork:
         return None
     plan = run_plan(prompt) if slash else None
-    if plan is not None:
-        # a command file that only runs its CLI entry: the mod runs that entry itself, with no model turn. The prompt
-        # hook decides first, with the same call as for the slash command (its value check, a settings or ner change
-        # the person typed, the note of a typed forget); its block drops the command
-        session = payload.get("session_id")
-        found = demo._find_transcript(session) if isinstance(session, str) and session else None
-        out = h.user_prompt({**payload, "prompt_id": "mod", "transcript_path": found or ""})
-        if out.get("decision") == "block":
-            reason = out.get("reason")
-            return {"drop": reason if isinstance(reason, str) and reason else "maisecrets: this command did not run."}
-        context = (out.get("hookSpecificOutput") or {}).get("additionalContext")
-        if isinstance(context, str) and context:
-            plan["note"] = context
-        if plan.get("view") == "ner":
-            from . import ner_setup
-            plan["starting"] = ner_setup.start_running()
-        return {"run": plan}
-    m = _TYPED_FORM_RE.match(prompt)
+    m = None if slash else _TYPED_FORM_RE.match(prompt)
     name = m.group("name").lower() if m else ""
     # the command names of commands/*.md and the skill (demo.FORMS and the names it leaves out): another word after
     # `maisecrets:` is a question for the AI
-    if name not in demo.FORMS and name not in demo.NOT_PASSED:
+    if not slash and name not in demo.FORMS and name not in demo.NOT_PASSED:
         return None
-    # in the demo a form that needs the model gets the demo's line that it did not run (demo.own_answer)
-    if demo.own_command(prompt) and (demo.own_argv(prompt) is not None or demo.active(payload.get("session_id"))):
+    if not slash and demo.own_command(prompt) and (demo.own_argv(prompt) is not None
+                                                   or demo.active(payload.get("session_id"))):
+        # in the demo a form that needs the model gets the demo's line that it did not run (demo.own_answer)
         return {"drop": demo.own_answer(prompt, payload.get("session_id"))}
-    form = f"/maisecrets:{name}" + (f" {m.group('args')}" if m.group("args") else "")
-    return {"drop": f"maisecrets: in Claude Code this is {form}. It is in your input box: press Enter to run it.",
-            "fill": form}
+    # a command that needs the model (`status test`, the Codex form of a command): the mod runs the entry command file
+    # with these words (commands/maisecrets.md), as the person's Enter would; the single command files are hidden
+    entry = None if plan is not None else _entry_words(prompt, m)
+    if not slash and entry is None:
+        # the skill (maisecrets: secret-hygiene): its slash form goes into the box, and the person's Enter starts it
+        form = f"/maisecrets:{name}" + (f" {m.group('args')}" if m.group("args") else "")
+        return {"drop": f"maisecrets: in Claude Code this is {form}. It is in your input box: press Enter to run it.",
+                "fill": form}
+    if plan is None and entry is None:
+        return None
+    # the prompt hook decides first, with the same call as for the slash command (its value check, a settings or ner
+    # change the person typed, the note of a typed forget); its block drops the command
+    session = payload.get("session_id")
+    found = demo._find_transcript(session) if isinstance(session, str) and session else None
+    out = h.user_prompt({**payload, "prompt_id": "mod", "transcript_path": found or ""})
+    if out.get("decision") == "block":
+        reason = out.get("reason")
+        return {"drop": reason if isinstance(reason, str) and reason else "maisecrets: this command did not run."}
+    if entry is not None:
+        return {"entry": entry}
+    # a command file that only runs its CLI entry: the mod runs that entry itself, with no model turn
+    context = (out.get("hookSpecificOutput") or {}).get("additionalContext")
+    if isinstance(context, str) and context:
+        plan["note"] = context
+    if plan.get("view") == "ner":
+        from . import ner_setup
+        plan["starting"] = ner_setup.start_running()
+    return {"run": plan}
 
 
-# `/maisecrets NAME ARGS`: a maisecrets command with a space in place of the colon (the Tab completion of `/maise` in
-# Claude Code gives the mod's own /maisecrets and a space). The mod runs it as the colon form for the person's prompt;
-# here (Codex, claude -p and a client without the mod) the prompt hook names the right form and sends nothing
+def _entry_words(prompt: str, typed) -> str | None:
+    """The words after the entry for a command the mod cannot run itself: `status test` for `/maisecrets:status test`
+    or `maisecrets: status test`. None for a command that is no maisecrets command (the skill secret-hygiene)."""
+    m = typed or _SLASH_FORM_RE.match(prompt)
+    name = m.group("name").lower() if m else ""
+    if name not in COMMANDS:
+        return None
+    return f"{name} {m.group('args') or ''}".strip()
+
+
+# `/maisecrets NAME ARGS` in Codex, which has no plugin slash commands: the prompt hook names the Codex form and sends
+# nothing. In Claude Code it is the entry (canonical), and every path reads it as the colon form
 _SPACED_RE = LazyRx(r"\A\s*/maisecrets[ \t]+(?P<name>[a-z][a-z-]*)(?P<rest>(?:[ \t][^\r\n]*)?)\s*\Z", re.I)
 
 
 def spaced_answer(payload: dict) -> dict | None:
-    """The block for a maisecrets command typed with a space, with the form that runs it; None for any other prompt.
-    It changes nothing, so it needs no check of who typed it: it only keeps the command text from the AI."""
+    """In Codex, the block for a maisecrets command typed as a slash command, with the form that runs it; None for any
+    other prompt and in Claude Code. It changes nothing, so it needs no check of who typed it: it only keeps the
+    command text from the AI."""
     from . import hooks as h
     prompt = payload.get("prompt")
     m = _SPACED_RE.match(prompt) if isinstance(prompt, str) else None
     name = m.group("name").lower() if m else ""
-    if name not in demo.FORMS and name not in demo.NOT_PASSED or name == "secret-hygiene":
+    if name not in COMMANDS or h.client_of(payload) != "codex":
         return None
     rest = m.group("rest").rstrip()
-    if h.client_of(payload) == "codex":
-        return {"decision": "block", "reason": f"maisecrets: in Codex, send maisecrets: {name}{rest}. This prompt "
-                                               "was not sent to the AI."}
-    return {"decision": "block", "reason": f"maisecrets: send /maisecrets:{name}{rest} with the colon to run it. "
-                                           "This prompt was not sent to the AI.",
-            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+    return {"decision": "block", "reason": f"maisecrets: in Codex, send maisecrets: {name}{rest}. This prompt "
+                                           "was not sent to the AI."}
 
 
 def fill_check(payload: dict) -> dict:

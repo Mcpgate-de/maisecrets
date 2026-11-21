@@ -713,6 +713,7 @@ def rewrite_prompt(payload: dict) -> dict:
     that turns the rewrite off. The answer carries placeholders, never a value."""
     if payload.get("fill_check") is True:
         return _pc().fill_check(payload)     # a command the mod puts into the box: its values masked, nothing run
+    payload = _pc().with_canonical(payload)     # `/maisecrets status` and `/ms status` read as `/maisecrets:status`
     own = _pc().mod_command(payload)
     if own is not None:
         return own
@@ -843,6 +844,8 @@ def _name_ttl(cfg: dict) -> int:
 
 
 def user_prompt(payload: dict) -> dict:
+    typed_form = payload
+    payload = _pc().with_canonical(payload)     # the entry forms read as the colon form (prompt_commands.canonical)
     groups = check_value.parse_all(payload.get("prompt"))
     if groups is not None:
         # ms:(…): blocked on every path, also without a closing bracket, before anything else reads the prompt
@@ -1020,7 +1023,7 @@ def user_prompt(payload: dict) -> dict:
     rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)
     entries, values = inline + entries, inline_values + values
     if not matches and not stored["n"] and not inline:
-        spaced = _pc().spaced_answer(payload)     # `/maisecrets demo on`: the form with the colon, nothing sent
+        spaced = _pc().spaced_answer(typed_form)     # Codex: `/maisecrets demo on` names `maisecrets: demo on`
         if spaced:
             return spaced
         if typed:
@@ -1289,7 +1292,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 _ARGS_END = "MAISECRETS_ARGS_END"
 _ARGS_CALL_RE = _LazyRx(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
-                           r"(?:audit|forget|guard|list|put --clipboard|report|settings|shortcut|sref) "
+                           r"(?:audit|entry|forget|guard|list|put --clipboard|report|settings|shortcut|sref) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
 

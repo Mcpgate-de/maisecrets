@@ -1,0 +1,212 @@
+"""The one entry of every client (commands/maisecrets.md and commands/ms.md): `/maisecrets NAME ARGS` (Cowork and the
+mod's /maisecrets in the terminal), `/ms NAME ARGS` (Cowork, and the personal shortcut in the terminal),
+`/maisecrets:maisecrets NAME ARGS` and `/maisecrets:ms NAME ARGS` (the plugin's names in the terminal). Each path reads
+them as `/maisecrets:NAME ARGS` (prompt_commands.canonical). The single command files are hidden from the menus
+(`user-invocable: false`), except where the person alone may start them.
+
+Measured on Claude Code 2.1.330: a hidden command that the person types is refused by the client ("This skill can only
+be invoked by Claude"), and the mod's command.run hook sees it first (tests/mod.test.ts).
+
+Synthetic values only.
+Run: python3 -m unittest tests.test_entry -v
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+
+from maisecrets import cli, events, hooks, prompt_commands  # noqa: E402
+from maisecrets.vault import HOME, Vault  # noqa: E402
+import _hygiene  # noqa: E402
+from _hygiene import CODEX  # noqa: E402
+
+SESSION = "0b6f1c2e-0000-4000-8000-0000000000e1"
+NAME = "Wibbleton" + " Quorrel"                         # a synthetic person
+PASSWORD = "Kx7-" + "plmQ29zr"
+KEY = "SECRET" + "_c1"
+ENTRY_FORMS = ("/maisecrets {}", "/ms {}", "/maisecrets:maisecrets {}", "/maisecrets:ms {}")
+
+# each command file and who may start it: "entry" (the person, in every client), "person" (the person only, and the
+# menu shows it), "model" (hidden from the menus: the person reaches it through the entry, the model through its name)
+INVOCABLE = {
+    "maisecrets": "entry", "ms": "entry",
+    # the AI may not start these: a report or a login that binds a claude.ai connector is the person's act
+    "report": "person", "sref": "person",
+    # a person-only change in these is the prompt hook's answer to the typed text; the file itself only shows
+    "demo": "model", "not-a-secret": "model", "term": "model", "settings": "model", "forget": "model", "ner": "model",
+    "audit": "model", "guard": "model", "list": "model", "put": "model", "rules": "model", "send": "model",
+    "shortcut": "model", "status": "model",
+}
+
+
+def _frontmatter(name: str) -> list[str]:
+    text = (ROOT / "commands" / f"{name}.md").read_text(encoding="utf-8")
+    return text.split("\n---\n", 1)[0].splitlines()
+
+
+class CanonicalTests(unittest.TestCase):
+    def test_each_entry_form_is_the_colon_form(self):
+        for form in ENTRY_FORMS:
+            for args, colon in (("status test", "/maisecrets:status test"), ("Term add " + NAME,
+                                                                             "/maisecrets:term add " + NAME),
+                                ("not-a-secret undo " + KEY, "/maisecrets:not-a-secret undo " + KEY),
+                                ("list", "/maisecrets:list")):
+                with self.subTest(form=form, args=args):
+                    self.assertEqual(prompt_commands.canonical("  " + form.format(args) + " "), colon)
+
+    def test_other_prompts_stay_as_they_are(self):
+        for prompt in ("/maisecrets", "/ms", "/maisecrets:maisecrets", "/maisecrets:ms", "/maisecrets:status",
+                       "/maisecrets wibble on", "/ms secret-hygiene", "/msx list", "/mss list", "/maisecretsx list",
+                       "/maisecrets:list list", "please run /ms list", "/ms list\nand more", "maisecrets: list", None):
+            with self.subTest(prompt=prompt):
+                self.assertIs(prompt_commands.canonical(prompt), prompt)
+
+    def test_the_entry_alone_is_known(self):
+        for prompt in ("/maisecrets", "/ms ", "/maisecrets:maisecrets", " /maisecrets:ms"):
+            self.assertTrue(prompt_commands.entry_alone(prompt), prompt)
+        for prompt in ("/ms list", "/msx", "/maisecrets:status"):
+            self.assertFalse(prompt_commands.entry_alone(prompt), prompt)
+
+    def test_codex_keeps_its_prompt(self):
+        payload = {"prompt": "/ms list", **CODEX}
+        self.assertIs(prompt_commands.with_canonical(payload), payload)
+        self.assertEqual(prompt_commands.with_canonical({"prompt": "/ms list", "prompt_id": "p"})["prompt"],
+                         "/maisecrets:list")
+
+
+class _HookBase(unittest.TestCase):
+    def setUp(self):
+        (Path(HOME) / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
+        for f in ("index.json", "vault.json", "terms.txt", "events.log", "allowed.json", "typed.json"):
+            (Path(HOME) / f).unlink(missing_ok=True)
+        hooks._live_cache.clear()
+        self.addCleanup(hooks._live_cache.clear)
+        self.claude_dir = tempfile.mkdtemp(prefix="ms-claude-config-")
+        env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.claude_dir})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
+        _hygiene.patch(self, hooks, "_clipboard", lambda text: True)
+        _hygiene.patch(self, hooks, "_scrub_transcript_later", lambda *a, **k: None)
+
+    def hook(self, prompt: str, source: str | None = "user", **client) -> dict:
+        hooks._live_cache.clear()
+        payload = {"hook_event_name": "UserPromptSubmit", "prompt": prompt, "session_id": SESSION,
+                   "transcript_path": "", "cwd": "", **(client or {"prompt_id": "p1"})}
+        if source is not None:
+            payload["source"] = source
+        return hooks.user_prompt(payload)
+
+    def mod(self, prompt: str) -> dict:
+        hooks._live_cache.clear()
+        return hooks.rewrite_prompt({"prompt": prompt, "session_id": SESSION, "cwd": "", "origin": "composer"})
+
+
+class PersonOnlyThroughTheEntryTests(_HookBase):
+    """A command only the person may give, typed through the entry, counts as typed: on the hook path (Cowork, a
+    client without the mod) and on the mod's path."""
+
+    def test_a_term_add_through_each_entry_form_is_the_hooks_answer(self):
+        for form in ENTRY_FORMS:
+            with self.subTest(form=form):
+                (Path(HOME) / "terms.txt").unlink(missing_ok=True)
+                out = self.hook(form.format("term add " + NAME))
+                self.assertEqual(out["decision"], "block")
+                self.assertIn("on your list now", out["reason"])
+                self.assertNotIn(NAME, out["reason"])
+                self.assertNotIn(NAME, self.mod(f"write to {NAME} today").get("text", NAME), "the term was added")
+
+    def test_a_forget_through_the_entry_leaves_the_typed_note_the_cli_takes(self):
+        Vault().put(PASSWORD, "SECRET", "manual", session=SESSION)
+        out = self.hook("/ms forget " + KEY)
+        self.assertNotEqual(out.get("decision"), "block", out)
+        self.assertTrue(events.take_typed_forget(KEY, [SESSION]))
+
+    def test_a_login_through_the_entry_leaves_the_typed_note(self):
+        self.hook("/maisecrets:maisecrets sref login Team_GW")
+        self.assertTrue(events.take_typed_login("Team_GW", [SESSION]))
+
+    def test_a_prompt_the_person_did_not_type_changes_nothing(self):
+        out = self.hook("/ms term add " + NAME, source="cron")
+        self.assertEqual(out["decision"], "block")
+        self.assertFalse((Path(HOME) / "terms.txt").exists() and NAME in (Path(HOME) / "terms.txt").read_text())
+
+    def test_the_mod_answers_each_entry_form_as_the_colon_form(self):
+        for form in ENTRY_FORMS:
+            with self.subTest(form=form):
+                self.assertEqual(self.mod(form.format("list")),
+                                 {"run": {"argv": ["list", "--args-stdin"], "stdin": ""}})
+                self.assertEqual(self.mod(form.format("status test")), {"entry": "status test"})
+        # the mod gives the entry alone (`/ms`, `/maisecrets:ms`) as `/maisecrets:maisecrets` (tests/mod.test.ts)
+        self.assertEqual(self.mod("/maisecrets:maisecrets"), {"run": {"argv": ["entry"], "fill": True}})
+
+    def test_codex_keeps_its_answer_for_the_slash_form(self):
+        # Codex has no slash commands: its prompt is not read as the entry, and it adds nothing
+        out = self.hook("/ms term add " + NAME, source=None, **CODEX)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertNotIn("on your list now", out["reason"])
+        self.assertFalse((Path(HOME) / "terms.txt").exists() and NAME in (Path(HOME) / "terms.txt").read_text())
+
+
+class InvocabilityTests(unittest.TestCase):
+    """Every command file has a deliberate invocability, and every command stays reachable by the person."""
+
+    def test_every_command_file_has_its_decision(self):
+        self.assertEqual(sorted(INVOCABLE), sorted(p.stem for p in (ROOT / "commands").glob("*.md")))
+        for name, who in INVOCABLE.items():
+            with self.subTest(name):
+                fm = _frontmatter(name)
+                hidden, user_only = "user-invocable: false" in fm, "disable-model-invocation: true" in fm
+                self.assertFalse(hidden and user_only, "reachable by nobody")
+                self.assertEqual((hidden, user_only), {"entry": (False, True), "person": (False, True),
+                                                       "model": (True, False)}[who])
+
+    def test_the_entry_knows_every_other_command(self):
+        self.assertEqual(sorted(prompt_commands.COMMANDS),
+                         sorted(n for n in INVOCABLE if n not in prompt_commands.ENTRIES))
+        self.assertEqual(prompt_commands.ENTRIES, tuple(n for n, w in INVOCABLE.items() if w == "entry"))
+
+    def test_the_two_entry_files_are_the_same(self):
+        self.assertEqual((ROOT / "commands" / "maisecrets.md").read_text(encoding="utf-8"),
+                         (ROOT / "commands" / "ms.md").read_text(encoding="utf-8"))
+
+    def test_the_entry_description_names_every_command(self):
+        desc = next(line for line in _frontmatter("maisecrets") if line.startswith("description:"))
+        for name in prompt_commands.COMMANDS:
+            self.assertRegex(desc, rf"(?<![\w-]){re.escape(name)}(?![\w-])", name)
+
+    def test_the_lint_refuses_a_command_reachable_by_nobody(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import lint_plugin
+        root = Path(tempfile.mkdtemp(prefix="ms-lint-"))
+        (root / "commands").mkdir()
+        (root / "commands" / "x.md").write_text('---\ndescription: "x"\ndisable-model-invocation: true\n'
+                                                'user-invocable: false\n---\nbody\n', encoding="utf-8")
+        errors, _ = lint_plugin.check_frontmatter(root)
+        self.assertTrue(any("unreachable" in e for e in errors), errors)
+
+
+class EntryCliTests(unittest.TestCase):
+    def test_every_name_runs_its_command(self):
+        called = []
+        with mock.patch.dict(cli.COMMANDS, {n: (lambda a, n=n: called.append((n, a)) or 0) for n in cli.COMMANDS}):
+            for name in ("status", "list", "audit", "rules", "guard", "shortcut", "forget", "settings", "sref",
+                         "report"):
+                called.clear()
+                self.assertEqual(cli.cmd_entry([name, "x"]), 0)
+                self.assertEqual(called, [(name, ["x"])])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -87,8 +87,11 @@ def yaml_problems(block: str) -> list[str] | None:
 
 
 # the frontmatter keys Claude Code reads as a boolean (disable-model-invocation: the model cannot run the command
-# itself; measured with claude -p 2.1.295 in the diagnostics review, round 5)
-BOOLEAN_KEYS = frozenset({"disable-model-invocation"})
+# itself; measured with claude -p 2.1.295 in the diagnostics review, round 5; user-invocable: false hides a command
+# from the person's menu and refuses it typed, measured on 2.1.330)
+BOOLEAN_KEYS = frozenset({"disable-model-invocation", "user-invocable"})
+# a command with both is reachable by nobody: the person cannot type it and the model cannot run it
+UNREACHABLE = ("disable-model-invocation: true", "user-invocable: false")
 
 
 def check_frontmatter(root: Path = ROOT) -> tuple[list[str], bool]:
@@ -108,6 +111,9 @@ def check_frontmatter(root: Path = ROOT) -> tuple[list[str], bool]:
         for key in REQUIRED[rel.split("/", 1)[0]]:
             if key not in keys:
                 errors.append(f"{rel}: the key {key} is missing")
+        if all(line in block.splitlines() for line in UNREACHABLE):
+            errors.append(f"{rel}: disable-model-invocation: true and user-invocable: false together make the "
+                          "command unreachable")
     return errors, parsed
 
 

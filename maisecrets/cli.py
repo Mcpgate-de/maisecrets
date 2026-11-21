@@ -1301,6 +1301,68 @@ def cmd_sref(args: list[str]) -> int:
     return 0
 
 
+# the first line of `entry` alone when a blocked prompt waits: the lines after it are that prompt
+# (commands/maisecrets.md)
+ENTRY_SEND_HEAD = "(maisecrets: the blocked prompt follows)"
+# what a command answers that only the person's own prompt makes: the prompt hook answered it before the command file,
+# so a run here means that the hook did not see it typed
+_TYPED_ONLY = {"demo": "/maisecrets demo on", "not-a-secret": "/maisecrets not-a-secret KEY"}
+
+
+def _entry_overview() -> int:
+    """The entry with no command name and no blocked prompt: the protection of this session, and the commands."""
+    from . import hub, prompt_commands
+    try:
+        line = hub.pane_status(os.environ.get("CLAUDE_CODE_SESSION_ID") or "").get("line")
+    except Exception:  # noqa: BLE001 - the list below still helps
+        line = None
+    print(line or "maisecrets: /maisecrets status shows the protection of this session.")
+    print("Commands: /maisecrets NAME, for example /maisecrets status test.")
+    print("  " + ", ".join(prompt_commands.COMMANDS))
+    return 0
+
+
+def cmd_entry(args: list[str]) -> int:
+    """The one entry of every client (commands/maisecrets.md, commands/ms.md): the first word names the command, the
+    rest are its arguments. With no word: the blocked prompt when one waits (as /maisecrets send), else an overview.
+    It accepts only the command names (prompt_commands.COMMANDS) and runs what their command files run."""
+    from . import prompt_commands
+    from .hooks import take_pending
+    if not args:
+        text = take_pending(os.environ.get("CLAUDE_CODE_SESSION_ID") or None)
+        if text is None:
+            return _entry_overview()
+        if text == TWO_WAITING:
+            print(text)
+            return 0
+        print(ENTRY_SEND_HEAD)
+        print(text)
+        return 0
+    name, rest = args[0].lower(), args[1:]
+    if name not in prompt_commands.COMMANDS:
+        # the word is never echoed: a placeholder resolved into it (as for `list bogus`)
+        print("maisecrets: the first word is no maisecrets command. Nothing ran.")
+        _entry_overview()
+        return 2
+    if name == "send":
+        text = take_pending(os.environ.get("CLAUDE_CODE_SESSION_ID") or None)
+        print(NOTHING_WAITING if text is None else text if text == TWO_WAITING else ENTRY_SEND_HEAD + "\n" + text)
+        return 0
+    if name in _TYPED_ONLY or (name == "term" and rest):
+        # the prompt hook answers these only for the person's own prompt; the words are never echoed
+        form = _TYPED_ONLY.get(name, "/maisecrets term add NAME")
+        print(f"maisecrets: this command counts only when you type it as your own prompt, for example {form}. "
+              "Nothing was changed.")
+        return 0 if name != "term" else cmd_terms([])
+    if name == "term":
+        return cmd_terms([])
+    if name == "put":
+        return cmd_put(["--clipboard", *rest])
+    if name == "ner":
+        return cmd_ner(["all"] if [w.lower() for w in rest] == ["all"] else [])
+    return COMMANDS[name](rest)
+
+
 def cmd_consent_report(args: list[str]) -> int:
     from . import consent_report
     return consent_report.run(args)
@@ -1311,7 +1373,7 @@ COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_res
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
             "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings,
             "consent-report": cmd_consent_report, "rules": cmd_rules, "terms": cmd_terms, "values": cmd_values,
-            "ner": cmd_ner, "sref": cmd_sref}
+            "ner": cmd_ner, "sref": cmd_sref, "entry": cmd_entry}
 
 
 def _stdin_words() -> list[str]:
