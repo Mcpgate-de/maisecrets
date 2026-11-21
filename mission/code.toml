@@ -2,8 +2,9 @@
 # carries, or `none` and the reason. The other direction of the mission layer: mission/M*.toml goes from a promise down
 # to the beliefs; this register goes from the code up. scripts/mission_coverage.py --strict is red on a program file
 # without an entry, an entry of a file that is gone, a declared control that no belief's proof in that file names, a
-# proof of a control that the entry of its file does not declare, and a file that the threat model names for a
-# control that is missing or not declared for it.
+# proof that breaks a line of a file whose entry does not declare the proof's control (an injection proof, whose replace
+# keeps the find text, breaks no line and is no such proof), and a file that the threat model names for a control that
+# is missing or not declared for it.
 #
 # A file carries a control when a line of it keeps a rule of that control's row: a wrong line breaks the rule. A file
 # that only routes, shows, measures or serves a command line with no such rule says `none`. The unit is the file, the
@@ -16,8 +17,10 @@
 # command texts (commands/*.md) are no program files; a belief names them directly.
 #
 # `none` is a judgement that --strict cannot read. It catches two signs of a wrong one: a `none` file that a belief's
-# mutation targets (an invariant belief's injection excepted), and a `none` file that writes a hook answer
-# (decision, permissionDecision, updatedInput, updatedToolOutput, updatedMCPToolOutput, suppressOriginalPrompt).
+# mutation breaks (a belief of a control, an invariant or a label; an injection proof breaks no line), and a `none`
+# file that names a hook answer key (decision, permissionDecision, updatedInput, updatedToolOutput,
+# updatedMCPToolOutput, suppressOriginalPrompt, additionalContext, systemMessage, continue, stopReason, quoted or bare
+# before : or =) or a hook's exit 2. It reads the text only: a key built at run time escapes it.
 # A belief with serves = [] proves no control of its file.
 
 [file]

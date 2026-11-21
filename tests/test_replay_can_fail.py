@@ -39,11 +39,15 @@ class ByteRestoreTests(unittest.TestCase):
         (root / "tests").mkdir()
         (root / "tests" / "test_launch.py").write_text(TEST, encoding="utf-8")
         (root / "launch.cmd").write_bytes(LAUNCHER)
-        belief = {"belief": "b", "control": "C13", "runner": ["tests/test_launch.py::T::test_deny"],
-                  "proof": {"file": "launch.cmd", "find": "echo deny", "replace": "echo allow"}}
-        ok, why = R.replay(belief, root)
-        self.assertTrue(ok, why)
-        self.assertEqual((root / "launch.cmd").read_bytes(), LAUNCHER, "the CRLF line ends came back")
+        # the second anchor holds a line end of the file: counted on text that read_text made, it is not there
+        for find, replace in (("echo deny", "echo allow"), ("echo deny\r\nexit", "echo allow\r\nexit")):
+            with self.subTest(find=find):
+                belief = {"belief": "b", "control": "C13", "runner": ["tests/test_launch.py::T::test_deny"],
+                          "proof": {"file": "launch.cmd", "find": find, "replace": replace}}
+                ok, why = R.replay(belief, root)
+                self.assertTrue(ok, why)
+                self.assertIsNone(R._baseline(belief, root), "the parallel replay counts the anchor the same way")
+                self.assertEqual((root / "launch.cmd").read_bytes(), LAUNCHER, "the CRLF line ends came back")
 
 
 if __name__ == "__main__":

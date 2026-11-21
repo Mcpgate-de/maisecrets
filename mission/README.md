@@ -19,12 +19,14 @@ promise turns the check red until it is mapped; a gated section that is renamed 
 `code.toml` is the other direction, from the code up: each program file of the plugin (`maisecrets/**/*.py`,
 `hooks/*.py`, `hooks/*.sh`, `hooks/*.cmd`, `claude-mod/*.mjs`, `skills/*/scripts/*.py`) names the controls and
 invariants its code carries, or `none` and why. A program file without an entry, an entry of a file that is gone, a
-declared control that no belief's proof in that file names, a proof of a control that the file's entry does not
-declare, and a file that the threat model names for a control but that is missing or not declared for it are findings.
-So a move of a control's code into a new file is red until the new file is declared and a belief proves it there.
-A `none` is a judgement the check cannot read; it is red only where it shows: a `none` file that a belief's mutation
-breaks, or one that writes a hook answer. A belief with `serves = []` proves no control of its file, and an invariant
-belief's mutation (I5 adds an import to any module) makes no file carry the invariant.
+declared control that no belief's proof in that file names, a proof that breaks a line of a file whose entry does not
+declare the proof's control, and a file that the threat model names for a control but that is missing or not declared
+for it are findings. So a move of a control's code into a new file is red until the new file is declared and a belief
+proves it there. An injection proof (its replace keeps the find text and adds code, as I5 adds an import to any
+module) proves its control but breaks no line, so it makes no file carry the control. A belief with `serves = []`
+proves no control of its file. A `none` is a judgement the check cannot read; it is red only where it shows: a `none`
+file that a belief's mutation breaks (of a control, an invariant or a label), or one that names a hook answer key. The
+check reads text only, so a key built at run time escapes it.
 The unit is the file: one proof per control and file is enough, and a second rule of the same control in that file
 can stay without a proof of its own.
 

@@ -37,9 +37,11 @@ CONTROL_ROW = re.compile(r"^\| (C\d+[a-z]?) \|", re.M)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mission_touch import CODE  # noqa: E402
 CODE_DIRS = ("maisecrets", "hooks", "claude-mod", "skills")
-# a key of a hook's answer that decides for a prompt or a tool call: a file that writes one is no `none` file
-ANSWER_KEY = re.compile(r"""["'](updatedToolOutput|updatedMCPToolOutput|updatedInput|permissionDecision|decision|"""
-                        r"""suppressOriginalPrompt)["']""")
+# a key of a hook's answer (quoted, or bare before : or = as in JavaScript or dict(...)), and a hook's exit 2: a file
+# that names one is no `none` file. Text only: a key built at run time escapes it
+_KEYS = ("updatedToolOutput|updatedMCPToolOutput|updatedInput|permissionDecision|decision|suppressOriginalPrompt|"
+         "additionalContext|systemMessage|continue|stopReason")
+ANSWER_KEY = re.compile(rf"""["']({_KEYS})["']|\b({_KEYS})\s*[:=](?!=)|\b(sys\.exit\(2\)|exit\s+(?:/b\s+)?2\b)""")
 # a path of the repository in a row of the threat model, in backticks
 NAMED_PATH = re.compile(r"`((?:maisecrets|hooks|claude-mod|skills|harness|tests|scripts)/[\w./-]+)`")
 INVARIANT_ITEM = re.compile(r"^- \*\*(I\d+)\*\*", re.M)
@@ -100,8 +102,9 @@ def check_code(root: Path, names: set[str], loaded: list[dict], threat_model: st
     findings += [f"{f}: a program file that mission/code.toml does not declare" for f in sorted(files - set(raw))]
     findings += [f"{f}: declared in mission/code.toml, but the file is gone" for f in sorted(set(raw) - files)]
     # control -> files: proofs of a belief that serves a promise. A belief with serves = [] proves no promise, so it
-    # proves no control of a file either. An invariant belief's proof also counts, but it does not make its file carry
-    # the invariant: an invariant mutation may inject code into any file (I5 adds an import to an alias module)
+    # proves no control of a file either. An injection proof (its replace keeps the find text and adds code, as I5
+    # adds an import to an alias module) proves the control, but it does not make its file carry the control and it
+    # breaks no line of the file; every other proof does both, of any kind and of any control or label
     proven: dict[str, set[str]] = {}
     forced: dict[str, set[str]] = {}
     targeted: set[str] = set()
@@ -110,11 +113,13 @@ def check_code(root: Path, names: set[str], loaded: list[dict], threat_model: st
         for p in ([proofs] if isinstance(proofs, dict) else proofs if isinstance(proofs, list) else []):
             if not (isinstance(p, dict) and isinstance(p.get("file"), str)):
                 continue
-            if b.get("kind") != "invariant" and b.get("control") in names:
-                targeted.add(p["file"])     # a label (operations) is no control the register can name
+            find, replace = p.get("find"), p.get("replace")
+            injects = isinstance(find, str) and isinstance(replace, str) and find in replace
+            if not injects:
+                targeted.add(p["file"])
             if b.get("serves"):
                 proven.setdefault(p["file"], set()).add(b.get("control", ""))
-                if b.get("kind") != "invariant":
+                if not injects:
                     forced.setdefault(p["file"], set()).add(b.get("control", ""))
     for f in sorted(declared):
         for c in sorted(declared[f] - proven.get(f, set())):
@@ -126,9 +131,10 @@ def check_code(root: Path, names: set[str], loaded: list[dict], threat_model: st
                 # `none` is a judgement the check cannot read; these two signs of a decision it can
                 if f in targeted:
                     findings.append(f"{f}: declared none, but a belief's mutation breaks a line of it")
-                keys = sorted(set(ANSWER_KEY.findall((root / f).read_text(encoding="utf-8", errors="replace"))))
+                text = (root / f).read_text(encoding="utf-8", errors="replace")
+                keys = sorted({next(g for g in m.groups() if g) for m in ANSWER_KEY.finditer(text)})
                 if keys:
-                    findings.append(f"{f}: declared none, but it writes a hook answer ({', '.join(keys)})")
+                    findings.append(f"{f}: declared none, but it names a hook answer key ({', '.join(keys)})")
     for c, paths in sorted(named_paths(threat_model).items()):
         for f in sorted(paths):
             if not (root / f).exists():

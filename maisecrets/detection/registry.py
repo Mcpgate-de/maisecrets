@@ -74,7 +74,7 @@ def runs_after_personal(rule) -> bool:
 
 
 def scan_order(every, personal, terms, imports) -> tuple:
-    """The rules of a list in scan order (detect._in_scan_order): the built-in ones, then the personal-data step and
+    """The rules of a list in scan order (core._in_scan_order): the built-in ones, then the personal-data step and
     the cleaned copy (`personal`), then the rules of your own, then the terms, then the imported values."""
     return in_phase_order(rules=[r for r in every if not runs_after_personal(r)], personal=[personal],
                           user=[r for r in every if runs_after_personal(r)], terms=[terms], imports=[imports])

@@ -1,0 +1,11 @@
+# c30a-the-name-service-line-waits-for-a-session-the-person-sees: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-the-name-service-line-waits-for-a-session-the-person-sees"
+control = "C30a"
+serves = ["M5.4"]
+statement = "A subagent, claude -p, the Agent SDK and codex exec neither show nor claim the line of a name service that cannot check the names, so the person's own session still gets it."
+runner = ["tests/test_ner_health.py::OnceTests::test_a_subagent_or_a_headless_run_neither_shows_nor_claims_the_line"]
+
+[proof]
+file = "maisecrets/ner_health.py"
+find = '''    return not payload.get("agent_id") and settings.person_sees_hook_lines(payload, codex)'''
+replace = '''    return True'''

@@ -5,7 +5,7 @@ actors = ["A5"]
 controls = ["C9", "C13", "C16", "C30a", "C31"]
 invariants = []
 labels = ["operations"]
-ends = "The log is on the same disk; a client that kills a hook before the guard answers."
+ends = "The log is on the same disk; a client that kills a hook before the guard answers; a subagent, claude -p, the Agent SDK and codex exec, where no person sees a hook's line (the name-service line waits for the person's own session); a name-service line whose record cannot be written is not shown (no line rather than one per result), and the next result tries again."
 
 [[part]]
 id = "M5.1"
@@ -21,7 +21,7 @@ says = "A stricter policy asks the person before a value leaves."
 
 [[part]]
 id = "M5.4"
-says = "A name service that cannot check the names is named to the person, with its cause and the step: at the session start and at a tool result, once per session, and again when the cause changes."
+says = "In a session the person sees, a name service that cannot check the names is named to the person, with its cause and the step: at the session start and at a tool result, once per session, and again when the cause changes."
 
 [measure]
 none = "no rate: each fault either blocks and names its cause or not (C13 beliefs)"
