@@ -517,10 +517,30 @@ class BetterleaksPatchTests(unittest.TestCase):
                 tok = rd(r, n, AN)
                 with self.subTest(n=n, form=form):
                     self.assertIn((rule, "SECRET", tok), found(form.format(t=tok), "tool"))
+        # a "-" in a token with long parts stays a hit
+        tok = rd(r, 18, AN) + "-" + rd(r, 17, AN)
+        self.assertIn((rule, "SECRET", tok), found(f"coveralls: {tok}", "tool"))
         for text in ("coveralls: " + rd(r, 35, AN), "coveralls: " + rd(r, 38, AN),
                      "coveralls: the coverage report of this branch is up again"):
             with self.subTest(miss=text[:14]):
                 self.assertNotIn(rule, [k for k, _t, _v in found(text, "tool")])
+        # three or more short parts joined by "-" are an id or a name: a UUID, a branch (Opus review of !629)
+        for text in ("COVERALLS_SERVICE_JOB_ID: " + _uuid(r), 'coveralls_build_id = "' + _uuid(r).upper() + '"',
+                     "coveralls: kubernetes-deployment-config-v2-main",
+                     "coveralls: kubernetes-deployment-config-v2-mains"):
+            with self.subTest(miss=text[:24]):
+                self.assertNotIn(rule, [k for k, _t, _v in found(text, "tool")])
+
+    def test_the_own_coveralls_rule_takes_36_or_37_characters_and_no_uuid(self):
+        rx = {x.id: x.regex for x in detect.rules()}["provider-coveralls-personal-api-token"]
+        r = random.Random(47)
+        for n in (36, 37):
+            tok = rd(r, n, L + D)
+            with self.subTest(n=n):
+                self.assertEqual(rx.search(f"COVERALLS_TOKEN: {tok}\n").group(1), tok)
+        for miss in (_uuid(r), _uuid(r).upper(), "kubernetes-deployment-config-v2-main", rd(r, 35, L + D)):
+            with self.subTest(miss=miss[:8]):
+                self.assertIsNone(rx.search(f"COVERALLS_TOKEN: {miss}\n"))
 
     def test_an_influxdb_token_after_a_label_joined_with_an_underscore_is_found(self):
         # betterleaks main after v1.10.1: INFLUX_TOKEN and influxdb_api_key are labels too; the vendored rule wanted
@@ -532,9 +552,23 @@ class BetterleaksPatchTests(unittest.TestCase):
             with self.subTest(form=form):
                 self.assertIn((rule, "SECRET", tok), found(form.format(t=tok), "tool"))
         for text in ("influx_token " + rd(r, 87, AN), "influx_token is set in the README of the deployment",
-                     "bareinflux_token " + rd(r, 88, AN)):
+                     "bareinflux_token " + rd(r, 88, AN), "influx_token " + rd(r, 257, AN)):
             with self.subTest(miss=text[:14]):
                 self.assertNotIn(rule, [k for k, _t, _v in found(text, "tool")])
+        tok = rd(r, 256, AN)
+        self.assertIn((rule, "SECRET", tok), found("influx_token " + tok, "tool"))
+        # upstream dropped the word boundary after "influx", so a longer word is a label too. Kept: 88 or more
+        # characters of base64 after "api_key" are a key whatever word comes before (Opus review of !629)
+        tok = rd(r, 86, B64U) + "=="
+        self.assertIn((rule, "SECRET", tok), found(f"the influxes of api_key {tok}", "tool"))
+
+    def test_a_long_run_after_an_influx_label_takes_linear_time(self):
+        # the unbounded value backtracked over each "influx" in the run: 4 KB took 5 to 7 s (Opus review of !629);
+        # the "-" form is the vendored rule's own, the "_" form came with the correction
+        for one in ("influx_token" + "=" * 8, "influx-token" + "=" * 8, "influxdb_api_key" + "=" * 5):
+            with self.subTest(one=one[:12]):
+                assert_linear(self, lambda text: found(text, "tool"), lambda n, one=one: one * n + "#", 400,
+                              hang=7.0, wall=20.0)
 
     def test_a_posix_class_of_re2_becomes_a_python_class(self):
         self.assertEqual(detect._re2_to_python(r"\b(pat[[:alnum:]]{14})"), r"\b(pat[A-Za-z0-9]{14})")
