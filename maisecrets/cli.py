@@ -1449,15 +1449,17 @@ def cmd_entry(args: list[str]) -> int:
     if name == "report" or (name == "sref" and [w.lower() for w in rest[:1]] in (["login"], ["logout"])):
         # the AI may not start these (disable-model-invocation): the entry file runs through the model, so a report
         # or a login starts only from report.md, sref.md or the mod's own run of the person's prompt
-        what = "report" if name == "report" else "login"
+        what = "report" if name == "report" else rest[0].lower()  # a fixed word: login or logout
         from . import cowork
         if not cowork.active():
             print(f"maisecrets: the AI does not start a {what}. Send /maisecrets:{name} with its words as your own "
                   "prompt.")
+        elif what == "login":
+            # the typed text form gives the same answer (prompt_commands._cowork_sref): say it at once
+            print(prompt_commands.COWORK_SREF_LOGIN)
         elif name == "sref":
-            # Cowork answers only the text form of sref (prompt_commands._cowork_sref); the word is a fixed one
-            print(f"maisecrets: the AI does not start a {what}. Send maisecrets: sref {rest[0].lower()} as your own "
-                  "prompt.")
+            # Cowork answers only the text form of sref (prompt_commands._cowork_sref)
+            print("maisecrets: the AI does not start a logout. Send maisecrets: sref logout as your own prompt.")
         else:
             print("maisecrets: the AI does not start a report. In Cowork send maisecrets: report incident as your own "
                   "prompt; another report starts in Claude Code in the terminal.")

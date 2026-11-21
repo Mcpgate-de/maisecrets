@@ -47,8 +47,11 @@ def _masked_request(payload: dict, answer: str) -> str | None:
 def show_answer(payload: dict, answer: str) -> dict:
     """The mod's answer in Cowork for a command the prompt hook answered: the prompt becomes a request to show the
     answer, with each value in it masked (_masked_request). When the rewrite was not possible, the request is a fixed
-    line."""
-    text = _masked_request(payload, answer)
+    line, also on any error (a lock that timed out, a store that cannot be read)."""
+    try:
+        text = _masked_request(payload, answer)
+    except Exception:  # noqa: BLE001 - the answer cannot be checked: the fixed line instead
+        text = None
     return {"text": text if text is not None else UNCHECKED}
 
 

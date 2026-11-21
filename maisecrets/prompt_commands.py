@@ -236,8 +236,9 @@ COWORK_SREF_LOGIN = ("maisecrets: a gateway login from Cowork is not tested yet.
 
 
 # the sref run in Cowork ends inside the mod's budget for one prompt (BUDGET_MS, 8 s, claude-mod/maisecrets-mod.mjs),
-# with time left for the start of Python: the child gets COWORK_SREF_S less the name service's wait in the mask of its
-# answer (COWORK_SREF_MASK_S); the child's discovery ends earlier still (cli.SREF_COWORK_DISCOVERY_S)
+# with time left for the start of Python: the child gets COWORK_SREF_S less the wait of a name service on this computer
+# in the mask of its answer (COWORK_SREF_MASK_S; a network name service checks no text that was not typed); the
+# child's discovery ends earlier still (cli.SREF_COWORK_DISCOVERY_S)
 COWORK_SREF_S = 5.0
 COWORK_SREF_MASK_S = 1.0
 # the child's environment: the run is this one, so cmd_sref ends its discovery early (an AI's own run keeps its time)

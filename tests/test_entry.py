@@ -331,7 +331,7 @@ class EntryCliTests(unittest.TestCase):
     def test_in_cowork_the_refusal_names_the_text_form_and_no_slash_form(self):
         # Cowork answers sref only in its text form (prompt_commands._cowork_sref): a slash form there does nothing
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"}):
-            for args, form in ((["sref", "login", "gw"], "maisecrets: sref login as your own prompt"),
+            for args, form in ((["sref", "login", "gw"], prompt_commands.COWORK_SREF_LOGIN),
                                (["sref", "LOGOUT"], "maisecrets: sref logout as your own prompt"),
                                (["report", "bug", "x"], "maisecrets: report incident as your own prompt")):
                 with self.subTest(args):
@@ -342,6 +342,7 @@ class EntryCliTests(unittest.TestCase):
                     self.assertIn(form, said)
                     self.assertNotIn("/", said.replace("maisecrets: ", ""))
                     self.assertNotIn("gw", said)
+                    self.assertNotIn("start a login. Send", said)
 
 
 if __name__ == "__main__":

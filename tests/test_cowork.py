@@ -226,6 +226,14 @@ class HookAnswerTests(unittest.TestCase):
             out = cowork.show_answer(payload, f"maisecrets: done with {token}")
             self.assertEqual(out["text"], cowork.UNCHECKED)
 
+    def test_an_error_in_the_mask_of_an_answer_gives_the_fixed_line(self):
+        # without it the hook process exits with 1, and the person gets no answer and no notice
+        payload = {"session_id": self.tm.SESSION, "cwd": "", "origin": "composer"}
+        for error in (TimeoutError("lock"), OSError("store"), ValueError("x")):
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.object(hooks, "rewrite_prompt", side_effect=error):
+                self.assertEqual(cowork.show_answer(payload, "maisecrets: done")["text"], cowork.UNCHECKED)
+
 
 class OutputTests(unittest.TestCase):
     def test_a_command_output_names_the_text_form_in_cowork(self):
