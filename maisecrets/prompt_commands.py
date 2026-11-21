@@ -214,6 +214,11 @@ def mod_command(payload: dict) -> dict | None:
     from . import hooks as h
     if payload.get("origin") not in ("composer", "bridge"):
         return None
+    # Cowork draws no panel and no dropped-prompt line: a command the mod ran itself showed nothing there. The command
+    # file runs it through the model instead, and its output reaches the conversation (maisecrets/cowork.py)
+    from . import cowork
+    if cowork.active():
+        return None
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or "maisecrets" not in prompt.lower():
         return None

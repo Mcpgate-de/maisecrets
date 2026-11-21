@@ -7,6 +7,13 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt" and sys.version_info < (3,
     sys.exit(3)   # the mod then tries its next Python (claude-mod/maisecrets-mod.mjs); run.sh checks 3.9 for the hooks
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Cowork knows a plugin's commands by their short name only (maisecrets/cowork.py). A command and the prompt and session
+# texts name them so there. A tool hook keeps its output as it is (it can carry a file), and the mod (mod-*) matches
+# the long form
+if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "remote_cowork" and not (
+        len(sys.argv) > 1 and (sys.argv[1].startswith("mod-") or "tool" in sys.argv[1])):
+    from maisecrets.cowork import ShortNames  # noqa: E402
+    sys.stdout, sys.stderr = ShortNames(sys.stdout), ShortNames(sys.stderr)
 HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "post-tool-failure", "session-start", "session-end")
 
 

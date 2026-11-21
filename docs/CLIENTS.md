@@ -12,7 +12,7 @@ vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
 |---|:---:|:---:|:---:|---|
 | Claude Code CLI | ✅ | ✅ | ✅ | built; from 0.6.0 with mods (2.1.287+) a prompt with a value is rewritten with placeholders instead of blocked, measured live and in the harness; on Windows without Git Bash the shell tool is PowerShell, and a placeholder in a PowerShell command is refused (no PowerShell rewrite) |
 | Claude desktop app, Code tab | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves (with the ask and warning of 0.5.9, now `rehydration: confirm`), and a redacted Bash output seen live (2026-09-28); the mod (mods from 2.1.286) rewrites the prompt, seen live with Claude Code 2.1.288 (2026-10-06): the model got the placeholder, and your own message bubble shows the text as typed (a local display); not in the harness |
-| Cowork | ✅ | ✅ | ✅ | same hooks as the desktop app; whether the mod loads there is not measured, so count on the block |
+| Cowork | ✅ | ✅ | ✅ | Claude Code in a Linux VM of the desktop app, with its own copy of the plugin; the mod rewrites the prompt (2026-11-21, Claude Code 2.1.330); Cowork knows the commands by their short name (`/status`) and draws no panel, no dropped-prompt line and no lock, so a typed command runs through its command file there |
 | Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
 | Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
 | Codex IDE extension | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured |
@@ -40,7 +40,7 @@ hook names, block/rewrite fields). Proven by the harness: Claude Code CLI
 "The mod" in [USING.md](USING.md#handing-a-value-to-claude-on-purpose)) and Codex CLI (same format; output via
 block feedback). Same runtime, seen live but not in the harness: the Claude desktop app
 (a blocked prompt, an MCP resolve with its ask and a redacted Bash output, 2026-09-28; in the Code tab with
-Claude Code 2.1.288 the mod rewrites the prompt, 2026-10-06; Cowork: the mod not measured) and Codex in the
+Claude Code 2.1.288 the mod rewrites the prompt, 2026-10-06; Cowork: the mod rewrites, 2026-11-21) and Codex in the
 ChatGPT app (2026-09-27). Same runtime, not measured: the Codex IDE extension. Docs, untested: ChatGPT
 Work mode runs plugin hooks in the Codex runtime. OpenCode: own npm plugin, can
 rewrite the prompt (correction 2026-09-26: the current plugin API lists
