@@ -12,6 +12,8 @@ Run: python3 -m unittest tests.test_entry -v
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -289,11 +291,18 @@ class EntryCliTests(unittest.TestCase):
     def test_every_name_runs_its_command(self):
         called = []
         with mock.patch.dict(cli.COMMANDS, {n: (lambda a, n=n: called.append((n, a)) or 0) for n in cli.COMMANDS}):
-            for name in ("status", "list", "audit", "rules", "guard", "shortcut", "forget", "settings", "sref",
-                         "report"):
+            for name in ("status", "list", "audit", "rules", "guard", "shortcut", "forget", "settings", "sref"):
                 called.clear()
                 self.assertEqual(cli.cmd_entry([name, "x"]), 0)
                 self.assertEqual(called, [(name, ["x"])])
+            # the AI may not start a report or a login, and the entry file runs through the model
+            for args in (["report"], ["report", "bug", "x"], ["sref", "login", "gw"], ["sref", "LOGOUT"]):
+                called.clear()
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(cli.cmd_entry(args), 2)
+                self.assertEqual(called, [])
+                self.assertIn("as your own prompt", out.getvalue())
 
 
 if __name__ == "__main__":

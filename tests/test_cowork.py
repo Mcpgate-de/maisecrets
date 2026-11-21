@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import cowork, forms, hooks, prompt_commands  # noqa: E402
+from maisecrets.placeholder import CLOSE, OPEN  # noqa: E402
 import _hygiene  # noqa: E402
 
 SESSION = "0b6f1c2e-0000-4000-8000-0000000000c7"
@@ -171,12 +172,38 @@ class HookAnswerTests(unittest.TestCase):
 
     def test_the_request_reads_as_no_command_to_the_prompt_hook(self):
         out = self.tm._mod(f"maisecrets: term add {self.tm.NAME}")
-        self.assertIsNone(prompt_commands.mod_command({"prompt": out["text"], "session_id": self.tm.SESSION,
-                                                       "cwd": "", "origin": "composer"}))
+        request = {"prompt": out["text"], "session_id": self.tm.SESSION, "cwd": "", "origin": "composer"}
+        self.assertIsNone(prompt_commands.mod_command(request))
+        self.assertIs(prompt_commands.with_canonical({**request, "prompt_id": "t"})["prompt"], out["text"])
+        from maisecrets import demo, not_a_secret, settings, term_files, value_files
+        for parse in (term_files.parse_command, settings.parse_prompt, not_a_secret.parse, demo.parse,
+                      value_files.parse_removal):
+            self.assertFalse(parse(out["text"]), parse)
+        from maisecrets.vault import HOME
+        store = ("index.json", "vault.json", "terms.txt", "allowed.json", "allow.txt", "demo.json")
+
+        def snapshot():
+            return {f: Path(HOME, f).read_bytes() for f in store if Path(HOME, f).is_file()}
+        before = snapshot()
         hooks._live_cache.clear()
-        out = hooks.user_prompt({"prompt": out["text"], "session_id": self.tm.SESSION, "cwd": "",
-                                 "prompt_id": "t", "transcript_path": ""})
-        self.assertNotEqual(out.get("decision"), "block", out)
+        answer = hooks.user_prompt({"prompt": out["text"], "session_id": self.tm.SESSION, "cwd": "",
+                                    "prompt_id": "t", "transcript_path": ""})
+        self.assertNotEqual(answer.get("decision"), "block", answer)
+        self.assertEqual(snapshot(), before, "the request stores and changes nothing")
+
+    def test_a_placeholder_in_the_answer_is_no_placeholder_the_person_typed(self):
+        ref = OPEN + "SECRET" + "_c1" + CLOSE
+        out = cowork.show_answer({"session_id": self.tm.SESSION, "cwd": "", "origin": "composer"},
+                                 f"maisecrets: deleted {ref}")
+        self.assertEqual(hooks.find_refs(out["text"]), [])
+        self.assertIn("[SECRET" + "_c1]", out["text"])
+
+    def test_an_answer_that_could_not_be_checked_is_not_sent(self):
+        token = "ghp_" + "R7kQ2mZx9VbT4nLp8WcY3sHd6FjA1uEo5GiN"
+        for payload in ({"session_id": "no valid id", "cwd": "", "origin": "composer"},
+                        {"cwd": "", "origin": "composer"}):
+            out = cowork.show_answer(payload, f"maisecrets: done with {token}")
+            self.assertEqual(out["text"], cowork.UNCHECKED)
 
 
 class OutputTests(unittest.TestCase):

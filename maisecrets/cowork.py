@@ -22,10 +22,24 @@ _SHOW = ("The person ran a maisecrets command, and maisecrets carried it out. Sh
          "it is, in a code block, and add nothing:\n\n")
 
 
+# the request when the answer could not be checked: nothing of the answer goes to the model
+UNCHECKED = (_SHOW + "maisecrets: the command was carried out, but its answer could not be checked, so it is not "
+             "shown here.")
+
+
 def show_answer(payload: dict, answer: str) -> dict:
     """The mod's answer in Cowork for a command the prompt hook answered: the prompt becomes a request to show the
-    answer, with each value in it masked as in any prompt the mod passes on."""
+    answer, with each value in it masked as in any prompt the mod passes on. A placeholder in the answer reaches the
+    prompt hook as plain brackets, so it never counts as one the person typed (C4). When the rewrite was not possible
+    (no valid session, the rewrite off), the request is a fixed line."""
     from . import forms, hooks
-    text = _SHOW + forms.cowork(answer)
+    from .placeholder import CLOSE, OPEN
+    text = _SHOW + forms.cowork(answer).replace(OPEN, "[").replace(CLOSE, "]")
     masked = hooks.rewrite_prompt({**payload, "prompt": text, "origin": None})
-    return {"text": masked.get("text", text) if isinstance(masked.get("text"), str) else text}
+    if isinstance(masked.get("text"), str):
+        return {"text": masked["text"]}
+    session = payload.get("session_id")
+    # {} from a rewrite that ran: no value in the text. {} before it ran: unknown, so nothing of it is sent
+    ran = (isinstance(session, str) and hooks._SESSION_ID_RE.fullmatch(session) is not None
+           and hooks.load_config().get("rewrite_prompts", True))
+    return {"text": text} if masked == {} and ran else {"text": UNCHECKED}

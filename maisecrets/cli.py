@@ -1423,6 +1423,13 @@ def cmd_entry(args: list[str]) -> int:
         print("maisecrets: the first word is no maisecrets command. Nothing ran.")
         _entry_overview()
         return 2
+    if name == "report" or (name == "sref" and [w.lower() for w in rest[:1]] in (["login"], ["logout"])):
+        # the AI may not start these (disable-model-invocation): the entry file runs through the model, so a report
+        # or a login starts only from report.md, sref.md or the mod's own run of the person's prompt
+        what = "report" if name == "report" else "login"
+        print(f"maisecrets: the AI does not start a {what}. Send /maisecrets:{name} with its words as your own prompt "
+              f"(in Cowork: /{name}).")
+        return 2
     if name == "send":
         text = take_pending(os.environ.get("CLAUDE_CODE_SESSION_ID") or None)
         print(NOTHING_WAITING if text is None else text if text == TWO_WAITING else ENTRY_SEND_HEAD + "\n" + text)
