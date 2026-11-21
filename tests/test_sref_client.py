@@ -158,6 +158,11 @@ class SrefClientTests(unittest.TestCase):
         got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
         self.assertEqual(got, {ref: "tok_" + "Rx7Qm2Vb4Np8"})
         self.assertIsNone(got.audit_id)
+        # an empty released value is in every text: it drops no id
+        empty = self.srv.mint("token", "")
+        self.srv.audit_id = "evt-7"
+        got = S.resolve(self.cfg, self.backend, self.found, [empty], "process", "mail")
+        self.assertEqual(got.audit_id, "evt-7")
 
     def test_a_refusal_carries_no_audit_id_and_refuses_as_before(self):
         # every refusal of the gateway (409, 429, ...) comes without an audit_id; the client refuses as before
