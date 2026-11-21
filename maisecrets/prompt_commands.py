@@ -308,6 +308,11 @@ def mod_command(payload: dict) -> dict | None:
         found = demo._find_transcript(session) if isinstance(session, str) and session else None
         out = h.user_prompt({**payload, "prompt_id": "mod", "transcript_path": found or ""})
         if out.get("decision") == "block" and isinstance(out.get("reason"), str):
+            if in_cowork and demo.active(session, found):
+                # demo on, or a command in a demo session: a request to show the answer would get the demo line, so
+                # the demo answer itself carries it, and nothing goes to the AI (demo.cowork_own)
+                line = incidents.cowork_line() if incidents.recognize(prompt, "claude") else out["reason"]
+                return demo.cowork_own(session, line)
             if in_cowork and incidents.recognize(prompt, "claude"):
                 # the AI never reads the incident report (docs/DIAGNOSTICS.md), and Cowork shows only what it writes
                 return cowork.show_answer(payload, incidents.cowork_line())

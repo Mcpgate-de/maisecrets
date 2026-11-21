@@ -383,6 +383,18 @@ test('a demo prompt enters with its masked text, and no model step sends a reque
   expect(asked).toEqual(['mod-prompt'])        // the prompt's answer said inDemo: no second question
 })
 
+test('in Cowork the first demo step answers with the text Python gave for the prompt, once, and sends nothing', async ($, on) => {
+  const sent: number[] = []
+  const SHOW = 'What the AI would have got:\n\nmasked\n\nDemo mode: nothing was sent to the AI. Start a new task to switch it off.'
+  demoWorld(on, { sent, promptExtra: { show: SHOW } } as any)
+  await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
+  const first = await step($)
+  expect(first.result.answer).toBe(SHOW)
+  expect(first.chunks.some(c => c.kind === 'text' && c.text === SHOW)).toBe(true)
+  expect((await step($, 1)).result.answer).toBe(DEMO_LINE)     // used once
+  expect(sent).toEqual([])
+})
+
 test('a session the mod has not seen asks at the step: in the demo no request goes out', async ($, on) => {
   const sent: number[] = []
   demoWorld(on, { demo: true, sent })

@@ -498,6 +498,9 @@ function takeAnswer(answer, session) {
 // last prompt), kept in this module's memory per session id. /clear gives a new session id, which asks again
 const DEMO_LINE = 'Demo mode: nothing was sent to the AI. /clear to switch it off.'
 const demo = new Map()     // session id -> in the demo; the demo command clears its entry
+// session id -> the answer of the next demo step in Cowork (maisecrets/demo.py cowork_show, cowork_own): what the AI
+// would have got, or a command's output, ending with the Cowork demo line. Cowork draws no row under a prompt
+const demoShow = new Map()
 const namesTold = new Set()   // session ids told once that the demo did not check names
 const DEMO_CMD = /^\s*(?:\/maisecrets:demo|maisecrets:\s*demo)\b/i
 
@@ -598,11 +601,17 @@ async function inDemo($) {
   return a.demo
 }
 
-// the step's answer without a request: one text block, the end of the turn
-async function * demoAnswer(e) {
-  yield { kind: 'text', index: 0, text: DEMO_LINE }
+// the step's answer without a request: one text block, the end of the turn. In Cowork the text Python gave for this
+// prompt (demoShow), once; else the demo line
+async function * demoAnswer($, e) {
+  let text = DEMO_LINE
+  try {
+    const id = await $.session.id()
+    if (typeof demoShow.get(id) === 'string') { text = demoShow.get(id); demoShow.delete(id) }
+  } catch { /* the demo line */ }
+  yield { kind: 'text', index: 0, text }
   yield { kind: 'stop', stopReason: 'end_turn', usage: null }
-  return { turnId: e.turnId, index: e.index, answer: DEMO_LINE, toolUses: [], stopReason: 'end_turn', usage: null }
+  return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn', usage: null }
 }
 
 const COMPACT_SKIP = 'maisecrets demo: the conversation stays as it is, nothing goes to the AI'
@@ -668,14 +677,14 @@ function registerDemo(on) {
   // No answer, a malformed one or a timeout answers the step itself (fail closed, Gate A of the demo turn)
   on('turn.step', async function * ($, e, next) {
     if (await inDemo($) === false) return yield * next(e)
-    return yield * demoAnswer(e)
+    return yield * demoAnswer($, e)
   }).catch(async function * ($, e, next) {
     // the hook failed: a request goes out only for a session this module knows is not in the demo
     if (next.called) return yield * next(e)
     let id = null
     try { id = await $.session.id() } catch { id = null }
     if (id !== null && demo.get(id) === false) return yield * next(e)
-    return yield * demoAnswer(e)
+    return yield * demoAnswer($, e)
   })
 }
 
@@ -1833,6 +1842,7 @@ export function register(on) {
     // the demo: the masked prompt enters as the person's row; its model steps are answered above, none is sent
     if (answer.demo === true) {
       await quietForTheDemo($)
+      try { if (typeof answer.show === 'string') demoShow.set(await $.session.id(), answer.show) } catch { /* the line */ }
       // one line: what was masked, and once per session that names were not checked (maisecrets/demo.py)
       try {
         const id = await $.session.id()

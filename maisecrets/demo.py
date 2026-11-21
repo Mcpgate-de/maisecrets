@@ -35,6 +35,12 @@ PASS_SECONDS = 120
 DEMO_LINE = "Demo mode: nothing was sent to the AI. /clear to switch it off."
 TITLE = "maisecrets demo"
 DEMO_LINE_CODEX = "Demo mode: nothing was sent to the AI. A new session switches it off."
+# Cowork has no /clear and draws no row under a prompt: its demo answer ends with this line, after what the AI would
+# have got (cowork_show), and it is forms.cowork(DEMO_LINE)
+DEMO_LINE_COWORK = "Demo mode: nothing was sent to the AI. Start a new task to switch it off."
+# the row that enters a Cowork demo session for the person's own command, so that the demo answer can show its output
+# (Cowork shows no dropped prompt); it carries no command, so the prompt hook reads none in it
+COWORK_ROW = "(maisecrets answered this in the demo)"
 # Claude Code 2.1.327 and later: where an organization manages Claude Code, the hooks of a plugin the person installed
 # do not run on session.compact and on the engine's http.fetch (the plugin page says so). The mod then cannot stop
 # /compact and the side requests; they carry only placeholders. docs/ADMIN.md, "The demo where an organization manages
@@ -204,7 +210,9 @@ def has_demo_rows(session: str, transcript: str | None = None) -> bool:
                 chunk = f.read(size - start)
                 last = _last_answer(chunk if start == 0 else chunk[chunk.find(b"\n") + 1:])
                 if last is not None or start == 0:
-                    return last == ("mod", DEMO_LINE)
+                    # Cowork's demo answer ends with its own line (cowork_show); only the mod writes either
+                    return last == ("mod", DEMO_LINE) or (last is not None and last[0] == "mod"
+                                                          and last[1].endswith(DEMO_LINE_COWORK))
                 want *= 4
     except FileNotFoundError:
         return False
@@ -460,6 +468,8 @@ def mod_answer(payload: dict, cfg: dict) -> dict | None:
     if parse(prompt) or _answered_by_the_hook(prompt):
         return {}
     if typed and own_command(prompt):
+        if _in_cowork():
+            return cowork_own(session, own_answer(prompt, session))
         return {"drop": own_answer(prompt, session)}
     if damaged():
         return {"drop": DAMAGED.format(off="/maisecrets demo off")}     # before the report pass: none passes
@@ -479,8 +489,34 @@ def mod_answer(payload: dict, cfg: dict) -> dict | None:
     else:
         text = prompt       # nothing to mask
     _write_pass(session, text)
-    return {"text": text, "count": out.get("count", 0), "demo": True, "masked": masked_line(prompt, text),
-            "namesUnchecked": not _names_checked(cfg, hooks.LAST_NAMES_WHY[0])}
+    answer = {"text": text, "count": out.get("count", 0), "demo": True, "masked": masked_line(prompt, text),
+              "namesUnchecked": not _names_checked(cfg, hooks.LAST_NAMES_WHY[0])}
+    if _in_cowork():
+        answer["show"] = cowork_show(text, answer["masked"], answer["namesUnchecked"])
+    return answer
+
+
+def _in_cowork() -> bool:
+    from . import cowork
+    return cowork.active()
+
+
+def cowork_show(text: str, masked: str, names_unchecked: bool = False) -> str:
+    """The demo answer in Cowork, which draws no row under a prompt: what the AI would have got (placeholders only, the
+    text that entered), what was masked, and the line that ends it."""
+    notes = [n for n in (masked, "names: not checked" if names_unchecked else "") if n]
+    return ("What the AI would have got:\n\n" + text + "\n\n" + (" · ".join(notes) + "\n\n" if notes else "")
+            + DEMO_LINE_COWORK)
+
+
+def cowork_own(session, output: str) -> dict:
+    """A Cowork demo session's answer to text that maisecrets answers itself (the person's own command, the demo
+    command): a neutral row enters, with a pass for the prompt hook, and the demo answer shows the output (Cowork shows
+    no dropped prompt). No request goes out: the session is in the demo."""
+    from . import forms
+    _write_pass(session, COWORK_ROW)
+    return {"text": COWORK_ROW, "count": 0, "demo": True, "inDemo": True, "masked": "",
+            "show": forms.cowork(output).rstrip() + "\n\n" + DEMO_LINE_COWORK}
 
 
 _KINDS = {"SECRET": ("secret", "secrets"), "EMAIL": ("e-mail", "e-mails"), "NAME": ("name", "names"),

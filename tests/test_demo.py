@@ -866,5 +866,67 @@ class NightFindingsTests(_Base):
         self.assertNotIn("decision", out, "out of the demo the command runs on as before")
 
 
+# ------------------------------------------------------------ the demo in Cowork --
+class CoworkDemoTests(_Base):
+    """Cowork (measured 2026-11-21) shows no dropped or blocked prompt, draws no row under a prompt and has no /clear:
+    the demo answer itself shows the confirmation, a command's output and what the AI would have got, and names a new
+    task as the way out."""
+
+    def setUp(self):
+        super().setUp()
+        env = mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"})
+        env.start()
+        self.addCleanup(env.stop)
+        _hygiene.patch(self, hooks, "_scrub_transcript_later", lambda *a, **k: None)
+
+    def test_demo_on_shows_its_confirmation_in_the_demo_answer_and_the_row_enters_once(self):
+        session = UUID.format(40)
+        out = _mod("maisecrets: demo on", session)
+        self.assertTrue(demo.active(session))
+        self.assertEqual(out["text"], demo.COWORK_ROW)
+        self.assertTrue(out["demo"])
+        self.assertIn("Demo mode is on", out["show"])
+        self.assertNotIn("/clear", out["show"])
+        self.assertTrue(out["show"].endswith(demo.DEMO_LINE_COWORK))
+        self.assertNotIn("decision", _prompt(demo.COWORK_ROW, session=session), "the row enters, with its pass")
+        self.assertTrue(_is_demo(_prompt(demo.COWORK_ROW, session=session)), "once")
+
+    def test_a_prompt_in_the_demo_shows_what_the_ai_would_have_got_without_a_value(self):
+        session = UUID.format(41)
+        self.on(session=session)
+        out = _mod(PROMPT, session)
+        self.assertIn("What the AI would have got:", out["show"])
+        self.assertIn(_ph("SECRET_c1"), out["show"])
+        self.assertIn("masked: 1 secret", out["show"])
+        self.assertNotIn(TOKEN, out["show"])
+        self.assertNotIn(MAIL, out["show"])
+        self.assertTrue(out["show"].endswith(demo.DEMO_LINE_COWORK))
+
+    def test_an_own_command_in_the_demo_shows_its_output_in_the_demo_answer(self):
+        session = UUID.format(42)
+        self.on(session=session)
+        out = _mod("maisecrets: list", session)
+        self.assertEqual(out["text"], demo.COWORK_ROW)
+        self.assertIn("Nothing is stored.", out["show"])
+        self.assertNotIn("drop", out)
+
+    def test_the_cowork_demo_answer_keeps_the_session_in_the_demo_only_as_the_mods_answer(self):
+        text = demo.cowork_show("hi " + _ph("SECRET_c1"), "masked: 1 secret")
+        made = {"type": "assistant", "answeredWithoutRequest": True,
+                "message": {"id": "msg_hook_7", "content": [{"type": "text", "text": text}]}}
+        user = {"type": "user", "message": {"role": "user", "content": "hi"}}
+        self.assertTrue(demo.active(SESSION, _transcript(self.tmp(), user, made)))
+        model = {"type": "assistant", "message": {"id": "msg_01AbC", "content": [{"type": "text", "text": text}]}}
+        _reset()
+        self.assertFalse(demo.active(SESSION, _transcript(self.tmp(), user, model)), "the model cannot make one")
+
+    def test_the_cowork_texts_name_a_new_task_for_clear(self):
+        from maisecrets import forms
+        self.assertEqual(forms.cowork(demo.DEMO_LINE), demo.DEMO_LINE_COWORK)
+        for text in (demo.ON, demo.OFF, demo.NEEDS_THE_AI):
+            self.assertNotIn("/clear", forms.cowork(text))
+        self.assertIn("until a new task;", forms.cowork("stays in the demo until /clear; a session"))
+
+
 if __name__ == "__main__":
     unittest.main()

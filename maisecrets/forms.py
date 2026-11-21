@@ -65,11 +65,22 @@ def _settings_change(m) -> str:
     return m.group(0)
 
 
+# Cowork has no /clear ("Unknown skill", measured 2026-11-21): a new task starts a new session there
+_CLEAR = [
+    (LazyRx(r"/clear to switch it off"), "Start a new task to switch it off"),
+    (LazyRx(r"/clear (switches it off|ends the demo|starts a new)"), r"A new task \1"),
+    (LazyRx(r"(?<![\w/])/clear\b"), "a new task"),
+]
+
+
 def cowork(text: str) -> str:
     """Each command that the prompt hook answers as its text form, which Cowork shows an answer for; every other
-    command keeps its slash form, whose command file shows its output there."""
+    command keeps its slash form, whose command file shows its output there. /clear, which Cowork does not have, is a
+    new task."""
     for rx, form in _TYPED:
         text = rx.sub(form if form is not None else _settings_change, text)
+    for rx, form in _CLEAR:
+        text = rx.sub(form, text)
     return text
 
 
