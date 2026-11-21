@@ -339,7 +339,7 @@ harness_claude:
   needs: []
   image: node:22
   variables:
-    CLAUDE_CODE_VERSION: "2.1.316"   # 2.1.300 checks updatedInput like model input, 2.1.301 narrows a mod .catch
+    CLAUDE_CODE_VERSION: "2.1.330"   # 2.1.300 checks updatedInput like model input, 2.1.301 narrows a mod .catch; the entry needs command.run's isTextDisplayOnly
     ANTHROPIC_API_KEY: "sk-ant-dummy-for-the-fake-upstream-000000000000"
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
   script:
