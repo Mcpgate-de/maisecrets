@@ -395,6 +395,20 @@ test('in Cowork the first demo step answers with the text Python gave for the pr
   expect(sent).toEqual([])
 })
 
+test('in Cowork a demo answer Python gave for an earlier prompt is never shown for a later one', async ($, on) => {
+  // the prompt hook may block a prompt the mod passed on: then no step takes its answer, and the next prompt's step
+  // must not show it
+  const sent: number[] = []
+  const OLD = 'What the AI would have got:\n\nold\n\nDemo mode: nothing was sent to the AI. Start a new task to switch it off.'
+  const opts: any = { sent, promptExtra: { show: OLD } }
+  demoWorld(on, opts)
+  await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
+  opts.promptExtra = {}
+  await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
+  expect((await step($)).result.answer).toBe(DEMO_LINE)
+  expect(sent).toEqual([])
+})
+
 test('a session the mod has not seen asks at the step: in the demo no request goes out', async ($, on) => {
   const sent: number[] = []
   demoWorld(on, { demo: true, sent })
@@ -678,6 +692,24 @@ test('an entry form that the mod does not answer goes on as typed to its command
       expect(seen.downstream).toBe(1)
     }
   }
+})
+
+test('the slash entry /maisecrets sref goes on as typed even when Python answers with a text', async ($, on) => {
+  // the engine throws away a change of a slash line (#44): a text answer never replaces it. In Cowork Python gives
+  // none for it, and the hints name the text form `maisecrets: sref`, which the mod rewrites
+  const SHOW = 'The person ran a maisecrets command, and maisecrets carried it out. Show the person this answer'
+  const seen = ownSetup(on, () => own({ text: SHOW, count: 0 }))
+  for (const text of ['/maisecrets sref', '/maisecrets sref status', '/maisecrets:sref']) {
+    seen.downstream = 0
+    const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBeUndefined()
+    expect(r.text).toBe(text)
+    expect(seen.downstream).toBe(1)
+  }
+  seen.downstream = 0
+  const typed = await $.prompt.submit({ text: 'maisecrets: sref', wait: false, origin: { kind: 'composer' } })
+  expect(typed.text).toBe(SHOW)
+  expect(seen.downstream).toBe(1)
 })
 
 test('a prompt that is not the person\'s own keeps the space form: Python is not asked, nothing runs', async ($, on) => {

@@ -1778,6 +1778,9 @@ export function register(on) {
     if (DEMO_CMD.test(own ?? '')) {
       try { demo.delete(await $.session.id()) } catch { /* the step asks */ }
     }
+    // a demo answer Python gave for an earlier prompt is never shown for this one (the hook may block this prompt, and
+    // no step then takes it): only this prompt's answer sets it again below
+    try { demoShow.delete(await $.session.id()) } catch { /* the step shows the demo line */ }
     if (!person) return next(e)
     afterPrompt($, own)
     const near = meant ? null : nearCommand(e.text)
@@ -1818,7 +1821,8 @@ export function register(on) {
       // no command of the mod's: the steps below, as for any prompt (a slash command goes on to its command file)
     }
     // an entry form the mod did not answer (Cowork, where the command file shows the output) goes on as typed: the
-    // engine throws away a change of a slash line (#44), and the prompt hook reads the line as its colon form
+    // engine throws away a change of a slash line (#44), and the prompt hook reads the line as its colon form. A text
+    // answer is no use here, so Python gives none for a slash line in Cowork (sref runs there in its text form)
     if (SLASH.test(e.text)) return next(e)
     if (CHECK.test(e.text)) {
       // a check of a value is never passed on: the verdict, or this sentence when Python gives none in time
