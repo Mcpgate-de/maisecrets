@@ -939,6 +939,16 @@ class CoworkDemoTests(_Base):
                     self.assertNotIn(TOKEN, out["show"])
                     self.assertTrue(out["show"].endswith(demo.DEMO_LINE_COWORK))
 
+    def test_the_mask_of_an_output_is_no_demo_prompt_of_its_own(self):
+        # the person's own command passes a damaged demo state (gate); the mask of its output must not meet the demo's
+        # own step, which drops every other text there, or the output would never show (demo._INSIDE)
+        session = UUID.format(46)
+        demo.STATE.write_text("not json", encoding="utf-8")
+        self.assertTrue(demo.damaged())
+        out = _mod("maisecrets: list", session)
+        self.assertIn("Nothing is stored.", out["show"])
+        self.assertNotIn(cowork.OUTPUT_UNCHECKED, out["show"])
+
     def test_an_output_that_cannot_be_checked_is_not_shown(self):
         out = demo.cowork_own({"session_id": "no valid id"}, f"maisecrets: done with {TOKEN}")
         self.assertNotIn(TOKEN, out["show"])
