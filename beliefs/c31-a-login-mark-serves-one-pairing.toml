@@ -7,7 +7,8 @@ runner = ["tests/test_sref_hooks.py::SrefBashTests::test_a_wrong_proof_binds_not
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''        entry.pop("login_t", None)
+find = '''        fresh = _fresh_mark(entry, time.time())
+        entry.pop("login_t", None)
 '''
-replace = '''        pass
+replace = '''        fresh = _fresh_mark(entry, time.time())
 '''

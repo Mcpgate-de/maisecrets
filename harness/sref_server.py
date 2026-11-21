@@ -76,6 +76,7 @@ class SrefServer:
         self.pairing = True              # #91: the pairing endpoint in the metadata, and its answer
         self.pair_key = secrets.token_bytes(32)   # K_user of the one user of this fake
         self.pair_answer = None          # (status, body): the pairing endpoint answers this instead
+        self.pairing_named = None        # what the metadata names as pairing_endpoint instead (a broken one)
         self.pairings: list = []         # the nonce of each pairing request (a test checks what the client sent)
         self.ner = False                 # ai-gateway #1819: the name endpoint and its scope, while the switch is on
         self.ner_answer = None           # (status, body): the name endpoint answers this instead
@@ -145,7 +146,8 @@ class SrefServer:
                                                  **({"display_scope": DISPLAY_SCOPE} if server.display_scope else {}),
                                                  "resolver_profiles": ["oauth-resolver-1"],
                                                  **({"pairing_endpoint":
-                                                     server.url + "/sensitive-references/pairing"}
+                                                     server.url + "/sensitive-references/pairing"
+                                                     if server.pairing_named is None else server.pairing_named}
                                                     if server.pairing else {}),
                                                  **({"refresh_reuse_interval": server.reuse_interval}
                                                     if server.reuse_interval is not None else {}),

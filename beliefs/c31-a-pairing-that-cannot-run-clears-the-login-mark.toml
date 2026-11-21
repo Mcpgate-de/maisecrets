@@ -1,0 +1,12 @@
+# c31-a-pairing-that-cannot-run-clears-the-login-mark: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-pairing-that-cannot-run-clears-the-login-mark"
+control = "C31"
+serves = ["M3.3"]
+statement = "When the mod's pairing cannot run (the connector gives no answer, Python does not answer), the mod asks Python to drop the unused login mark."
+runner = ["tests/mod.test.ts::a connector that gives no answer binds nothing, and the unused login mark goes"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''    try { await askEntry($, { action: 'pair_cancel', key }) } catch { /* the next login clears it */ }
+'''
+replace = ''''''

@@ -891,21 +891,37 @@ const CONNECTOR_NAME = /^claude_ai_[A-Za-z0-9_-]{1,64}$/
 const CONNECTOR_TOOL = 'sensitive_references_resource'
 
 // the one call of an MCP server in the mod: the connector's own tool, with no argument (which gateway?) or with a
-// nonce of the mod only (its pairing proof, #91). The text of its answer, or null
+// nonce of the mod only (its pairing proof, #91). { text, error } of its answer, or null when it gave none in 10 s
 async function callConnector($, server, nonce) {
   // a connector that does not answer in 10 s gives no answer; the other offers go on
   let timer = null
   const late = new Promise(resolve => { try { timer = $.clock.after(10000, () => resolve(null)) } catch { resolve(null) } })
   const r = await Promise.race([$.mcp.call(server, CONNECTOR_TOOL, nonce === undefined ? undefined : { nonce }), late])
   try { timer?.cancel?.() } catch { /* ended */ }
-  if (!r || r.isError) return null
-  return (r.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('').slice(0, 2000)
+  if (!r) return null
+  const text = (r.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('').slice(0, 2000)
+  return { text, error: r.isError === true }
 }
 
 async function askConnector($, session, server) {
-  const answer = await callConnector($, server)
-  if (answer === null) return null
-  return askEntry($, { action: 'connector', session_id: session, server, answer, cwd: await $.session.cwd() })
+  const r = await callConnector($, server)
+  if (!r || r.error) return null
+  return askEntry($, { action: 'connector', session_id: session, server, answer: r.text, cwd: await $.session.cwd() })
+}
+
+// the nonce of each pairing while its connector call runs -> { key, own, tainted }. The gateway's contract (#91, its
+// section 7a): the nonce goes to exactly one call, the mod's own; the same nonce in any other tool call (the AI could
+// carry it to the person's real gateway connector and its proof back) taints the pairing, and nothing binds
+const pairings = new Map()
+
+function notePairingUse(e) {
+  const text = JSON.stringify(e ?? null)
+  for (const [nonce, p] of pairings) {
+    if (!text.includes(nonce)) continue
+    // the mod's own call passes the tool hooks too (measured on 2.1.330): one call of the connector's tool, once
+    if (!p.own && e?.tool === `mcp__claude_ai_${p.key}__${CONNECTOR_TOOL}`) p.own = true
+    else p.tainted = true
+  }
 }
 
 // #91: a proposed connector is bound only when it proves that it reaches the gateway with the person's account: after
@@ -934,16 +950,28 @@ async function pairConnector($, key) {
   const due = await askEntry($, { action: 'pair_due', key })
   if (due && due.due !== true) return          // no proposal waits for a proof (a gateway without pairing bound it)
   let line = null
+  let why = 'its proof could not be checked'
   if (due) {
     try {
       const nonce = pairingNonce()
-      const answer = await callConnector($, 'claude_ai_' + key, nonce)
-      const a = await askEntry($, { action: 'pair', key, nonce, answer: answer ?? '' }, PAIR_MS)
-      line = typeof a?.note === 'string' ? a.note : null
+      const p = { key, own: false, tainted: false }
+      pairings.set(nonce, p)
+      let r = null
+      try { r = await callConnector($, 'claude_ai_' + key, nonce) } finally { pairings.delete(nonce) }
+      if (p.tainted) why = 'another tool call carried the nonce of this pairing, which only the connector may get'
+      else if (r === null) why = 'the connector did not answer'
+      else {
+        const a = await askEntry($, { action: 'pair', key, nonce, answer: r.text, error: r.error }, PAIR_MS)
+        line = typeof a?.note === 'string' ? a.note : null
+      }
     } catch { line = null }
   }
-  line = line ?? `maisecrets: the claude.ai connector ${key} was not bound: its proof could not be checked. To try ` +
-    `again, send /maisecrets:sref login ${key}.`
+  if (line === null) {
+    // the pairing did not run: the unused login mark goes, so only a new typed login allows one (#91)
+    try { await askEntry($, { action: 'pair_cancel', key }) } catch { /* the next login clears it */ }
+    line = `maisecrets: the claude.ai connector ${key} was not bound: ${why}. To try again, send ` +
+      `/maisecrets:sref login ${key}.`
+  }
   toast($, line)
   try { $.ui.log(line.slice(0, 300)) } catch { /* the toast says it */ }
 }
@@ -1743,6 +1771,8 @@ function registerSettingsPane(on) {
   // a tool call or a turn of this session runs the hooks: the open panel asks for the status again. Neither hook
   // changes the call or the answer, and a failure of its own never reaches them
   on('tool.call', async ($, e, next) => {
+    // a pairing runs: its nonce in this call taints it (notePairingUse), before the call goes on
+    if (pairings.size > 0) try { notePairingUse(e) } catch { /* the pairing ends without a binding */ }
     let start = null
     try { start = (await $.clock.now()) / 1000 } catch { start = null }
     const r = await next(e)

@@ -169,6 +169,16 @@ def pair_due(key: str) -> bool:
     return _SERVER_NAME_RE.fullmatch(key or "") is not None and login_mark_due(key)
 
 
+def pair_cancel(key: str) -> bool:
+    """The mod's pairing could not run (no answer from Python, the connector failed): the unused login mark goes, so
+    only a new typed login allows a pairing."""
+    from .vault_refs import clear_login_mark
+    if _SERVER_NAME_RE.fullmatch(key or "") is None:
+        return False
+    clear_login_mark(key)
+    return True
+
+
 def pair_connector(key: str, nonce: str, answer: str) -> dict:
     """#91: the connector's answer to the mod's nonce. It binds the proposed connector KEY only when the person's
     typed login for it left a fresh mark (used once here), the answer names the proposed URL, and its proof equals
@@ -189,7 +199,10 @@ def pair_connector(key: str, nonce: str, answer: str) -> dict:
         return {"bound": False, "note": "maisecrets: that is no claude.ai connector."}
     if not isinstance(nonce, str) or not sref_client.NONCE_RE.fullmatch(nonce):
         return no("the proof request had no valid form")
-    url = vault_refs.take_login_mark(key)
+    url, why = vault_refs.take_login_mark(key)
+    if why == "expired":
+        return no("its proposal expired (an hour after the connector named its gateway); it is proposed again after "
+                  "it shows a reference")
     if not url:
         return no("no login of yours for it in the last 15 minutes")
     host = urlsplit(url).hostname
@@ -200,6 +213,12 @@ def pair_connector(key: str, nonce: str, answer: str) -> dict:
     data = data if isinstance(data, dict) else {}
     resource = data.get("resource").strip() if isinstance(data.get("resource"), str) else ""
     proof = data.get("proof")
+    if not isinstance(proof, str):
+        # a refusal of the gateway (its error_code; the tool answers it with isError false or true): a fixed text
+        code = data.get("error_code") or data.get("error")
+        code = code.upper() if isinstance(code, str) else ""
+        if code in sref_client.PAIRING_REFUSALS:
+            return no(f"{host} gave the connector no proof: {sref_client.PAIRING_REFUSALS[code]}")
     if resource != url:
         return no(f"it no longer names {host} as its gateway")
     if not isinstance(proof, str) or not sref_client.PROOF_RE.fullmatch(proof):

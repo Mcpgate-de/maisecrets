@@ -224,8 +224,8 @@ def pane_ner_set(value: str) -> dict:
 def mod_answer(payload: dict) -> dict:
     """The panel's question, by `action`: list (the rows), set (key, value), status (session_id), values (offset),
     forget (key), allow_ask and allow (key, session_id), forget_all (confirm), ner, ner_set (value), login_offer,
-    connector, login_offered, pair_due (key) and pair (key, nonce, answer: the pairing proof of a claude.ai connector,
-    #91)."""
+    connector, login_offered, pair_due and pair_cancel (key), and pair (key, nonce, answer: the pairing proof of a
+    claude.ai connector, #91)."""
     action = payload.get("action")
     if action == "status":
         at = payload.get("tool_call_at")
@@ -257,6 +257,9 @@ def mod_answer(payload: dict) -> dict:
     if action == "pair_due":
         from . import sref_hooks
         return {"due": sref_hooks.pair_due(str(payload.get("key") or ""))}
+    if action == "pair_cancel":
+        from . import sref_hooks
+        return {"cancelled": sref_hooks.pair_cancel(str(payload.get("key") or ""))}
     if action == "pair":
         from . import sref_hooks
         return sref_hooks.pair_connector(str(payload.get("key") or ""), str(payload.get("nonce") or ""),

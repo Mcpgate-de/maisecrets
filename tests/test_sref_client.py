@@ -1418,9 +1418,15 @@ class ProfileNameTests(unittest.TestCase):
                 self.assertIn("does not resolve into a command", self.refusal(self.found(block)))
 
     def test_a_pairing_endpoint_counts_only_on_the_gateway_s_own_origin(self):
-        self.assertEqual(self.found({"pairing_endpoint": self.ORIGIN + "/p"})["pairing"], self.ORIGIN + "/p")
-        self.assertIsNone(self.found({"pairing_endpoint": "https://other.example/p"})["pairing"])
-        self.assertIsNone(self.found({})["pairing"])
+        good = self.found({"pairing_endpoint": self.ORIGIN + "/p"})
+        self.assertEqual((good["pairing"], good["pairing_invalid"]), (self.ORIGIN + "/p", False))
+        # a named endpoint that is not on the origin is no endpoint, and marks the record: nothing binds then
+        for named in ("https://other.example/p", 7, None, "http://" + self.ORIGIN[8:] + "/p"):
+            with self.subTest(named=named):
+                bad = self.found({"pairing_endpoint": named})
+                self.assertEqual((bad["pairing"], bad["pairing_invalid"]), (None, True))
+        absent = self.found({})
+        self.assertEqual((absent["pairing"], absent["pairing_invalid"]), (None, False))
         with self.assertRaises(S.Refused):
             S.pairing_proof({}, JsonFileBackend(), {"origin": self.ORIGIN, "pairing": None}, "n" * 43)
 

@@ -962,12 +962,17 @@ const BOUND = 'maisecrets: the claude.ai connector team-gw is bound to gw.exampl
   'gateway with your account.'
 function pairSetup(on, opts: any = {}) {
   const asked: any[] = []
-  const st = runSetup(on, { answer: (q) => q.action === 'pair_due' ? { due: opts.due ?? true }
+  const st = runSetup(on, { answer: (q) => q.action === 'pair_due' ? (opts.dueFails ? null : { due: opts.due ?? true })
+    : q.action === 'pair_cancel' ? { cancelled: true }
     : q.action === 'pair' ? { bound: true, note: BOUND } : (opts.plan ?? LOGIN_PAIR), code: opts.code,
   chunks: ['maisecrets: logged in to gw.example. The claude.ai connector team-gw is bound only when it proves it.\n'] })
-  on('mcp.call', ($, e) => {
+  on('tool.call', () => ({ result: 'done' }))
+  on('mcp.call', async ($, e) => {
     asked.push(e)
+    if (opts.connectorFails) return { value: null }
     const nonce = e.args?.nonce
+    // the AI carries the nonce into another tool call while the connector's call runs (the relay of #91)
+    if (opts.relay) await opts.outer.tool.call({ tool: opts.relay, input: { note: 'use ' + nonce } } as any)
     return { value: { content: [{ type: 'text', text: JSON.stringify({ resource: 'https://gw.example/mcp',
       proof: 'p'.repeat(43), nonce }) }] } }
   })
@@ -1021,6 +1026,44 @@ test('a plan without a connector asks the connector nothing', async ($, on) => a
 
 test('no proposal that waits for a proof asks the connector nothing', async ($, on) =>
   asksNothing($, on, { due: false }))
+
+test('a connector that gives no answer binds nothing, and the unused login mark goes', async ($, on) => {
+  const { st, asked } = pairSetup(on, { connectorFails: true })
+  await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.toasts.some(t => t.includes('was not bound')))).toBe(true)
+  expect(asked.length).toBe(1)
+  expect(questions(st, 'pair').length).toBe(0)
+  expect(questions(st, 'pair_cancel')).toEqual([{ action: 'pair_cancel', key: 'team-gw' }])
+  expect(st.toasts).toContain('maisecrets: the claude.ai connector team-gw was not bound: the connector did not ' +
+    'answer. To try again, send /maisecrets:sref login team-gw.')
+})
+
+async function relayTaints($, on, relay) {
+  const { st, asked } = pairSetup(on, { relay, outer: $ })
+  await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.toasts.some(t => t.includes('was not bound')))).toBe(true)
+  expect(asked.length).toBe(1)
+  expect(questions(st, 'pair').length).toBe(0)                    // the answer never reaches Python
+  expect(questions(st, 'pair_cancel')).toEqual([{ action: 'pair_cancel', key: 'team-gw' }])
+  expect(st.toasts).toContain('maisecrets: the claude.ai connector team-gw was not bound: another tool call ' +
+    'carried the nonce of this pairing, which only the connector may get. To try again, send ' +
+    '/maisecrets:sref login team-gw.')
+}
+
+test('the nonce in a call of another connector while the pairing runs binds nothing, and the login mark goes',
+  async ($, on) => relayTaints($, on, 'mcp__claude_ai_Real_GW__sensitive_references_resource'))
+
+test('the nonce in a command while the pairing runs binds nothing, and the login mark goes',
+  async ($, on) => relayTaints($, on, 'Bash'))
+
+test('no answer from Python about the proof asks the connector nothing, and the unused login mark goes',
+  async ($, on) => {
+    const { st, asked } = pairSetup(on, { dueFails: true })
+    await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+    expect(await until(() => st.toasts.some(t => t.includes('was not bound')))).toBe(true)
+    expect(asked.length).toBe(0)
+    expect(questions(st, 'pair_cancel').length).toBe(1)
+  })
 
 test('a plan whose connector is not the server of the login asks nothing', async ($, on) => {
   const { st, asked } = pairSetup(on, { plan: { run: { ...LOGIN.run, pair: 'other' } } })

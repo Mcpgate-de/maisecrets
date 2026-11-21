@@ -914,7 +914,20 @@ resolve, output that prints the value shows the reference instead.
    shown. Without the mod (`claude -p`) nothing binds. A gateway that names
    no pairing endpoint gives no proof: there your typed login binds, as
    before, the login output says so, and you log in only when the named
-   connector is your gateway. Before the binding, its
+   connector is your gateway. That fallback needs this login's own
+   discovery of the gateway (never a cached one), no broken pairing
+   endpoint, and no earlier discovery of that gateway that named one;
+   else nothing binds. What the proof does not cover: a connector that
+   passes your own consent on to your gateway (it reaches your gateway
+   with your account) passes it. While the pairing runs, the mod watches
+   every tool call: the nonce in any call other than its own connector
+   call (the AI could carry it to your gateway's own connector and its
+   proof back) ends the pairing, and nothing binds. The AI's own calls of
+   `sensitive_references_resource` with a nonce are not refused yet: the
+   mod's own call passes the same tool hooks (measured on Claude Code
+   2.1.330). A gateway's refusal to give a proof (a delegated call, an
+   account the gateway does not enable, no pairing key set up) gets its
+   own line, and nothing binds. Before the binding, its
    references do not count; ask for them again after the login. A binding is
    never re-pointed, never takes a gateway that a server of your
    configuration or another connector holds, and never a name of your own

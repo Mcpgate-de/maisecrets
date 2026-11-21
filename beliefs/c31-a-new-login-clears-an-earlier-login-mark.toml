@@ -1,0 +1,11 @@
+# c31-a-new-login-clears-an-earlier-login-mark: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-new-login-clears-an-earlier-login-mark"
+control = "C31"
+serves = ["M3.3"]
+statement = "A new login of a proposed connector clears an unused login mark before it starts, so a failed login leaves none."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_the_login_mark_takes_the_url_of_the_login_and_goes_when_the_pairing_cannot_run"]
+
+[proof]
+file = "maisecrets/cli.py"
+find = '''        vault_refs.clear_login_mark(server)       # a mark'''
+replace = '''        pass       # a mark'''

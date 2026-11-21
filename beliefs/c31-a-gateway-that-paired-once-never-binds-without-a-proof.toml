@@ -1,0 +1,11 @@
+# c31-a-gateway-that-paired-once-never-binds-without-a-proof: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-gateway-that-paired-once-never-binds-without-a-proof"
+control = "C31"
+serves = ["M3.3"]
+statement = "Once a live discovery of a gateway named a pairing endpoint, a later login there never binds a connector without a proof."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_a_gateway_that_named_a_pairing_endpoint_once_never_binds_without_a_proof_again"]
+
+[proof]
+file = "maisecrets/cli.py"
+find = '''if sref_client.pairing_seen(f["origin"]) else'''
+replace = '''if False else'''

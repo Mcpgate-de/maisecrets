@@ -187,8 +187,10 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None, patient: bo
             "display_scope": display_scope if isinstance(display_scope, str) else None,
             "sinks": sinks, "sink_types": types,
             # #91: the endpoint that answers a nonce with the proof of the token's user; None when the gateway names
-            # none (a proposed claude.ai connector is then bound by the typed login alone)
+            # none. A named one that is no https URL on this origin is None too, with `pairing_invalid`: then no
+            # proposed claude.ai connector is bound at all (never the fallback to the typed login)
             "pairing": block["pairing_endpoint"] if origin_of(block.get("pairing_endpoint")) == origin else None,
+            "pairing_invalid": "pairing_endpoint" in block and origin_of(block.get("pairing_endpoint")) != origin,
             "authorize": ends["authorization"], "token": ends["token"], "register": ends["registration"]}
 
 
@@ -242,6 +244,8 @@ def discover_typed(cfg: dict, mcp_url: str, budget: float = TYPED_BUDGET, tries:
         found = discover(cfg, mcp_url, time.monotonic() + left, True)
         if found:
             ner_gateway._keep(found["origin"], found, mcp_url)
+            if found.get("pairing"):
+                note_pairing(found["origin"])
             return found, ""
         if DISCOVERY.get("why") not in ("timeout", "network"):
             return None, ""
@@ -255,6 +259,41 @@ def discover_typed(cfg: dict, mcp_url: str, budget: float = TYPED_BUDGET, tries:
     if timeout:
         return None, f"the gateway did not answer within {_seconds(budgets)}"
     return None, "no connection to the gateway" + (", twice" if len(budgets) == 2 else "")
+
+
+# #91: the origins whose live discovery named a pairing endpoint once. A later binding there without a proof is
+# refused, so a gateway that drops the endpoint (or an answer that hides it) does not bring back the typed-login rule.
+# The origin and a time only, in maisecrets' home (no store entry)
+def _pairing_path():
+    from .vault import HOME
+    return HOME / "sref-pairing.json"
+
+
+def note_pairing(origin: str) -> None:
+    """Record that the gateway at this origin gives a pairing proof. Never raises."""
+    from .vault import HOME, LockTimeout, _lock_for, atomic_write
+    if pairing_seen(origin):
+        return
+    try:
+        with _lock_for(HOME / ".sref-pairing.lock"):
+            try:
+                data = json.loads(_pairing_path().read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            data = data if isinstance(data, dict) else {}
+            data.setdefault(origin, time.time())
+            atomic_write(_pairing_path(), json.dumps(data))
+    except (OSError, LockTimeout):
+        pass
+
+
+def pairing_seen(origin: str) -> bool:
+    """A live discovery of this origin named a pairing endpoint once."""
+    try:
+        data = json.loads(_pairing_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and origin in data
 
 
 def discovery_failed() -> bool:
@@ -1044,6 +1083,15 @@ NONCE_RE = re.compile(r"[A-Za-z0-9_-]{22,64}")
 PROOF_RE = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
+# the gateway's reasons for no proof (ai-gateway 2.0.4024), from its pairing endpoint or the connector's tool: a fixed
+# text each, never the gateway's own words
+PAIRING_REFUSALS = {
+    "DELEGATED_CALL": "the call came on someone else's behalf (a delegated call), and such a call gets no proof",
+    "NOT_ENABLED": "your account there gets no pairing proof (a service account, or a person the gateway blocked)",
+    "NOT_CONFIGURED": "the gateway has no pairing key set up yet; its administrator sets one up",
+}
+
+
 def pairing_proof(cfg: dict, backend, found: dict, nonce: str, deadline: float | None = None) -> str:
     """The proof the gateway gives the person's own login for this nonce (its `pairing_endpoint`), or Refused. The
     caller compares it with a connector's proof; neither is stored or printed."""
@@ -1064,9 +1112,14 @@ def pairing_proof(cfg: dict, backend, found: dict, nonce: str, deadline: float |
     if status == 401:
         raise Refused(f"the login at {host} is no longer valid (consent withdrawn or expired); "
                       "the person runs /maisecrets:sref login")
+    code = answer.get("error_code") or answer.get("error")
+    code = code.upper() if isinstance(code, str) else ""
+    if code in PAIRING_REFUSALS:
+        raise Refused(f"{host} gives no proof: {PAIRING_REFUSALS[code]}")
+    if status == 503:
+        raise Refused(f"{host} gives no proof: {PAIRING_REFUSALS['NOT_CONFIGURED']}")
     if status == 403:
-        code = answer.get("error")
-        why = _FORBIDDEN.get(code, "forbidden") if isinstance(code, str) else "forbidden"
+        why = _FORBIDDEN.get(code.lower(), "forbidden")
         raise Refused(f"{host} refused the pairing ({why})")
     raise Refused(f"{host} gave no usable answer (HTTP {status})")
 

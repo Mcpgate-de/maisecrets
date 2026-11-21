@@ -352,20 +352,32 @@ def bind_connector(key: str, url: str) -> bool:
 LOGIN_MARK_TTL = 900      # #91: a typed login lets one pairing follow within 15 minutes
 
 
-def mark_login(key: str) -> bool:
-    """The person's typed login for a proposed connector of a gateway with a pairing proof succeeded: one pairing
-    (take_login_mark) may follow within LOGIN_MARK_TTL. False when the proposal is gone."""
-    url = connectors(pending=True).get(key)
-    if not url:
+def mark_login(key: str, url: str) -> bool:
+    """The person's typed login for a proposed connector of a gateway with a pairing proof succeeded at `url` (the URL
+    that login used): one pairing (take_login_mark) may follow within LOGIN_MARK_TTL. False when the proposal expired
+    or names another URL now."""
+    if key not in connectors(pending=True):
         return False
 
     def change(mine):
         entry = mine["pending"].get(key)
         if not isinstance(entry, dict) or entry.get("url") != url:
-            return False
+            return False                 # the proposal names another URL than the one this login used
         entry["login_t"] = time.time()
         return True
     return bool(_write_connectors(change))
+
+
+def clear_login_mark(key: str) -> None:
+    """An unused login mark goes: a new login of the key starts, or the mod's pairing could not run."""
+    if "login_t" not in (_connector_data().get("pending", {}).get(key) or {}):
+        return
+
+    def change(mine):
+        entry = mine["pending"].get(key)
+        if isinstance(entry, dict):
+            entry.pop("login_t", None)
+    _write_connectors(change)
 
 
 def _fresh_mark(entry: object, now: float) -> bool:
@@ -378,18 +390,23 @@ def login_mark_due(key: str) -> bool:
     return key in connectors(pending=True) and _fresh_mark(_connector_data().get("pending", {}).get(key), time.time())
 
 
-def take_login_mark(key: str) -> str | None:
-    """The proposed URL of this key once, when its login mark is fresh; the mark goes either way (used once, also by
-    a pairing that fails)."""
+def take_login_mark(key: str) -> tuple:
+    """(url, None) once, when the proposal of this key holds a fresh login mark; else (None, why): "no login" (no
+    mark, or one older than LOGIN_MARK_TTL) or "expired" (the proposal itself expired). The mark goes either way
+    (used once, also by a pairing that fails)."""
     url = connectors(pending=True).get(key)
 
     def change(mine):
         entry = mine["pending"].get(key)
         if not isinstance(entry, dict) or "login_t" not in entry:
-            return None
+            return None, "no login"
         fresh = _fresh_mark(entry, time.time())
         entry.pop("login_t", None)
-        return entry.get("url") if fresh and url and entry.get("url") == url else None
+        if not fresh:
+            return None, "no login"
+        if not url or entry.get("url") != url:
+            return None, "expired"
+        return url, None
     return _write_connectors(change)
 
 

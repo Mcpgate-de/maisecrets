@@ -39,7 +39,7 @@ class SrefBashTests(unittest.TestCase):
     def setUp(self) -> None:
         _hygiene.watch_children(self)
         HOME.mkdir(parents=True, exist_ok=True)
-        for name in ("sref", "vault-refs", "index.json", "vault.json", "audit.log"):
+        for name in ("sref", "vault-refs", "index.json", "vault.json", "audit.log", "sref-pairing.json"):
             p = HOME / name
             if p.is_dir():
                 shutil.rmtree(p)
@@ -472,14 +472,15 @@ class SrefBashTests(unittest.TestCase):
     # ---- #91: the pairing proof of a connector, for a gateway whose metadata names pairing_endpoint
     NONCE = "n" * 21 + "_" + "A1-b" * 5 + "z"            # 43 characters of the base64url alphabet, as the mod makes
 
-    def typed_login(self, key: str = "Team_GW") -> tuple:
+    def typed_login(self, key: str = "Team_GW", login=None, propose: bool = True) -> tuple:
         """A proposed connector and the person's typed login for it, as cli sref login runs it: (exit code, output)."""
         from maisecrets import cli, events, vault_refs
-        self.connector_result()
-        vault_refs.propose_connector("claude_ai_" + key, self.answer())
+        if propose:
+            self.connector_result()
+            vault_refs.propose_connector("claude_ai_" + key, self.answer())
         self.login()                                  # the browser login itself (stands in for sref_client.login)
         events.note_typed_login(f"/maisecrets:sref login {key}", {"session_id": "s1"}, True)
-        with mock.patch.object(S, "login", lambda *a, **k: None), \
+        with mock.patch.object(S, "login", login or (lambda *a, **k: None)), \
                 mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "s1"}), \
                 mock.patch.object(cli, "_ROUTE", {"v": "slash command"}), \
                 mock.patch("sys.stdout", new_callable=__import__("io").StringIO) as out:
@@ -569,10 +570,38 @@ class SrefBashTests(unittest.TestCase):
         self.assertTrue(self.pair(right)["bound"])
         self.assertEqual(self.srv.pairings, [self.NONCE])
 
+    def test_each_reason_of_the_gateway_for_no_proof_gets_its_own_line_and_binds_nothing(self):
+        from maisecrets import vault_refs
+        url = self.srv.url + "/mcp"
+        # the connector's tool answers a refusal as JSON text (ai-gateway 2.0.4024: error_code, isError false)
+        for code, words in [("DELEGATED_CALL", "a delegated call"), ("NOT_ENABLED", "a service account"),
+                            ("NOT_CONFIGURED", "no pairing key set up yet")]:
+            with self.subTest(tool=code):
+                vault_refs.forget_connector("Team_GW")
+                self.assertEqual(self.typed_login()[0], 0)
+                got = self.pair({"success": False, "error_code": code, "error": "text of the gateway"})
+                self.assertFalse(got["bound"])
+                self.assertIn("127.0.0.1 gave the connector no proof: ", got["note"])
+                self.assertIn(words, got["note"])
+                self.assertNotIn("text of the gateway", got["note"])
+        # the pairing endpoint's refusals
+        for answer, words in [((403, {"error": "NOT_ENABLED"}), "a service account"),
+                              ((403, {"error_code": "DELEGATED_CALL"}), "a delegated call"),
+                              ((503, {"error": "unavailable"}), "no pairing key set up yet")]:
+            with self.subTest(endpoint=answer):
+                vault_refs.forget_connector("Team_GW")
+                self.assertEqual(self.typed_login()[0], 0)
+                self.srv.pair_answer = answer
+                got = self.pair({"resource": url, "proof": self.srv.proof(self.NONCE)})
+                self.assertFalse(got["bound"])
+                self.assertIn("127.0.0.1 gives no proof: ", got["note"])
+                self.assertIn(words, got["note"])
+        self.assertEqual(vault_refs.connectors(), {})
+
     def test_the_gateway_s_refusal_of_the_pairing_binds_nothing(self):
         from maisecrets import vault_refs
         self.assertEqual(self.typed_login()[0], 0)
-        self.srv.pair_answer = (403, {"error": "not_enabled"})
+        self.srv.pair_answer = (403, {"error": "insufficient_scope"})
         got = self.pair({"resource": self.srv.url + "/mcp", "proof": self.srv.proof(self.NONCE)})
         self.assertFalse(got["bound"])
         self.assertIn("127.0.0.1 refused the pairing", got["note"])
@@ -581,13 +610,77 @@ class SrefBashTests(unittest.TestCase):
     def test_a_discovery_record_that_does_not_say_whether_the_gateway_pairs_binds_nothing(self):
         from maisecrets import vault_refs
         self.assertEqual(self.found["pairing"], self.srv.url + "/sensitive-references/pairing")
-        old = {k: v for k, v in self.found.items() if k != "pairing"}     # the cache of an older version
-        with mock.patch.object(S, "discover_typed", lambda *a, **k: (old, "the gateway did not answer in time")):
-            code, out = self.typed_login()
+        for old in ({k: v for k, v in self.found.items() if k != "pairing"},     # the cache of an older version
+                    {**self.found, "pairing": None}):                          # a cache that names no endpoint
+            with self.subTest(keys=len(old)):
+                vault_refs.forget_connector("Team_GW")
+                with mock.patch.object(S, "discover_typed",
+                                       lambda *a, **k: (old, "the gateway did not answer in time")):
+                    code, out = self.typed_login()
+                self.assertEqual(code, 1)
+                self.assertIn("could not check whether the gateway gives a pairing proof", out)
+                self.assertEqual(vault_refs.connectors(), {})
+                self.assertFalse(sref_hooks.pair_due("Team_GW"))
+
+    def test_a_broken_pairing_endpoint_binds_nothing(self):
+        from maisecrets import vault_refs
+        for named in ("https://other.example/sensitive-references/pairing", 7, "http://127.0.0.1/p"):
+            with self.subTest(named=named):
+                vault_refs.forget_connector("Team_GW")
+                self.srv.pairing_named = named
+                code, out = self.typed_login()
+                self.assertEqual(code, 1)
+                self.assertIn("its pairing endpoint is not an https URL on its own origin", out)
+                self.assertEqual(vault_refs.connectors(), {})
+                self.assertFalse(sref_hooks.pair_due("Team_GW"))
+
+    def test_a_gateway_that_named_a_pairing_endpoint_once_never_binds_without_a_proof_again(self):
+        from maisecrets import vault_refs
+        self.assertEqual(self.typed_login()[0], 0)           # a live discovery saw the endpoint
+        self.assertTrue(S.pairing_seen(self.found["origin"]))
+        vault_refs.forget_connector("Team_GW")
+        self.srv.pairing = False                              # the endpoint is gone (or an answer hides it)
+        code, out = self.typed_login()
         self.assertEqual(code, 1)
-        self.assertIn("could not check whether 127.0.0.1 gives a pairing proof", out)
+        self.assertIn("it named a pairing endpoint before and names none now", out)
         self.assertEqual(vault_refs.connectors(), {})
+
+    def test_the_login_mark_takes_the_url_of_the_login_and_goes_when_the_pairing_cannot_run(self):
+        from maisecrets import vault_refs
+        url = self.srv.url + "/mcp"
+        self.connector_result()
+        vault_refs.propose_connector("claude_ai_Team_GW", self.answer())
+        self.assertFalse(vault_refs.mark_login("Team_GW", "https://other.example/mcp"))
         self.assertFalse(sref_hooks.pair_due("Team_GW"))
+        self.assertTrue(vault_refs.mark_login("Team_GW", url))
+        self.assertTrue(sref_hooks.pair_due("Team_GW"))
+        # the mod's pairing could not run: the mark goes
+        self.assertEqual(hub.mod_answer({"action": "pair_cancel", "key": "Team_GW"}), {"cancelled": True})
+        self.assertFalse(sref_hooks.pair_due("Team_GW"))
+        # a new login clears an earlier mark before it starts, also when it then fails
+        self.assertTrue(vault_refs.mark_login("Team_GW", url))
+
+        def refused(*a, **k):
+            raise S.Refused("the person declined it")
+        code, out = self.typed_login(login=refused, propose=False)
+        self.assertEqual(code, 1, out)
+        self.assertFalse(sref_hooks.pair_due("Team_GW"))
+        self.assertIn("no login of yours", self.pair({"resource": url, "proof": self.srv.proof(self.NONCE)})["note"])
+
+    def test_a_proposal_that_expired_after_the_login_says_so(self):
+        from maisecrets import vault_refs
+        self.assertEqual(self.typed_login()[0], 0)
+        later = vault_refs.time.time() + vault_refs.PROPOSAL_TTL + 5
+        # the mark is still fresh (its clock), the proposal is not: only the proposal's age moves
+        data = json.loads((HOME / "sref" / "connectors.json").read_text())
+        for mine in data.values():
+            mine["pending"]["Team_GW"]["t"] -= vault_refs.PROPOSAL_TTL + 5
+        (HOME / "sref" / "connectors.json").write_text(json.dumps(data))
+        self.assertLess(vault_refs.time.time(), later)
+        got = self.pair({"resource": self.srv.url + "/mcp", "proof": self.srv.proof(self.NONCE)})
+        self.assertFalse(got["bound"])
+        self.assertIn("its proposal expired", got["note"])
+        self.assertEqual(vault_refs.connectors(), {})
 
     def test_the_run_plan_of_a_login_names_a_proposed_connector_for_the_pairing(self):
         from maisecrets import prompt_commands, vault_refs
