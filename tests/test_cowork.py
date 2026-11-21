@@ -93,6 +93,16 @@ class FormsTests(unittest.TestCase):
                      "/maisecrets ner", "/maisecrets ner all", "maisecrets: list"):
             self.assertEqual(forms.cowork(text), text)
 
+    def test_clear_is_rewritten_only_where_it_is_the_command(self):
+        # a path or a longer word keeps its text: the rewrite runs before the mask, on the text the AI gets
+        for text in ("~/clear", "/clear-cache", "/clear/x", "./clear", "a/clear", "x.y/clear", "-/clear"):
+            with self.subTest(text):
+                self.assertEqual(forms.cowork(f"see {text} now"), f"see {text} now")
+        self.assertEqual(forms.cowork("type /clear."), "type a new task.")
+        from maisecrets import demo
+        self.assertEqual(forms.cowork(demo.NOT_FIRST),
+                         "Start the demo in a new task, so this conversation stays as it is.")
+
     def test_codex_gets_its_form(self):
         self.assertEqual(forms.codex("run /maisecrets status test or /maisecrets:list; /maisecrets:secret-hygiene"),
                          "run maisecrets: status test or maisecrets: list; /maisecrets:secret-hygiene")

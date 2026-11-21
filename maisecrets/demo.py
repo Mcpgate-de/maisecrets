@@ -10,10 +10,10 @@ SDKs), a scheduled prompt, another session or a tool call changes nothing. It st
 yet (has_turns: the transcript holds no model answer), because the only way out is /clear, which starts a new session
 and leaves this conversation behind. The demo rows stay in the session's transcript, so the demo does not end with
 `off` and not with SessionEnd (a resumed session must stay in the demo, or its rows would go to the AI with the next
-real request). The transcript is the lasting truth: a session whose last answer is the demo answer (DEMO_LINE, which
-only the mod writes) is in the demo whatever demo.json says. STATE (the maisecrets home: a session id and a time,
-never a prompt) carries it from `demo on` to the first demo answer. The only extra record is one events.log line for
-each switch (events.record_demo).
+real request). The transcript is the lasting truth: a session whose last answer is the mod's demo answer (DEMO_LINE,
+or in Cowork a text that ends with DEMO_LINE_COWORK; the model cannot write a mod's answer) is in the demo whatever
+demo.json says. STATE (the maisecrets home: a session id and a time, never a prompt) carries it from `demo on` to the
+first demo answer. The only extra record is one events.log line for each switch (events.record_demo).
 
 A demo.json that cannot be read or has another shape blocks every session (fail closed) until the person types
 /maisecrets demo off, which resets it.
@@ -190,9 +190,11 @@ def _find_transcript(session: str) -> str | None:
 
 
 def has_demo_rows(session: str, transcript: str | None = None) -> bool:
-    """Whether the session is in the demo by its transcript: its last assistant text is DEMO_LINE, which only the mod
-    writes (its answer to a model step). A demo session is left only with /clear, a new session id, so once it has a
-    demo row no real answer can follow in it: the last answer tells. Only the tail is read (TAIL bytes, widened while
+    """Whether the session is in the demo by its transcript: its last assistant text is an answer of the mod (its
+    answer to a model step, which the model cannot write: _last_answer) that is DEMO_LINE or, in Cowork, ends with
+    DEMO_LINE_COWORK (after what the AI would have got or a command's output, cowork_show and cowork_own). A demo
+    session is left only with /clear, a new session id, so once it has a demo row no real answer can follow in it: the
+    last answer tells. Only the tail is read (TAIL bytes, widened while
     it holds no answer). A transcript that exists but cannot be read counts as in the demo: it can hold demo rows, and
     its prompt would carry them to the AI (fail closed; /clear starts a new, empty one). No transcript: no demo row
     (Codex never has one: its demo prompts are blocked and never enter the history)."""
