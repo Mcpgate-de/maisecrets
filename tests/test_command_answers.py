@@ -166,13 +166,16 @@ class ShortcutTests(unittest.TestCase):
         self.old_shortcut("send2")
         own = self.cfg / "commands" / "mine.md"
         own.write_text("---\ndescription: mine\n---\nmy own command\n", encoding="utf-8")
-        self.assertEqual(cli.upgrade_shortcuts(), [], "a store that installed no shortcut changes no file")
         Path(HOME, ".shortcut").write_text("installed\n", encoding="utf-8")
         self.assertEqual(cli.upgrade_shortcuts(), [])        # no frontmatter: not the file the shortcut wrote
         for name in ("ms", "send2"):
             (self.cfg / "commands" / f"{name}.md").write_text(
                 "---\ndescription: Send the last blocked prompt\n---\n\n!`bash ~/.maisecrets/bin/ms.sh`\n",
                 encoding="utf-8")
+        # the harness and a test run the client with another maisecrets home: that store installed no shortcut
+        Path(HOME, ".shortcut").unlink()
+        self.assertEqual(cli.upgrade_shortcuts(), [], "a store that installed no shortcut changes no file")
+        Path(HOME, ".shortcut").write_text("installed\n", encoding="utf-8")
         self.assertEqual(cli.upgrade_shortcuts(), ["ms.md", "send2.md"])
         for name in ("ms", "send2"):
             text = (self.cfg / "commands" / f"{name}.md").read_text(encoding="utf-8")
