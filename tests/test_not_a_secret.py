@@ -386,7 +386,8 @@ class NotASecretTests(_ServiceBase):
     def test_usage_and_unknown_keys(self):
         self.assertIn("name one stored value", _prompt("/maisecrets:not-a-secret")["reason"])
         self.assertIn("name one stored value", _prompt("/maisecrets:not-a-secret two words")["reason"])
-        self.assertIn("there is no stored value NAME_c999", _prompt("/maisecrets:not-a-secret NAME_c999")["reason"])
+        self.assertIn("there is no stored value with this key",
+                      _prompt("/maisecrets:not-a-secret NAME_c999")["reason"])
 
     def test_parse(self):
         p = not_a_secret.parse

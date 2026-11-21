@@ -1290,7 +1290,8 @@ def cmd_sref(args: list[str]) -> int:
     if name is not None:
         servers = {k: v for k, v in servers.items() if k == name}
         if not servers:
-            print(f"maisecrets: no MCP server named {name} in your user configuration.")
+            # never the typed name: only the names of the configuration are named
+            print("maisecrets: no MCP server of that name in your user configuration.")
             return 1
     start = time.monotonic()
     # the whole discovery ends after this, however many servers are slow: the client ends a command after 2 minutes,

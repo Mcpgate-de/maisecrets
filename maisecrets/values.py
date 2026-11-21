@@ -509,7 +509,8 @@ def remove_typed(ids: list) -> str:
     with _lock():
         for iid in ids:
             if not value_files.ID_RE.fullmatch(iid):
-                said.append(f"import:{iid[:20]} is no import id (/maisecrets list shows them)")
+                # never the typed text: a part of a value the rules do not find would show in clear
+                said.append("this is no import id (/maisecrets list shows the import ids)")
                 continue
             path = IMPORTS / f"{iid}{SUFFIX}"
             try:

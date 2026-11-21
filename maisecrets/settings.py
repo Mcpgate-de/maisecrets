@@ -624,7 +624,8 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
                            "or in Codex: maisecrets: set value_files add FILE.")
         if key in MEANING:
             return False, f"maisecrets: {key} is not changed by a prompt; edit {CONFIG} by hand."
-        return False, f"maisecrets: {key} is no setting this command changes. /maisecrets settings --all lists them."
+        # never the typed word: only a key of the settings is named
+        return False, "maisecrets: this is no setting this command changes. /maisecrets settings --all lists them."
     if word != "default" and not hosts_change and not ner_change and key != "regions":
         if key in _BOOL_KEYS and word not in _BOOL_WORDS:
             return False, f"maisecrets: {key} takes on, off or default."

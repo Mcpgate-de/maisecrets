@@ -479,7 +479,8 @@ class ExceptionTests(_Base):
         with self.subTest("a term"):
             self.assertFalse(_is_demo(_prompt("/maisecrets:term add Quentin Demoquist")))
         with self.subTest("not-a-secret"):
-            self.assertIn("there is no stored value NAME_c99", _prompt("/maisecrets:not-a-secret NAME_c99")["reason"])
+            self.assertIn("there is no stored value with this key",
+                          _prompt("/maisecrets:not-a-secret NAME_c99")["reason"])
         for cmd in ("/maisecrets:status", "/maisecrets:status all", "/maisecrets:list", "/maisecrets:audit 5",
                     "/maisecrets:forget SECRET_c3", "/maisecrets:guard status", "/maisecrets:report last",
                     "maisecrets: status all"):
@@ -930,7 +931,7 @@ class CoworkDemoTests(_Base):
         cfg = tempfile.mkdtemp(prefix="ms-demo-cfg-")
         self.addCleanup(shutil.rmtree, cfg, True)
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
-            for prompt, said in ((f"maisecrets: sref status {TOKEN}", "no MCP server named"),
+            for prompt, said in ((f"maisecrets: sref status {TOKEN}", "no MCP server of that name"),
                                  (f"maisecrets: ner url https://{TOKEN}.example", "names from a service")):
                 with self.subTest(prompt):
                     out = _mod(prompt, session)

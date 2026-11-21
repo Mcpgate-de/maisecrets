@@ -586,7 +586,10 @@ def own_answer(prompt: str, session) -> str:
     import sys
     argv = own_argv(prompt)
     if argv is None:
-        return NEEDS_THE_AI.format(cmd=" ".join(prompt.split()[:2])[:80])
+        # the command's name only, never a typed word: the arguments can hold a value
+        m = _OWN_SPLIT.match(prompt)
+        name = m.group("name").lower() if m else ""
+        return NEEDS_THE_AI.format(cmd=name if name in FORMS or name in _ARGV else "this command")
     from . import cli
     old_env = os.environ.get("CLAUDE_CODE_SESSION_ID")
     if isinstance(session, str) and session:

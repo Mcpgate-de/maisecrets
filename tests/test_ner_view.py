@@ -247,7 +247,7 @@ class ArgumentTests(unittest.TestCase):
     def test_an_unknown_server_name_after_gateway_is_answered(self):
         out = _prompt("/maisecrets:ner gateway no-such-server")
         self.assertEqual(out.get("decision"), "block")
-        self.assertIn('no MCP server named "no-such-server" (it has: other, team-gateway)', out["reason"])
+        self.assertIn("no MCP server of that name (it has: other, team-gateway)", out["reason"])
         self.assertFalse(_conf())
 
     def test_a_keyword_is_never_taken_as_a_server_name(self):

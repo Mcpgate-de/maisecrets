@@ -496,5 +496,62 @@ class ArgumentTests(unittest.TestCase):
         self.assertNotIn("maisecrets:send", cli.SHORTCUT_COMMAND)
 
 
+class TypedWordTests(unittest.TestCase):
+    """An answer never repeats a typed word that the store or the configuration does not know: a part of a value the
+    rules do not find would show in clear (in Cowork the answer goes to the model through cowork.show_answer)."""
+
+    TOKEN = "glpat-" + "ECHOxxxxx1234567890abcd"          # split: the repository scan stays clean
+    WORD = "QX7RZ9WBK2LM4VN8"                              # no shape the rules know
+
+    def setUp(self):
+        CONFIG.write_text(json.dumps(TEST_CONFIG))
+        self.addCleanup(CONFIG.write_text, json.dumps(TEST_CONFIG))
+
+    def _reason(self, text: str) -> str:
+        hooks._live_cache.clear()
+        out = hooks.user_prompt({"prompt": text, "session_id": "S1", **CLAUDE})
+        self.assertEqual(out.get("decision"), "block", out)
+        return out["reason"]
+
+    def test_a_wrong_import_id_is_not_repeated(self):
+        said = self._reason(f"/maisecrets:forget import:{self.TOKEN}")
+        self.assertIn("this is no import id", said)
+        self.assertNotIn(self.TOKEN[:12], said)
+
+    def test_a_key_that_is_not_stored_is_not_repeated(self):
+        said = self._reason(f"/maisecrets:not-a-secret {self.WORD}_c1")
+        self.assertIn("there is no stored value with this key", said)
+        self.assertNotIn(self.WORD, said)
+
+    def test_a_word_that_is_no_setting_is_not_repeated(self):
+        word = "qxzrwbklmvnt"                              # a key has letters and _ only
+        said = self._reason(f"maisecrets: set {word} on")
+        self.assertIn("this is no setting this command changes", said)
+        self.assertNotIn(word, said)
+
+    def test_a_name_service_word_or_server_name_is_not_repeated(self):
+        for text, says in ((f"/maisecrets:ner gateway {self.WORD}", "no MCP server of that name"),
+                           (f"/maisecrets:ner {self.WORD}", "does not know this argument")):
+            with self.subTest(text):
+                said = self._reason(text)
+                self.assertIn(says, said)
+                self.assertNotIn(self.WORD, said)
+
+    def test_an_sref_server_name_is_not_repeated(self):
+        cfg = tempfile.mkdtemp(prefix="ms-answers-cfg-")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            rc, out = _run(cli.cmd_sref, ["status", self.WORD])
+        self.assertEqual(rc, 1)
+        self.assertIn("no MCP server of that name", out)
+        self.assertNotIn(self.WORD, out)
+
+    def test_a_demo_command_that_does_not_run_names_the_command_once_and_no_argument(self):
+        from maisecrets import demo
+        self.assertEqual(demo.own_answer("maisecrets: sref logout gw", "S1"), demo.NEEDS_THE_AI.format(cmd="sref"))
+        said = demo.own_answer(f"maisecrets:sref {self.TOKEN}", "S1")
+        self.assertTrue(said.startswith("maisecrets: sref needs the AI"), said)
+        self.assertNotIn(self.TOKEN[:12], said)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -173,7 +173,8 @@ def allow_typed(key: str, session: str | None, route: str, cfg: dict | None = No
     if meta is None:
         if key in records():
             return (f"maisecrets: {key} is already on your allow list (see /maisecrets list). Nothing was changed.")
-        return f"maisecrets: there is no stored value {key} (see /maisecrets list). Nothing was changed."
+        # never the typed key: only a key the store or the allow list holds is named
+        return "maisecrets: there is no stored value with this key (see /maisecrets list). Nothing was changed."
     kind, type_ = str(meta.get("kind", "")), str(meta.get("type", ""))
     if kind.startswith(("term:", "import:")):
         where = "your term list (/maisecrets term remove)" if kind.startswith("term:") else \

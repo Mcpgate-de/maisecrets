@@ -186,10 +186,6 @@ _MISSING = {"gateway": ("a server name or URL", "NAME"), "url": ("the address of
             "fallback": ("url URL or off", "url URL")}
 
 
-def _quoted(text: str) -> str:
-    return '"' + "".join(c if c.isprintable() else "?" for c in text)[:60] + '"'
-
-
 def typed_word(word: str, slash: bool = True) -> tuple:
     """(the word to write, "") or (None, the answer) for a word of parse. A server name of the person's
     configuration becomes `gateway:<its URL>`: after `gateway`, or alone when it is no keyword. Any other argument is
@@ -203,7 +199,8 @@ def typed_word(word: str, slash: bool = True) -> tuple:
             return "gateway:" + str(url), ""
         names = sorted(n for n in _servers() if re.fullmatch(r"[\w.-]{1,64}", n))[:10]
         have = f" (it has: {', '.join(names)})" if names else ""
-        return None, (f"maisecrets: your configuration has no MCP server named {_quoted(name)}{have}; {sref} lists "
+        # never the typed name: only the names of the configuration are named
+        return None, (f"maisecrets: your configuration has no MCP server of that name{have}; {sref} lists "
                       f"them, and {cmd} gateway URL takes an address. Nothing was changed.")
     if word.startswith("other:"):
         text = word[len("other:"):]
@@ -220,7 +217,7 @@ def typed_word(word: str, slash: bool = True) -> tuple:
             if url:
                 return "gateway:" + str(url), ""
         forms = ", ".join(f.replace("/maisecrets sref", sref) for f in FORMS)
-        return None, (f"maisecrets: the command does not know {_quoted(text)}. {cmd} takes: {forms}; without an "
+        return None, (f"maisecrets: the command does not know this argument. {cmd} takes: {forms}; without an "
                       "argument it shows the source. Nothing was changed.")
     return word, ""
 
