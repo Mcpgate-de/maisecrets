@@ -14,6 +14,8 @@ import sys
 import time
 from pathlib import Path
 
+from .detection.lazy_regex import LazyRx
+
 # the internal hook event names (hooks.WATCHDOG_SECONDS) that a per-event code can carry
 HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "post-tool-failure")
 
@@ -59,7 +61,7 @@ _CLAIMED_RE = re.compile(r"\A" + re.escape(MARKER_PREFIX) + r"([a-z0-9.-]{1,48})
 # and reaches the model as plain text (measured, Claude Code 2.1.295)
 _COMMAND_RE = re.compile(r"\A/maisecrets:report(?=\s|\Z)")
 # the text form, which Cowork answers (it shows no answer to a slash command): `maisecrets: report incident`
-_TEXT_RE = re.compile(r"\Amaisecrets:[ \t]*report(?=\s|\Z)")
+_TEXT_RE = LazyRx(r"\Amaisecrets:[ \t]*report(?=\s|\Z)")  # compiled at first use: the hooks import this module
 # Cowork shows only what the AI writes, and the AI never reads the report (docs/DIAGNOSTICS.md): one fixed line
 COWORK_LINE = ("maisecrets: the incident report is for you only, and Cowork shows only what the AI writes, so it is "
                "not shown here. maisecrets recorded {n} incident group(s) on the computer of this session. In "
