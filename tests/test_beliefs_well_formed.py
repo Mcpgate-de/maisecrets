@@ -15,6 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _isolate  # noqa: E402,F401  first: no client environment, a temp home and temp dir
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
+sys.path.insert(0, str(ROOT / "scripts"))
+if tomllib is not None:
+    import replay_can_fail  # noqa: E402  the replay's own reading of a file (Python 3.11+, like the replay)
 BELIEFS = sorted((ROOT / "beliefs").glob("*.toml"))
 
 
@@ -56,8 +59,10 @@ class BeliefsWellFormedTests(unittest.TestCase):
                 for proof in proofs:
                     target = ROOT / proof["file"]
                     self.assertTrue(target.exists(), proof["file"])
-                    text = target.read_bytes().decode("utf-8")   # as the replay counts it (CRLF kept)
-                    self.assertEqual(text.count(proof["find"]), 1, f"{path.name}: anchor must occur exactly once")
+                    # as the replay counts it: the file's bytes, the anchor in the file's line ends (a Windows
+                    # checkout holds CRLF)
+                    n = replay_can_fail.anchor_count(replay_can_fail._text(target), proof["find"])
+                    self.assertEqual(n, 1, f"{path.name}: anchor must occur exactly once")
                     self.assertNotEqual(proof["find"], proof["replace"],
                                         "a mutation that changes nothing proves nothing")
                 if b.get("kind") == "invariant":

@@ -169,6 +169,18 @@ def _text(path: Path) -> str:
     return path.read_bytes().decode("utf-8")
 
 
+def in_line_ends_of(text: str, s: str) -> str:
+    """`s` (an anchor or its replacement, written with LF) with the line ends of `text`: a file checked out with CRLF
+    (hooks/run.cmd everywhere, every file on a Windows runner) holds its lines with CRLF, so a multi-line anchor with
+    LF would not be found there."""
+    return s.replace("\r\n", "\n").replace("\n", "\r\n") if "\r\n" in text else s
+
+
+def anchor_count(text: str, find: str) -> int:
+    """How often a proof's anchor stands in a file's text (_text), in the file's line ends."""
+    return text.count(in_line_ends_of(text, find))
+
+
 @contextmanager
 def restored_on_any_exit(target: Path, original: str):
     """Put the file back on every exit: a SIGTERM from a cancelled CI job would otherwise
@@ -239,11 +251,12 @@ def _replay_one(belief: dict, proof: dict, root: Path = ROOT) -> tuple[bool, str
     """Apply one mutation, run the owning tests, restore. Returns (red, why, the red test ids)."""
     target = root / proof["file"]
     original = _text(target)
-    n = original.count(proof["find"])
+    n = anchor_count(original, proof["find"])
     if n != 1:
         return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)", set()
     with restored_on_any_exit(target, original):
-        mutated = original.replace(proof["find"], proof["replace"], 1)
+        mutated = original.replace(in_line_ends_of(original, proof["find"]),
+                                   in_line_ends_of(original, proof["replace"]), 1)
         target.write_bytes(mutated.encode("utf-8"))
         bad = _check_mutation(target, mutated)
         if bad:
@@ -266,7 +279,7 @@ def replay(belief: dict, root: Path = ROOT) -> tuple[bool, str]:
     proofs = proofs_of(belief)
     for proof in proofs:
         target = root / proof["file"]
-        n = _text(target).count(proof["find"])
+        n = anchor_count(_text(target), proof["find"])
         if n != 1:
             return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
     first, _ = run_tests(belief["runner"], root, belief["belief"])
@@ -309,7 +322,7 @@ def _tree_copy(tmp: str, n: int) -> Path:
 def _baseline(belief: dict, root: Path) -> str | None:
     """The checks of replay() before the first mutation; None when the mutations may run."""
     for proof in proofs_of(belief):
-        n = _text(root / proof["file"]).count(proof["find"])
+        n = anchor_count(_text(root / proof["file"]), proof["find"])
         if n != 1:
             return f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
     first, _ = run_tests(belief["runner"], root, belief["belief"])
