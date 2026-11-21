@@ -920,12 +920,13 @@ resolve, output that prints the value shows the reference instead.
    else nothing binds. What the proof does not cover: a connector that
    passes your own consent on to your gateway (it reaches your gateway
    with your account) passes it. While the pairing runs, the mod watches
-   every tool call: the nonce in any call other than its own connector
-   call (the AI could carry it to your gateway's own connector and its
-   proof back) ends the pairing, and nothing binds. The AI's own calls of
-   `sensitive_references_resource` with a nonce are not refused yet: the
-   mod's own call passes the same tool hooks (measured on Claude Code
-   2.1.330). A gateway's refusal to give a proof (a delegated call, an
+   every tool call, tool result and prompt: the nonce in any of them other
+   than its own connector call (the AI could carry it to your gateway's own
+   connector and its proof back) ends the pairing, nothing binds, and a
+   tool call that carries it never runs. The PreToolUse hook refuses every
+   call of `sensitive_references_resource` with a nonce that the AI makes;
+   only the mod's own call (its tool_use_id starts with `toolu_plugin_`,
+   measured on Claude Code 2.1.330) runs. A gateway's refusal to give a proof (a delegated call, an
    account the gateway does not enable, no pairing key set up) gets its
    own line, and nothing binds. Before the binding, its
    references do not count; ask for them again after the login. A binding is

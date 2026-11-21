@@ -163,6 +163,27 @@ PAIR_DISCOVERY_S = 6.0      # the pairing runs inside the mod's wait (PAIR_MS, 2
 PAIR_REQUEST_S = 8.0
 
 
+# #91: the mod's own call of a connector's pairing tool has a tool_use_id of this form (measured on Claude Code
+# 2.1.330); the AI's calls do not, and it cannot choose one
+_PLUGIN_CALL = "toolu_plugin_"
+
+
+def pairing_call_refusal(payload: dict) -> str | None:
+    """The reason to refuse a call of a server's `sensitive_references_resource` that carries a nonce and that the AI
+    made, not the mod (#91): the AI never needs a pairing proof, and with the nonce of a running pairing it could
+    carry the proof of the person's own gateway connector to the connector that pairs. None for any other call."""
+    tool = str(payload.get("tool_name") or "")
+    tool_input = payload.get("tool_input")
+    if not (tool.startswith("mcp__") and tool.endswith("__sensitive_references_resource")):
+        return None
+    if not isinstance(tool_input, dict) or "nonce" not in tool_input:
+        return None
+    if str(payload.get("tool_use_id") or "").startswith(_PLUGIN_CALL):
+        return None
+    return ("maisecrets: a pairing proof is only for the maisecrets mod; the AI never asks a gateway for one. Nothing "
+            "ran.")
+
+
 def pair_due(key: str) -> bool:
     """The mod asks after a login of KEY succeeded: does a proposed connector wait for its pairing proof?"""
     from .vault_refs import login_mark_due

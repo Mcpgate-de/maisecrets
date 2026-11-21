@@ -1042,6 +1042,31 @@ class AuditIdLineTests(unittest.TestCase):
         self.assertIn("printf y", out.getvalue(), "the line shows, without the field")
 
 
+class PairingCallTests(unittest.TestCase):
+    """#91: the AI never calls a connector's pairing tool with a nonce; only the mod's own call (toolu_plugin_) runs."""
+
+    def pre(self, tool: str, tool_input: dict, tool_use_id: str) -> dict:
+        hooks._live_cache.clear()
+        return hooks.pre_tool({"tool_name": tool, "session_id": "s1", **CLAUDE, "tool_input": tool_input,
+                               "tool_use_id": tool_use_id, "mcp_server": {"name": "claude.ai Real GW"}})
+
+    def test_the_ai_s_call_of_a_pairing_tool_with_a_nonce_is_refused(self):
+        nonce = "n" * 43
+        for tool in ("mcp__claude_ai_Real_GW__sensitive_references_resource", "mcp__gw__sensitive_references_resource"):
+            out = self.pre(tool, {"nonce": nonce}, "toolu_01abc")
+            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny", tool)
+            self.assertIn("pairing proof is only for the maisecrets mod", out["hookSpecificOutput"]
+                          ["permissionDecisionReason"])
+            self.assertNotIn(nonce, json.dumps(out))
+
+    def test_the_mod_s_own_call_and_a_call_without_a_nonce_are_not_refused_for_it(self):
+        tool = "mcp__claude_ai_Real_GW__sensitive_references_resource"
+        for tool_input, tool_use_id in (({"nonce": "n" * 43}, "toolu_plugin_0123"), ({}, "toolu_01abc")):
+            out = self.pre(tool, tool_input, tool_use_id)
+            self.assertNotIn("pairing proof", json.dumps(out))
+        self.assertIsNone(sref_hooks.pairing_call_refusal({"tool_name": "Bash", "tool_input": {"nonce": "x"}}))
+
+
 class ServerFormTests(unittest.TestCase):
     def test_an_encoded_form_of_a_short_server_value_is_not_encoded_again(self):
         # Codex review, round 5: each form was taken for a value and encoded once more (base64 of base64)

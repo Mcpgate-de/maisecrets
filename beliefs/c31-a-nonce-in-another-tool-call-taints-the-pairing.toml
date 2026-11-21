@@ -7,6 +7,8 @@ runner = ["tests/mod.test.ts::the nonce in a call of another connector while the
 
 [proof]
 file = "claude-mod/maisecrets-mod.mjs"
-find = '''    if (pairings.size > 0) try { notePairingUse(e) } catch { /* the pairing ends without a binding */ }
+find = '''    p.tainted = true
+    hit = true
 '''
-replace = ''''''
+replace = '''    hit = true
+'''

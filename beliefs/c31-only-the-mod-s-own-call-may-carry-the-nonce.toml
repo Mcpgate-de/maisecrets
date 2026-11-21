@@ -1,0 +1,12 @@
+# c31-only-the-mod-s-own-call-may-carry-the-nonce: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-only-the-mod-s-own-call-may-carry-the-nonce"
+control = "C31"
+serves = ["M3.3"]
+statement = "A call of the pairing connector's own tool is the mod's own call only with a tool_use_id of the mod (toolu_plugin_); the same call that the AI made taints the pairing and never runs."
+runner = ["tests/mod.test.ts::a call of the pairing tool under the name of the connector that the AI made is no own call"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''  return e?.tool === `mcp__claude_ai_${p.key}__${CONNECTOR_TOOL}` && typeof e?.tool_use_id === 'string' &&
+    e.tool_use_id.startsWith(PLUGIN_CALL)'''
+replace = '''  return e?.tool === `mcp__claude_ai_${p.key}__${CONNECTOR_TOOL}`'''

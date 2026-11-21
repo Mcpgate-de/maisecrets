@@ -909,20 +909,33 @@ async function askConnector($, session, server) {
   return askEntry($, { action: 'connector', session_id: session, server, answer: r.text, cwd: await $.session.cwd() })
 }
 
-// the nonce of each pairing while its connector call runs -> { key, own, tainted }. The gateway's contract (#91, its
-// section 7a): the nonce goes to exactly one call, the mod's own; the same nonce in any other tool call (the AI could
-// carry it to the person's real gateway connector and its proof back) taints the pairing, and nothing binds
+// the nonce of each pairing while its connector call runs -> { key, tainted }. The gateway's contract (#91, its
+// section 7a): the nonce goes to exactly one call, the mod's own; the same nonce in any other tool call, a tool
+// result or a prompt (the AI could carry it to the person's real gateway connector and its proof back) taints the
+// pairing, and nothing binds
 const pairings = new Map()
+const PLUGIN_CALL = 'toolu_plugin_'      // the tool_use_id of the mod's own call (measured on Claude Code 2.1.330)
 
-function notePairingUse(e) {
-  const text = JSON.stringify(e ?? null)
-  for (const [nonce, p] of pairings) {
-    if (!text.includes(nonce)) continue
-    // the mod's own call passes the tool hooks too (measured on 2.1.330): one call of the connector's tool, once
-    if (!p.own && e?.tool === `mcp__claude_ai_${p.key}__${CONNECTOR_TOOL}`) p.own = true
-    else p.tainted = true
-  }
+// the mod's own pairing call: the AI cannot choose a tool_use_id of this form
+function ownPairingCall(e, p) {
+  return e?.tool === `mcp__claude_ai_${p.key}__${CONNECTOR_TOOL}` && typeof e?.tool_use_id === 'string' &&
+    e.tool_use_id.startsWith(PLUGIN_CALL)
 }
+
+// true when this text holds the nonce of a running pairing: that pairing is tainted. `e` is the tool call the text
+// belongs to (its own call is exempt), or null for a prompt
+function notePairingUse(text, e) {
+  let hit = false
+  for (const [nonce, p] of pairings) {
+    if (!text.includes(nonce) || (e && ownPairingCall(e, p))) continue
+    p.tainted = true
+    hit = true
+  }
+  return hit
+}
+
+const PAIR_DENY = 'maisecrets: this call carried the nonce of a running pairing, which only the maisecrets mod ' +
+  'sends to one connector. Nothing ran, and that connector is not bound.'
 
 // #91: a proposed connector is bound only when it proves that it reaches the gateway with the person's account: after
 // the person's login for it succeeded, the connector answers a fresh nonce, and Python compares its proof with the
@@ -954,11 +967,12 @@ async function pairConnector($, key) {
   if (due) {
     try {
       const nonce = pairingNonce()
-      const p = { key, own: false, tainted: false }
+      const p = { key, tainted: false }
       pairings.set(nonce, p)
       let r = null
       try { r = await callConnector($, 'claude_ai_' + key, nonce) } finally { pairings.delete(nonce) }
-      if (p.tainted) why = 'another tool call carried the nonce of this pairing, which only the connector may get'
+      if (p.tainted) why = 'another tool call, a tool result or a prompt carried the nonce of this pairing, which ' +
+        'only the connector may get'
       else if (r === null) why = 'the connector did not answer'
       else {
         const a = await askEntry($, { action: 'pair', key, nonce, answer: r.text, error: r.error }, PAIR_MS)
@@ -1771,11 +1785,17 @@ function registerSettingsPane(on) {
   // a tool call or a turn of this session runs the hooks: the open panel asks for the status again. Neither hook
   // changes the call or the answer, and a failure of its own never reaches them
   on('tool.call', async ($, e, next) => {
-    // a pairing runs: its nonce in this call taints it (notePairingUse), before the call goes on
-    if (pairings.size > 0) try { notePairingUse(e) } catch { /* the pairing ends without a binding */ }
+    // a pairing runs: its nonce in any call but the mod's own taints it, and that call never runs (#91)
+    if (pairings.size > 0) {
+      let hit = true
+      try { hit = notePairingUse(JSON.stringify(e ?? null), e) } catch { hit = true }
+      if (hit) return { deny: PAIR_DENY }
+    }
     let start = null
     try { start = (await $.clock.now()) / 1000 } catch { start = null }
     const r = await next(e)
+    // the nonce in the result of any call but the mod's own taints the pairing too (a connector that echoes it)
+    if (pairings.size > 0) try { notePairingUse(JSON.stringify(r ?? null), e) } catch { /* see the call above */ }
     try {
       // an MCP result that may hold a gateway reference: at the end of the turn Python says whether a gateway really
       // sent this session references without a login here (offerLogin). A string test only; the text is never kept
@@ -1847,6 +1867,8 @@ export function register(on) {
   registerShowValues(on)
   registerSettingsPane(on)
   on('prompt.submit', async ($, e, next) => {
+    // a pairing runs: its nonce in any prompt taints it (#91)
+    if (pairings.size > 0) try { notePairingUse(String(e?.text ?? ''), null) } catch { /* the pairing goes on */ }
     const person = PERSON.has(e.origin?.kind)
     // `/maisecrets demo on`, typed by the person, is `/maisecrets:demo on`: the steps below read `own`, the colon
     // form, with the person's origin as it came, so it has the same path and checks as the colon form and no more. Any
