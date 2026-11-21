@@ -140,6 +140,7 @@ class MissionCoverageTests(unittest.TestCase):
         (root / "README.md").write_text(readme, encoding="utf-8")
         (root / "PRIVACY.md").write_text(privacy, encoding="utf-8")
         (root / "mission" / "claims.toml").write_text(claims, encoding="utf-8")
+        (root / "mission" / "code.toml").write_text("[file]\n", encoding="utf-8")     # a tree without program files
         for name, text in missions.items():
             (root / "mission" / f"{name}.toml").write_text(text, encoding="utf-8")
         # each belief: its control, which serves M1.1, or (control, serves); serves None leaves the key out
@@ -342,6 +343,68 @@ class MissionCoverageTests(unittest.TestCase):
         self.assertIn("M2: no [measure], and no `none` that says why", r["unknown"])
         self.assertIn("M3: the measure cannot be read: no row with 'holdout-v9' in LOG.md", r["unknown"])
 
+    def code_tree(self, register: str, threat_model: str = THREAT_MODEL):
+        """A tree with program files, beliefs whose proofs name them, and a register (mission/code.toml)."""
+        root = self.tree(self.covered(), ["C1", "C2", "C3", "I1"])
+        (root / "docs" / "THREAT-MODEL.md").write_text(threat_model, encoding="utf-8")
+        for f in ("maisecrets/a.py", "maisecrets/b.py", "maisecrets/undeclared.py", "hooks/run.sh",
+                  "claude-mod/x.mjs", "skills/s/scripts/t.py", "maisecrets/rules/data.json", "docs/notes.py"):
+            (root / f).parent.mkdir(parents=True, exist_ok=True)
+            (root / f).write_text("x = 1\n", encoding="utf-8")
+        for name, control, f in (("pa", "C1", "maisecrets/a.py"), ("pb", "C1", "maisecrets/b.py"),
+                                 ("pm", "C2", "claude-mod/x.mjs"), ("pr", "operations", "hooks/run.sh")):
+            (root / "beliefs" / f"{name}.toml").write_text(
+                f'belief = "{name}"\ncontrol = "{control}"\nserves = []\nstatement = "s"\nrunner = ["t"]\n'
+                f'[proof]\nfile = "{f}"\n', encoding="utf-8")
+        (root / "mission" / "code.toml").write_text(register, encoding="utf-8")
+        return root
+
+    def test_each_code_finding_is_named_and_strict_fails_on_it(self):
+        import mission_coverage
+        register = ('[file]\n"maisecrets/a.py" = { controls = ["C1", "C2"] }\n'
+                    '"maisecrets/b.py" = { none = "a helper" }\n'
+                    '"maisecrets/gone.py" = { controls = ["C1"] }\n'
+                    '"hooks/run.sh" = { controls = ["C1"], none = "both" }\n'
+                    '"claude-mod/x.mjs" = { controls = ["C2", "C9"] }\n'
+                    '"skills/s/scripts/t.py" = { none = "" }\n')
+        model = THREAT_MODEL.replace("| C3 | c |", "| C3 | c (`maisecrets/a.py`, `maisecrets/missing.py`) |")
+        r = mission_coverage.analyse(self.code_tree(register, model))
+        self.assertEqual(r["code"], [
+            "claude-mod/x.mjs: declares C9, which docs/THREAT-MODEL.md does not document",
+            "hooks/run.sh: the entry needs controls (a list of C or I names) or none (a reason), not both",
+            "skills/s/scripts/t.py: the entry needs controls (a list of C or I names) or none (a reason), not both",
+            "maisecrets/undeclared.py: a program file that mission/code.toml does not declare",
+            "maisecrets/gone.py: declared in mission/code.toml, but the file is gone",
+            "claude-mod/x.mjs: declares C9, but no belief of C9 has a proof in this file",
+            "maisecrets/a.py: declares C2, but no belief of C2 has a proof in this file",
+            "maisecrets/b.py: a belief of C1 has a proof in this file, but its entry does not declare C1",
+            "maisecrets/gone.py: declares C1, but no belief of C1 has a proof in this file",
+            "docs/THREAT-MODEL.md names maisecrets/a.py for C3, but mission/code.toml does not declare it",
+            "docs/THREAT-MODEL.md names maisecrets/missing.py for C3, but the file does not exist"])
+        self.assertEqual(r["code_counts"], {"files": 6, "with controls": 3, "none": 1})
+        root = self.code_tree(register)
+        self.assertEqual(quiet(mission_coverage.main, ["--root", str(root)]), 0)
+        self.assertEqual(quiet(mission_coverage.main, ["--strict", "--root", str(root)]), 1)
+
+    def test_a_register_that_matches_the_code_has_no_finding(self):
+        import mission_coverage
+        register = ('[file]\n"maisecrets/a.py" = { controls = ["C1"] }\n'
+                    '"maisecrets/b.py" = { controls = ["C1"] }\n'
+                    '"maisecrets/undeclared.py" = { none = "a helper" }\n'
+                    '"hooks/run.sh" = { none = "a launcher; its belief has a label, no control" }\n'
+                    '"claude-mod/x.mjs" = { controls = ["C2"] }\n'
+                    '"skills/s/scripts/t.py" = { none = "a script" }\n')
+        model = THREAT_MODEL.replace("| C1 | a |", "| C1 | a (`maisecrets/a.py`, `tests/test_a.py`) |")
+        root = self.code_tree(register, model)
+        (root / "tests").mkdir()
+        (root / "tests" / "test_a.py").write_text("", encoding="utf-8")
+        r = mission_coverage.analyse(root)
+        self.assertEqual(r["code"], [])
+        self.assertEqual(quiet(mission_coverage.main, ["--strict", "--root", str(root)]), 0)
+        (root / "mission" / "code.toml").unlink()
+        self.assertEqual(mission_coverage.analyse(root)["code"],
+                         ["mission/code.toml not found: no program file says which controls it carries"])
+
     def test_the_repository_maps_every_promise_and_names_only_documented_controls(self):
         import mission_coverage
         r = mission_coverage.analyse(ROOT)
@@ -350,6 +413,8 @@ class MissionCoverageTests(unittest.TestCase):
         self.assertEqual(r["gaps"], [], "every part of a mission rests on a belief that can fail")
         self.assertEqual(r["orphans"], [], "a documented control must serve a mission")
         self.assertEqual(r["claims"], [], "every promise of README.md and PRIVACY.md maps to a mission")
+        self.assertEqual(r["code"], [], "each program file declares its controls; each one is proven there")
+        self.assertGreaterEqual(r["code_counts"]["files"], 100, "a population test must fail on an empty population")
 
 
 if __name__ == "__main__":

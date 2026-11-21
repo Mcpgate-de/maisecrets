@@ -1,0 +1,11 @@
+# c17-the-session-audit-never-echoes-the-report-path: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c17-the-session-audit-never-echoes-the-report-path"
+control = "C17"
+serves = ["M1.8"]
+statement = "The session audit names its report file without a folder and never echoes a path the person gave: a folder name can hold a token."
+runner = ["tests/test_audit_result.py::SummaryShapeTests::test_a_path_given_with_out_is_not_echoed_and_the_temp_path_is"]
+
+[proof]
+file = "skills/secret-hygiene/scripts/audit_transcripts.py"
+find = "    return \"the file you gave with --out\" if out else f\"{report.name} in your temp folder\""
+replace = "    return str(report)"

@@ -1,0 +1,11 @@
+# c1-a-vendored-keyword-rule-finds-a-value-after-its-keyword: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-vendored-keyword-rule-finds-a-value-after-its-keyword"
+control = "C1"
+serves = ["M1.3"]
+statement = "The vendored keyword rules of detect-secrets find a value after a password or secret keyword, in a prompt and in a tool result."
+runner = ["tests/test_keyword_value_words.py::KeywordValueWordTests::test_a_word_after_a_password_or_secret_label_stays_a_hit_in_a_tool_result"]
+
+[proof]
+file = "maisecrets/detection/keyword_tail.py"
+find = "            yield from self._rx.finditer(text)\n            return"
+replace = "            return"

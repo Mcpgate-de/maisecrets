@@ -1,0 +1,11 @@
+# c31-an-echo-of-a-released-value-comes-back-as-the-reference: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-an-echo-of-a-released-value-comes-back-as-the-reference"
+control = "C31"
+serves = ["M1.2"]
+statement = "A value the gateway released is kept for its window, so an echo of it in a later tool result comes back as its Sensitive Reference."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_an_echo_of_the_value_comes_back_as_the_reference"]
+
+[proof]
+file = "maisecrets/server_values.py"
+find = "    vault_refs.remember_released(vault.backend, session, got)"
+replace = "    pass"

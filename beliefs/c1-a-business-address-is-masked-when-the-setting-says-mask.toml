@@ -1,0 +1,11 @@
+# c1-a-business-address-is-masked-when-the-setting-says-mask: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-business-address-is-masked-when-the-setting-says-mask"
+control = "C1"
+serves = ["M1.3"]
+statement = "With business_addresses set to mask, the address of a company, an office, a shop or a public place is masked as any address: the business words that leave it as text find nothing."
+runner = ["tests/test_business_addresses_option.py::BusinessAddressTests::test_mask_masks_a_business_address"]
+
+[proof]
+file = "maisecrets/detection/business.py"
+find = "        return None if masked() else self._rx.search(*args)"
+replace = "        return self._rx.search(*args)"

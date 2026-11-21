@@ -1,0 +1,11 @@
+# c1-a-display-always-hides-part-of-the-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-display-always-hides-part-of-the-value"
+control = "C1"
+serves = ["M1.1", "M1.2"]
+statement = "The display part of a placeholder always hides part of the value; a value its rule cannot mask gets no display."
+runner = ["tests/test_display_and_refs.py::DisplayExamplesTests::test_values_the_rules_cannot_parse_get_no_display"]
+
+[proof]
+file = "maisecrets/pii_display.py"
+find = "    return shown if BULLET in shown else \"\""
+replace = "    return shown"

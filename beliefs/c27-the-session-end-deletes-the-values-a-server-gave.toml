@@ -1,0 +1,11 @@
+# c27-the-session-end-deletes-the-values-a-server-gave: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-session-end-deletes-the-values-a-server-gave"
+control = "C27"
+serves = ["M4.3"]
+statement = "At the end of a session the values a server gave that session leave the store."
+runner = ["tests/test_hooks_paths.py::PayloadMatrixTests::test_session_end_deletes_the_values_a_server_gave_that_session_and_answers_nothing"]
+
+[proof]
+file = "maisecrets/session_end.py"
+find = "        vault_refs.end_session(Vault(load_config()).backend, session)"
+replace = "        pass"

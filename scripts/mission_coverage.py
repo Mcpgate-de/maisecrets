@@ -15,10 +15,14 @@ PRIVACY.md make to users onto the missions. This script joins them and reports:
 - a claim whose quote no longer stands in its source, a bullet of a gated section of README.md or PRIVACY.md that
   no claim maps, and a gated section that is gone,
 - each mission's measured number (`[measure]`: a source file, the row that holds it and its column, and the gate
-  that keeps its bound), or why it has none (`none`); a measure that cannot be read is a finding.
+  that keeps its bound), or why it has none (`none`); a measure that cannot be read is a finding,
+- the other direction, from the code up (mission/code.toml): a program file of the plugin (CODE) that the register
+  does not declare; an entry for a file that is gone; a file declared for a control that no belief's proof in that
+  file names; a proof in a file whose entry does not declare the proof's control; a file that the threat model names
+  for a control but that does not exist, or that the register does not declare for that control.
 
-Without --strict it only reports and exits 0. With --strict it exits 1 on a gap, an orphan control, an unknown name
-or a claim finding. Python 3.11+ (tomllib), like replay_can_fail.py.
+Without --strict it only reports and exits 0. With --strict it exits 1 on a gap, an orphan control, an unknown name,
+a claim finding or a code finding. Python 3.11+ (tomllib), like replay_can_fail.py.
 """
 import argparse
 import re
@@ -28,7 +32,13 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CONTROL_ROW = re.compile(r"^\| (C\d+) \|", re.M)
+CONTROL_ROW = re.compile(r"^\| (C\d+[a-z]?) \|", re.M)
+# the program files of the plugin: what it runs (one pattern, in mission_touch.py, which runs on Python 3.9 too)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mission_touch import CODE  # noqa: E402
+CODE_DIRS = ("maisecrets", "hooks", "claude-mod", "skills")
+# a path of the repository in a row of the threat model, in backticks
+NAMED_PATH = re.compile(r"`((?:maisecrets|hooks|claude-mod|skills|harness|tests|scripts)/[\w./-]+)`")
 INVARIANT_ITEM = re.compile(r"^- \*\*(I\d+)\*\*", re.M)
 # the sections whose every bullet is a promise, a limit or a feature that claims.toml must map
 GATED_SECTIONS = (("README.md", "What it does"), ("README.md", "What the Claude Code mod does"),
@@ -39,6 +49,70 @@ KINDS = ("promise", "limit", "feature")
 
 def documented(threat_model: str):
     return set(CONTROL_ROW.findall(threat_model)), set(INVARIANT_ITEM.findall(threat_model))
+
+
+def named_paths(threat_model: str) -> dict[str, set[str]]:
+    """control or invariant -> the repository paths its row (or item) of the threat model names."""
+    out: dict[str, set[str]] = {}
+    for m in re.finditer(r"^\| (C\d+[a-z]?) \|(.*)$|^- \*\*(I\d+)\*\*(.*)$", threat_model, re.M):
+        name, text = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+        out.setdefault(name, set()).update(NAMED_PATH.findall(text))
+    return out
+
+
+def code_files(root: Path) -> set[str]:
+    return {p.relative_to(root).as_posix() for d in CODE_DIRS if (root / d).is_dir() for p in (root / d).rglob("*")
+            if p.is_file() and "__pycache__" not in p.parts and CODE.match(p.relative_to(root).as_posix())}
+
+
+def check_code(root: Path, names: set[str], loaded: list[dict], threat_model: str) -> tuple[list[str], dict]:
+    """The register of mission/code.toml against the files, the proofs and the threat model. (findings, counts)."""
+    path = root / "mission" / "code.toml"
+    if not path.exists():
+        return ["mission/code.toml not found: no program file says which controls it carries"], {}
+    raw = tomllib.loads(path.read_text(encoding="utf-8")).get("file", {})
+    findings: list[str] = []
+    if not isinstance(raw, dict):
+        return ["mission/code.toml: file is not a table of paths"], {}
+    declared: dict[str, set[str]] = {}
+    nones = withs = 0
+    for f, entry in sorted(raw.items()):
+        controls = entry.get("controls") if isinstance(entry, dict) else None
+        none = entry.get("none") if isinstance(entry, dict) else None
+        if isinstance(controls, list) and controls and all(isinstance(c, str) for c in controls) and none is None:
+            declared[f] = set(controls)
+            withs += 1
+            for c in controls:
+                if c not in names:
+                    findings.append(f"{f}: declares {c}, which docs/THREAT-MODEL.md does not document")
+        elif isinstance(none, str) and none.strip() and controls is None:
+            declared[f] = set()
+            nones += 1
+        else:
+            findings.append(f"{f}: the entry needs controls (a list of C or I names) or none (a reason), not both")
+            declared[f] = set()
+    files = code_files(root)
+    findings += [f"{f}: a program file that mission/code.toml does not declare" for f in sorted(files - set(raw))]
+    findings += [f"{f}: declared in mission/code.toml, but the file is gone" for f in sorted(set(raw) - files)]
+    proven: dict[str, set[str]] = {}
+    for b in loaded:
+        proofs = b.get("proof", [])
+        for p in ([proofs] if isinstance(proofs, dict) else proofs if isinstance(proofs, list) else []):
+            if isinstance(p, dict) and isinstance(p.get("file"), str):
+                proven.setdefault(p["file"], set()).add(b.get("control", ""))
+    for f in sorted(declared):
+        for c in sorted(declared[f] - proven.get(f, set())):
+            findings.append(f"{f}: declares {c}, but no belief of {c} has a proof in this file")
+        if f in files:
+            for c in sorted((proven.get(f, set()) & names) - declared[f]):
+                findings.append(f"{f}: a belief of {c} has a proof in this file, but its entry does not declare {c}")
+    for c, paths in sorted(named_paths(threat_model).items()):
+        for f in sorted(paths):
+            if not (root / f).exists():
+                findings.append(f"docs/THREAT-MODEL.md names {f} for {c}, but the file does not exist")
+            elif CODE.match(f) and c not in declared.get(f, {c}):
+                findings.append(f"docs/THREAT-MODEL.md names {f} for {c}, but mission/code.toml does not declare it")
+    return findings, {"files": len(files), "with controls": withs, "none": nones}
 
 
 def flat(text: str) -> str:
@@ -156,6 +230,7 @@ def analyse(root: Path):
     r = {"_dup": set(), "missions": [], "gaps": [], "thin": [], "no_invariant": [], "orphans": [], "unknown": [],
          "claims": [],
          "measures": [],
+         "code": [],
          "unowned_beliefs": Counter(),
          "undocumented_belief_controls": sorted({c for c in beliefs.values()
                                                  if c not in controls and c not in invariants})}
@@ -209,7 +284,7 @@ def analyse(root: Path):
         else:
             r["unknown"].append(f"{mid}: no [measure], and no `none` that says why")
         r["missions"].append((mid, m["promise"], rows))
-    for name in sorted(controls | invariants, key=lambda s: (s[0], int(s[1:]))):
+    for name in sorted(controls | invariants, key=lambda s: (s[0], int(s[1:].rstrip("abcdefghijklmnopqrstuvwxyz")), s)):
         if name not in served:
             r["orphans"].append(f"{name} serves no mission")
     for b, control in beliefs.items():
@@ -225,6 +300,8 @@ def analyse(root: Path):
             elif control not in parts[pid]:
                 r["unknown"].append(f"{b}: serves {pid}, but {pid.split('.')[0]} does not name its control {control}")
     r["claims"] = check_claims(root, {m["mission"] for _, m in missions})
+    r["code"], r["code_counts"] = check_code(root, controls | invariants, loaded,
+                                             (root / "docs" / "THREAT-MODEL.md").read_text(encoding="utf-8"))
     del r["_dup"]
     return r
 
@@ -241,6 +318,8 @@ def render(r) -> str:
                 ("unowned", "beliefs that serve no promise (serves = []), by control", unowned),
                 ("unknown", "unknown names and broken links", r["unknown"]),
                 ("claims", "claims of README.md and PRIVACY.md", r["claims"]),
+                ("code", "program files and their controls (mission/code.toml: "
+                 + ", ".join(f"{k} {v}" for k, v in r["code_counts"].items()) + ")", r["code"]),
                 ("measures", "the measured number of each mission", r["measures"]),
                 ("labels", "belief control labels that are no documented control",
                  r["undocumented_belief_controls"]))
@@ -253,12 +332,12 @@ def render(r) -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--strict", action="store_true",
-                    help="exit 1 on a gap, an orphan control, an unknown name or a claim finding")
+                    help="exit 1 on a gap, an orphan control, an unknown name, a claim or a code finding")
     ap.add_argument("--root", type=Path, default=ROOT)
     args = ap.parse_args(argv)
     r = analyse(args.root)
     print(render(r))
-    return 1 if args.strict and (r["gaps"] or r["orphans"] or r["unknown"] or r["claims"]) else 0
+    return 1 if args.strict and (r["gaps"] or r["orphans"] or r["unknown"] or r["claims"] or r["code"]) else 0
 
 
 if __name__ == "__main__":

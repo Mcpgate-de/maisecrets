@@ -3,7 +3,7 @@
 mission = "M1"
 promise = "A value the person stored, or one a rule finds, never reaches the AI in clear text."
 actors = ["A1"]
-controls = ["C1", "C2", "C17", "C19", "C26", "C27", "C28", "C29", "C30", "C31", "C32"]
+controls = ["C1", "C2", "C17", "C19", "C25", "C26", "C27", "C28", "C29", "C30", "C30a", "C31", "C32"]
 invariants = ["I1"]
 labels = ["detector"]
 ends = "A value with no known shape that is not stored and on no list; a name without a label; a value a command encodes before it prints it; the output of a failed command in Claude Code; a client without hooks (chat, web and mobile apps); an agent that evades."

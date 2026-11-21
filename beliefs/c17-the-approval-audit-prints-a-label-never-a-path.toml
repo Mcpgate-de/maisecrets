@@ -1,0 +1,11 @@
+# c17-the-approval-audit-prints-a-label-never-a-path: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c17-the-approval-audit-prints-a-label-never-a-path"
+control = "C17"
+serves = ["M1.8"]
+statement = "The approval audit names each file by a fixed label, never by its path: a file or folder name can hold the credential."
+runner = ["tests/test_audit_approvals.py::ApprovalAuditTests::test_a_token_only_in_a_codex_rules_file_name_is_a_finding"]
+
+[proof]
+file = "skills/secret-hygiene/scripts/audit_approvals.py"
+find = "len(m.value), src.label, place, src.client, src.what))"
+replace = "len(m.value), str(src.path), place, src.client, src.what))"

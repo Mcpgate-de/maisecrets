@@ -1,0 +1,11 @@
+# c1-a-street-before-its-number-after-a-strong-label-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-street-before-its-number-after-a-strong-label-is-a-hit"
+control = "C1"
+serves = ["M1.3"]
+statement = "After a strong address label, a street written before its number (Kalinova ulica 17, ul. Lakowa 5) is an address."
+runner = ["tests/test_street_number_last_after_a_strong_label.py::StreetNumberLastTests::test_each_form_after_each_strong_label"]
+
+[proof]
+file = "maisecrets/detection/street_forms.py"
+find = "    return any(len(w) >= 4 and w.lower() not in known for w in words)"
+replace = "    return False"

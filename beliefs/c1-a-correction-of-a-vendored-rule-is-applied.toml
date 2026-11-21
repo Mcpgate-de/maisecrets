@@ -1,0 +1,11 @@
+# c1-a-correction-of-a-vendored-rule-is-applied: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-correction-of-a-vendored-rule-is-applied"
+control = "C1"
+serves = ["M1.3"]
+statement = "The corrections to the vendored betterleaks rules apply when the rules load: a token that a corrected rule finds without the provider's name is a hit."
+runner = ["tests/test_rules_from_the_catalogs.py::BetterleaksPatchTests::test_a_bare_token_without_the_providers_name_is_found"]
+
+[proof]
+file = "maisecrets/detection/vendored_patches.py"
+find = "    \"resend-api-key.1\": {\"add_keywords\": (\"re_\",)},\n"
+replace = ""

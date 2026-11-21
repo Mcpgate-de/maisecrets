@@ -687,5 +687,19 @@ class VerdictModelTests(_Base):
         self.assertIn(f"remove that line from {user_rules.ALLOW_FILE}.", out)
 
 
+class VerdictLabelTests(unittest.TestCase):
+    """The verdict names the label in front of a hit only when that label touches no hit (maisecrets/verdict.py):
+    the text before a value can be another value."""
+
+    def test_a_label_that_overlaps_a_hit_is_never_shown(self):
+        from maisecrets import verdict
+        token = "ghp_" + "Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0dF3gH6"
+        for text, hit in (("password: Zq8-pw", (0, 4)), (token + ": Zq8-pw", (0, len(token)))):
+            with self.subTest(text=text[:10]):
+                start = text.index("Zq8")
+                self.assertTrue(verdict.label_before(text, start, []), "the premise: a label stands in front")
+                self.assertEqual(verdict.label_before(text, start, [hit]), "")
+
+
 if __name__ == "__main__":
     unittest.main()

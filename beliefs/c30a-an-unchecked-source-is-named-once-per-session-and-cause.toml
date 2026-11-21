@@ -1,0 +1,11 @@
+# c30a-an-unchecked-source-is-named-once-per-session-and-cause: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-an-unchecked-source-is-named-once-per-session-and-cause"
+control = "C30a"
+serves = ["M1.3"]
+statement = "A name source whose names go unchecked is named on the person's screen once per session and source, and again only when the cause changes."
+runner = ["tests/test_ner_health.py::OnceTests::test_the_line_is_claimed_per_session_and_source"]
+
+[proof]
+file = "maisecrets/ner_health.py"
+find = "    return line(cause, conf, codex) if claim(payload.get(\"session_id\"), cause, conf) else None"
+replace = "    return line(cause, conf, codex)"

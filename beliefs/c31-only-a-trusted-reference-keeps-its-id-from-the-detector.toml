@@ -1,0 +1,11 @@
+# c31-only-a-trusted-reference-keeps-its-id-from-the-detector: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-only-a-trusted-reference-keeps-its-id-from-the-detector"
+control = "C31"
+serves = ["M1.2"]
+statement = "The detector skips the id of a Sensitive Reference only when a gateway gave this session that reference; a forged one hides no secret in its id."
+runner = ["tests/test_sref_client.py::ReferenceIsNoFindingTests::test_a_forged_reference_hides_no_secret"]
+
+[proof]
+file = "maisecrets/placeholder.py"
+find = "    return f\"{OPEN}sref:{m.group('kind')}:{m.group('id')}{CLOSE}\" in TRUSTED"
+replace = "    return True"
