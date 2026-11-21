@@ -1596,7 +1596,12 @@ function runEntrySoon($, words) {
 // form `own`, with the answer as the command's output for the person alone. Measured on 2.1.330: neither line passes
 // prompt.submit or the settings hook
 const ownText = (line) => ({ text: String(line).replace(/^maisecrets: /, ''), isTextDisplayOnly: true })
-async function runTyped($, own, kind) {
+// the origin Python gets for this route (prompt_commands.COMMAND_ROUTE): the engine stamps every local command run
+// `composer`, so it is no proof that the person typed it. Python makes no change there that only the person's own
+// prompt may make (C22): it names the prompt to send, which goes through prompt.submit and the prompt hook
+const COMMAND_ROUTE = 'command'
+async function runTyped($, own) {
+  const kind = COMMAND_ROUTE
   if (DEMO_CMD.test(own)) {
     try { demo.delete(await $.session.id()) } catch { /* the step asks */ }
   }
@@ -1692,7 +1697,7 @@ function registerSettingsPane(on) {
     const spaced = `/maisecrets ${e?.args ?? ''}`
     const typed = meantCommand(spaced)
     // `/maisecrets status`, typed by the person: it runs now, as its colon form (no second Enter)
-    if (typed && RUN_ORIGINS.has(e?.origin?.kind)) return await runTyped($, typed, e.origin.kind)
+    if (typed && RUN_ORIGINS.has(e?.origin?.kind)) return await runTyped($, typed)
     const meant = typed ?? nearCommand(spaced)
     if (meant) {
       const a = await checkFill($, meant, e?.origin?.kind)
@@ -1719,7 +1724,7 @@ export function register(on) {
     const name = typeof e?.command === 'string' && e.command.startsWith('maisecrets:') ? e.command.slice(11) : ''
     if (!HIDDEN.includes(name) || !RUN_ORIGINS.has(e?.origin?.kind)) return next(e)
     const args = typeof e.args === 'string' ? e.args.trim() : ''
-    return await runTyped($, `/maisecrets:${name}${args ? ' ' + args : ''}`, e.origin.kind)
+    return await runTyped($, `/maisecrets:${name}${args ? ' ' + args : ''}`)
   })
   registerDemo(on)
   // the values on the person's screen (the part above): one hooks module per plugin, so it registers from here

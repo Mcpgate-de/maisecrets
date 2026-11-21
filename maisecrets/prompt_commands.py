@@ -255,6 +255,8 @@ def mod_command(payload: dict) -> dict | None:
     runs through the entry command file. None for every other prompt, and for a prompt the person did not type (the
     hook path stays as it is: Codex, claude -p, a client without the mod)."""
     from . import hooks as h
+    if payload.get("origin") == COMMAND_ROUTE:
+        return _command_route(payload)
     if payload.get("origin") not in ("composer", "bridge"):
         return None
     # Cowork draws no panel and no dropped-prompt line, so an answer the mod drops is not seen there
@@ -325,6 +327,50 @@ def mod_command(payload: dict) -> dict | None:
         from . import ner_setup
         plan["starting"] = ner_setup.start_running()
     return {"run": plan}
+
+
+# the origin the mod gives a command it got from its command.run hook (the mod's own /maisecrets NAME, a hidden
+# /maisecrets:NAME): the engine stamps such a run `composer` for every local command, so it is no proof that the person
+# typed it. That route never makes a change only the person's own prompt may make (C22): it names the prompt to send
+COMMAND_ROUTE = "command"
+# the source this module gives the prompt hook for that route: not the person's (settings.TYPED_SOURCES)
+_ROUTE_SOURCE = "mod-command-run"
+
+
+def person_only(prompt: str) -> bool:
+    """Whether a colon-form command makes a change that counts only from the person's own prompt: what the prompt hook
+    answers (term add or remove, not-a-secret, demo, forget import:ID, the incident report), a settings or name service
+    change, a forget (its typed note lets the deletion count as the person's) and a login or logout (it binds a
+    claude.ai connector)."""
+    from . import hooks as h
+    from . import settings as settings_mod
+    if (incidents.recognize(prompt, "claude") or demo.parse(prompt) or term_files.parse_command(prompt)
+            or value_files.parse_removal(prompt) or not_a_secret.parse(prompt) or settings_mod.parse_prompt(prompt)
+            or h._GRANT_RE.match(prompt)):
+        return True
+    m = _SLASH_FORM_RE.match(prompt)
+    name, words = (m.group("name").lower(), (m.group("args") or "").split()) if m else ("", [])
+    return name == "forget" or (name == "sref" and words[:1] in (["login"], ["logout"]))
+
+
+def _command_route(payload: dict) -> dict:
+    """The mod's answer for a command its command.run hook got. A change only the person may make is not made: the
+    answer names the prompt that makes it. Any other command takes the person's path, with a source that is not the
+    person's, so the prompt hook counts nothing of it as typed."""
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str):
+        return {"drop": "maisecrets: this command did not run."}
+    if person_only(prompt):
+        from . import forms
+        m = _SLASH_FORM_RE.match(prompt)
+        words = f"{m.group('name').lower()} {m.group('args') or ''}".strip() if m else ""
+        typed = forms.cowork(f"/maisecrets {words}")
+        if typed.startswith("/"):
+            typed = f"/maisecrets:maisecrets {words}"       # a plugin command: the person's Enter goes through the hook
+        return {"drop": "maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. "
+                        f"Nothing was changed. Send it as a prompt: {typed}"}
+    out = mod_command({**payload, "origin": "composer", "source": _ROUTE_SOURCE})
+    return out if out is not None else {"drop": "maisecrets: this command did not run."}
 
 
 def _entry_words(prompt: str, typed) -> str | None:

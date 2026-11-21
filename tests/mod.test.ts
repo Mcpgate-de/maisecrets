@@ -1072,11 +1072,30 @@ test('a person types /maisecrets NAME or a hidden /maisecrets:NAME: the command 
     expect(r.text).toBe('/maisecrets list runs without the AI; its output opens in a panel.')
     expect((r as any).isTextDisplayOnly).toBe(true)
     expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin))
-      .toEqual({ prompt: '/maisecrets:list', session_id: 'sess-1', cwd: '/work', origin: 'composer' })
+      .toEqual({ prompt: '/maisecrets:list', session_id: 'sess-1', cwd: '/work', origin: 'command' })
     expect(await until(() => st.spawns.length === n + 1 && st.ended === n + 1)).toBe(true)
     await new Promise(resolve => setTimeout(resolve, 20))
   }
   expect(st.fills).toEqual([])
+})
+
+// the engine stamps every local command run `composer`: the route tells Python so, and Python makes no change there
+// that only the person's own prompt may make (prompt_commands.COMMAND_ROUTE, C22)
+test('a command from the command.run route reaches Python as the command route, never as the person', async ($, on) => {
+  const HINT = 'maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. Nothing ' +
+    'was changed. Send it as a prompt: maisecrets: set ssh_consent on'
+  const st = runSetup(on, { answer: { drop: HINT } })
+  on('command.run', () => ({ text: 'engine' }))
+  for (const [command, args] of [['maisecrets', 'settings ssh_consent on'], ['maisecrets:settings', 'ssh_consent on'],
+    ['maisecrets:term', 'add Bertolt Q'], ['maisecrets:not-a-secret', 'SECRET_c1']]) {
+    st.checks.length = 0
+    const r = await $.command.run({ command, args, origin: { kind: 'composer' } } as any)
+    expect(r.text).toBe(HINT.replace(/^maisecrets: /, ''))
+    const asked = st.checks.filter(c => c.argv[2] === 'mod-prompt').map(c => JSON.parse(c.init.stdin))
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked.every(q => q.origin === 'command')).toBe(true)
+  }
+  expect(st.spawns.length).toBe(0)
 })
 
 test('a hidden command that no person typed goes on to the engine, and the mod asks nothing', async ($, on) => {
