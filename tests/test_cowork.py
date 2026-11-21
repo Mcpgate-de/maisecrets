@@ -233,6 +233,40 @@ class OutputTests(unittest.TestCase):
         self.assertNotIn(token, r.stdout)
         self.assertIn("run /maisecrets:status test and /maisecrets demo on", r.stdout)
 
+    def _isolated(self, env: dict) -> dict:
+        import tempfile
+        cfg = tempfile.mkdtemp(prefix="ms-cowork-cfg-")
+        return {**env, "CLAUDE_CONFIG_DIR": cfg, "CODEX_HOME": cfg}
+
+    def test_list_names_no_terminal_in_cowork(self):
+        r = _dispatch("list", env=COWORK)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("In Cowork each new task starts with an empty store.", r.stdout)
+        self.assertNotIn("run in a terminal", r.stdout)
+        self.assertIn("run in a terminal", _dispatch("list", env={}).stdout)
+
+    def test_sref_says_in_cowork_that_it_is_not_tested_there(self):
+        r = _dispatch("sref", env=self._isolated(COWORK))
+        self.assertIn("not tested in Cowork", r.stdout)
+        self.assertNotIn("in Claude Code (after a result", r.stdout)
+        self.assertIn("use your gateway once in Claude Code", _dispatch("sref", env=self._isolated({})).stdout)
+
+    def test_the_lock_setting_says_in_cowork_that_no_lock_is_drawn(self):
+        r = _dispatch("settings", env=COWORK)
+        self.assertIn("Values with a lock (Cowork draws no lock yet)", r.stdout)
+        self.assertNotIn("Cowork draws no lock", _dispatch("settings", env={}).stdout)
+
+    def test_a_typed_sref_in_cowork_is_run_by_maisecrets_and_a_login_gets_its_line(self):
+        with mock.patch.dict(os.environ, self._isolated(COWORK)):
+            hooks._live_cache.clear()
+            login = prompt_commands.mod_command({"prompt": "maisecrets: sref login gw", "session_id": SESSION,
+                                                 "cwd": "", "origin": "composer"})
+            status = prompt_commands.mod_command({"prompt": "maisecrets: sref", "session_id": SESSION,
+                                                  "cwd": "", "origin": "composer"})
+        self.assertIn("a gateway login from Cowork is not tested yet", login["text"])
+        self.assertTrue(login["text"].startswith(cowork._SHOW))
+        self.assertIn("not tested in Cowork", status["text"])
+
     def test_a_refusal_the_ai_relays_names_the_text_form_in_cowork(self):
         out = io.StringIO()
         with mock.patch.dict(os.environ, COWORK), mock.patch.object(sys, "stdout", out):

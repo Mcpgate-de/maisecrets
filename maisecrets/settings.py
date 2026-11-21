@@ -320,7 +320,12 @@ def _row(key: str, cfg: dict) -> str:
         other = "off" if value else "on"
     else:
         other = ""
-    return f"| {_cell(LABEL.get(key, TITLE.get(key, key)))} | {now} | {other} | `{key}` |"
+    label = LABEL.get(key, TITLE.get(key, key))
+    if key == "show_values":
+        from . import cowork
+        if cowork.active():
+            label += " (Cowork draws no lock yet)"      # its drawing bridge is off (CLAUDE.md watch list)
+    return f"| {_cell(label)} | {now} | {other} | `{key}` |"
 
 
 def render_table(show_all: bool = False, cfg: dict | None = None, codex: bool = False) -> str:

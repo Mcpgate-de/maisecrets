@@ -230,6 +230,47 @@ _STDIN_ENTRIES = {"list": ["list"], "audit": ["audit"], "report": ["report"], "g
                   "put": ["put", "--clipboard"]}
 
 
+COWORK_SREF_LOGIN = ("maisecrets: a gateway login from Cowork is not tested yet. Each Cowork task runs in a new VM, so "
+                     "a login there would last one task. Log in to your gateway in Claude Code in the terminal or in "
+                     "the desktop app's Code tab.")
+
+
+def _cowork_sref(payload: dict, prompt: str, slash: bool) -> dict | None:
+    """Cowork's answer to the person's sref command: the AI may not start it (commands/sref.md), and in Cowork a typed
+    command reaches only the AI, which then ran the command file by hand (measured 2026-11-21). maisecrets runs the
+    status itself and shows its output (cowork.show_answer); a login gets the line that it is not tested in Cowork.
+    None for every other command: its command file shows its output there."""
+    import os
+    import subprocess
+    import sys
+    from . import cowork
+    m = (_SLASH_FORM_RE if slash else _TYPED_FORM_RE).match(prompt)
+    if not m or m.group("name").lower() != "sref":
+        return None
+    args = (m.group("args") or "").strip()
+    session = payload.get("session_id")
+
+    def shown(text: str) -> dict:
+        # in a demo session a request to show it would get the demo line: the demo answer carries it
+        return demo.cowork_own(session, text) if demo.active(session) else cowork.show_answer(payload, text)
+    if args.split()[:1] == ["login"]:
+        return shown(COWORK_SREF_LOGIN)
+    plan = run_plan("/maisecrets:sref" + (f" {args}" if args else ""))
+    if plan is None or plan.get("long"):
+        return None
+    entry = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", "dispatch.py")
+    env = {**os.environ, "PYTHONUTF8": "1"}
+    if isinstance(payload.get("session_id"), str):
+        env["CLAUDE_CODE_SESSION_ID"] = payload["session_id"]
+    try:
+        r = subprocess.run([sys.executable, entry, *plan["argv"]], input=plan.get("stdin", ""), capture_output=True,
+                           text=True, env=env, timeout=30)
+        output = (r.stdout + r.stderr).strip() or "maisecrets: the sref command gave no output."
+    except (OSError, subprocess.SubprocessError):
+        output = "maisecrets: the sref command could not run. Send it again."
+    return shown(output)
+
+
 def run_plan(prompt) -> dict | None:
     """What the mod runs for a slash command the person typed, in place of its command file: {"argv": the CLI words
     after hooks/dispatch.py (fixed words only), "stdin": the typed arguments for --args-stdin, "long": a run of up to
@@ -319,7 +360,7 @@ def mod_command(payload: dict) -> dict | None:
             return cowork.show_answer(payload, out["reason"]) if in_cowork else {"drop": out["reason"]}
         return {}
     if in_cowork:
-        return None
+        return _cowork_sref(payload, prompt, slash)
     plan = run_plan(prompt) if slash else None
     m = None if slash else _TYPED_FORM_RE.match(prompt)
     name = m.group("name").lower() if m else ""

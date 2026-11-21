@@ -73,8 +73,13 @@ def _list_values() -> int:
         except ValueError:
             shown = str(home)
         print(f"\nbackend: jsonfile (TEST MODE, plaintext under {shown})")
-    print(f"\nTo delete one: /maisecrets forget <placeholder>. To delete everything, run in a terminal: {_launcher()} "
-          "wipe --yes")
+    from . import cowork
+    if cowork.active():
+        # Cowork has no terminal of the person, and each task starts with an empty store in a new VM
+        print("\nTo delete one: /maisecrets forget <placeholder>. In Cowork each new task starts with an empty store.")
+    else:
+        print(f"\nTo delete one: /maisecrets forget <placeholder>. To delete everything, run in a terminal: "
+              f"{_launcher()} wipe --yes")
     return 0
 
 
@@ -125,7 +130,8 @@ def _destination_lines(rec: dict, shown_before: float, protect: bool = False) ->
                    else "    Sent to (a record only; it allows nothing)")
         out += [row(d) for d in network]
     if local:
-        out.append("    Used on this computer")
+        from . import cowork
+        out.append("    Used in this Cowork task" if cowork.active() else "    Used on this computer")
         out += [row(d) for d in local]
     return out
 
@@ -1307,10 +1313,15 @@ def cmd_sref(args: list[str]) -> int:
     if not found:
         if failed:
             return 1
-        print("maisecrets: no MCP server of your user configuration offers Sensitive References, and no claude.ai "
-              "connector has named its gateway yet. Next step: use your gateway once in Claude Code (after a result "
-              "with a reference, a claude.ai connector is asked for its gateway at the end of the turn), or add it as "
-              "an MCP server of your user configuration; then send /maisecrets sref login.")
+        from . import cowork
+        if cowork.active():
+            print("maisecrets: in Cowork no gateway offers Sensitive References yet, and Sensitive References are not "
+                  "tested in Cowork. Use them in Claude Code in the terminal or in the desktop app's Code tab.")
+        else:
+            print("maisecrets: no MCP server of your user configuration offers Sensitive References, and no claude.ai "
+                  "connector has named its gateway yet. Next step: use your gateway once in Claude Code (after a "
+                  "result with a reference, a claude.ai connector is asked for its gateway at the end of the turn), or "
+                  "add it as an MCP server of your user configuration; then send /maisecrets sref login.")
         # no server with references is a state, not a failure; a login or logout cannot start without one
         return 0 if action == "status" else 1
     if action == "status":
