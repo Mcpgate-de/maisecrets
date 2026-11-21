@@ -305,6 +305,40 @@ class OutputTests(unittest.TestCase):
         budget = int(re.search(r"const BUDGET_MS = (\d+)", mod).group(1)) / 1000
         # the start of Python and the mask of the answer need the rest of the mod's budget
         self.assertLessEqual(seen["timeout"] + 2, budget)
+        # the child and the mask of its answer share COWORK_SREF_S
+        self.assertEqual(seen["timeout"] + prompt_commands.COWORK_SREF_MASK_S, prompt_commands.COWORK_SREF_S)
+
+    def test_the_mask_of_a_sref_answer_in_cowork_waits_a_short_time_for_the_name_service(self):
+        # a name service on this computer may make a prompt wait up to 5 s (prompt_timeout_ms); in the sref run the
+        # mask of the answer waits at most COWORK_SREF_MASK_S, so the run and the mask end inside COWORK_SREF_S
+        from maisecrets import remote_layer
+        waits, seen_env = [], {}
+
+        def prepare(cfg, strings, scan, protect=None, use_fallback=True, kind="tool", deadline=None):
+            waits.append(deadline - time.monotonic())
+            return None
+
+        def run(argv, **kw):
+            seen_env.update(kw["env"])
+            return subprocess.CompletedProcess(argv, 0, stdout="maisecrets: gw ok\n", stderr="")
+        conf = {"url": "http://127.0.0.1:9", "prompt_timeout_ms": 5000, "timeout_ms": 5000}
+        real_load = hooks.load_config
+        with mock.patch.dict(os.environ, self._isolated({"CLAUDE_CODE_ENTRYPOINT": cowork.ENTRYPOINT})), \
+                mock.patch("subprocess.run", run), mock.patch.object(remote_layer, "prepare", prepare), \
+                mock.patch.object(hooks, "load_config", lambda: {**real_load(), "remote_detector": conf}):
+            hooks._live_cache.clear()
+            out = prompt_commands.mod_command({"prompt": "maisecrets: sref", "session_id": SESSION, "cwd": "",
+                                               "origin": "composer"})
+            self.assertIsNone(remote_layer.WAIT_CAP_MS["v"], "the cap ends with the run")
+        self.assertIn("gw ok", out["text"])
+        self.assertTrue(waits, "the mask asked the name service")
+        self.assertLessEqual(max(waits), prompt_commands.COWORK_SREF_MASK_S)
+        self.assertEqual(seen_env.get(prompt_commands.COWORK_SREF_ENV), "1", "the child knows it is this run")
+        # outside the sref run a prompt keeps its wait
+        waits.clear()
+        with mock.patch.object(remote_layer, "prepare", prepare):
+            remote_layer.prompt_names({"remote_detector": conf}, "a prompt", [], lambda: [], typed=False)
+        self.assertGreater(waits[0], 4.0)
 
     def test_the_sref_discovery_in_cowork_ends_before_the_run_is_ended(self):
         from contextlib import redirect_stdout
@@ -314,14 +348,23 @@ class OutputTests(unittest.TestCase):
         def discover(cfg, url, end=None, **kw):
             left.append(end - time.monotonic())
             return None, "timeout"
-        with mock.patch.dict(os.environ, self._isolated(COWORK)), \
-                mock.patch.object(vault_refs, "user_servers", lambda: {"gw": "https://gw.example/mcp"}), \
-                mock.patch.object(vault_refs, "connectors", lambda **kw: {}), \
-                mock.patch.object(sref_client, "discover_typed", discover), redirect_stdout(io.StringIO()):
-            cli.cmd_sref([])
-        self.assertEqual(len(left), 1)
-        self.assertLessEqual(left[0], cli.SREF_COWORK_DISCOVERY_S)
-        self.assertLess(cli.SREF_COWORK_DISCOVERY_S + 1, prompt_commands.COWORK_SREF_S)
+        # only maisecrets' own run of a typed sref (prompt_commands._cowork_sref) has the flag; the AI's run through
+        # the entry in Cowork keeps the time of a command
+        for quick in (True, False):
+            left.clear()
+            flag = {prompt_commands.COWORK_SREF_ENV: "1"} if quick else {}
+            with mock.patch.dict(os.environ, self._isolated({**COWORK, **flag})), \
+                    mock.patch.object(vault_refs, "user_servers", lambda: {"gw": "https://gw.example/mcp"}), \
+                    mock.patch.object(vault_refs, "connectors", lambda **kw: {}), \
+                    mock.patch.object(sref_client, "discover_typed", discover), redirect_stdout(io.StringIO()):
+                cli.cmd_sref([])
+            self.assertEqual(len(left), 1)
+            if quick:
+                self.assertLessEqual(left[0], cli.SREF_COWORK_DISCOVERY_S)
+            else:
+                self.assertGreater(left[0], cli.SREF_DISCOVERY_S - 5)
+        self.assertLessEqual(cli.SREF_COWORK_DISCOVERY_S + 1,
+                             prompt_commands.COWORK_SREF_S - prompt_commands.COWORK_SREF_MASK_S)
 
     def test_a_refusal_the_ai_relays_names_the_text_form_in_cowork(self):
         out = io.StringIO()

@@ -14,6 +14,7 @@ masked where the model found it and never hunted in other texts. A false name su
 from __future__ import annotations
 
 import bisect
+import contextlib
 import math
 import time
 
@@ -259,6 +260,23 @@ PROMPT_TIMEOUT_MS = 1000    # a person waits for a prompt anyway; 300 ms left a 
 NETWORK_PROMPT_TIMEOUT_MS = 2000
 
 
+# the longest wait of a prompt for the name service while a mask runs inside a fixed budget (capped_wait); None: no cap
+WAIT_CAP_MS: dict = {"v": None}
+
+
+@contextlib.contextmanager
+def capped_wait(ms: float):
+    """Each prompt_names inside this waits at most `ms` for the name service (the sref run in Cowork,
+    prompt_commands._cowork_sref). A service that does not answer in time leaves the names to the rules, as for any
+    prompt."""
+    old = WAIT_CAP_MS["v"]
+    WAIT_CAP_MS["v"] = ms
+    try:
+        yield
+    finally:
+        WAIT_CAP_MS["v"] = old
+
+
 def prompt_names(cfg: dict, prompt: str, matches: list, protect_of, typed: bool = True) -> tuple:
     """(names, why) for a prompt the mod rewrites (Claude Code): the names the service of /maisecrets ner finds
     become placeholders like the rules' findings (`matches`), and nothing is blocked for a name. `why` is "" when the
@@ -287,6 +305,8 @@ def prompt_names(cfg: dict, prompt: str, matches: list, protect_of, typed: bool 
     own = conf.get("timeout_ms", 300)
     if local and isinstance(own, (int, float)) and not isinstance(own, bool) and own > wait:
         wait = own
+    if WAIT_CAP_MS["v"] is not None:
+        wait = min(wait, WAIT_CAP_MS["v"])
     end = time.monotonic() + wait / 1000          # one end for the discovery, the token and the request
     # a service on this computer: the network stays shut for a prompt whatever the setting says, so a "localhost" that
     # resolves to another host is refused when it connects (codex review of 0.8.7)

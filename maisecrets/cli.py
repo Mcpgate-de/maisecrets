@@ -1249,8 +1249,9 @@ def cmd_ner(args: list[str]) -> int:
 # a command ends inside the 2 minutes a client gives it: the discovery of all servers (less for a login, which also
 # registers, waits for the browser and exchanges the code, each request with SREF_LOGIN_REQUEST_S)
 SREF_DISCOVERY_S = 60.0
-# Cowork: maisecrets runs the status inside the mod's budget for one prompt (prompt_commands.COWORK_SREF_S)
-SREF_COWORK_DISCOVERY_S = 3.5
+# Cowork: maisecrets runs the status inside the mod's budget for one prompt (prompt_commands.COWORK_SREF_S less
+# COWORK_SREF_MASK_S, with 1 s for the start of Python and the output)
+SREF_COWORK_DISCOVERY_S = 3.0
 SREF_LOGIN_DISCOVERY_S = 40.0
 SREF_LOGIN_REQUEST_S = 15.0
 SREF_LOGIN_END_S = 115.0
@@ -1297,9 +1298,13 @@ def cmd_sref(args: list[str]) -> int:
     # the whole discovery ends after this, however many servers are slow: the client ends a command after 2 minutes,
     # and a login waits for the browser after it. Each server gets an equal share of the time that is left, so a slow
     # server never takes the time of the gateway after it (a login with a NAME asks that server only)
+    # the short time only for the run of a typed `maisecrets: sref` in Cowork (prompt_commands._cowork_sref), which
+    # ends inside the mod's budget; the AI's own run through the entry keeps the time of a command
     from . import cowork
+    from .prompt_commands import COWORK_SREF_ENV
+    quick = cowork.active() and os.environ.get(COWORK_SREF_ENV) == "1"
     phase_end = start + (SREF_LOGIN_DISCOVERY_S if action == "login" else
-                         SREF_COWORK_DISCOVERY_S if cowork.active() else SREF_DISCOVERY_S)
+                         SREF_COWORK_DISCOVERY_S if quick else SREF_DISCOVERY_S)
     found, failed = {}, []
     for i, (server, url) in enumerate(servers.items()):
         now = time.monotonic()

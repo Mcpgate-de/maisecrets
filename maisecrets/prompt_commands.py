@@ -236,8 +236,12 @@ COWORK_SREF_LOGIN = ("maisecrets: a gateway login from Cowork is not tested yet.
 
 
 # the sref run in Cowork ends inside the mod's budget for one prompt (BUDGET_MS, 8 s, claude-mod/maisecrets-mod.mjs),
-# with time left for the start and the mask; its discovery ends earlier still (cli.SREF_COWORK_DISCOVERY_S)
+# with time left for the start of Python: the child gets COWORK_SREF_S less the name service's wait in the mask of its
+# answer (COWORK_SREF_MASK_S); the child's discovery ends earlier still (cli.SREF_COWORK_DISCOVERY_S)
 COWORK_SREF_S = 5.0
+COWORK_SREF_MASK_S = 1.0
+# the child's environment: the run is this one, so cmd_sref ends its discovery early (an AI's own run keeps its time)
+COWORK_SREF_ENV = "MAISECRETS_COWORK_SREF"
 COWORK_SREF_SLOW = ("maisecrets: the gateway did not answer in time; send maisecrets: sref again, or check it in "
                     "Claude Code in the terminal.")
 
@@ -251,7 +255,7 @@ def _cowork_sref(payload: dict, prompt: str) -> dict | None:
     import os
     import subprocess
     import sys
-    from . import cowork
+    from . import cowork, remote_layer
     m = _TYPED_FORM_RE.match(prompt)
     if not m or m.group("name").lower() != "sref":
         return None
@@ -260,8 +264,10 @@ def _cowork_sref(payload: dict, prompt: str) -> dict | None:
     in_demo = demo.active(session)
 
     def shown(text: str) -> dict:
-        # in a demo session a request to show it would get the demo line: the demo answer carries it
-        return demo.cowork_own(payload, text) if in_demo else cowork.show_answer(payload, text)
+        # in a demo session a request to show it would get the demo line: the demo answer carries it. The name service
+        # waits at most COWORK_SREF_MASK_S, so the run and the mask end inside COWORK_SREF_S
+        with remote_layer.capped_wait(COWORK_SREF_MASK_S * 1000):
+            return demo.cowork_own(payload, text) if in_demo else cowork.show_answer(payload, text)
     if in_demo and demo.own_argv(f"maisecrets: sref {args}") is None:
         # the demo runs only the sref forms it permits (a login or a logout goes to the network)
         return shown(demo.own_answer(f"maisecrets: sref {args}", session))
@@ -271,13 +277,13 @@ def _cowork_sref(payload: dict, prompt: str) -> dict | None:
     if plan is None or plan.get("long"):
         return None
     entry = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", "dispatch.py")
-    env = {**os.environ, "PYTHONUTF8": "1"}
+    env = {**os.environ, "PYTHONUTF8": "1", COWORK_SREF_ENV: "1"}
     if isinstance(session, str):
         env["CLAUDE_CODE_SESSION_ID"] = session
     try:
         # subprocess.run kills the child when the time is up
         r = subprocess.run([sys.executable, entry, *plan["argv"]], input=plan.get("stdin", ""), capture_output=True,
-                           text=True, env=env, timeout=COWORK_SREF_S)
+                           text=True, env=env, timeout=COWORK_SREF_S - COWORK_SREF_MASK_S)
         output = (r.stdout + r.stderr).strip() or "maisecrets: the sref command gave no output."
     except subprocess.TimeoutExpired:
         output = COWORK_SREF_SLOW
