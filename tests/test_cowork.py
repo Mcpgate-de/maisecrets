@@ -74,6 +74,16 @@ class FormsTests(unittest.TestCase):
                                 or settings.parse_prompt(text) or value_files.parse_removal(text)
                                 or incidents.recognize(text, "claude"), text)
 
+    def test_a_sentence_after_settings_and_a_key_is_no_change(self):
+        # the session start of hooks/dispatch.py: the key shows its card, nothing changes
+        line = "/maisecrets settings clean_dirs shows which, and the real folder to add."
+        self.assertEqual(forms.cowork(line), line)
+        for text in ("/maisecrets settings ssh_consent on.", "/maisecrets settings max_keys_per_session 300",
+                     "/maisecrets settings KEY VALUE", "/maisecrets settings ttl_seconds 7d",
+                     "/maisecrets settings ssh_consent default", "/maisecrets settings regions de"):
+            with self.subTest(text):
+                self.assertTrue(forms.cowork(text).startswith("maisecrets: set "), forms.cowork(text))
+
     def test_a_command_its_file_shows_keeps_the_slash(self):
         for text in ("/maisecrets status test", "/maisecrets list", "/maisecrets term", "/maisecrets settings",
                      "/maisecrets settings all", "/maisecrets forget SECRET_c1", "/maisecrets sref login gw",
