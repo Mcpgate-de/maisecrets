@@ -2290,6 +2290,16 @@ _CONSTANT_NAME_RE = _LazyRx(r"(?:[A-Z]*[AEIOUY][A-Z]*|DB)(?:[-_](?:[A-Z]*[AEIOUY
 _TIME_OR_RATIO_RE = _LazyRx(r"\d+:[a-z]+")
 # a number and then `,name:number` fields: a log of timings after a field name such as secret_shape_scan (#92)
 _NUMBER_LIST_RE = _LazyRx(r"\d+(?:\.\d+)?(?:,[A-Za-z_][\w.-]*:\d+(?:\.\d+)?)+")
+# a census of records: `'token': 'bound=1234 unbound=5 ready=no'`. The value is a lower-case word=digits, a quoted one
+# holds only word=value fields, and the next field on the line is another word=digits: a count, not a value (#96)
+_CENSUS_VALUE_RE = _LazyRx(r"[a-z][a-z_]{0,30}=\d{1,12}(?:[ \t]+[a-z][a-z_]{0,30}=\w{1,20})*")
+_CENSUS_PAIR_RE = _LazyRx(r"[a-z][a-z_]{0,30}=\d{1,12}[ \t]+[a-z][a-z_]{0,30}=\d{1,12}(?![\w.=-])")
+def _census_count(text: str, secret: str, end: int) -> bool:
+    value = secret.strip("\"'`")
+    return bool(_CENSUS_VALUE_RE.fullmatch(value)
+                and _CENSUS_PAIR_RE.match(value + text[end:_line_end(text, end)]))
+
+
 _SECRET_WORD_LABEL_RE = _LazyRx(r"(?i)(?<![\w.-])secret(?:s|os?|as?)?:")
 # an article or a possessive, and at most one more word, right before the label: "Le secret:", "Notre grand secret:",
 # "The secret:", "El secreto:". It starts the line or follows the end of a sentence; after `INFO `, `# ` or `| ` it is a
@@ -2855,6 +2865,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue   # 0:default after `secret:`
             if "number-list" in filters and _NUMBER_LIST_RE.fullmatch(secret.strip("\"'`")):
                 continue   # a list of timings after a field name such as secret_shape_scan, not one value
+            if "census-count" in filters and _census_count(text, secret, end):
+                continue   # token bound=1234 unbound=5: the count of a family in a census, not a token
             if "word-after-secret" in filters and _word_after_secret(text, m.start(1), secret, end):
                 continue   # a sentence: an article, secret, a colon and one ordinary word (#26)
             if ("test-result" in filters and _TEST_NAME_RE.fullmatch(secret.strip("\"'`"))
