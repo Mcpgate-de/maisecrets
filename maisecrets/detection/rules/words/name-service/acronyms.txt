@@ -1,0 +1,27 @@
+# Effect: a word here makes maisecrets mask LESS. Add one when a value is masked wrongly.
+# Format: one entry per line, lower case; a comment line opens a block; each block sorted.
+# technical acronyms that follow an initial in a list label ("G. PII", "B. MCP"). Never a surname: no lee, kim, koch.
+api
+aws
+cli
+cpu
+csv
+dns
+gpu
+html
+http
+json
+jwt
+llm
+mcp
+pdf
+pii
+sdk
+sql
+ssh
+sso
+tls
+url
+vpn
+xml
+yaml

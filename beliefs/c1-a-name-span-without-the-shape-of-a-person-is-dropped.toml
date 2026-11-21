@@ -1,0 +1,11 @@
+# c1-a-name-span-without-the-shape-of-a-person-is-dropped: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-name-span-without-the-shape-of-a-person-is-dropped"
+control = "C1"
+serves = ["M1.3"]
+statement = "Since 0.9.22, remote.is_no_person (and so the remote path and a caller that applies the spans itself) drops a NAME span with a digit, an initial with acronyms, an observability product or a greeting phrase (#93, #95); a real name of the same texts stays a name."
+runner = ["tests/test_name_spans_that_are_no_person.py::SpanRuleTests::test_a_digit_an_initial_with_acronyms_or_an_observability_product_is_no_person", "tests/test_name_spans_that_are_no_person.py::RemotePathTests::test_the_texts_without_a_person_stay_clear"]
+
+[proof]
+file = "maisecrets/detection/remote.py"
+find = '''            or _has_digit(span) or _is_initial_and_acronyms(span) or is_greeting_phrase(span))'''
+replace = '''            )'''
