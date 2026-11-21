@@ -1,0 +1,11 @@
+# c30a-withhold-keeps-an-unchecked-result-from-the-ai: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-withhold-keeps-an-unchecked-result-from-the-ai"
+control = "C30a"
+serves = ["M1.2"]
+statement = "With unavailable withhold, a tool result whose name service gave no answer is replaced by a notice in the shape the client takes, so the AI does not get it."
+runner = ["tests/test_ner_gateway.py::GatewaySourceTests::test_withhold_keeps_an_unchecked_result_from_the_ai"]
+
+[proof]
+file = "maisecrets/tool_withhold.py"
+find = "    return {\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"updatedToolOutput\": text}}"
+replace = "    return {}"

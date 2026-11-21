@@ -1,0 +1,13 @@
+# c31-a-display-part-cannot-move-the-shell-analysis: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-display-part-cannot-move-the-shell-analysis"
+control = "C31"
+serves = ["M3.3"]
+statement = "The hooks read a command with each Sensitive Reference of this session in its canonical form, so a quote or a command substitution in its display part cannot move the shell analysis past the refusals."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_a_display_part_cannot_move_the_shell_analysis"]
+
+[proof]
+file = "maisecrets/sref_hooks.py"
+find = '''        if r in here:
+            out = out[:a] + c + out[b:]'''
+replace = '''        if False:
+            out = out[:a] + c + out[b:]'''

@@ -1,0 +1,11 @@
+# c30a-a-prompt-of-a-program-never-goes-to-a-service-on-the-network: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-a-prompt-of-a-program-never-goes-to-a-service-on-the-network"
+control = "C30a"
+serves = ["M6.4"]
+statement = "Only a prompt the person typed (the mod's origin composer or bridge) goes to a name service on the network; a prompt of claude -p or the Agent SDK never does."
+runner = ["tests/test_ner_gateway.py::GatewaySourceTests::test_a_prompt_of_a_program_never_goes_to_a_service_on_the_network"]
+
+[proof]
+file = "maisecrets/remote_layer.py"
+find = "    if not local and not typed:\n        return [], \"\""
+replace = "    if False:\n        return [], \"\""

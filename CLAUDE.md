@@ -35,7 +35,8 @@ output. `README.md` says what it does for users; `docs/USING.md`, `docs/ADMIN.md
 - **Before and after a change to the code, run `python3 scripts/mission_touch.py`.** It names the mission
   parts (`mission/`) whose guarded lines or belief tests the change touches. Read the sentence of each part and
   check that the change still keeps it; adapt the beliefs it names. It names code that no belief guards, too.
-  The pre-push hook prints it as well.
+  The pre-push hook prints it as well. A new program file needs its entry in `mission/code.toml` (the controls its
+  code carries, or `none` and why); `mission_coverage.py --strict` is red without it.
 - **Commit subjects are release notes.** Write them for a user ("detects secrets in 245 more formats"),
   not for a developer ("a test value hides only its own type").
 

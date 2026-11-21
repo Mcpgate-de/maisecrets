@@ -1,0 +1,11 @@
+# c1-a-phone-number-of-any-country-after-a-call-cue-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-phone-number-of-any-country-after-a-call-cue-is-a-hit"
+control = "C1"
+serves = ["M1.3"]
+statement = "In a tool result, a phone number in the grouping of any country after a call cue is masked."
+runner = ["tests/test_phone_after_a_call_cue_any_country.py::PhoneAfterACallCueTests::test_each_country_grouping_after_a_call_cue"]
+
+[proof]
+file = "maisecrets/detection/phone_forms.py"
+find = "        out.append((span[0], span[1], \"phone-after-phone-word\", PHONE))"
+replace = "        pass"

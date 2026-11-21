@@ -102,6 +102,14 @@ class OnceTests(Base):
         codex = {"session_id": "s2", "transcript_path": "/nonexistent/rollout.jsonl"}
         self.assertIsNone(H.result_line(cfg, codex, "network", codex=True), "codex exec or an unknown source")
 
+    def test_a_record_that_cannot_be_written_gives_no_line(self):
+        # the limit in M5's ends: no line rather than one per result when the record of the told causes fails
+        cfg = self.cfg({"url": "https://ner.example.test/", "allow_network": True})
+        from maisecrets import home
+        with mock.patch.object(home, "atomic_write", side_effect=OSError("read-only")):
+            self.assertIsNone(H.result_line(cfg, P("s1"), "network"))
+        self.assertIn("does not answer", H.result_line(cfg, P("s1"), "network"), "the next result gets it")
+
     def test_the_line_is_claimed_per_session_and_source(self):
         a = self.cfg({"url": "https://ner-a.example.test/", "allow_network": True})
         b = self.cfg({"url": "https://ner-b.example.test/", "allow_network": True})

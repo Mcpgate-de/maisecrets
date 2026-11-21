@@ -1,0 +1,11 @@
+# c27-a-failed-command-with-a-value-ends-with-0-so-its-output-is-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-failed-command-with-a-value-ends-with-0-so-its-output-is-masked"
+control = "C27"
+serves = ["M1.2"]
+statement = "In Claude Code a Bash command that gets a value ends with exit 0 and prints its real exit code, so PostToolUse runs and masks a value in its output."
+runner = ["tests/test_rehydration_matrix.py::RehydrationMatrixTests::test_a_failed_command_with_a_stored_value_ends_with_0_so_its_output_is_masked"]
+
+[proof]
+file = "maisecrets/exit_wrap.py"
+find = "    return _TRAP"
+replace = "    return \":\""

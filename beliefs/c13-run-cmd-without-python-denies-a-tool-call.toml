@@ -1,0 +1,11 @@
+# c13-run-cmd-without-python-denies-a-tool-call: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-run-cmd-without-python-denies-a-tool-call"
+control = "C13"
+serves = ["M5.2"]
+statement = "On Windows without Python 3.9, the Windows launcher answers each hook event with the refusal of its client and exit 0; a tool call is denied. Read from the file: the test runs on every system."
+runner = ["tests/test_promises.py::RunCmdFailsClosedTests::test_without_python_every_hook_event_answers_json_and_exit_0"]
+
+[proof]
+file = "hooks/run.cmd"
+find = "\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"maisecrets needs Python"
+replace = "\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"maisecrets needs Python"

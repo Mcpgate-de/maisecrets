@@ -1,0 +1,11 @@
+# c1-a-user-name-after-a-user-cue-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-user-name-after-a-user-cue-is-a-hit"
+control = "C1"
+serves = ["M1.3"]
+statement = "A user name after a user cue in prose, and in an sshd, a sudo or a pam line, is masked."
+runner = ["tests/test_user_names_after_a_cue.py::UserNameAfterACueTests::test_each_cue_and_each_handle_shape"]
+
+[proof]
+file = "maisecrets/detection/user_forms.py"
+find = "    if not (starts or sudo or uids or lines):\n        return []"
+replace = "    if True:\n        return []"

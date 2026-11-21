@@ -15,6 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _isolate  # noqa: E402,F401  first: no client environment, a temp home and temp dir
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
+sys.path.insert(0, str(ROOT / "scripts"))
+if tomllib is not None:
+    import replay_can_fail  # noqa: E402  the replay's own reading of a file (Python 3.11+, like the replay)
 BELIEFS = sorted((ROOT / "beliefs").glob("*.toml"))
 
 
@@ -56,8 +59,10 @@ class BeliefsWellFormedTests(unittest.TestCase):
                 for proof in proofs:
                     target = ROOT / proof["file"]
                     self.assertTrue(target.exists(), proof["file"])
-                    text = target.read_text(encoding="utf-8")
-                    self.assertEqual(text.count(proof["find"]), 1, f"{path.name}: anchor must occur exactly once")
+                    # as the replay counts it: the file's bytes, the anchor in the file's line ends (a Windows
+                    # checkout holds CRLF)
+                    n = replay_can_fail.anchor_count(replay_can_fail._text(target), proof["find"])
+                    self.assertEqual(n, 1, f"{path.name}: anchor must occur exactly once")
                     self.assertNotEqual(proof["find"], proof["replace"],
                                         "a mutation that changes nothing proves nothing")
                 if b.get("kind") == "invariant":
@@ -77,7 +82,7 @@ class BeliefsWellFormedTests(unittest.TestCase):
         # C11 (TTL) is a data rule with no single removable line; every other control is enforced
         # by code that a mutation can remove, and each one needs a proof
         for control in ("C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C12", "C13", "C14", "C15", "C16",
-                        "C17", "C20", "C24", "C25", "C26", "C28", "C29", "C31", "C33"):
+                        "C17", "C20", "C24", "C25", "C26", "C28", "C29", "C30a", "C31", "C33"):
             self.assertIn(control, covered, f"{control} has no belief")
 
 

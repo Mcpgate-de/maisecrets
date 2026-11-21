@@ -74,6 +74,19 @@ class MissionTouchTests(unittest.TestCase):
         self.assertIn(old, text)
         (root / path).write_text(text.replace(old, new), encoding="utf-8")
 
+    def test_the_register_names_the_controls_of_a_changed_file_and_a_new_file_it_lacks(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self.repo(d)
+            (root / "mission" / "code.toml").write_text('[file]\n"maisecrets/x.py" = { controls = ["C1"] }\n',
+                                                        encoding="utf-8")
+            git(d, "add", "-A")
+            git(d, "commit", "-q", "-m", "register")
+            self.edit(root, "maisecrets/x.py", "return 1", "return 2")
+            (root / "maisecrets" / "new.py").write_text("x = 1\n", encoding="utf-8")
+            out = self.run_on(root)
+            self.assertIn("Controls of the changed program files (mission/code.toml): maisecrets/x.py: C1", out)
+            self.assertIn("Changed program files that mission/code.toml does not declare: maisecrets/new.py", out)
+
     def test_a_change_inside_the_guarded_lines_names_the_belief_and_its_part(self):
         with tempfile.TemporaryDirectory() as d:
             root = self.repo(d)

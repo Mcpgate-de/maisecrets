@@ -10,6 +10,8 @@ joins it with them:
 - test changed: a test file that a runner names changed.
 - the other beliefs on a changed file, whose guarded lines did not change, are only counted.
 - changed code that no proof names: no belief proves anything about this file.
+- the controls that mission/code.toml declares for each changed program file, and a changed program file that it does
+  not declare: keep each control of the file, and declare a new file (mission_coverage.py --strict goes red without).
 
 It only reports and exits 0; scripts/replay_can_fail.py and scripts/mission_coverage.py are the gates.
 
@@ -28,8 +30,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
-# the code that a belief can guard: what the plugin runs
-CODE = re.compile(r"^(maisecrets/.*\.py|hooks/.*\.py|claude-mod/.*\.mjs|skills/[^/]+/scripts/.*\.py)$")
+# the code that a belief can guard: the program files of the plugin (mission_coverage.py reads this one pattern)
+CODE = re.compile(r"^(maisecrets/.*\.py|hooks/[^/]+\.(?:py|sh|cmd)|claude-mod/.*\.mjs|skills/[^/]+/scripts/.*\.py)$")
 
 
 def git(*args: str) -> str:
@@ -121,6 +123,27 @@ def parts_of(rev: str) -> dict[str, str]:
     return says
 
 
+def declared_controls(head: str | None, paths: list[str]) -> tuple[list[str], list[str]]:
+    """(lines "file: C1, C2" or "file: none", files the register does not declare) for the changed program files,
+    from mission/code.toml of HEAD, or of the work tree when HEAD is None."""
+    import tomllib
+    try:
+        text = git("show", f"{head}:mission/code.toml") if head else (ROOT / "mission" / "code.toml").read_text(
+            encoding="utf-8")
+        register = tomllib.loads(text).get("file", {})
+    except (subprocess.CalledProcessError, OSError, ValueError):
+        register = {}
+    lines, missing = [], []
+    for p in paths:
+        entry = register.get(p)
+        if not isinstance(entry, dict):
+            missing.append(p)
+        else:
+            controls = entry.get("controls")
+            lines.append(f"{p}: {', '.join(controls)}" if isinstance(controls, list) else f"{p}: none")
+    return lines, missing
+
+
 def report(base: str, head: str | None) -> str:
     merge_base = git("merge-base", base, head or "HEAD").strip()
     changed = changed_lines(merge_base, head)
@@ -176,6 +199,12 @@ def report(base: str, head: str | None) -> str:
                    + ", ".join(f"{k} {v}" for k, v in sorted(same_file.items())))
     if unguarded:
         out.append("Changed code that no belief guards: " + ", ".join(unguarded))
+    program = sorted(p for p in set(changed) | set(new) if CODE.match(p) and (ROOT / p).exists())
+    lines, missing = declared_controls(head, program)
+    if lines:
+        out.append("Controls of the changed program files (mission/code.toml): " + "; ".join(lines))
+    if missing:
+        out.append("Changed program files that mission/code.toml does not declare: " + ", ".join(missing))
     return "\n".join(out)
 
 

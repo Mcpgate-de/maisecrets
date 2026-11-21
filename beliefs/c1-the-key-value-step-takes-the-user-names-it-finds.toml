@@ -1,0 +1,11 @@
+# c1-the-key-value-step-takes-the-user-names-it-finds: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-the-key-value-step-takes-the-user-names-it-finds"
+control = "C1"
+serves = ["M1.3"]
+statement = "The step of the values after a key in structured data hands on the user names that the user-cue forms find."
+runner = ["tests/test_user_names_after_a_cue.py::UserNameAfterACueTests::test_each_cue_and_each_handle_shape"]
+
+[proof]
+file = "maisecrets/detection/key_values.py"
+find = "    out += [(s, e, \"username-after-label\", USERNAME) for s, e in user_names(text)]"
+replace = "    out += []"

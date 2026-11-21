@@ -16,6 +16,20 @@ function to none. Every bullet of the gated sections (three of README.md, and "W
 and where" and "What leaves the machine" of PRIVACY.md) must start with the quote of a claim, so a new or reworded
 promise turns the check red until it is mapped; a gated section that is renamed or gone is a finding too.
 
+`code.toml` is the other direction, from the code up: each program file of the plugin (`maisecrets/**/*.py`,
+`hooks/*.py`, `hooks/*.sh`, `hooks/*.cmd`, `claude-mod/*.mjs`, `skills/*/scripts/*.py`) names the controls and
+invariants its code carries, or `none` and why. A program file without an entry, an entry of a file that is gone, a
+declared control that no belief's proof in that file names, a proof that breaks a line of a file whose entry does not
+declare the proof's control, and a file that the threat model names for a control but that is missing or not declared
+for it are findings. So a move of a control's code into a new file is red until the new file is declared and a belief
+proves it there. An injection proof (its replace keeps the find text and adds code, as I5 adds an import to any
+module) proves its control but breaks no line, so it makes no file carry the control. A belief with `serves = []`
+proves no control of its file. A `none` is a judgement the check cannot read; it is red only where it shows: a `none`
+file that a belief's mutation breaks (of a control, an invariant or a label), or one that names a hook answer key. The
+check reads text only, so a key built at run time escapes it.
+The unit is the file: one proof per control and file is enough, and a second rule of the same control in that file
+can stay without a proof of its own.
+
 Each mission names its measured number in `[measure]` (a source file, the row and column that hold it, and the
 gate that keeps its bound), or says in `none` why it has none: most promises are kept or broken, not a rate.
 
@@ -23,7 +37,7 @@ M1 to M5 are derived from the controls (bottom-up); M6 comes from README.md and 
 brought control C33 into the threat model.
 
     python3 scripts/mission_coverage.py            # report
-    python3 scripts/mission_coverage.py --strict   # exit 1 on a gap, an orphan, an unknown name or a claim
+    python3 scripts/mission_coverage.py --strict   # exit 1 on a gap, an orphan, an unknown name, a claim or code
 
 Before a change, `scripts/mission_touch.py` turns the diff into the parts it touches: a belief whose guarded lines
 (`find` of its proof) or whose own test function the diff changes, read from the merge base, and the parts it serves.
@@ -37,5 +51,5 @@ all.
 
 The beliefs prove that each test can fail; this layer shows which promise each belief serves.
 `tests/test_mission_coverage.py` runs the strict check on the repository in CI: a gap, an orphan control, an
-unknown name or a claim finding turns it red. A thin part, a mission without an invariant and the measures are
-reported only.
+unknown name, a claim finding or a code finding turns it red. A thin part, a mission without an invariant and the
+measures are reported only.

@@ -1,0 +1,11 @@
+# c1-a-filter-of-a-vendored-rule-drops-its-findings: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-filter-of-a-vendored-rule-drops-its-findings"
+control = "C1"
+serves = ["M1.3"]
+statement = "The filter of a vendored betterleaks rule, and the global filter, drop the findings their authors drop: a template, a value of low entropy."
+runner = ["tests/test_rule_filter.py::BetterleaksRuleTests::test_the_rule_filter_drops_a_low_entropy_value"]
+
+[proof]
+file = "maisecrets/detection/rule_filter.py"
+find = "        return bool(_eval(node, env))"
+replace = "        return False"
