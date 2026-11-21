@@ -351,11 +351,16 @@ class MissionCoverageTests(unittest.TestCase):
                   "claude-mod/x.mjs", "skills/s/scripts/t.py", "maisecrets/rules/data.json", "docs/notes.py"):
             (root / f).parent.mkdir(parents=True, exist_ok=True)
             (root / f).write_text("x = 1\n", encoding="utf-8")
-        for name, control, f in (("pa", "C1", "maisecrets/a.py"), ("pb", "C1", "maisecrets/b.py"),
-                                 ("pm", "C2", "claude-mod/x.mjs"), ("pr", "operations", "hooks/run.sh")):
+        # pe serves no promise, so it proves nothing for the register; pi is an invariant belief whose mutation
+        # injects code into a file that carries no rule of it; pr has a label (operations), which no entry can name
+        for name, control, f, serves, kind in (
+                ("pa", "C1", "maisecrets/a.py", '["M1.1"]', ""), ("pb", "C1", "maisecrets/b.py", '["M1.1"]', ""),
+                ("pm", "C2", "claude-mod/x.mjs", '["M1.1"]', ""), ("pr", "operations", "hooks/run.sh", "[]", ""),
+                ("pe", "C2", "maisecrets/a.py", "[]", ""),
+                ("pi", "I1", "maisecrets/undeclared.py", '["M1.1"]', 'kind = "invariant"\n')):
             (root / "beliefs" / f"{name}.toml").write_text(
-                f'belief = "{name}"\ncontrol = "{control}"\nserves = []\nstatement = "s"\nrunner = ["t"]\n'
-                f'[proof]\nfile = "{f}"\n', encoding="utf-8")
+                f'belief = "{name}"\ncontrol = "{control}"\nserves = {serves}\n{kind}statement = "s"\n'
+                f'runner = ["t"]\n[proof]\nfile = "{f}"\n', encoding="utf-8")
         (root / "mission" / "code.toml").write_text(register, encoding="utf-8")
         return root
 
@@ -378,6 +383,7 @@ class MissionCoverageTests(unittest.TestCase):
             "claude-mod/x.mjs: declares C9, but no belief of C9 has a proof in this file",
             "maisecrets/a.py: declares C2, but no belief of C2 has a proof in this file",
             "maisecrets/b.py: a belief of C1 has a proof in this file, but its entry does not declare C1",
+            "maisecrets/b.py: declared none, but a belief's mutation breaks a line of it",
             "maisecrets/gone.py: declares C1, but no belief of C1 has a proof in this file",
             "docs/THREAT-MODEL.md names maisecrets/a.py for C3, but mission/code.toml does not declare it",
             "docs/THREAT-MODEL.md names maisecrets/missing.py for C3, but the file does not exist"])
@@ -404,6 +410,23 @@ class MissionCoverageTests(unittest.TestCase):
         (root / "mission" / "code.toml").unlink()
         self.assertEqual(mission_coverage.analyse(root)["code"],
                          ["mission/code.toml not found: no program file says which controls it carries"])
+
+    def test_a_none_file_that_a_mutation_targets_or_that_writes_a_hook_answer_is_named(self):
+        import mission_coverage
+        register = ('[file]\n"maisecrets/a.py" = { controls = ["C1"] }\n'
+                    '"maisecrets/b.py" = { none = "a helper" }\n'
+                    '"maisecrets/undeclared.py" = { none = "a helper" }\n'
+                    '"hooks/run.sh" = { none = "a launcher" }\n'
+                    '"claude-mod/x.mjs" = { controls = ["C2"] }\n'
+                    '"skills/s/scripts/t.py" = { none = "a script" }\n')
+        root = self.code_tree(register)
+        (root / "skills/s/scripts/t.py").write_text('out = {"hookSpecificOutput": {"updatedToolOutput": "x"}}\n',
+                                                     encoding="utf-8")
+        r = mission_coverage.analyse(root)
+        self.assertEqual(r["code"], [
+            "maisecrets/b.py: a belief of C1 has a proof in this file, but its entry does not declare C1",
+            "maisecrets/b.py: declared none, but a belief's mutation breaks a line of it",
+            "skills/s/scripts/t.py: declared none, but it writes a hook answer (updatedToolOutput)"])
 
     def test_the_repository_maps_every_promise_and_names_only_documented_controls(self):
         import mission_coverage

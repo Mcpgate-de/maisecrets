@@ -22,6 +22,9 @@ invariants its code carries, or `none` and why. A program file without an entry,
 declared control that no belief's proof in that file names, a proof of a control that the file's entry does not
 declare, and a file that the threat model names for a control but that is missing or not declared for it are findings.
 So a move of a control's code into a new file is red until the new file is declared and a belief proves it there.
+A `none` is a judgement the check cannot read; it is red only where it shows: a `none` file that a belief's mutation
+breaks, or one that writes a hook answer. A belief with `serves = []` proves no control of its file, and an invariant
+belief's mutation (I5 adds an import to any module) makes no file carry the invariant.
 The unit is the file: one proof per control and file is enough, and a second rule of the same control in that file
 can stay without a proof of its own.
 

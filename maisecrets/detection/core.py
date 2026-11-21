@@ -3050,21 +3050,14 @@ _TERMS = object()                # the place of _term_hits: registry phase "term
 _IMPORTS = object()              # the place of _import_hits: registry phase "imports", after the terms
 
 
-def _runs_after_personal(rule: Rule) -> bool:
-    """A rule of your own: its phase (registry.PHASES["user"]) puts it after the personal-data step. A rule list that a
-    caller built has no phase; its rules of your own have the id prefix `user:`."""
-    return rule.phase == _registry.PHASES["user"] if rule.phase else rule.id.startswith("user:")
+_runs_after_personal = _registry.runs_after_personal
 
 
 def _in_scan_order(every: list) -> tuple:
-    """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
-    rules of your own (ids with `user:`), then the terms, then the imported values. Kept per list, so a scan pays for
-    it once."""
+    """The rules of a list in scan order (registry.scan_order), kept per list: a scan pays for it once."""
     d = _det()
     if d._order[0] is not every:
-        d._order = (every, _registry.in_phase_order(rules=[r for r in every if not _runs_after_personal(r)],
-                    personal=[_PERSONAL], user=[r for r in every if _runs_after_personal(r)], terms=[_TERMS],
-                    imports=[_IMPORTS]))
+        d._order = (every, _registry.scan_order(every, _PERSONAL, _TERMS, _IMPORTS))
     return d._order[1]
 
 

@@ -665,6 +665,15 @@ class VerdictModelTests(_Base):
         self.assertIn("It is a common word, so it is found again only with the label.", out)
         self.assertNotIn("now stored", out)
 
+    def test_a_label_word_after_another_value_is_not_shown_with_it(self):
+        # the two words in front of the value are the e-mail address's end and "password": the verdict names no label
+        # rather than a part of the address (verdict.label_before)
+        domain = MAIL.split("@")[1]
+        out = _prompt(f"ms:({MAIL} password {self.LABELLED})")["reason"].split("\n\n")[0]
+        self.assertIn("found by the label in front of it;", out)
+        self.assertNotIn(domain.split(".")[0], out)
+        self.assertNotIn(self.LABELLED, out)
+
     def test_several_hits_get_one_line_each_in_text_order(self):
         out = _prompt(f"ms:(password: {self.LABELLED} mail {MAIL})")["reason"].split("\n\n")[0]
         lines = out.split("\n")

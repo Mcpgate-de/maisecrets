@@ -12,14 +12,19 @@
 # a second rule of the same control in the same file can stay unproven; the beliefs of that control name the rules.
 #
 # Program files: maisecrets/**/*.py, hooks/*.py, hooks/*.sh, hooks/*.cmd, claude-mod/*.mjs,
-# skills/*/scripts/*.py (CODE in scripts/mission_coverage.py). Data files (rules, word lists, hooks.json) and the
+# skills/*/scripts/*.py (CODE in scripts/mission_touch.py). Data files (rules, word lists, hooks.json) and the
 # command texts (commands/*.md) are no program files; a belief names them directly.
+#
+# `none` is a judgement that --strict cannot read. It catches two signs of a wrong one: a `none` file that a belief's
+# mutation targets (an invariant belief's injection excepted), and a `none` file that writes a hook answer
+# (decision, permissionDecision, updatedInput, updatedToolOutput, updatedMCPToolOutput, suppressOriginalPrompt).
+# A belief with serves = [] proves no control of its file.
 
 [file]
 "claude-mod/maisecrets-mod.mjs" = { controls = ["C1", "C32", "C33", "I5"] }
 "hooks/dispatch.py" = { controls = ["C1", "C2", "C13", "C22", "C27"] }
 "hooks/guard.py" = { controls = ["C13", "C33"] }
-"hooks/ms.sh" = { none = "the fixed path of the person's /ms shortcut: it finds the newest installed copy and runs its `pending` (send the last blocked prompt), which the prompt hook checks again" }
+"hooks/ms.sh" = { none = "the fixed path of the person's /ms shortcut: it runs `pending` (send the last blocked prompt) of the highest maisecrets version installed from any marketplace or synced folder; the prompt hook checks that prompt again" }
 "hooks/proxy_connect.py" = { controls = ["C18"] }
 "hooks/resolve.py" = { none = "the Windows (Git Bash) launcher of the one-time read of a value: it starts the CLI's resolve command, whose grant Vault.redeem checks (maisecrets/vault.py)" }
 # limit: run.cmd does not run on macOS or Linux; its C13 belief reads the file (each hook event's refusal, exit 0),
@@ -41,7 +46,7 @@
 "maisecrets/debug_log.py" = { none = "appends the line its caller gives to the debug log of the harness; each caller writes no value" }
 "maisecrets/demo.py" = { controls = ["C22"] }
 "maisecrets/destinations.py" = { controls = ["C23"] }
-"maisecrets/detect.py" = { controls = ["I5"] }
+"maisecrets/detect.py" = { none = "an old module name: the same module object as maisecrets/detection/core.py; an I5 belief adds an import to it, which proves nothing about this file" }
 "maisecrets/detection/__init__.py" = { none = "the names of the library API; the code is in the modules it imports" }
 "maisecrets/detection/__main__.py" = { none = "starts contract.main for `python3 -m maisecrets.detection`" }
 "maisecrets/detection/business.py" = { controls = ["C1"] }
@@ -91,7 +96,7 @@
 "maisecrets/lazy_regex.py" = { none = "an old module name: the same module object as maisecrets/detection/lazy_regex.py" }
 "maisecrets/ner_gateway.py" = { controls = ["C30a"] }
 "maisecrets/ner_health.py" = { controls = ["C30a"] }
-"maisecrets/ner_metrics.py" = { none = "reads the load counters of a name service for /maisecrets:ner; numbers only, and no text of a request" }
+"maisecrets/ner_metrics.py" = { controls = ["C30"] }
 "maisecrets/ner_secret.py" = { controls = ["C30"] }
 "maisecrets/ner_setup.py" = { controls = ["C22", "C30"] }
 "maisecrets/ner_view.py" = { none = "the lines of /maisecrets:ner; it shows the state that ner_setup.py and ner_health.py give" }
@@ -111,7 +116,7 @@
 "maisecrets/rule_filter.py" = { none = "an old module name: the same module object as maisecrets/detection/rule_filter.py" }
 "maisecrets/rules_cli.py" = { controls = ["C25"] }
 "maisecrets/rulespec.py" = { none = "an old module name: the same module object as maisecrets/detection/rulespec.py" }
-"maisecrets/selftest.py" = { none = "the self-test of /maisecrets:status test with its own synthetic value; it shows the person that the hooks run and proves nothing against an agent (C13)" }
+"maisecrets/selftest.py" = { controls = ["C1", "C2"] }
 "maisecrets/server_values.py" = { controls = ["C27", "C31"] }
 "maisecrets/session_end.py" = { controls = ["C27"] }
 "maisecrets/settings.py" = { controls = ["C22", "C25"] }

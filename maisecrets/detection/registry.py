@@ -67,6 +67,19 @@ def in_phase_order(**groups) -> tuple:
     return tuple(x for key in sorted(groups, key=lambda k: PHASES[k]) for x in groups[key])
 
 
+def runs_after_personal(rule) -> bool:
+    """A rule of your own: its phase (PHASES["user"]) puts it after the personal-data step. A rule list that a caller
+    built has no phase; its rules of your own have the id prefix `user:`."""
+    return rule.phase == PHASES["user"] if rule.phase else rule.id.startswith("user:")
+
+
+def scan_order(every, personal, terms, imports) -> tuple:
+    """The rules of a list in scan order (detect._in_scan_order): the built-in ones, then the personal-data step and
+    the cleaned copy (`personal`), then the rules of your own, then the terms, then the imported values."""
+    return in_phase_order(rules=[r for r in every if not runs_after_personal(r)], personal=[personal],
+                          user=[r for r in every if runs_after_personal(r)], terms=[terms], imports=[imports])
+
+
 # a label rule finds a value by its label alone; a keyword rule is a label rule with no `=` or `:` of its own. Until
 # the registry these were id prefixes (detect.LABEL_RULES, detect.KEYWORD_RULES), and a stored kind still is one
 LABEL_PREFIXES = ("ds-keyword", "label-", "generic-api-key", "url-query-secret", "auth-scheme")

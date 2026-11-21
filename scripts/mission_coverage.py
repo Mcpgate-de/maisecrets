@@ -37,6 +37,9 @@ CONTROL_ROW = re.compile(r"^\| (C\d+[a-z]?) \|", re.M)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mission_touch import CODE  # noqa: E402
 CODE_DIRS = ("maisecrets", "hooks", "claude-mod", "skills")
+# a key of a hook's answer that decides for a prompt or a tool call: a file that writes one is no `none` file
+ANSWER_KEY = re.compile(r"""["'](updatedToolOutput|updatedMCPToolOutput|updatedInput|permissionDecision|decision|"""
+                        r"""suppressOriginalPrompt)["']""")
 # a path of the repository in a row of the threat model, in backticks
 NAMED_PATH = re.compile(r"`((?:maisecrets|hooks|claude-mod|skills|harness|tests|scripts)/[\w./-]+)`")
 INVARIANT_ITEM = re.compile(r"^- \*\*(I\d+)\*\*", re.M)
@@ -75,6 +78,7 @@ def check_code(root: Path, names: set[str], loaded: list[dict], threat_model: st
     if not isinstance(raw, dict):
         return ["mission/code.toml: file is not a table of paths"], {}
     declared: dict[str, set[str]] = {}
+    nones_of: set[str] = set()
     nones = withs = 0
     for f, entry in sorted(raw.items()):
         controls = entry.get("controls") if isinstance(entry, dict) else None
@@ -87,6 +91,7 @@ def check_code(root: Path, names: set[str], loaded: list[dict], threat_model: st
                     findings.append(f"{f}: declares {c}, which docs/THREAT-MODEL.md does not document")
         elif isinstance(none, str) and none.strip() and controls is None:
             declared[f] = set()
+            nones_of.add(f)
             nones += 1
         else:
             findings.append(f"{f}: the entry needs controls (a list of C or I names) or none (a reason), not both")
@@ -94,18 +99,36 @@ def check_code(root: Path, names: set[str], loaded: list[dict], threat_model: st
     files = code_files(root)
     findings += [f"{f}: a program file that mission/code.toml does not declare" for f in sorted(files - set(raw))]
     findings += [f"{f}: declared in mission/code.toml, but the file is gone" for f in sorted(set(raw) - files)]
+    # control -> files: proofs of a belief that serves a promise. A belief with serves = [] proves no promise, so it
+    # proves no control of a file either. An invariant belief's proof also counts, but it does not make its file carry
+    # the invariant: an invariant mutation may inject code into any file (I5 adds an import to an alias module)
     proven: dict[str, set[str]] = {}
+    forced: dict[str, set[str]] = {}
+    targeted: set[str] = set()
     for b in loaded:
         proofs = b.get("proof", [])
         for p in ([proofs] if isinstance(proofs, dict) else proofs if isinstance(proofs, list) else []):
-            if isinstance(p, dict) and isinstance(p.get("file"), str):
+            if not (isinstance(p, dict) and isinstance(p.get("file"), str)):
+                continue
+            if b.get("kind") != "invariant" and b.get("control") in names:
+                targeted.add(p["file"])     # a label (operations) is no control the register can name
+            if b.get("serves"):
                 proven.setdefault(p["file"], set()).add(b.get("control", ""))
+                if b.get("kind") != "invariant":
+                    forced.setdefault(p["file"], set()).add(b.get("control", ""))
     for f in sorted(declared):
         for c in sorted(declared[f] - proven.get(f, set())):
             findings.append(f"{f}: declares {c}, but no belief of {c} has a proof in this file")
         if f in files:
-            for c in sorted((proven.get(f, set()) & names) - declared[f]):
+            for c in sorted((forced.get(f, set()) & names) - declared[f]):
                 findings.append(f"{f}: a belief of {c} has a proof in this file, but its entry does not declare {c}")
+            if f in nones_of:
+                # `none` is a judgement the check cannot read; these two signs of a decision it can
+                if f in targeted:
+                    findings.append(f"{f}: declared none, but a belief's mutation breaks a line of it")
+                keys = sorted(set(ANSWER_KEY.findall((root / f).read_text(encoding="utf-8", errors="replace"))))
+                if keys:
+                    findings.append(f"{f}: declared none, but it writes a hook answer ({', '.join(keys)})")
     for c, paths in sorted(named_paths(threat_model).items()):
         for f in sorted(paths):
             if not (root / f).exists():

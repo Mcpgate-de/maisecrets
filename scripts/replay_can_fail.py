@@ -163,6 +163,12 @@ def run_mod_tests(ids: list[str], root: Path = ROOT) -> tuple[int, dict[str, str
     return (1 if "fail" in outcomes.values() else 0), outcomes
 
 
+def _text(path: Path) -> str:
+    """A file's text as its bytes hold it: a CRLF file keeps its CRs, so the anchor is counted, the mutation written
+    and the file restored on the same text, byte for byte (read_text would turn CRLF into LF)."""
+    return path.read_bytes().decode("utf-8")
+
+
 @contextmanager
 def restored_on_any_exit(target: Path, original: str):
     """Put the file back on every exit: a SIGTERM from a cancelled CI job would otherwise
@@ -232,7 +238,7 @@ def _check_mutation(target: Path, mutated: str) -> str | None:
 def _replay_one(belief: dict, proof: dict, root: Path = ROOT) -> tuple[bool, str, set[str]]:
     """Apply one mutation, run the owning tests, restore. Returns (red, why, the red test ids)."""
     target = root / proof["file"]
-    original = target.read_bytes().decode("utf-8")   # bytes: a CRLF file comes back byte for byte
+    original = _text(target)
     n = original.count(proof["find"])
     if n != 1:
         return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)", set()
@@ -243,7 +249,7 @@ def _replay_one(belief: dict, proof: dict, root: Path = ROOT) -> tuple[bool, str
         if bad:
             return False, bad, set()
         rc, outcomes = run_tests(belief["runner"], root, belief["belief"])
-    if target.read_bytes().decode("utf-8") != original:
+    if _text(target) != original:
         return False, "the file was not restored", set()
     if rc == SKIPPED:
         return False, "an owning test was skipped under the mutation; a skip is no evidence", set()
@@ -260,7 +266,7 @@ def replay(belief: dict, root: Path = ROOT) -> tuple[bool, str]:
     proofs = proofs_of(belief)
     for proof in proofs:
         target = root / proof["file"]
-        n = target.read_text(encoding="utf-8").count(proof["find"])
+        n = _text(target).count(proof["find"])
         if n != 1:
             return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
     first, _ = run_tests(belief["runner"], root, belief["belief"])
@@ -303,7 +309,7 @@ def _tree_copy(tmp: str, n: int) -> Path:
 def _baseline(belief: dict, root: Path) -> str | None:
     """The checks of replay() before the first mutation; None when the mutations may run."""
     for proof in proofs_of(belief):
-        n = (root / proof["file"]).read_text(encoding="utf-8").count(proof["find"])
+        n = _text(root / proof["file"]).count(proof["find"])
         if n != 1:
             return f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
     first, _ = run_tests(belief["runner"], root, belief["belief"])

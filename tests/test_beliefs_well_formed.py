@@ -56,7 +56,7 @@ class BeliefsWellFormedTests(unittest.TestCase):
                 for proof in proofs:
                     target = ROOT / proof["file"]
                     self.assertTrue(target.exists(), proof["file"])
-                    text = target.read_text(encoding="utf-8")
+                    text = target.read_bytes().decode("utf-8")   # as the replay counts it (CRLF kept)
                     self.assertEqual(text.count(proof["find"]), 1, f"{path.name}: anchor must occur exactly once")
                     self.assertNotEqual(proof["find"], proof["replace"],
                                         "a mutation that changes nothing proves nothing")
