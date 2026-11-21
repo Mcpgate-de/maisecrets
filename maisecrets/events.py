@@ -160,7 +160,7 @@ _FORGET_CMD_RE = re.compile(r"\A\s*/maisecrets:forget\s+(.+)\Z", re.S | re.I)
 
 
 def _typed_notes() -> dict:
-    """session id -> {"keys", "t"} of the typed /maisecrets:forget prompts; the expired ones are left out."""
+    """session id -> {"keys", "t"} of the typed /maisecrets forget prompts; the expired ones are left out."""
     try:
         notes = json.loads(_TYPED_FORGET.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -193,7 +193,7 @@ def _notes_lock():
 
 
 def note_typed_forget(prompt: str, payload: dict, typed: bool) -> None:
-    """The person typed /maisecrets:forget KEY... in this session (`typed`, and no subagent's prompt): the keys and the
+    """The person typed /maisecrets forget KEY... in this session (`typed`, and no subagent's prompt): the keys and the
     time, so the command that this session runs marks its deletions as typed. An import (import:ID) has its own typed
     path. Never raises."""
     m = _FORGET_CMD_RE.match(prompt or "")
@@ -214,7 +214,7 @@ _SREF_LOGIN_RE = re.compile(r"\A\s*/maisecrets:sref[ \t]+login[ \t]+([A-Za-z0-9_
 
 
 def note_typed_login(prompt: str, payload: dict, typed: bool) -> None:
-    """The person typed (or pressed the pane button for) /maisecrets:sref login NAME in this session: the command that
+    """The person typed (or pressed the pane button for) /maisecrets sref login NAME in this session: the command that
     this session runs may bind a proposed claude.ai connector NAME (vault_refs.bind_connector). Never raises."""
     m = _SREF_LOGIN_RE.match(prompt or "")
     session = payload.get("session_id")
@@ -236,7 +236,7 @@ def take_typed_login(name: str, sessions: list) -> bool:
 
 
 def take_typed_forget(key: str, sessions: list) -> bool:
-    """True once for a key the person typed in /maisecrets:forget within TYPED_FORGET_SECONDS in one of `sessions`
+    """True once for a key the person typed in /maisecrets forget within TYPED_FORGET_SECONDS in one of `sessions`
     (the session ids the client gave this command); the key leaves that note. Without a session id it is False: the
     start notice stays. Any process of the user can write the note too (C22): it only leaves out the start notice."""
     try:
@@ -302,7 +302,7 @@ def weakenings_since_last_start() -> str | None:
     more = f", and {len(new) - 5} more in {EVENTS.name}" if len(new) > 5 else ""
     was = "protection was" if len(new) == 1 else "protections were"
     return (f"maisecrets: since the last session start, {len(new)} {was} loosened: {named}{more}. If you did not "
-            "do this, check /maisecrets:settings and /maisecrets:list.")
+            "do this, check /maisecrets settings and /maisecrets list.")
 
 
 def issue_url(event: dict, note: str = "") -> str:

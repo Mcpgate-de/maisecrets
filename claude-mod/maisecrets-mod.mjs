@@ -186,8 +186,8 @@ function hint($) {
       await $.store.set('show-values-hints', n + 1)
       // the lock says what Claude never saw; plain text next to it Claude knows (UX research 2026-11-09)
       $.ui.toast('🔒 Claude got only a placeholder for this value. Text without 🔒 Claude knows. ' +
-        (names ? 'A click copies the value.' : docker ? '💡 To find names too: /maisecrets:ner local (a local model).'
-          : '💡 A name it missed? /maisecrets:term add NAME'), { timeoutMs: 15000 })
+        (names ? 'A click copies the value.' : docker ? '💡 To find names too: /maisecrets ner local (a local model).'
+          : '💡 A name it missed? /maisecrets term add NAME'), { timeoutMs: 15000 })
     } catch { /* a hint only */ }
   })
 }
@@ -817,7 +817,7 @@ async function askEntry($, question) {
 async function askSettings($, question) {
   const a = await askEntry($, question)
   if (!a || !Array.isArray(a.groups)) {
-    pane.error = 'maisecrets could not read its settings. /maisecrets:status shows why.'
+    pane.error = 'maisecrets could not read its settings. /maisecrets status shows why.'
     return false
   }
   pane.groups = a.groups
@@ -846,7 +846,7 @@ async function refreshStatus($) {
   const gen = ++pane.statusGen
   const a = await askEntry($, { action: 'status', session_id: id, tool_call_at: lastToolCall.get(id) ?? 0 })
   if (pane.statusSession !== id || gen !== pane.statusGen) return
-  pane.status = a && typeof a.line === 'string' ? a.line : 'maisecrets: the status is unknown → /maisecrets:status'
+  pane.status = a && typeof a.line === 'string' ? a.line : 'maisecrets: the status is unknown → /maisecrets status'
   pane.notes = a && Array.isArray(a.notes) ? a.notes.filter(n => n && typeof n.name === 'string') : []
   if (!pane.notes.length) pane.showNotes = false
   pane.statusMs = Math.round((await $.clock.now()) - t0)
@@ -1041,8 +1041,8 @@ function watchNerStart($, left = NER_WATCH_ROUNDS) {
     $.clock.after(5000, () => {
       void askEntry($, { action: 'ner' }).then(a => {
         if (a?.answers === true) return done('maisecrets: the name service runs and checks names now.')
-        if (a && a.starting !== true) return done('maisecrets: the name service did not start. /maisecrets:ner shows why.')
-        if (left <= 1) return done('maisecrets: the name service still loads. /maisecrets:ner shows its state.')
+        if (a && a.starting !== true) return done('maisecrets: the name service did not start. /maisecrets ner shows why.')
+        if (left <= 1) return done('maisecrets: the name service still loads. /maisecrets ner shows its state.')
         watchNerStart($, left - 1)
       }).catch(() => done(null))
     })
@@ -1146,7 +1146,7 @@ function drawNer($, e, Box, Text, Button) {
     rows.push(h(Box, { marginTop: 1, key: 'gq' }, h(Text, {}, 'The gateway of which MCP server?')))
     if (!n.servers.length) {
       rows.push(h(Text, { dimColor: true, key: 'gn' },
-        'Your configuration has no MCP server with an https address. /maisecrets:ner gateway URL takes one.'))
+        'Your configuration has no MCP server with an https address. /maisecrets ner gateway URL takes one.'))
     }
     rows.push(h(Box, { flexDirection: 'row', flexWrap: 'wrap', key: 'gs' },
       ...n.servers.map(s => btn(Box, Button, `gw:${s}`, s, () => setNer($, 'gateway:' + s))),
@@ -1623,7 +1623,7 @@ async function runTyped($, own, kind) {
 // a login button of the output pane of /maisecrets:sref: the person's press, which the AI cannot make, starts the login
 // as the typed command would (its checks in Python, one flight, a login again starts over). A server name of the output
 // only, in the form the box takes
-const LOGIN_NAME = /\/maisecrets:sref login ([A-Za-z0-9_.-]{1,64})(?=[\s)]|$)/g
+const LOGIN_NAME = /\/maisecrets[: ]sref login ([A-Za-z0-9_.-]{1,64})(?=[\s)]|$)/g
 const loginNames = (lines) => [...new Set(lines.flatMap(l => [...String(l).matchAll(LOGIN_NAME)].map(m => m[1])))]
 
 async function loginFromPane($, id, name) {
@@ -1704,7 +1704,7 @@ function registerSettingsPane(on) {
     pane.hint = word ? unknownLine(word) : null
     let opened = false
     try { opened = await openSettings($) } catch { opened = false }
-    if (!opened) return { text: '/maisecrets:status shows the protection, /maisecrets:settings the settings.' }
+    if (!opened) return { text: '/maisecrets status shows the protection, /maisecrets settings the settings.' }
     takeKeysSoon($)
     // no text: a plugin command's text goes into the next request; the time goes to the pane's own line
     try { $.ui.log(`maisecrets hub: opened in ${Math.round((await $.clock.now()) - t0)} ms`, { to: 'debug' }) }

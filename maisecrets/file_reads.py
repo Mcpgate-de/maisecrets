@@ -883,7 +883,7 @@ def untrusted_tool() -> str | None:
 
 
 def missing_tool_text(codex: bool) -> str:
-    change = "maisecrets: set read_pdf" if codex else "/maisecrets:settings read_pdf"
+    change = "maisecrets: set read_pdf" if codex else "/maisecrets settings read_pdf"
     found = untrusted_tool()
     if found:
         return (f"maisecrets: the setting read_pdf is convert, and maisecrets does not run the pdftotext in "
@@ -1184,7 +1184,7 @@ def refusal(kind: str, why: str, codex: bool) -> str:
     """The text for a read that a mode stops (pre-tool deny, or the text that stands in for the file)."""
     key = SETTING[kind]
     noun = "PDF" if kind == "pdf" else "image"
-    change = f"maisecrets: set {key}" if codex else f"/maisecrets:settings {key}"
+    change = f"maisecrets: set {key}" if codex else f"/maisecrets settings {key}"
     others = "allow, ask or convert" if kind == "pdf" else "allow or ask"
     if why == "config":
         return (f"maisecrets: this {noun} was not read. The maisecrets config.json cannot be read, so {key} counts "

@@ -98,7 +98,10 @@ def parse_removal(prompt) -> list | None:
 # The command name and `import:` in either order, at any distance, after quotes and line continuations are taken
 # out: a shell joins `"/maisecrets:forget "'import:v1'`, `"…forget "import:v1`, a backslash or backtick line end and a
 # printf into the removal prompt (Gate B, round 3). A command that only names both is refused too: acceptable
-_FORGET = r"(?:/maisecrets:forget|maisecrets:\s*forget)"
+# each slash form of a command, the entry forms too: forms.SLASH, written out because a scan imports this module and the
+# detection core keeps its imports (tests/test_detection_boundary.py; tests/test_entry.py compares the two)
+_SLASH = r"(?:/maisecrets:(?:(?:maisecrets|ms)[ \t]+)?|/maisecrets[ \t]+|(?<![\w./-])/ms[ \t]+)"
+_FORGET = r"(?:" + _SLASH + r"forget|maisecrets:\s*forget)"
 IN_A_COMMAND_RE = _LazyRx(
     _FORGET + r"[\s\S]*?import:|import:[\s\S]*?" + _FORGET
     + r"|\bvalues[\s\"']+(?:remove|forget|delete)\b"
@@ -125,5 +128,5 @@ def removal_in_command(command: str) -> bool:
 
 
 IN_A_COMMAND = ("maisecrets: this command removes an import of values, which makes detection weaker; only the person "
-                "removes one, as their own prompt (/maisecrets:forget import:ID, in Codex: maisecrets: forget "
+                "removes one, as their own prompt (/maisecrets forget import:ID, in Codex: maisecrets: forget "
                 "import:ID). The command did not run. Tell the user the prompt to send.")

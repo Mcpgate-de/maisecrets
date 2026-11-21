@@ -65,7 +65,7 @@ TOOL_CALL_GRACE = 2.0
 
 
 def pane_status(session: str, tool_call_at: float = 0.0) -> dict:
-    """The verdict /maisecrets:status prints first, for the session of the pane: its head line and the names of the
+    """The verdict /maisecrets status prints first, for the session of the pane: its head line and the names of the
     checks that failed. The hooks check differs: the pane is no tool call, and no row of this session in hooks.log is
     no proof that a hook failed (before the first tool call a session can have none, and the capped log can drop a
     session's rows), so it is a note. A positive signal of a failure gives FAIL: the self-test, or the last tool call
@@ -94,7 +94,7 @@ def pane_status(session: str, tool_call_at: float = 0.0) -> dict:
                             f"the last tool call of this session started {sv.ago(time.time() - tool_call_at)}; "
                             "hooks.log holds no tool-call row of it")
         if not runs:
-            return sv.Check("warn", "hooks", "not seen in this session yet", "/maisecrets:status",
+            return sv.Check("warn", "hooks", "not seen in this session yet", "/maisecrets status",
                             "hooks.log holds no row of this session (none before its first tool call)")
         return sv.Check("ok", "hooks", "ran in this session", None, ", ".join(sorted(runs)))
 
@@ -111,7 +111,7 @@ def pane_status(session: str, tool_call_at: float = 0.0) -> dict:
     head = sv.head_line(version, checks, "claude").split(" \u00b7 ")[0]
     failed = [c.name for c in checks if c.state == "FAIL"]
     if failed:
-        head += " \u2192 /maisecrets:status (" + ", ".join(failed) + ")"
+        head += " \u2192 /maisecrets status (" + ", ".join(failed) + ")"
     notes = [{"name": c.name, "fact": c.fact, "next": c.next or ""} for c in checks if c.state == "warn"]
     return {"line": head, "notes": notes, "ms": round((time.time() - t0) * 1000)}
 
@@ -180,7 +180,7 @@ def pane_not_a_secret(key: str, session: str) -> str:
 
 def pane_ner() -> dict:
     """The source of names as the pane draws it: the source word, the servers a gateway pick takes, the check lines
-    of /maisecrets:ner. A source set by a policy is locked."""
+    of /maisecrets ner. A source set by a policy is locked."""
     from . import ner_setup, ner_view
     cfg = load_config()
     conf = cfg.get("remote_detector")
@@ -204,7 +204,7 @@ def pane_ner() -> dict:
 
 def pane_ner_set(value: str) -> dict:
     """off, local (and its start in the background, as `run.sh ner start`), or gateway:NAME: a server of the person's
-    configuration, by name. An address is typed (/maisecrets:ner url URL), never sent by the panel."""
+    configuration, by name. An address is typed (/maisecrets ner url URL), never sent by the panel."""
     name = value[len("gateway:"):] if value.startswith("gateway:") else None
     if value not in ("off", "local") and not (name and _SERVER_RE.fullmatch(name)):
         return {"note": "That source cannot be set here."}

@@ -22,7 +22,7 @@ def _age(ts: float) -> str:
 
 
 def cmd_list(args: list[str]) -> int:
-    """What is stored, masked: the same view a person gets from /maisecrets:list. No value.
+    """What is stored, masked: the same view a person gets from /maisecrets list. No value.
     `list uses [n]`: the last uses of stored values (the same as `audit`)."""
     if args and args[0].lower() == "uses":
         return cmd_audit(args[1:], usage="usage: list uses [n]")
@@ -73,7 +73,7 @@ def _list_values() -> int:
         except ValueError:
             shown = str(home)
         print(f"\nbackend: jsonfile (TEST MODE, plaintext under {shown})")
-    print(f"\nTo delete one: /maisecrets:forget <placeholder>. To delete everything, run in a terminal: {_launcher()} "
+    print(f"\nTo delete one: /maisecrets forget <placeholder>. To delete everything, run in a terminal: {_launcher()} "
           "wipe --yes")
     return 0
 
@@ -135,7 +135,7 @@ _ROUTE = {"v": "cli"}
 
 def cmd_forget(args: list[str]) -> int:
     if not args:
-        print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
+        print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets list shows them)", file=sys.stderr)
         return 2
     v, rc = Vault(), 0
     # keys as a person types them (events.forget_keys, #44)
@@ -154,7 +154,7 @@ def cmd_forget(args: list[str]) -> int:
         # Only the key from the index is printed, never the given spelling: a placeholder can resolve into it (Gate A)
         same = [k for k in v._index["entries"] if k.lower() == key.lower() and k != key]
         if same and key not in v._index["entries"]:
-            print(f"That key is not stored in this spelling (see /maisecrets:list). Did you mean {same[0]}?")
+            print(f"That key is not stored in this spelling (see /maisecrets list). Did you mean {same[0]}?")
             rc = 1
             continue
         # the person typed /maisecrets:forget with this key in the session that runs this command (the prompt hook
@@ -165,12 +165,12 @@ def cmd_forget(args: list[str]) -> int:
         status = v.forget(key, route=_ROUTE["v"], typed=typed)
         if getattr(v, "destinations_kept", False):
             print((f"The destination record of {key}" if stored else "A destination record") +
-                  " could not be deleted now; send the same /maisecrets:forget later.")
+                  " could not be deleted now; send the same /maisecrets forget later.")
         if status == "ok":
             print(f"Deleted {key}. A placeholder for it no longer works anywhere.")   # "ok": the index held it
         elif status == "unknown":
             # a fixed text: the given spelling is never printed (Gate A, 2026-11-17)
-            print("That key is not stored (see /maisecrets:list).")
+            print("That key is not stored (see /maisecrets list).")
             rc = 1
         else:
             print(f"The store refused to delete {key}; nothing was changed.")   # "store": the index holds it
@@ -261,7 +261,7 @@ def cmd_put(args: list[str]) -> int:
         value = sys.stdin.read()
     value = value.strip()
     if not value:
-        print("maisecrets: the clipboard is empty. Copy the value first, then run /maisecrets:put again."
+        print("maisecrets: the clipboard is empty. Copy the value first, then run /maisecrets put again."
               if source == "clipboard" else "maisecrets: no value came on stdin; nothing was stored.", file=sys.stderr)
         return 2
     # a second put found the placeholder the first one copied, and stored it as a new secret (UX test, 2026-11-17).
@@ -272,7 +272,7 @@ def cmd_put(args: list[str]) -> int:
     rest = SREF_RE.sub("", REF_RE.sub("", value))
     if (REF_RE.search(value) or SREF_RE.search(value)) and not any(c.isalnum() for c in rest):
         where = "the clipboard holds" if source == "clipboard" else "the input holds"
-        again = "Copy the real value first, then run /maisecrets:put again" if source == "clipboard" else \
+        again = "Copy the real value first, then run /maisecrets put again" if source == "clipboard" else \
             "Pass the real value on stdin"
         print(f"maisecrets: {where} a placeholder, not a value. {again}. Nothing was stored.", file=sys.stderr)
         return 2
@@ -328,8 +328,8 @@ def cmd_report(args: list[str]) -> int:
         for i, e in enumerate(evs, 1):
             hits = ", ".join(f"{h['type']}/{h['kind']}" for h in e.get("hits", []))
             print(f"{i:<3} {e.get('ts', ''):<20} {e.get('hook', ''):<17} {e.get('client', ''):<7} {hits}")
-        print("\n/maisecrets:report last <why it is wrong> | /maisecrets:report <n> <why> | /maisecrets:report bug "
-              "<text> | /maisecrets:report feature <text> | /maisecrets:report incident")
+        print("\n/maisecrets report last <why it is wrong> | /maisecrets report <n> <why> | /maisecrets report bug "
+              "<text> | /maisecrets report feature <text> | /maisecrets report incident")
         return 0
     if args[0] == "last":
         # a removal of invisible characters is no detection to report as a false alarm; the list shows it. The
@@ -344,7 +344,7 @@ def cmd_report(args: list[str]) -> int:
     else:
         ev = evs[int(args[0]) - 1]
         if not any(h.get("type") not in ("HIDDEN", "RULE") for h in ev.get("hits", [])):
-            what = ("only left out a rule of your own (/maisecrets:rules says why)"
+            what = ("only left out a rule of your own (/maisecrets rules says why)"
                     if any(h.get("type") == "RULE" for h in ev.get("hits", []))
                     else "only removed invisible characters")
             print(f"that event {what}; there is no detection to report as a false alarm")
@@ -368,7 +368,7 @@ def _forget_the_false_positive(ev: dict) -> None:
     keys = list(dict.fromkeys(h.get("key") for h in ev.get("hits", []) if h.get("key")))
     if keys:
         print("If this is not a secret, delete its stored value so it is not masked or blocked again: "
-              + " ".join(f"/maisecrets:forget {k}" for k in keys))
+              + " ".join(f"/maisecrets forget {k}" for k in keys))
 
 
 def _report_incident(kind: str, selector: str | None) -> int:
@@ -380,7 +380,7 @@ def _report_incident(kind: str, selector: str | None) -> int:
         print(incidents.USAGE)
         return 0
     if not sys.stdout.isatty():
-        print("maisecrets: the incident report is shown to a person only: type /maisecrets:report incident in "
+        print("maisecrets: the incident report is shown to a person only: type /maisecrets report incident in "
               "Claude Code, or run this command in a terminal.")
         return 0
     if kind == "clear":
@@ -454,7 +454,7 @@ def cmd_values(args: list[str]) -> int:
         return 0
     if args[0] in ("remove", "forget", "delete"):
         print("maisecrets: no command removes an import; only the person does, as their own prompt: "
-              "/maisecrets:forget import:ID (in Codex: maisecrets: forget import:ID).")
+              "/maisecrets forget import:ID (in Codex: maisecrets: forget import:ID).")
         return 1
     print("usage: maisecrets values [import FILE]", file=sys.stderr)
     return 2
@@ -465,7 +465,7 @@ def _print_imports(rows: list, always: bool = False) -> None:
     if not rows:
         if always:
             print("No values are imported. A tool of yours writes JSON lines ({\"value\": ..., \"type\": ...}); "
-                  "/maisecrets:settings value_files add FILE adds them.")
+                  "/maisecrets settings value_files add FILE adds them.")
         return
     from .values import type_text
     print(f"\nImported values (mask only): {sum(r['count'] for r in rows)} in {len(rows)} import(s)")
@@ -473,7 +473,7 @@ def _print_imports(rows: list, always: bool = False) -> None:
         origin = {"file": "a value file", "run": "a command", "damaged": "DAMAGED"}.get(r["origin"], r["origin"])
         age = _age(r["at"]) if r["at"] else "?"
         print(f"  import:{r['id']} · {r['count']} value(s) ({type_text(r['types']) or '-'}) · {age} · from {origin}")
-    print("  To remove one: type /maisecrets:forget import:ID as your own prompt.")
+    print("  To remove one: type /maisecrets forget import:ID as your own prompt.")
 
 
 def cmd_terms(args: list[str]) -> int:
@@ -514,10 +514,10 @@ def cmd_settings(args: list[str]) -> int:
         # a list takes add or remove and one entry (Gate A, 2026-11-17)
         # Codex has no slash commands: its own form, as settings.render gives it
         if key == "ssh_autonomous_hosts":
-            form = "maisecrets: ssh autonomous|ask HOST" if codex else f"/maisecrets:settings {key} add|remove HOST"
+            form = "maisecrets: ssh autonomous|ask HOST" if codex else f"/maisecrets settings {key} add|remove HOST"
         else:
             tail = "add|remove FOLDER" if folder else "VALUE (one value)"
-            form = f"maisecrets: set {key} {tail}" if codex else f"/maisecrets:settings {key} {tail}"
+            form = f"maisecrets: set {key} {tail}" if codex else f"/maisecrets settings {key} {tail}"
         print(f"maisecrets settings: too many words. Nothing was changed. Send {form} as your own prompt.")
         return 1
     if rest:
@@ -596,7 +596,7 @@ def cmd_status(args: list[str]) -> int:
     from . import user_rules
     own = user_rules.load()
     print(f"rules of your own: {len(own.rules)} from {sum(f.state == 'ok' for f in own.folders)} folder(s), "
-          f"{sum(not q.kept for q in own.quarantined)} left out; /maisecrets:rules shows them")
+          f"{sum(not q.kept for q in own.quarantined)} left out; /maisecrets rules shows them")
     from . import terms
     print(terms.summary())
     from . import value_files
@@ -632,7 +632,7 @@ def cmd_status(args: list[str]) -> int:
     groups, damaged = incidents.load()
     markers = incidents.unfolded_markers()
     print(f"incidents: {len(groups)} group(s)" + (f", {len(markers)} not yet folded" if markers else "")
-          + (", the record is damaged" if damaged else "") + "; /maisecrets:report incident shows them")
+          + (", the record is damaged" if damaged else "") + "; /maisecrets report incident shows them")
     return 0
 
 
@@ -746,7 +746,7 @@ def _shortcuts_using_the_wrapper(commands) -> list:
 
 SHORTCUT_WORDS = ("install", "remove", "--remove", "status")
 _SHORTCUT_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,31}")
-SHORTCUT_USAGE = ("usage: /maisecrets:shortcut [install] [NAME] | remove [NAME] | status [NAME] (--remove is "
+SHORTCUT_USAGE = ("usage: /maisecrets shortcut [install] [NAME] | remove [NAME] | status [NAME] (--remove is "
                   "remove). A NAME is one word of letters, digits and -, such as ms. Nothing was changed.")
 
 
@@ -766,7 +766,7 @@ def cmd_shortcut(args: list[str]) -> int:
         # the kind of each file, never its path: the path holds the given name, which can hold a resolved value (#82)
         kinds = ["the command file" if r.endswith(".md") else "the shared wrapper" for r in removed]
         print("removed: " + (" and ".join(kinds) if kinds else "nothing (no maisecrets shortcut found)"))
-        print("The session start will not install it again; type /maisecrets:shortcut to get it back.")
+        print("The session start will not install it again; type /maisecrets shortcut to get it back.")
         return 0
     if what == "status":
         from pathlib import Path as _P
@@ -782,10 +782,10 @@ def cmd_shortcut(args: list[str]) -> int:
         if ours and (SHORTCUT_MARK in text or (HOME / "bin" / "ms.sh").exists()):
             print("The shortcut is installed.")
         elif ours:
-            print("The shortcut is incomplete: its wrapper is missing. Install it again: /maisecrets:shortcut install "
+            print("The shortcut is incomplete: its wrapper is missing. Install it again: /maisecrets shortcut install "
                   "NAME")
         else:
-            print("The shortcut is not installed. Install it: /maisecrets:shortcut install NAME")
+            print("The shortcut is not installed. Install it: /maisecrets shortcut install NAME")
         return 0
     try:
         install_shortcut(name)
@@ -1025,7 +1025,7 @@ def register_guard_for_a_synced_install() -> "str | None":
         return None
     if first and any(d.startswith("registered it") for d in done):
         return (f"maisecrets registered its guard in {settings}: it blocks a session in which a plugin update left "
-                "maisecrets not running. /maisecrets:guard remove takes it away.")
+                "maisecrets not running. /maisecrets guard remove takes it away.")
     return None
 
 
@@ -1103,7 +1103,7 @@ def cmd_guard(args: list[str]) -> int:
     from .vault import HOME
     # four facts and no verdict (UX test, 2026-11-17): the first line says what is the case and the next step
     on = script.exists() and guard_registered()
-    print("The guard is installed." if on else "The guard is not installed. Install it: /maisecrets:guard install")
+    print("The guard is installed." if on else "The guard is not installed. Install it: /maisecrets guard install")
     print(f"guard script: {script} ({'present' if script.exists() else 'missing'})")
     print(f"registered in {settings}: {'yes' if guard_registered() else 'no'}")
     print(f"maisecrets writes its sign of life for the guard: {'yes' if (HOME / 'guard.json').exists() else 'no'}")
@@ -1141,7 +1141,7 @@ def cmd_repair(_: list[str]) -> int:
 
 
 def cmd_ner(args: list[str]) -> int:
-    """The source of names (/maisecrets:ner): which one is set and whether it answers. It changes nothing: the
+    """The source of names (/maisecrets ner): which one is set and whether it answers. It changes nothing: the
     prompt hook already wrote a change the person typed (maisecrets/ner_setup.py). `--wait N` waits up to N seconds
     for the service, after a start."""
     from . import ner_setup
@@ -1176,7 +1176,7 @@ SREF_LOGIN_END_S = 115.0
 
 
 def cmd_sref(args: list[str]) -> int:
-    """Sensitive References (/maisecrets:sref): `status` (the default) names each user-scope server whose gateway
+    """Sensitive References (/maisecrets sref): `status` (the default) names each user-scope server whose gateway
     offers a resolver and whether maisecrets is logged in there; `login [NAME]` logs in in the browser (the person
     gives the consent there; nothing starts without this command); `logout [NAME]` forgets the login. No token, id or
     value is printed."""
@@ -1200,7 +1200,7 @@ def cmd_sref(args: list[str]) -> int:
     if action == "status":
         for key, url in proposed.items():
             print(f"{key} ({urlsplit(url).hostname}): a claude.ai connector that names this gateway; not bound. "
-                  f"Only if it is your gateway: /maisecrets:sref login {shlex.quote(key)}")
+                  f"Only if it is your gateway: /maisecrets sref login {shlex.quote(key)}")
     if action == "logout" and name is not None and vault_refs.forget_connector(name):
         print(f"maisecrets: the claude.ai connector {name} is no longer bound to a gateway.")
         servers = {k: v for k, v in servers.items() if k == name}
@@ -1237,20 +1237,20 @@ def cmd_sref(args: list[str]) -> int:
         print("maisecrets: no MCP server of your user configuration offers Sensitive References, and no claude.ai "
               "connector has named its gateway yet. Next step: use your gateway once in Claude Code (after a result "
               "with a reference, a claude.ai connector is asked for its gateway at the end of the turn), or add it as "
-              "an MCP server of your user configuration; then send /maisecrets:sref login.")
+              "an MCP server of your user configuration; then send /maisecrets sref login.")
         # no server with references is a state, not a failure; a login or logout cannot start without one
         return 0 if action == "status" else 1
     if action == "status":
         for server, f in found.items():
             if not sref_client.logged_in(backend, f["origin"]):
-                state = f"not logged in (/maisecrets:sref login {shlex.quote(server)})"
+                state = f"not logged in (/maisecrets sref login {shlex.quote(server)})"
             else:
                 now, then = sref_client.allows(backend, f), sref_client.could_allow(f)
                 state = "logged in; values go into " + ", ".join(now)
                 more = [w for w in then if w not in now]
                 if more:
                     state += (f" (log in again to allow {' and '.join(more)}: "
-                              f"/maisecrets:sref login {shlex.quote(server)})")
+                              f"/maisecrets sref login {shlex.quote(server)})")
             # the account goes to the person only (sref_hooks.account_notice): the AI reads this output
             who = sref_client.account(backend, f["origin"]) if sref_client.logged_in(backend, f["origin"]) else ""
             print(f"{server} ({urlsplit(f['origin']).hostname}): {state}"
@@ -1267,7 +1267,7 @@ def cmd_sref(args: list[str]) -> int:
         # one ready command per server: the person picks one (a login without a name never ends with nothing)
         print(f"maisecrets: {len(found)} servers offer Sensitive References. Pick one and send its command:")
         for server in found:
-            print(f"  /maisecrets:sref {action} {shlex.quote(server)}")
+            print(f"  /maisecrets sref {action} {shlex.quote(server)}")
         return 2
     server, f = next(iter(found.items()))
     host = urlsplit(f["origin"]).hostname
@@ -1297,7 +1297,7 @@ def cmd_sref(args: list[str]) -> int:
         # only a login the person typed (or pressed in the panel) binds: a command the AI ran does not
         if not (_ROUTE["v"] == "slash command" and events.take_typed_login(server, sessions_of_this_command())):
             print(f"maisecrets: logged in to {host}; the claude.ai connector {server} was not bound, because you did "
-                  f"not type this login. To bind it, type /maisecrets:sref login {server} yourself.")
+                  f"not type this login. To bind it, type /maisecrets sref login {server} yourself.")
             return 1
         if not vault_refs.bind_connector(server, proposed[server]):
             print(f"maisecrets: logged in to {host}, but the claude.ai connector {server} was not bound: another "
@@ -1433,8 +1433,31 @@ def main(argv: list[str] | None = None) -> int:
               "store, so the store keeps its rights. Run it again outside the sandbox (Codex asks you to approve "
               "that), or in a terminal of your own.", file=sys.stderr)
         return 1
+    from . import cowork
+    if cowork.active() and argv[0] not in ("hook", "get", "resolve"):
+        return _in_cowork(fn, argv)
+    return _run(fn, argv)
+
+
+def _in_cowork(fn, argv: list[str]) -> int:
+    """In Cowork the command's output names each command the prompt hook answers in its text form (forms.cowork):
+    Cowork shows no answer to such a command typed with a slash."""
+    import contextlib
+    import io
+    from . import forms
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            return _run(fn, argv)
+    finally:
+        sys.stdout.write(forms.cowork(out.getvalue()))
+        sys.stderr.write(forms.cowork(err.getvalue()))
+        sys.stdout.flush()
+
+
+def _run(fn, argv: list[str]) -> int:
     # a damaged index or a wrong policy printed a Python traceback to the person who ran
-    # /maisecrets:list; the message of these two errors names the file and the fix, never a value
+    # /maisecrets list; the message of these two errors names the file and the fix, never a value
     try:
         return fn(argv[1:])
     except ConfigError as exc:

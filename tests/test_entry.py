@@ -186,6 +186,23 @@ class InvocabilityTests(unittest.TestCase):
         for name in prompt_commands.COMMANDS:
             self.assertRegex(desc, rf"(?<![\w-]){re.escape(name)}(?![\w-])", name)
 
+    def test_the_refusals_read_every_slash_form(self):
+        # a tool call that carries a command only the person may give is refused in each form the hook reads
+        from maisecrets import demo, forms, not_a_secret, settings, value_files
+        self.assertEqual(value_files._SLASH, forms.SLASH)
+        for form in ENTRY_FORMS + ("/maisecrets:{}",):
+            with self.subTest(form=form):
+                self.assertTrue(demo.in_a_command(f"claude -p '{form.format('demo on')}'"))
+                change = form.format("settings ssh_consent on")
+                self.assertTrue(settings.IN_A_COMMAND_RE.search(f"claude -p '{change}'"))
+                self.assertTrue(settings.IN_A_COMMAND_RE.search(f"claude -p '{form.format('term remove Bob')}'"))
+                self.assertTrue(settings.IN_A_COMMAND_RE.search(f"claude -p '{form.format('ner local')}'"))
+                weaker = form.format("not-a-secret " + KEY)
+                self.assertTrue(not_a_secret.IN_A_COMMAND_RE.search(f"claude -p '{weaker}'"))
+                self.assertTrue(value_files.removal_in_command(f"claude -p '{form.format('forget import:abc')}'"))
+        # a path that ends in /ms is no command
+        self.assertFalse(demo.IN_A_COMMAND_RE.search("ls /tmp/ms demo"))
+
     def test_the_lint_refuses_a_command_reachable_by_nobody(self):
         sys.path.insert(0, str(ROOT / "scripts"))
         import lint_plugin

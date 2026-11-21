@@ -34,7 +34,7 @@ _SREF_COMMAND_RE = _LazyRx(r'/hooks/run\.(?:sh|cmd)" sref --args-stdin')
 
 
 def account_notice(payload: dict) -> str | None:
-    """After /maisecrets:sref (status or login): the masked account of each gateway login, as a message for the
+    """After /maisecrets sref (status or login): the masked account of each gateway login, as a message for the
     person. The command prints no account, because the AI reads its output (the specification: the account hint
     never goes to the model)."""
     if payload.get("tool_name") not in ("Bash", "PowerShell"):
@@ -106,7 +106,7 @@ def _login_hint(payload: dict) -> str | None:
     if not sref_notes.first_hint(origin, payload.get("session_id"), sender=name or None):
         return None
     host = urlsplit(origin).hostname
-    command = ("run.sh sref login" if client_of(payload) == "codex" else "/maisecrets:sref login") + \
+    command = ("run.sh sref login" if client_of(payload) == "codex" else "/maisecrets sref login") + \
         (" " + name if name else "")
     return (f"maisecrets: {host} offers Sensitive References: its results hold references that maisecrets can put "
             f"into your commands and files as their values. To allow that, send {command} once: your browser opens, "
@@ -134,7 +134,7 @@ def login_offer(session: str | None) -> str | None:
         backend = backend or Vault(load_config()).backend
         if sref_client.logged_in(backend, origin):
             continue
-        return f"/maisecrets:sref login {name}"
+        return f"/maisecrets sref login {name}"
     return None
 
 
@@ -152,7 +152,7 @@ def connector_answer(session: str | None, server: str, answer: str, cwd: str | N
             not _SERVER_NAME_RE.fullmatch(key):
         return {"fill": None, "note": None}
     host = urlsplit(origin).hostname
-    return {"fill": f"/maisecrets:sref login {key}",
+    return {"fill": f"/maisecrets sref login {key}",
             "note": f"maisecrets: your claude.ai connector {key} names {host} as its gateway for Sensitive References: "
                     "values that a command or a file of yours can use. Only if this connector is your gateway at "
                     f"{host}, press Enter on the command in your input box: your browser opens at {host}, and you "
@@ -207,7 +207,7 @@ def never_reason(refs: list) -> str:
     names = ", ".join(refs)
     return (f"maisecrets: {names} is a Sensitive Reference that this session did not receive in a tool result, so "
             "maisecrets cannot put its value in; the call would work with the reference's text instead. If maisecrets "
-            "has no login to the gateway yet, the user runs /maisecrets:sref login once. Then call the tool that "
+            "has no login to the gateway yet, the user runs /maisecrets sref login once. Then call the tool that "
             "showed the reference again in this session and use the reference it returns.")
 
 
@@ -243,7 +243,7 @@ def fetch(cfg: dict, backend, keys: list[str], session: str | None, sink: tuple[
         if not found:
             raise sref_client.Refused(f"{host} offers no resolver for references")
         if not sref_client.logged_in(backend, origin):
-            raise sref_client.Refused(f"maisecrets has no login to {host} yet; the user runs /maisecrets:sref login "
+            raise sref_client.Refused(f"maisecrets has no login to {host} yet; the user runs /maisecrets sref login "
                                       "once (in Codex: run.sh sref login)")
         canon = {k: sref_client.find(f"⟦{k}⟧")[0][1] for k in ks}
         values = sref_client.resolve(cfg, backend, found, list(dict.fromkeys(canon.values())), sink[0], sink[1])
@@ -267,7 +267,7 @@ def precheck(cfg: dict, backend, keys: list[str], session: str | None) -> str | 
         if not sref_client.discover(cfg, url):
             why = f"{host} offers no resolver for references"
         elif not sref_client.logged_in(backend, origin):
-            why = f"maisecrets has no login to {host} yet; the user runs /maisecrets:sref login once (in Codex: " \
+            why = f"maisecrets has no login to {host} yet; the user runs /maisecrets sref login once (in Codex: " \
                   "run.sh sref login)"
         if why:
             names = ", ".join(f"⟦{k}⟧" for k in keys)

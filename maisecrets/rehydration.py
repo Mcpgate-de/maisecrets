@@ -68,7 +68,7 @@ def refusal(cfg: dict, path: str, client: str, names: str, did_not: str) -> str 
     if cfg.get("rehydration_fallback"):
         # the fallback for a config it cannot read as written set block, not the user: name the cause
         return (f"maisecrets: {names} gets no value while the maisecrets settings cannot be read as written "
-                f"({cfg['config_warning']}). {did_not} Tell the user to fix the file; /maisecrets:status names it.")
+                f"({cfg['config_warning']}). {did_not} Tell the user to fix the file; /maisecrets status names it.")
     if raw not in POLICIES:
         return (f"maisecrets: {names} gets no value: the rehydration setting is not one of "
                 f"{', '.join(POLICIES)}. {did_not} Tell the user to check the maisecrets config.")

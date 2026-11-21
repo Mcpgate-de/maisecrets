@@ -1,4 +1,4 @@
-"""/maisecrets:not-a-secret KEY (Codex: `maisecrets: not a secret KEY`): the person says that a stored value is no
+"""/maisecrets not-a-secret KEY (Codex: `maisecrets: not a secret KEY`): the person says that a stored value is no
 secret and no personal data. It deletes the entry from the store and puts that exact value on the person's allow list
 (user_rules.ALLOW_FILE), so neither a rule nor the name service masks it again. One exact value, never a pattern.
 
@@ -6,8 +6,8 @@ Only the person's typed prompt does it, as a setting (C22): a subagent, a progra
 or a tool call changes nothing. A key type (a secret, a card, an IBAN, an official, tax or bank number, or a type that
 the vocabulary does not know) needs the same typed command twice within CONFIRM_SECONDS; the first one only asks.
 
-`/maisecrets:not-a-secret undo ID` (Codex: `maisecrets: undo not a secret ID`) takes an allowance back. The ID is the
-key the value had (a key is never given twice, so it stays unique after the entry is gone); /maisecrets:list shows
+`/maisecrets not-a-secret undo ID` (Codex: `maisecrets: undo not a secret ID`) takes an allowance back. The ID is the
+key the value had (a key is never given twice, so it stays unique after the entry is gone); /maisecrets list shows
 each allowance with its ID, its type, its date and the masked form. The record (ALLOWED) keeps no value: the masked
 form and a salted hash (_digest), which outlives a wipe of the store. Undo deletes only the line directly under the
 comment line `# not-a-secret ID` and only when its hash matches, so a line the person wrote stays. A value that was on
@@ -42,12 +42,13 @@ _KEY_RE = _LazyRx("(?:" + re.escape(OPEN) + r")?([A-Z][A-Z0-9_]*_c\d+(?:-\d+)?)(
                   + re.escape(CLOSE) + r")?\.?")
 # the same command in a tool call: a nested client would type it for the model, and the writers called by name would
 # skip the prompt. A text match (the C22 class): a form built at run time is not seen
-IN_A_COMMAND_RE = _LazyRx(r"/maisecrets:not-a-secret\b|maisecrets:\s*(?:undo\s+)?not\s+a\s+secret\b|"
+from .forms import SLASH as _SLASH  # noqa: E402 - each slash form of a command (the entry forms too)
+IN_A_COMMAND_RE = _LazyRx(_SLASH + r"not-a-secret\b|maisecrets:\s*(?:undo\s+)?not\s+a\s+secret\b|"
                           r"\b(?:allow_typed|undo_typed)\b", re.I)
-IN_A_COMMAND = ("maisecrets: this command carries /maisecrets:not-a-secret, which makes detection weaker; only the "
+IN_A_COMMAND = ("maisecrets: this command carries /maisecrets not-a-secret, which makes detection weaker; only the "
                 "person does that, as their own prompt. The command did not run. Tell the user the prompt to send.")
-USAGE = ("maisecrets: name one stored value by its key, as /maisecrets:list shows it: /maisecrets:not-a-secret "
-         "NAME_c12 (Codex: maisecrets: not a secret NAME_c12). To take one back: /maisecrets:not-a-secret undo "
+USAGE = ("maisecrets: name one stored value by its key, as /maisecrets list shows it: /maisecrets not-a-secret "
+         "NAME_c12 (Codex: maisecrets: not a secret NAME_c12). To take one back: /maisecrets not-a-secret undo "
          "NAME_c12. Nothing was changed.")
 
 
@@ -171,12 +172,12 @@ def allow_typed(key: str, session: str | None, route: str, cfg: dict | None = No
     meta = v._index["entries"].get(key)
     if meta is None:
         if key in records():
-            return (f"maisecrets: {key} is already on your allow list (see /maisecrets:list). Nothing was changed.")
-        return f"maisecrets: there is no stored value {key} (see /maisecrets:list). Nothing was changed."
+            return (f"maisecrets: {key} is already on your allow list (see /maisecrets list). Nothing was changed.")
+        return f"maisecrets: there is no stored value {key} (see /maisecrets list). Nothing was changed."
     kind, type_ = str(meta.get("kind", "")), str(meta.get("type", ""))
     if kind.startswith(("term:", "import:")):
-        where = "your term list (/maisecrets:term remove)" if kind.startswith("term:") else \
-            "an import of values (/maisecrets:forget import:ID)"
+        where = "your term list (/maisecrets term remove)" if kind.startswith("term:") else \
+            "an import of values (/maisecrets forget import:ID)"
         return f"maisecrets: {key} comes from {where}; take it out there. Nothing was changed."
     if meta.get("purged") or meta.get("expires", 0) < time.time():
         return (f"maisecrets: {key} has expired, so its value is no longer stored and cannot go on the allow list. "
@@ -185,7 +186,7 @@ def allow_typed(key: str, session: str | None, route: str, cfg: dict | None = No
     if needs_confirmation(type_) and not _inside_home():
         return (f"maisecrets: your allow list is a link to a file outside the maisecrets folder, and {shown} is a key "
                 "type: its value would be written there in clear. Nothing was changed. Make allow.txt a file of your "
-                f"own, or delete the value with /maisecrets:forget {key}.")
+                f"own, or delete the value with /maisecrets forget {key}.")
     if needs_confirmation(type_) and not _confirmed(key, session):
         from .notices import type_word
         return (f"maisecrets: {shown} is {type_word(type_)}, a key type. Type the command again within "
@@ -195,7 +196,7 @@ def allow_typed(key: str, session: str | None, route: str, cfg: dict | None = No
         return f"maisecrets: the store did not give the value of {key}. Nothing was changed."
     if not _fits_a_line(value):
         return (f"maisecrets: the value of {shown} cannot be one line of the allow list (it has a line break, a space "
-                f"at an end, or starts with # or rule:). Nothing was changed; /maisecrets:forget {key} deletes it.")
+                f"at an end, or starts with # or rule:). Nothing was changed; /maisecrets forget {key} deletes it.")
     if v.forget(key, route=route, typed=True) != "ok":
         return f"maisecrets: the store refused to delete {key}. Nothing was changed."
     from . import events
@@ -219,7 +220,7 @@ def allow_typed(key: str, session: str | None, route: str, cfg: dict | None = No
     _reset()
     return (f"maisecrets: {shown} is deleted from the store, and this exact value is on your allow list, so "
             "maisecrets does not mask it again. A longer value that contains it is still masked. To take it back: "
-            f"/maisecrets:not-a-secret undo {rid} (Codex: maisecrets: undo not a secret {rid}).")
+            f"/maisecrets not-a-secret undo {rid} (Codex: maisecrets: undo not a secret {rid}).")
 
 
 def _confirmed(key: str, session: str | None) -> bool:
@@ -249,7 +250,7 @@ def undo_typed(rid: str, cfg: dict | None = None) -> str:
         taken = records()
         rec = taken.get(rid)
         if rec is None:
-            return f"maisecrets: there is no allowance {rid} (see /maisecrets:list). Nothing was changed."
+            return f"maisecrets: there is no allowance {rid} (see /maisecrets list). Nothing was changed."
         try:
             lines = ALLOW_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
         except FileNotFoundError:
@@ -308,11 +309,11 @@ def answer(payload: dict, cmd: tuple, typed: bool, client: str) -> dict:
     verb, key = cmd
     if verb == "usage":
         # only a key of the index: a key built from the typed text could spell a stored value (Gate A, 2026-11-17)
-        reason = USAGE + (f" Did you mean {key}? Write the key as /maisecrets:list shows it." if key and _stored(key)
+        reason = USAGE + (f" Did you mean {key}? Write the key as /maisecrets list shows it." if key and _stored(key)
                           else "")
     elif not typed:
         from .settings import came_from
-        reason = ("maisecrets: /maisecrets:not-a-secret counts only when you type it as your prompt; this one came "
+        reason = ("maisecrets: /maisecrets not-a-secret counts only when you type it as your prompt; this one came "
                   f"from {came_from(payload)}, so nothing was changed.")
     else:
         route = "slash command" if str(payload.get("prompt", "")).lstrip().startswith("/") else "typed prompt"
@@ -336,18 +337,18 @@ def hint(entries: list) -> str:
                               and not needs_confirmation(str(getattr(e, "type", "")))))
     if not keys:
         return ""
-    return f" Wrong? Type /maisecrets:not-a-secret {keys[0] if len(keys) == 1 else 'KEY'}"
+    return f" Wrong? Type /maisecrets not-a-secret {keys[0] if len(keys) == 1 else 'KEY'}"
 
 
 def list_lines() -> list:
-    """The allowances for /maisecrets:list: id, type, date and masked form, never a value."""
+    """The allowances for /maisecrets list: id, type, date and masked form, never a value."""
     rows = sorted(records().items(), key=lambda kv: kv[1].get("t", 0))
     if not rows:
         return []
-    out = [f"Allowed by you with /maisecrets:not-a-secret ({len(rows)}): not masked again",
+    out = [f"Allowed by you with /maisecrets not-a-secret ({len(rows)}): not masked again",
            f"{'id':<14} {'type':<7} {'allowed':<10}  shown as"]
     for rid, r in rows:
         day = time.strftime("%Y-%m-%d", time.localtime(r.get("t", 0))) if isinstance(r.get("t"), int) else "?"
         out.append(f"{rid:<14} {str(r.get('type', '?')):<7} {day:<10}  {r.get('display') or '-'}")
-    out.append("To take one back: /maisecrets:not-a-secret undo ID (Codex: maisecrets: undo not a secret ID).")
+    out.append("To take one back: /maisecrets not-a-secret undo ID (Codex: maisecrets: undo not a secret ID).")
     return out

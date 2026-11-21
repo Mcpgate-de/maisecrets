@@ -438,7 +438,7 @@ class Hint(unittest.TestCase):
         text = out["systemMessage"]
         self.assertEqual(text, settings.HINTS["secret_destinations"]["claude"], "one fixed line for the person")
         self.assertNotIn(MARK, json.dumps(out.get("hookSpecificOutput") or {}), "nothing of it for the model")
-        self.assertIn("/maisecrets:list", text)
+        self.assertIn("/maisecrets list", text)
         self.assertNotIn("other.example.net", text, "the hint names no destination")
         self.assertNotIn(_key(ref), text, "and no secret")
         # once, globally: a second break, another secret, another session
@@ -609,7 +609,7 @@ class Shown(unittest.TestCase):
         self.assertIn("Seen so far: 1 secret(s), 1 destination(s), 0 with more than one.", text)
         self.assertIn("protect would have asked about 0 time(s) in the last 1 day(s), for 0 secret(s): an "
                       "estimate", text)
-        self.assertIn("Ask before a new host: /maisecrets:settings secret_destinations protect", text)
+        self.assertIn("Ask before a new host: /maisecrets settings secret_destinations protect", text)
         self.assertEqual(settings.parse_prompt("/maisecrets:settings secret_destinations protect"),
                          ("secret_destinations", "protect"))
         self.assertTrue(settings.apply_typed("secret_destinations", "protect")[0])

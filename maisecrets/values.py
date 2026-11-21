@@ -21,13 +21,13 @@ where nothing else masks, and never changes how another value is masked or resol
 The trust rule: the agent can only make detection stricter. An import only adds. Nothing in a line can loosen
 anything: only `value` and `type` are read, and a type only names the placeholder. A new import of the same file
 merges into its import and never drops a value; only the person removes an import, by a typed prompt
-(/maisecrets:forget import:ID, hooks.user_prompt). What an agent can still do is mask too much, and these hold it:
+(/maisecrets forget import:ID, hooks.user_prompt). What an agent can still do is mask too much, and these hold it:
 
 - a floor per value (_reason): at least MIN_LEN characters, a number at least MIN_DIGITS digits, no ordinary word
   (one word of lower-case letters, or only words of the stop list of the team terms), no text of maisecrets itself.
 - caps: MAX_PER_IMPORT values in one import, MAX_VALUES in all, of which the imports that no value file names hold
   at most MAX_RUN_VALUES, so the person's value files always have room; MAX_IMPORTS imports.
-- each new import is named at the next session start, by id and count, and /maisecrets:list shows every import.
+- each new import is named at the next session start, by id and count, and /maisecrets list shows every import.
 """
 from __future__ import annotations
 
@@ -304,7 +304,7 @@ def _read_import(iid: str, path: Path) -> tuple[dict, list]:
                 raise ValueError
             items.append((v, t))
     except (OSError, ValueError, KeyError, IndexError, TypeError, UnicodeDecodeError):
-        raise ValuesError(f"import:{iid} is damaged, so its values cannot be masked. Your prompt /maisecrets:forget "
+        raise ValuesError(f"import:{iid} is damaged, so its values cannot be masked. Your prompt /maisecrets forget "
                           f"import:{iid} removes it.") from None
     return head, items
 
@@ -381,11 +381,11 @@ def _import_bytes(raw: bytes, key: str, origin: str = "run", build: bool = True)
             if origin != "file" and runs_n >= MAX_RUN_IMPORTS:
                 raise ValueError(f"maisecrets holds {MAX_RUN_IMPORTS} imports of commands, their limit (the other "
                                  f"{MAX_IMPORTS - MAX_RUN_IMPORTS} places are kept for your value files); "
-                                 "/maisecrets:list names them, and your prompt /maisecrets:forget import:ID "
+                                 "/maisecrets list names them, and your prompt /maisecrets forget import:ID "
                                  "removes one")
             if len(every) >= MAX_IMPORTS:
-                raise ValueError(f"maisecrets holds {MAX_IMPORTS} imports, the limit; /maisecrets:list names them, and "
-                                 "your prompt /maisecrets:forget import:ID removes one")
+                raise ValueError(f"maisecrets holds {MAX_IMPORTS} imports, the limit; /maisecrets list names them, and "
+                                 "your prompt /maisecrets forget import:ID removes one")
         # each import keeps every value it lists, also one that another import holds: a removal of that other import
         # then leaves this one whole (Gate A and Gate B, round 1). The index keeps one entry per value
         held = {terms._lower(v) for v, _t in (mine[3] if mine else [])}
@@ -419,8 +419,8 @@ def _import_bytes(raw: bytes, key: str, origin: str = "run", build: bool = True)
             else:
                 why = ""
             if why:
-                result.stopped = (f"line {n} and later not imported: {why}; /maisecrets:list names the imports, and "
-                                  "your prompt /maisecrets:forget import:ID removes one")
+                result.stopped = (f"line {n} and later not imported: {why}; /maisecrets list names the imports, and "
+                                  "your prompt /maisecrets forget import:ID removes one")
                 break
             values.append((value, type_))
             size += _line_bytes(value, type_)
@@ -509,13 +509,13 @@ def remove_typed(ids: list) -> str:
     with _lock():
         for iid in ids:
             if not value_files.ID_RE.fullmatch(iid):
-                said.append(f"import:{iid[:20]} is no import id (/maisecrets:list shows them)")
+                said.append(f"import:{iid[:20]} is no import id (/maisecrets list shows them)")
                 continue
             path = IMPORTS / f"{iid}{SUFFIX}"
             try:
                 path.unlink()
             except FileNotFoundError:
-                said.append(f"import:{iid} not found (/maisecrets:list shows the imports)")
+                said.append(f"import:{iid} not found (/maisecrets list shows the imports)")
                 continue
             except OSError as exc:
                 said.append(f"import:{iid} could not be removed ({type(exc).__name__}); nothing was changed")
@@ -707,18 +707,18 @@ def session_note(cfg: dict, started: float | None = None) -> str | None:
     if new:
         shown = ", ".join(f"import:{r['id']} ({r['count']} value(s))" for r in new[:5])
         more = f" and {len(new) - 5} more" if len(new) > 5 else ""
-        parts.append(f"from now on maisecrets masks the values of {shown}{more}. /maisecrets:list shows each "
-                     "import; your prompt /maisecrets:forget import:ID removes one.")
+        parts.append(f"from now on maisecrets masks the values of {shown}{more}. /maisecrets list shows each "
+                     "import; your prompt /maisecrets forget import:ID removes one.")
     damaged = [r["id"] for r in every if r["origin"] == "damaged"]
     if damaged:
         parts.append(f"import:{damaged[0]} is damaged, so maisecrets withholds every tool result until your prompt "
-                     f"/maisecrets:forget import:{damaged[0]} removes it.")
+                     f"/maisecrets forget import:{damaged[0]} removes it.")
     prebuild()
     return ("maisecrets: " + " ".join(parts)) if parts else None
 
 
 def summary_line() -> str:
-    """One line for /maisecrets:status and /maisecrets:rules: imports and values, no value."""
+    """One line for /maisecrets status and /maisecrets rules: imports and values, no value."""
     try:
         every = rows()
     except ValuesError as exc:

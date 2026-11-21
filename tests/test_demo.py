@@ -551,7 +551,7 @@ class DamagedStateTests(_Base):
              "a time of zero": json.dumps({SESSION: 0}), "a negative time": json.dumps({SESSION: -5.0}),
              "NaN": '{"' + SESSION + '": NaN}', "Infinity": '{"' + SESSION + '": Infinity}',
              "-Infinity": '{"' + SESSION + '": -Infinity}', "a huge number that is inf": '{"' + SESSION + '": 1e999}'}
-    ANSWER = "Demo mode: the demo state cannot be read, so nothing was sent. /maisecrets:demo off resets it."
+    ANSWER = "Demo mode: the demo state cannot be read, so nothing was sent. /maisecrets demo off resets it."
     RESET = ("Demo mode: its state could not be read, so it was reset. A session with demo lines stays in the demo "
              "until /clear; a session that had only switched it on is out of it.")
 

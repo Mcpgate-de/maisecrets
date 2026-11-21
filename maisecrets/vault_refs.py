@@ -348,7 +348,7 @@ def bind_connector(key: str, url: str) -> bool:
 
 
 def forget_connector(key: str) -> bool:
-    """`/maisecrets:sref logout NAME` of a connector: its binding and its proposal go."""
+    """`/maisecrets sref logout NAME` of a connector: its binding and its proposal go."""
     if key not in connectors() and key not in connectors(pending=True):
         return False
 
@@ -627,7 +627,7 @@ def ensure_headers(cfg: dict, backend) -> str | None:
     if not parts:
         return None
     return "; ".join(parts) + (f" (a backup of the config is kept until the next start: {backup.name}. To turn "
-                               "this off: /maisecrets:settings client_header off.)")
+                               "this off: /maisecrets settings client_header off.)")
 
 
 def _apply_config(cfg: dict, backend, lock_wait: float = 5.0,
@@ -732,7 +732,7 @@ def _notice(name: str) -> str:
     # later request carries the new header; no restart is needed
     return (f"maisecrets: the MCP server {_say_name(name)} supports {HEADER}, and maisecrets wrote its header into "
             f"the client config. {reconnect_step(name)} Then maisecrets puts this server's values into your local "
-            "files and commands; the AI still sees only placeholders. To turn it off: /maisecrets:settings "
+            "files and commands; the AI still sees only placeholders. To turn it off: /maisecrets settings "
             "client_header off. More: README, section \"Vault references\".")
 
 

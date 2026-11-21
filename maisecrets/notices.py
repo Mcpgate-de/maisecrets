@@ -56,7 +56,7 @@ def _hours(seconds: int) -> str:
 
 def send_command() -> str:
     """The command that sends the blocked prompt: `/ms` only when the person installed the shortcut (its command file
-    calls the maisecrets wrapper, cli.install_shortcut), else `/maisecrets:send`. The plugin ships no `/ms`: without
+    calls the maisecrets wrapper, cli.install_shortcut), else `/maisecrets send`. The plugin ships no `/ms`: without
     the shortcut it is an unknown command."""
     import os
     from pathlib import Path
@@ -67,7 +67,7 @@ def send_command() -> str:
             return "/ms"
     except (OSError, UnicodeDecodeError):
         pass
-    return "/maisecrets:send"
+    return "/maisecrets send"
 
 
 def launcher() -> str:
@@ -90,7 +90,7 @@ def _wrong_hit(entries: list, more: int, codex: bool) -> list[str]:
     if not keys and entries and not more:
         return []
     key = keys[0] if len(keys) == 1 and not more else "KEY"
-    return ["", f"A wrong hit? {'maisecrets: not a secret' if codex else '/maisecrets:not-a-secret'} {key}"]
+    return ["", f"A wrong hit? {'maisecrets: not a secret' if codex else '/maisecrets not-a-secret'} {key}"]
 
 
 def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: dict, vault, more: int = 0,

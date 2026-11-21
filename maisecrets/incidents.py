@@ -598,8 +598,8 @@ def _launcher() -> str:
     return launcher()
 
 
-USAGE = ("maisecrets: /maisecrets:report incident shows the incident report; "
-         "/maisecrets:report incident <code/cause> shows one group. "
+USAGE = ("maisecrets: /maisecrets report incident shows the incident report; "
+         "/maisecrets report incident <code/cause> shows one group. "
          f"Clear the record in a terminal: {_launcher()} report incident clear")
 
 
@@ -674,7 +674,7 @@ def render(groups: dict, selector: str | None, markers: list[str] | None = None)
         lines += ["", f"Report for {_key(g)}:", "", title, "", body, "", _link(title, body)]
         others = [k for k in shown if k != _key(g)]
         if others:
-            lines.append("Other groups: /maisecrets:report incident " + others[0]
+            lines.append("Other groups: /maisecrets report incident " + others[0]
                          + (f" (and {len(others) - 1} more)" if len(others) > 1 else ""))
     return "\n".join(lines)
 

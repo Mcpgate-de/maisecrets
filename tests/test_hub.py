@@ -213,7 +213,7 @@ class NameServiceTests(unittest.TestCase):
             out = ask(action="ner_set", value="local")
             self.assertTrue(out.get("starting"))
         # no question first: the press is the person's choice, and the note says what happens and how to turn it off
-        self.assertIn("To turn it off: /maisecrets:ner off", out["note"])
+        self.assertIn("To turn it off: /maisecrets ner off", out["note"])
         (call,) = [c for c in popen.call_args_list if "maisecrets.cli" in c.args[0]]
         self.assertEqual(call.args[0][1:], ["-m", "maisecrets.cli", "ner", "start"])
         self._detached(call, os.name)
@@ -291,7 +291,7 @@ class StatusTests(unittest.TestCase):
         self.assertIn("protects this session", out["line"])
         self.assertNotIn("NOT protecting", out["line"])
         self.assertEqual(self._hooks_note(out),
-                         [{"name": "hooks", "fact": "not seen in this session yet", "next": "/maisecrets:status"}])
+                         [{"name": "hooks", "fact": "not seen in this session yet", "next": "/maisecrets status"}])
 
     def test_a_session_whose_hook_ran_has_no_note_on_the_hooks(self):
         hooks._run_log("session-start", {"session_id": "ran-once"}, "answer", "pass", 0)

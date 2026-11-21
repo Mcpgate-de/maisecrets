@@ -1,13 +1,14 @@
 """Cowork (the Claude desktop app's Cowork tab) marks its sessions with CLAUDE_CODE_ENTRYPOINT=remote_cowork and knows
-a plugin's commands by their short name only (maisecrets/cowork.py). Measured live on 2026-11-21: before the fix, a
-command typed in Cowork showed nothing, and the status output named `/maisecrets:status test`, which Cowork answers
-with "unknown skill".
+a plugin's commands by their short name only: `/maisecrets`, the entry (maisecrets/cowork.py). Measured live on
+2026-11-21: a command typed in Cowork showed nothing, and Cowork shows no blocked or dropped prompt; the text form
+`maisecrets: term add NAME` shows the hook's answer.
 
 Synthetic values only.
 Run: python3 -m unittest tests.test_cowork -v
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -21,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
-from maisecrets import cowork, hooks, prompt_commands  # noqa: E402
+from maisecrets import cowork, forms, hooks, prompt_commands  # noqa: E402
 import _hygiene  # noqa: E402
 
 SESSION = "0b6f1c2e-0000-4000-8000-0000000000c7"
@@ -39,20 +40,53 @@ def _dispatch(*argv: str, env: dict, stdin: str = "") -> subprocess.CompletedPro
                           capture_output=True, text=True, env=full, cwd=str(ROOT), timeout=120)
 
 
-class ShortTests(unittest.TestCase):
-    def test_each_long_command_name_becomes_the_short_one(self):
-        self.assertEqual(cowork.short("→  /maisecrets:status test, then /maisecrets:sref login gw"),
-                         "→  /status test, then /sref login gw")
+class FormsTests(unittest.TestCase):
+    """Cowork shows no answer of the prompt hook to a slash command; it shows one for the text form."""
 
-    def test_other_text_stays(self):
-        for text in ("maisecrets: list", "/maisecrets", "/maisecrets:", "plugin maisecrets:2"):
-            self.assertEqual(cowork.short(text), text)
+    def test_a_command_the_hook_answers_is_named_as_text(self):
+        for slash, text in (("/maisecrets term add NAME", "maisecrets: term add NAME"),
+                            ("/maisecrets term remove NAME", "maisecrets: term remove NAME"),
+                            ("/maisecrets not-a-secret KEY", "maisecrets: not a secret KEY"),
+                            ("/maisecrets not-a-secret undo KEY", "maisecrets: undo not a secret KEY"),
+                            ("/maisecrets demo on", "maisecrets: demo on"),
+                            ("/maisecrets settings ssh_consent on", "maisecrets: set ssh_consent on"),
+                            ("/maisecrets settings rule_dirs add DIR", "maisecrets: set rule_dirs add DIR"),
+                            ("/maisecrets settings ssh_autonomous_hosts add HOST", "maisecrets: ssh autonomous HOST"),
+                            ("/maisecrets settings ssh_autonomous_hosts remove HOST", "maisecrets: ssh ask HOST"),
+                            ("/maisecrets settings hints reset", "maisecrets: reset hints"),
+                            ("/maisecrets forget import:ID", "maisecrets: forget import:ID"),
+                            ("/maisecrets ner local", "maisecrets: ner local")):
+            with self.subTest(slash):
+                self.assertEqual(forms.cowork(f"→ {slash}."), f"→ {text}.")
+
+    def test_each_text_form_is_one_the_mod_answers(self):
+        # the parsers the mod's command branch reads (prompt_commands.mod_command)
+        from maisecrets import demo, not_a_secret, settings, term_files, value_files
+        for text in ("maisecrets: term add Wibbleton Q", "maisecrets: not a secret NAME_c1",
+                     "maisecrets: undo not a secret NAME_c1", "maisecrets: demo on", "maisecrets: set ssh_consent on",
+                     "maisecrets: ssh autonomous web1", "maisecrets: reset hints", "maisecrets: forget import:abc",
+                     "maisecrets: ner local", "maisecrets: set rule_dirs add /tmp/rules"):
+            with self.subTest(text):
+                self.assertTrue(term_files.parse_command(text) or not_a_secret.parse(text) or demo.parse(text)
+                                or settings.parse_prompt(text) or value_files.parse_removal(text), text)
+
+    def test_a_command_its_file_shows_keeps_the_slash(self):
+        for text in ("/maisecrets status test", "/maisecrets list", "/maisecrets term", "/maisecrets settings",
+                     "/maisecrets settings all", "/maisecrets forget SECRET_c1", "/maisecrets sref login gw",
+                     "/maisecrets ner", "/maisecrets ner all", "maisecrets: list"):
+            self.assertEqual(forms.cowork(text), text)
+
+    def test_codex_gets_its_form(self):
+        self.assertEqual(forms.codex("run /maisecrets status test or /maisecrets:list; /maisecrets:secret-hygiene"),
+                         "run maisecrets: status test or maisecrets: list; /maisecrets:secret-hygiene")
 
     def test_active_reads_the_entry_point(self):
         with mock.patch.dict(os.environ, COWORK):
             self.assertTrue(cowork.active())
+            self.assertEqual(forms.for_this_client("/maisecrets demo on"), "maisecrets: demo on")
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
             self.assertFalse(cowork.active())
+            self.assertEqual(forms.for_this_client("/maisecrets demo on"), "/maisecrets demo on")
 
 
 class ModCommandTests(unittest.TestCase):
@@ -90,7 +124,7 @@ class HookAnswerTests(unittest.TestCase):
         self.assertNotIn("drop", out)
         self.assertIn("on your list now", out["text"])
         self.assertTrue(out["text"].startswith(cowork._SHOW))
-        self.assertIn("/term shows them", out["text"])
+        self.assertIn("/maisecrets term shows them", out["text"])
         self.assertNotIn("/maisecrets:", out["text"])
         self.assertNotIn(self.tm.NAME, out["text"], "the model gets the answer, never the term")
         masked = self.tm._mod(f"write to {self.tm.NAME} today")
@@ -114,28 +148,38 @@ class HookAnswerTests(unittest.TestCase):
 
 
 class OutputTests(unittest.TestCase):
-    def test_the_status_output_names_the_short_commands_in_cowork(self):
-        r = _dispatch("status", env=COWORK)
+    def test_a_command_output_names_the_text_form_in_cowork(self):
+        r = _dispatch("terms", env=COWORK)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("/status all", r.stdout)
+        self.assertIn("maisecrets: term add", r.stdout)
+        self.assertNotIn("/maisecrets term add", r.stdout)
         self.assertNotIn("/maisecrets:", r.stdout + r.stderr)
 
-    def test_the_status_output_keeps_the_long_names_elsewhere(self):
-        r = _dispatch("status", env={})
+    def test_the_output_keeps_the_slash_form_elsewhere(self):
+        r = _dispatch("terms", env={})
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("/maisecrets:status all", r.stdout)
+        self.assertIn("/maisecrets term add", r.stdout)
+        r = _dispatch("status", env={})
+        self.assertIn("/maisecrets status all", r.stdout)
 
     def test_a_tool_hook_keeps_the_tool_output_as_it_is(self):
         # a file that names a command (a README, a command file) reaches the model unchanged, so an edit of it matches
         token = "ghp_" + "R7kQ2mZx9VbT4nLp8WcY3sHd6FjA1uEo5GiN"     # a token shape the hook masks, so it answers
-        text = f"run /maisecrets:status test to check it\ntoken={token}"
+        text = f"run /maisecrets:status test and /maisecrets demo on to check it\ntoken={token}"
         payload = {"session_id": SESSION, "hook_event_name": "PostToolUse", "tool_name": "Bash",
                    "tool_input": {"command": "cat README.md"}, "tool_response": {"stdout": text, "stderr": ""},
                    "cwd": str(ROOT)}
         r = _dispatch("post-tool", env=COWORK, stdin=json.dumps(payload))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn(token, r.stdout)
-        self.assertIn("/maisecrets:status test", r.stdout)
+        self.assertIn("run /maisecrets:status test and /maisecrets demo on", r.stdout)
+
+    def test_a_refusal_the_ai_relays_names_the_text_form_in_cowork(self):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, COWORK), mock.patch.object(sys, "stdout", out):
+            hooks._out({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                               "permissionDecisionReason": "type /maisecrets demo on yourself"}})
+        self.assertIn("type maisecrets: demo on yourself", out.getvalue())
 
 
 if __name__ == "__main__":

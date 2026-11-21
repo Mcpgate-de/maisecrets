@@ -33,7 +33,7 @@ RATE_SAMPLES, RATE_MIN, RATE_MIN_CHARS = 40, 5, 500
 
 def from_config(cfg: dict, fallback: bool = False, deadline: float | None = None) -> tuple:
     """(RemoteDetector or None, the reason it is not used, or ""). A setting it cannot use leaves the rules alone.
-    fallback: the detector of the setting's `fallback` (/maisecrets:ner fallback url URL), with the tuning keys of the
+    fallback: the detector of the setting's `fallback` (/maisecrets ner fallback url URL), with the tuning keys of the
     setting itself. `deadline`: the end of a prompt's whole wait, which the gateway's discovery and token share."""
     conf = cfg.get("remote_detector") or {}
     if not isinstance(conf, dict) or not conf.get("url"):
@@ -260,12 +260,12 @@ NETWORK_PROMPT_TIMEOUT_MS = 2000
 
 
 def prompt_names(cfg: dict, prompt: str, matches: list, protect_of, typed: bool = True) -> tuple:
-    """(names, why) for a prompt the mod rewrites (Claude Code): the names the service of /maisecrets:ner finds
+    """(names, why) for a prompt the mod rewrites (Claude Code): the names the service of /maisecrets ner finds
     become placeholders like the rules' findings (`matches`), and nothing is blocked for a name. `why` is "" when the
     service answered or was not asked, else why it did not check the prompt (the reason or the state of its status:
     timeout, too_long, refused, unauthorized …): the prompt keeps the rules alone, and the person is told.
     Any source that is set reads a typed prompt, as it reads tool results (C30, C30a): the person chose it with
-    /maisecrets:ner. Only a machine policy's `"prompts": false` keeps prompts from it (home.load_config drops the
+    /maisecrets ner. Only a machine policy's `"prompts": false` keeps prompts from it (home.load_config drops the
     key from the person's own file). A fallback never reads a prompt, and a prompt of a program never goes to a
     service on the network.
     The rules' findings and the stored values (`protect_of()`) go out as filler.
@@ -301,7 +301,7 @@ def prompt_names(cfg: dict, prompt: str, matches: list, protect_of, typed: bool 
 
 
 UNCHECKED_NOTE = ("maisecrets: the names in this prompt were not checked by the name service ({why}); the rules "
-                  "ran. /maisecrets:ner shows the service. This note comes once per session.")
+                  "ran. /maisecrets ner shows the service. This note comes once per session.")
 _WHY = {"timeout": "no answer in time", "too_long": "the prompt is longer than max_chars", "refused": "not running",
         "unauthorized": "it wants another bearer", "policy": "the address is not on this computer"}
 
@@ -346,7 +346,7 @@ _TOOL_WHY = {"timeout": "no answer in time", "too_long": "the text is longer tha
              "http": "the service answered with an error", "busy": "the gateway was busy",
              "rate_limited": "the gateway's limit per minute was reached",
              "forbidden": "the login lacks the name scope",
-             "setup": "the source cannot be asked; /maisecrets:ner names the reason"}
+             "setup": "the source cannot be asked; /maisecrets ner names the reason"}
 
 # the person's screen, one line per tool result: the same words for every source (a missed name must not look like a
 # clean result, and a name the AI writes must not look like one the AI made up)
@@ -354,7 +354,7 @@ _SCREEN_WHY = {"timeout": "did not answer in time", "too_long": "does not take a
                "refused": "is not running", "network": "could not be reached", "busy": "was busy",
                "rate_limited": "reached its limit per minute", "forbidden": "refused the login",
                "not_ours": "is not the container maisecrets started", "policy": "is at an address it may not use",
-               "setup": "cannot be asked; /maisecrets:ner names the reason"}
+               "setup": "cannot be asked; /maisecrets ner names the reason"}
 
 
 def screen_line(why: str, withheld: bool) -> str:
@@ -362,7 +362,7 @@ def screen_line(why: str, withheld: bool) -> str:
     said = _SCREEN_WHY.get(why, "gave no usable answer")
     if withheld:
         return (f"⚠ maisecrets withheld this result from the AI: names not checked, the name service {said}. "
-                "/maisecrets:ner unavailable rules lets the rules alone mask it.")
+                "/maisecrets ner unavailable rules lets the rules alone mask it.")
     return f"⚠ names not checked: the name service {said}; the rules masked this result."
 
 
@@ -381,7 +381,7 @@ def withhold_text(why: str) -> str:
     """What the AI reads in place of a withheld tool result."""
     said = _TOOL_WHY.get(why, "no usable answer")
     return (f"[maisecrets withheld this tool result: the name service gave no result ({said}), and the person chose "
-            "to keep such a result from you (/maisecrets:ner unavailable withhold). The tool ran and finished. Do NOT "
+            "to keep such a result from you (/maisecrets ner unavailable withhold). The tool ran and finished. Do NOT "
             "run it again to see the output; tell the user, who can check the result in their terminal.]")
 
 # the setting of the source the last prepare() of this process asked (ner_health.clear compares it)
@@ -408,7 +408,7 @@ def note_result(layer) -> None:
 
 
 def hint(payload: dict, codex: bool = False):
-    """Once per session, when the service of /maisecrets:ner did not answer: the person learns that names went
+    """Once per session, when the service of /maisecrets ner did not answer: the person learns that names went
     unmasked by it. Not in a subagent: it has no conversation with the person. A line for the person, so only where a
     person sees it (settings.person_sees_hook_lines); elsewhere it is not claimed."""
     from . import ner_setup, settings

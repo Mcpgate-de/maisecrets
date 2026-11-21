@@ -418,10 +418,10 @@ def _token(cfg: dict, found: dict, form: dict, deadline: float, patient: bool = 
             or not isinstance(data.get("refresh_token"), str):
         code = data.get("error") if isinstance(data, dict) else None
         if code == "invalid_grant" and status == 400:
-            raise _Revoked(f"the gateway no longer accepts the login (HTTP {status}); send /maisecrets:sref login "
+            raise _Revoked(f"the gateway no longer accepts the login (HTTP {status}); send /maisecrets sref login "
                            "again (with the server's name when more than one offers references)")
         raise Refused(f"the gateway gave no token (HTTP {status}"
-                      f"{', ' + code if code in _TOKEN_ERRORS else ''}); send /maisecrets:sref login again")
+                      f"{', ' + code if code in _TOKEN_ERRORS else ''}); send /maisecrets sref login again")
     return data
 
 
@@ -592,7 +592,7 @@ def _refresh_locked(cfg: dict, backend, found: dict, stale: str | None, deadline
     try:
         rec = _load(backend, found["origin"])
         if not rec.get("refresh"):
-            raise Refused(f"maisecrets is not logged in at {host}; the person runs /maisecrets:sref login")
+            raise Refused(f"maisecrets is not logged in at {host}; the person runs /maisecrets sref login")
         got = _fresh(rec, stale, margin)
         if got:
             return got
@@ -617,7 +617,7 @@ def _refresh_locked(cfg: dict, backend, found: dict, stale: str | None, deadline
                 _mark_ended(found["origin"], "uncertain")
                 _set_inflight(found["origin"], None)
                 raise _Revoked(f"the last renewal of the login at {host} did not finish, so its token may be spent; "
-                               "send /maisecrets:sref login again")
+                               "send /maisecrets sref login again")
             data = _retry(cfg, backend, found, form, old, sent_at, retry)
         else:
             sent_at = time.time()
@@ -953,7 +953,7 @@ def _access(cfg: dict, backend, found: dict, deadline: float, stale: str | None 
             renew_ahead(cfg, backend, found)      # less than RENEW_AHEAD left: renewed now, in the background
         return got
     if not rec.get("refresh"):
-        raise Refused(f"maisecrets is not logged in at {host}; the person runs /maisecrets:sref login")
+        raise Refused(f"maisecrets is not logged in at {host}; the person runs /maisecrets sref login")
     try:
         kind = _KINDS.get(type(backend).__name__)
         if kind is None:
@@ -1071,15 +1071,15 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
         raise Refused(f"{host} reached the daily limit of resolved values; try again tomorrow")
     if status == 401:
         raise Refused(f"the login at {host} is no longer valid (consent withdrawn or expired); "
-                      "the person runs /maisecrets:sref login")
+                      "the person runs /maisecrets sref login")
     if status == 403:
         if code == "insufficient_scope" and sink_type == "display":
             raise Refused(f"the login at {host} does not allow showing values on the screen; the person runs "
-                          "/maisecrets:sref login again and allows it on the consent page")
+                          "/maisecrets sref login again and allows it on the consent page")
         if code == "insufficient_scope" and sink_type == "process":
             # mcpgate 2.0.3815: a command needs a login whose consent allowed it; a file still works
             raise Refused(f"the login at {host} does not allow real values in commands; the person runs "
-                          "/maisecrets:sref login again and allows commands on the consent page")
+                          "/maisecrets sref login again and allows commands on the consent page")
         why = _FORBIDDEN.get(code, "forbidden") if isinstance(code, str) else "forbidden"
         raise Refused(f"{host} refused the resolve ({why})")
     raise Refused(f"{host} gave no usable answer (HTTP {status})")

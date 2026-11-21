@@ -137,7 +137,7 @@ class RecordAfterTheAnswerTests(_Clean):
 
     def test_the_fail_closed_line_names_the_report_for_each_client(self):
         claude = hooks._fail_closed("pre-tool", CLAUDE, "x")["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertIn("Type /maisecrets:report incident", claude)
+        self.assertIn("Type /maisecrets report incident", claude)
         codex = hooks._fail_closed("pre-tool", CODEX, "x")["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn(hooks._run_sh() + " report incident", codex)
         self.assertTrue(os.path.isabs(hooks._run_sh()))

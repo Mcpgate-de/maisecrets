@@ -142,7 +142,7 @@ class ShortcutTests(unittest.TestCase):
         self.assertIn("removed:", out)
         self.assertEqual(self.commands(), [], "no /remove or /status command was written")
         rc, out = _run(cli.cmd_shortcut, ["STATUS"])
-        self.assertEqual(out.strip(), "The shortcut is not installed. Install it: /maisecrets:shortcut install NAME")
+        self.assertEqual(out.strip(), "The shortcut is not installed. Install it: /maisecrets shortcut install NAME")
         self.assertEqual(self.commands(), [])
 
     def test_status_of_a_command_file_that_is_no_text_says_not_installed(self):
@@ -165,7 +165,7 @@ class ShortcutTests(unittest.TestCase):
         rc, out = _run(cli.cmd_shortcut, ["status"])
         self.assertEqual(rc, 0)
         self.assertIn("The shortcut is incomplete", out)
-        self.assertIn("/maisecrets:shortcut install NAME", out)
+        self.assertIn("/maisecrets shortcut install NAME", out)
         # the shortcut of now needs no wrapper
         self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
         self.assertEqual(_run(cli.cmd_shortcut, ["status"])[1].strip(), "The shortcut is installed.")
@@ -204,7 +204,7 @@ class ShortcutTests(unittest.TestCase):
             with self.subTest(args=args):
                 rc, out = _run(cli.cmd_shortcut, args)
                 self.assertEqual(rc, 2)
-                self.assertIn("usage: /maisecrets:shortcut", out)
+                self.assertIn("usage: /maisecrets shortcut", out)
                 self.assertEqual(self.commands(), ["victim.md"])
 
 
@@ -217,13 +217,13 @@ class SettingsTests(unittest.TestCase):
         rc, out = _run(cli.cmd_settings, ["tips", "off", "extra"])
         self.assertEqual(rc, 1)
         self.assertIn("too many words", out)
-        self.assertIn("/maisecrets:settings tips VALUE", out)
+        self.assertIn("/maisecrets settings tips VALUE", out)
         self.assertNotIn("is no setting", out)
 
     def test_the_host_list_with_too_many_words_names_its_own_form(self):
         rc, out = _run(cli.cmd_settings, ["ssh_autonomous_hosts", "add", "a.example.com", "b.example.com"])
         self.assertEqual(rc, 1)
-        self.assertIn("/maisecrets:settings ssh_autonomous_hosts add|remove HOST as your own prompt", out)
+        self.assertIn("/maisecrets settings ssh_autonomous_hosts add|remove HOST as your own prompt", out)
         self.assertNotIn("VALUE", out)
 
     def test_codex_gets_the_codex_form(self):
@@ -231,7 +231,7 @@ class SettingsTests(unittest.TestCase):
         with mock.patch.object(cli, "_client_now", return_value="codex"):
             _rc, out = _run(cli.cmd_settings, ["tips", "off", "extra"])
             self.assertIn("Send maisecrets: set tips VALUE (one value) as your own prompt", out)
-            self.assertNotIn("/maisecrets:settings", out.splitlines()[0])
+            self.assertNotIn("/maisecrets settings", out.splitlines()[0])
             _rc, out = _run(cli.cmd_settings, ["ssh_autonomous_hosts", "add", "a.example.com", "b.example.com"])
             self.assertIn("Send maisecrets: ssh autonomous|ask HOST as your own prompt", out)
 
@@ -250,11 +250,11 @@ class NerTests(unittest.TestCase):
 
     def test_a_known_word_without_its_value_names_what_is_missing(self):
         before = CONFIG.read_text()
-        for word, want in (("gateway", "gateway needs a server name or URL: /maisecrets:ner gateway NAME"),
-                           ("url", "url needs the address of the service: /maisecrets:ner url URL"),
-                           ("updates", "updates needs on or off: /maisecrets:ner updates on"),
-                           ("unavailable", "unavailable needs rules or withhold: /maisecrets:ner unavailable rules"),
-                           ("fallback", "fallback needs url URL or off: /maisecrets:ner fallback url URL")):
+        for word, want in (("gateway", "gateway needs a server name or URL: /maisecrets ner gateway NAME"),
+                           ("url", "url needs the address of the service: /maisecrets ner url URL"),
+                           ("updates", "updates needs on or off: /maisecrets ner updates on"),
+                           ("unavailable", "unavailable needs rules or withhold: /maisecrets ner unavailable rules"),
+                           ("fallback", "fallback needs url URL or off: /maisecrets ner fallback url URL")):
             with self.subTest(word=word):
                 out = self._prompt(f"/maisecrets:ner {word}")
                 self.assertIn(want, out)
@@ -269,7 +269,7 @@ class NerTests(unittest.TestCase):
         with mock.patch.object(ner_setup, "_servers", return_value=servers):
             word, answer = ner_setup.typed_word("other:gateway")
         self.assertIsNone(word)
-        self.assertIn("2 server(s) of your configuration can be named; /maisecrets:sref lists them.", answer)
+        self.assertIn("2 server(s) of your configuration can be named; /maisecrets sref lists them.", answer)
         self.assertNotIn(value[:8], answer)
         self.assertNotIn("team-gw", answer)
         with mock.patch.object(ner_setup, "_servers", return_value={}):
@@ -399,7 +399,7 @@ class ArgumentTests(unittest.TestCase):
         cfg = Path(tempfile.mkdtemp(prefix="maisecrets-cfg-"))
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(cfg)}):
             rc, out = _run(cli.cmd_guard, [])
-            self.assertEqual(out.splitlines()[0], "The guard is not installed. Install it: /maisecrets:guard install")
+            self.assertEqual(out.splitlines()[0], "The guard is not installed. Install it: /maisecrets guard install")
             self.assertNotIn("heartbeat", out)
             rc, out = _run(cli.cmd_guard, ["bogus"])
         self.assertEqual(out.splitlines()[0], "maisecrets guard: the first word is no form of this command; it takes "

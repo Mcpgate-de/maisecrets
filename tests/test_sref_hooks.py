@@ -267,7 +267,7 @@ class SrefBashTests(unittest.TestCase):
         out = self.bash(f"printf %s {self.shown}")
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("/maisecrets:sref login", reason)
+        self.assertIn("/maisecrets sref login", reason)
         rest = reason.replace(self.shown, "").replace(self.ref, "")
         self.assertNotIn(self.ref[6:-1].split(":")[-1], rest, "no id beyond the reference")
 
@@ -280,22 +280,22 @@ class SrefBashTests(unittest.TestCase):
     def test_without_a_login_the_first_result_tells_the_person_once_per_session(self):
         first = self.gateway_result("s1").get("systemMessage") or ""
         self.assertIn("offers Sensitive References", first)
-        self.assertIn("/maisecrets:sref login", first)
+        self.assertIn("/maisecrets sref login", first)
         self.assertNotIn("offers Sensitive References", self.gateway_result("s1").get("systemMessage") or "")
         self.assertIn("offers Sensitive References", self.gateway_result("s2").get("systemMessage") or "")
         self.assertEqual(self.srv.resolved, [])          # a hint resolves nothing and opens no browser
 
     def test_the_hint_names_the_server_and_why_the_browser_opens(self):
         first = self.gateway_result("s1").get("systemMessage") or ""
-        self.assertIn("send /maisecrets:sref login gw once", first)
+        self.assertIn("send /maisecrets sref login gw once", first)
         self.assertIn("your browser opens, and you give your consent at the gateway", first)
 
     def test_the_login_offer_comes_once_per_session_after_the_hint_and_never_with_a_login(self):
         self.assertIsNone(sref_hooks.login_offer("s1"))          # no reference yet: no offer
         self.gateway_result("s1")
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
         # asking records nothing: only a fill that happened (login_offered) ends the offer
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
         self.assertEqual(hub.mod_answer({"action": "login_offered", "session_id": "s1",
                                          "fill": "/maisecrets:sref login gw"}), {"recorded": True})
         self.assertIsNone(sref_hooks.login_offer("s1"))          # once per session and gateway
@@ -328,7 +328,7 @@ class SrefBashTests(unittest.TestCase):
         cfg["mcpServers"]["g\u00e4tew\u00e4y"] = {"type": "http", "url": url.replace("/mcp", "/third/mcp")}
         (self.profile / ".claude.json").write_text(json.dumps(cfg))
         self.gateway_result("s1")                                 # sent by gw, the same origin as aa-other
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
         hooks._post_tool_guarded({"tool_name": "mcp__g\u00e4tew\u00e4y__read", "session_id": "s2", **CLAUDE,
                                   "mcp_server": {"name": "g\u00e4tew\u00e4y", "source": "user"}, "tool_input": {},
                                   "tool_response": {"content": [{"type": "text", "text": "author: " + self.shown}]}})
@@ -353,7 +353,7 @@ class SrefBashTests(unittest.TestCase):
         self.connector_result()                                        # before the binding: nothing is noted
         self.assertEqual(self.bash(f"printf %s {self.shown}")["hookSpecificOutput"]["permissionDecision"], "deny")
         out = sref_hooks.connector_answer("s1", "claude_ai_Team_GW", self.answer())
-        self.assertEqual(out["fill"], "/maisecrets:sref login Team_GW")
+        self.assertEqual(out["fill"], "/maisecrets sref login Team_GW")
         self.assertIn("your claude.ai connector Team_GW names 127.0.0.1", out["note"])
         self.assertEqual(vault_refs.connectors(), {})                  # a proposal only
         self.assertEqual(vault_refs.connectors(pending=True), {"Team_GW": self.srv.url + "/mcp"})
@@ -514,7 +514,7 @@ class SrefBashTests(unittest.TestCase):
                 self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
                 reason = out["hookSpecificOutput"]["permissionDecisionReason"]
                 self.assertIn("did not receive", reason)
-                self.assertIn("/maisecrets:sref login", reason)
+                self.assertIn("/maisecrets sref login", reason)
         self.assertEqual(self.srv.resolved, [])
 
     def test_a_file_with_a_reference_no_session_received_is_not_written(self):
@@ -656,7 +656,7 @@ class SrefBashTests(unittest.TestCase):
         self.assertEqual(run.returncode, 97)
         self.assertEqual(run.stdout, "", "printf never ran")
         self.assertIn("does not allow real values in commands", run.stderr)
-        self.assertIn("/maisecrets:sref login", run.stderr)
+        self.assertIn("/maisecrets sref login", run.stderr)
         self.assertNotIn("served for 120 s", run.stderr)
         self.assertNotIn(VALUE, run.stderr)
         self.assertEqual(self.srv.resolved, [], "the gateway gave no value")
