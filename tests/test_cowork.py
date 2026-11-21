@@ -95,7 +95,8 @@ class FormsTests(unittest.TestCase):
 
     def test_clear_is_rewritten_only_where_it_is_the_command(self):
         # a path or a longer word keeps its text: the rewrite runs before the mask, on the text the AI gets
-        for text in ("~/clear", "/clear-cache", "/clear/x", "./clear", "a/clear", "x.y/clear", "-/clear"):
+        for text in ("~/clear", "/clear-cache", "/clear/x", "./clear", "a/clear", "x.y/clear", "-/clear",
+                     "rm /clear.log", "x=/clear"):
             with self.subTest(text):
                 self.assertEqual(forms.cowork(f"see {text} now"), f"see {text} now")
         self.assertEqual(forms.cowork("type /clear."), "type a new task.")

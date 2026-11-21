@@ -74,8 +74,9 @@ _CLEAR = [
     (LazyRx(r"/clear to switch it off"), "Start a new task to switch it off"),
     (LazyRx(r"/clear (switches it off|ends the demo|starts a new)"), r"A new task \1"),
     (LazyRx(r"in a new session \(or after /clear\)"), "in a new task"),
-    # the command only: not a path or a word that holds it (`~/clear`, `/clear-cache`, `/clear/x`)
-    (LazyRx(r"(?<![\w/~.-])/clear(?![\w/-])"), "a new task"),
+    # the command only: not a path, a file name or a word that holds it (`~/clear`, `/clear-cache`, `/clear.log`,
+    # `x=/clear`)
+    (LazyRx(r"(?<![\w/~.=-])/clear(?![\w/-]|\.\w)"), "a new task"),
 ]
 
 
