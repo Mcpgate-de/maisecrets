@@ -135,7 +135,10 @@ test('the pane lists the settings, and a press changes the value through the ent
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /Put values into tool calls/ })).toBeDefined()
-    expect((await ui.find({ key: 'set:rehydration:automatic' }))?.text).toMatch(/● automatic/)
+    // the terminal marks the chosen button with a dot; the desktop app fills it, so its label is the word alone
+    const chosen = await ui.find({ key: 'set:rehydration:automatic' })
+    if (surface === 'terminal') expect(chosen?.text).toMatch(/● automatic/)
+    else expect(chosen?.text).toBe('automatic')
     await ui.unmount()
   }
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -146,7 +149,13 @@ test('the pane lists the settings, and a press changes the value through the ent
   const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await again.find({ key: 'set:rehydration:confirm' }))?.text).toMatch(/● confirm ✎/)
   expect(await again.find({ type: 'Text', text: /^Saved\./ })).toBeDefined()
+  expect(await again.find({ type: 'Text', text: /^set by you$/ })).toBeUndefined()
   await again.unmount()
+  // the desktop app: "set by you" is grey text after the buttons, not a mark in the chosen one
+  const desk = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await desk.find({ key: 'set:rehydration:confirm' }))?.text).toBe('confirm')
+  expect(await desk.find({ type: 'Text', text: /^set by you$/ })).toBeDefined()
+  await desk.unmount()
 })
 
 test('/maisecrets alone opens the same pane: a status line, the views, and the old-leaks button', async ($, on) => {

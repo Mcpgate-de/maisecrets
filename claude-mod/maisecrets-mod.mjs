@@ -1197,6 +1197,9 @@ function drawSettings($, e) {
   if (pane.view === 'ner') return drawNer($, e, Box, Text, Button)
   if (pane.sub === 'regions') { const t = drawCountries($, e, Box, Text, Button); if (t) return t }
   const narrow = (e.props?.bodyColumns ?? 100) < NARROW
+  // the desktop app fills a chosen button: no dot in it, and "set by you" goes after the buttons as grey text (the
+  // terminal keeps both in the button: there a fill alone can be lost)
+  const desk = e.surface === 'desktop'
   const rows = []
   // the top stays in view on a short terminal: the status, the last change, the buttons
   if (pane.hint) rows.push(h(Text, { color: 'yellow', key: 'hint' }, pane.hint))
@@ -1259,17 +1262,18 @@ function drawSettings($, e) {
           // several countries: a toggle per code; one value: the current one
           const now = it.multi && Array.isArray(it.values) ? it.values.includes(c) : c === it.value
           const shown = (it.labels && it.labels[c]) || c
-          const props = { key: `set:${it.key}:${c}`, label: now ? `● ${shown}${it.mark ? ' ' + it.mark : ''}` : shown,
-            onPress: () => pick($, it.key, c) }
+          const props = { key: `set:${it.key}:${c}`,
+            label: now && !desk ? `● ${shown}${it.mark ? ' ' + it.mark : ''}` : shown, onPress: () => pick($, it.key, c) }
           if (now) props.variant = 'primary'
           else props.dimColor = true
           cells.push(h(Box, { marginRight: 1, flexShrink: 0, key: `b:${c}` }, h(Button, props)))
         }
+        if (desk && it.mark === '✎') cells.push(h(Text, { dimColor: true, key: 'mark' }, 'set by you'))
       }
       const label = h(Text, { key: 'label', wrap: 'truncate-end' }, '  ' + it.label)
       if (narrow) {
         rows.push(h(Box, { flexDirection: 'column', key: `r:${it.key}` }, label,
-          h(Box, { flexDirection: 'row', flexWrap: 'wrap', marginLeft: 4, key: 'c' }, ...cells)))
+          h(Box, { flexDirection: 'row', flexWrap: 'wrap', marginLeft: desk ? 2 : 4, key: 'c' }, ...cells)))
       } else {
         rows.push(h(Box, { flexDirection: 'row', key: `r:${it.key}` },
           h(Box, { width: 44, flexShrink: 0, key: 'l' }, label), h(Box, { flexDirection: 'row', key: 'c' }, ...cells)))
