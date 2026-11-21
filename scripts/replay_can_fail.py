@@ -191,7 +191,8 @@ def restored_on_any_exit(target: Path, original: str):
         target.write_bytes(original.encode("utf-8"))
         signal.signal(signum, previous.get(signum, signal.SIG_DFL))
         raise SystemExit(128 + signum)
-    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    # SIGHUP does not exist on Windows
+    for sig in [getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, n)]:
         try:
             previous[sig] = signal.signal(sig, restore_and_die)
         except (ValueError, OSError):
