@@ -504,6 +504,13 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         _run_log("session" + "-start", payload, "answer", "pass", 0)
     except Exception:  # noqa: BLE001 - a log row never stops a session start
         pass
+    if not codex:
+        try:
+            # a /ms of 0.9.21 and before only sent the blocked prompt: it becomes the entry (/ms status)
+            from maisecrets.cli import upgrade_shortcuts  # noqa: E402
+            upgrade_shortcuts()
+        except Exception:  # noqa: BLE001 - an upgrade never stops a session start
+            pass
     if isinstance(out.get("systemMessage"), str):
         from maisecrets import forms  # noqa: E402
         out["systemMessage"] = forms.for_this_client(out["systemMessage"])   # Cowork: a hook's command as text

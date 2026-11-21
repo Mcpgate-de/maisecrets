@@ -703,6 +703,38 @@ def install_shortcut(name: str = "ms", only_if_absent: bool = False) -> "tuple[s
     return str(target), ""
 
 
+def upgrade_shortcuts() -> list[str]:
+    """A shortcut of 0.9.21 and before (it only sent the blocked prompt, through the wrapper) becomes the entry, under
+    its own name; the wrapper goes when no shortcut uses it. A command file of the user is never touched. The names
+    of the files it rewrote."""
+    from pathlib import Path as _P
+    from .vault import HOME
+    commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
+    done = []
+    try:
+        files = sorted(commands.glob("*.md"))
+    except OSError:
+        return done
+    for p in files:
+        try:
+            text = p.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if SHORTCUT_MARKS[1] in text and SHORTCUT_MARK not in text and text.lstrip().startswith("---"):
+            try:
+                install_shortcut(p.stem)
+                done.append(p.name)
+            except OSError:
+                continue
+    wrapper = HOME / "bin" / "ms.sh"
+    if done and wrapper.exists() and not _shortcuts_using_the_wrapper(commands):
+        try:
+            wrapper.unlink()
+        except OSError:
+            pass
+    return done
+
+
 def remove_shortcut(name: str = "ms") -> list[str]:
     """Undo install_shortcut: delete the command file (only when it is ours), the wrapper, and
     leave a marker so the next session start does not install it again."""

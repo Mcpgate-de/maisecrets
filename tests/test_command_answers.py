@@ -159,6 +159,25 @@ class ShortcutTests(unittest.TestCase):
         Path(HOME, "bin").mkdir(mode=0o700, parents=True, exist_ok=True)
         Path(HOME, "bin", "ms.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
+    def test_an_old_shortcut_becomes_the_entry_and_a_command_of_the_user_stays(self):
+        self.old_shortcut()
+        self.old_shortcut("send2")
+        own = self.cfg / "commands" / "mine.md"
+        own.write_text("---\ndescription: mine\n---\nmy own command\n", encoding="utf-8")
+        self.assertEqual(cli.upgrade_shortcuts(), [])        # no frontmatter: not the file the shortcut wrote
+        for name in ("ms", "send2"):
+            (self.cfg / "commands" / f"{name}.md").write_text(
+                "---\ndescription: Send the last blocked prompt\n---\n\n!`bash ~/.maisecrets/bin/ms.sh`\n",
+                encoding="utf-8")
+        self.assertEqual(cli.upgrade_shortcuts(), ["ms.md", "send2.md"])
+        for name in ("ms", "send2"):
+            text = (self.cfg / "commands" / f"{name}.md").read_text(encoding="utf-8")
+            self.assertIn(cli.SHORTCUT_MARK, text)
+            self.assertNotIn("ms.sh", text)
+        self.assertEqual(own.read_text(encoding="utf-8"), "---\ndescription: mine\n---\nmy own command\n")
+        self.assertFalse(Path(HOME, "bin", "ms.sh").exists(), "no shortcut uses the wrapper any more")
+        self.assertEqual(cli.upgrade_shortcuts(), [], "once")
+
     def test_status_says_incomplete_when_the_shared_wrapper_of_an_old_shortcut_is_missing(self):
         self.old_shortcut()
         Path(HOME, "bin", "ms.sh").unlink()
