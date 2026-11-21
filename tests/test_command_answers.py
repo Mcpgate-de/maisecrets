@@ -518,6 +518,17 @@ class TypedWordTests(unittest.TestCase):
         self.assertIn("this is no import id", said)
         self.assertNotIn(self.TOKEN[:12], said)
 
+    def test_several_wrong_import_ids_are_named_by_their_position(self):
+        said = self._reason(f"/maisecrets:forget import:v0000000a import:{self.TOKEN} import:{self.WORD}")
+        self.assertIn("the 2nd id is no import id", said)
+        self.assertIn("the 3rd id is no import id", said)
+        self.assertNotIn("this is no import id", said)
+        self.assertNotIn(self.TOKEN[:12], said)
+        self.assertNotIn(self.WORD, said)
+        from maisecrets import values
+        self.assertEqual([values._ordinal(n) for n in (1, 2, 3, 4, 11, 12, 13, 21, 22, 101, 111)],
+                         ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "101st", "111th"])
+
     def test_a_key_that_is_not_stored_is_not_repeated(self):
         said = self._reason(f"/maisecrets:not-a-secret {self.WORD}_c1")
         self.assertIn("there is no stored value with this key", said)

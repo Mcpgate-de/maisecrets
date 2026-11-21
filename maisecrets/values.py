@@ -502,15 +502,23 @@ def rows() -> list:
     return out
 
 
+def _ordinal(n: int) -> str:
+    """1st, 2nd, 3rd, 4th … 11th, 12th, 13th, 21st."""
+    end = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{end}"
+
+
 def remove_typed(ids: list) -> str:
     """Remove imports. Only the prompt hook calls this, for a prompt the person typed (hooks.user_prompt): the one way
     an import is removed. A value file's next import then reads the file as it is."""
     said = []
     with _lock():
-        for iid in ids:
+        for n, iid in enumerate(ids, 1):
             if not value_files.ID_RE.fullmatch(iid):
-                # never the typed text: a part of a value the rules do not find would show in clear
-                said.append("this is no import id (/maisecrets list shows the import ids)")
+                # never the typed text: a part of a value the rules do not find would show in clear. With more ids,
+                # the position names the wrong one
+                which = "this" if len(ids) == 1 else f"the {_ordinal(n)} id"
+                said.append(f"{which} is no import id (/maisecrets list shows the import ids)")
                 continue
             path = IMPORTS / f"{iid}{SUFFIX}"
             try:
