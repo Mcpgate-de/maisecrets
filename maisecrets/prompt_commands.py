@@ -214,11 +214,11 @@ def mod_command(payload: dict) -> dict | None:
     from . import hooks as h
     if payload.get("origin") not in ("composer", "bridge"):
         return None
-    # Cowork draws no panel and no dropped-prompt line: a command the mod ran itself showed nothing there. The command
-    # file runs it through the model instead, and its output reaches the conversation (maisecrets/cowork.py)
+    # Cowork draws no panel and no dropped-prompt line, so an answer the mod drops is not seen there
+    # (maisecrets/cowork.py): a command the hook answers goes to the model as a request to show the answer, and every
+    # other command runs through its command file
     from . import cowork
-    if cowork.active():
-        return None
+    in_cowork = cowork.active()
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or "maisecrets" not in prompt.lower():
         return None
@@ -239,8 +239,10 @@ def mod_command(payload: dict) -> dict | None:
         found = demo._find_transcript(session) if isinstance(session, str) and session else None
         out = h.user_prompt({**payload, "prompt_id": "mod", "transcript_path": found or ""})
         if out.get("decision") == "block" and isinstance(out.get("reason"), str):
-            return {"drop": out["reason"]}
+            return cowork.show_answer(payload, out["reason"]) if in_cowork else {"drop": out["reason"]}
         return {}
+    if in_cowork:
+        return None
     plan = run_plan(prompt) if slash else None
     if plan is not None:
         # a command file that only runs its CLI entry: the mod runs that entry itself, with no model turn. The prompt

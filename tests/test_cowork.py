@@ -71,6 +71,48 @@ class ModCommandTests(unittest.TestCase):
             self.assertIsNone(self._mod("/maisecrets:list"))
 
 
+class HookAnswerTests(unittest.TestCase):
+    """Cowork does not show a dropped prompt: the answer of a command the hook answers goes to the model to show."""
+
+    def setUp(self):
+        import test_mod_commands as tm
+        self.tm = tm
+        tm._reset()
+        self.addCleanup(tm._reset)
+        env = mock.patch.dict(os.environ, COWORK)
+        env.start()
+        self.addCleanup(env.stop)
+        _hygiene.patch(self, hooks, "_clipboard", lambda text: True)
+        _hygiene.patch(self, hooks, "_scrub_transcript_later", lambda *a, **k: None)
+
+    def test_a_term_add_becomes_a_request_to_show_its_answer_without_the_term(self):
+        out = self.tm._mod(f"maisecrets: term add {self.tm.NAME}")
+        self.assertNotIn("drop", out)
+        self.assertIn("on your list now", out["text"])
+        self.assertTrue(out["text"].startswith(cowork._SHOW))
+        self.assertIn("/term shows them", out["text"])
+        self.assertNotIn("/maisecrets:", out["text"])
+        self.assertNotIn(self.tm.NAME, out["text"], "the model gets the answer, never the term")
+        masked = self.tm._mod(f"write to {self.tm.NAME} today")
+        self.assertNotIn(self.tm.NAME, masked.get("text", self.tm.NAME), "the term was added")
+
+    def test_a_value_in_an_answer_reaches_the_model_masked(self):
+        token = "ghp_" + "R7kQ2mZx9VbT4nLp8WcY3sHd6FjA1uEo5GiN"
+        out = cowork.show_answer({"session_id": self.tm.SESSION, "cwd": "", "origin": "composer"},
+                                 f"maisecrets: done with {token}")
+        self.assertNotIn(token, out["text"])
+        self.assertIn("done with", out["text"])
+
+    def test_the_request_reads_as_no_command_to_the_prompt_hook(self):
+        out = self.tm._mod(f"maisecrets: term add {self.tm.NAME}")
+        self.assertIsNone(prompt_commands.mod_command({"prompt": out["text"], "session_id": self.tm.SESSION,
+                                                       "cwd": "", "origin": "composer"}))
+        hooks._live_cache.clear()
+        out = hooks.user_prompt({"prompt": out["text"], "session_id": self.tm.SESSION, "cwd": "",
+                                 "prompt_id": "t", "transcript_path": ""})
+        self.assertNotEqual(out.get("decision"), "block", out)
+
+
 class OutputTests(unittest.TestCase):
     def test_the_status_output_names_the_short_commands_in_cowork(self):
         r = _dispatch("status", env=COWORK)
