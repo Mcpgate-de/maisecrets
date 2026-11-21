@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import demo, detect, events, hooks, session_end, settings, status_verdict as sv  # noqa: E402
-from maisecrets import prompt_commands  # noqa: E402
+from maisecrets import cowork, prompt_commands  # noqa: E402
 from maisecrets.placeholder import CLOSE, OPEN  # noqa: E402
 from maisecrets.vault import HOME, Vault, load_config  # noqa: E402
 from test_remote_detector import NAME  # noqa: E402
@@ -919,6 +919,38 @@ class CoworkDemoTests(_Base):
         model = {"type": "assistant", "message": {"id": "msg_01AbC", "content": [{"type": "text", "text": text}]}}
         _reset()
         self.assertFalse(demo.active(SESSION, _transcript(self.tmp(), user, model)), "the model cannot make one")
+
+    def test_a_typed_value_that_an_output_echoes_shows_masked_in_the_demo_answer(self):
+        # the demo answer stays in the transcript: an output that repeats a typed word shows it masked (cowork_own),
+        # for the sref run (prompt_commands._cowork_sref) and for an answer of the prompt hook (mod_command)
+        import shutil
+        import tempfile
+        session = UUID.format(43)
+        self.on(session=session)
+        cfg = tempfile.mkdtemp(prefix="ms-demo-cfg-")
+        self.addCleanup(shutil.rmtree, cfg, True)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            for prompt, said in ((f"maisecrets: sref status {TOKEN}", "no MCP server named"),
+                                 (f"maisecrets: ner url https://{TOKEN}.example", "names from a service")):
+                with self.subTest(prompt):
+                    out = _mod(prompt, session)
+                    self.assertIn(said, out["show"])
+                    self.assertNotIn(TOKEN, out["show"])
+                    self.assertTrue(out["show"].endswith(demo.DEMO_LINE_COWORK))
+
+    def test_an_output_that_cannot_be_checked_is_not_shown(self):
+        out = demo.cowork_own({"session_id": "no valid id"}, f"maisecrets: done with {TOKEN}")
+        self.assertNotIn(TOKEN, out["show"])
+        self.assertTrue(out["show"].startswith(cowork.OUTPUT_UNCHECKED), out["show"])
+
+    def test_a_sref_form_the_demo_does_not_run_starts_nothing_in_a_cowork_demo(self):
+        session = UUID.format(44)
+        self.on(session=session)
+        with mock.patch("subprocess.run", side_effect=AssertionError("a network command ran in the demo")):
+            for prompt in ("maisecrets: sref logout gw", "maisecrets: sref login gw"):
+                with self.subTest(prompt):
+                    out = _mod(prompt, session)
+                    self.assertIn("did not run in the demo", out["show"])
 
     def test_the_cowork_texts_name_a_new_task_for_clear(self):
         from maisecrets import forms

@@ -469,7 +469,7 @@ def mod_answer(payload: dict, cfg: dict) -> dict | None:
         return {}
     if typed and own_command(prompt):
         if _in_cowork():
-            return cowork_own(session, own_answer(prompt, session))
+            return cowork_own(payload, own_answer(prompt, session))
         return {"drop": own_answer(prompt, session)}
     if damaged():
         return {"drop": DAMAGED.format(off="/maisecrets demo off")}     # before the report pass: none passes
@@ -509,14 +509,21 @@ def cowork_show(text: str, masked: str, names_unchecked: bool = False) -> str:
             + DEMO_LINE_COWORK)
 
 
-def cowork_own(session, output: str) -> dict:
+def cowork_own(payload: dict, output: str) -> dict:
     """A Cowork demo session's answer to text that maisecrets answers itself (the person's own command, the demo
     command): a neutral row enters, with a pass for the prompt hook, and the demo answer shows the output (Cowork shows
-    no dropped prompt). No request goes out: the session is in the demo."""
-    from . import forms
+    no dropped prompt), masked as a prompt is (cowork.masked_output): the output can echo a typed word, and the demo
+    answer stays in the transcript. No request goes out: the session is in the demo."""
+    from . import cowork
+    session = payload.get("session_id")
+    _INSIDE.append(1)           # the mask's rewrite is no demo prompt: no pass of its own, no demo answer
+    try:
+        shown = cowork.masked_output(payload, output)
+    finally:
+        _INSIDE.pop()
     _write_pass(session, COWORK_ROW)
     return {"text": COWORK_ROW, "count": 0, "demo": True, "inDemo": True, "masked": "",
-            "show": forms.cowork(output).rstrip() + "\n\n" + DEMO_LINE_COWORK}
+            "show": shown.rstrip() + "\n\n" + DEMO_LINE_COWORK}
 
 
 _KINDS = {"SECRET": ("secret", "secrets"), "EMAIL": ("e-mail", "e-mails"), "NAME": ("name", "names"),

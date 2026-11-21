@@ -1,0 +1,11 @@
+# c1-a-cowork-demo-answer-shows-an-output-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-cowork-demo-answer-shows-an-output-masked"
+control = "C1"
+serves = ["M1.1"]
+statement = "In a Cowork demo session the demo answer, which stays in the transcript, shows a command's output with each value masked as in a prompt the mod passes on, also a value the person typed and the output repeats; an output that could not be checked is a fixed line."
+runner = ["tests/test_demo.py::CoworkDemoTests::test_a_typed_value_that_an_output_echoes_shows_masked_in_the_demo_answer"]
+
+[proof]
+file = "maisecrets/cowork.py"
+find = '''    text = _masked_request(payload, output)'''
+replace = '''    text = _SHOW + output'''

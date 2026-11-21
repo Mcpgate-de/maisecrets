@@ -58,7 +58,9 @@ class FormsTests(unittest.TestCase):
                             ("/maisecrets settings hints reset", "maisecrets: reset hints"),
                             ("/maisecrets forget import:ID", "maisecrets: forget import:ID"),
                             ("/maisecrets ner local", "maisecrets: ner local"),
-                            ("/maisecrets report incident", "maisecrets: report incident")):
+                            ("/maisecrets report incident", "maisecrets: report incident"),
+                            ("/maisecrets sref login gw", "maisecrets: sref login gw"),
+                            ("/maisecrets:sref", "maisecrets: sref")):
             with self.subTest(slash):
                 self.assertEqual(forms.cowork(f"→ {slash}."), f"→ {text}.")
 
@@ -87,7 +89,7 @@ class FormsTests(unittest.TestCase):
 
     def test_a_command_its_file_shows_keeps_the_slash(self):
         for text in ("/maisecrets status test", "/maisecrets list", "/maisecrets term", "/maisecrets settings",
-                     "/maisecrets settings all", "/maisecrets forget SECRET_c1", "/maisecrets sref login gw",
+                     "/maisecrets settings all", "/maisecrets forget SECRET_c1",
                      "/maisecrets ner", "/maisecrets ner all", "maisecrets: list"):
             self.assertEqual(forms.cowork(text), text)
 
@@ -118,6 +120,14 @@ class ModCommandTests(unittest.TestCase):
     def test_in_cowork_the_mod_leaves_it_to_the_command_file(self):
         with mock.patch.dict(os.environ, COWORK):
             self.assertIsNone(self._mod("/maisecrets:list"))
+
+    def test_a_slash_sref_in_cowork_runs_nothing(self):
+        # the engine sends a slash line as typed (#44): an answer of the mod would never reach the model, so nothing
+        # runs for it, and the hints in Cowork name the text form
+        with mock.patch.dict(os.environ, COWORK), mock.patch("subprocess.run", side_effect=AssertionError("ran")):
+            for prompt in ("/maisecrets:sref", "/maisecrets:sref status", "/maisecrets:sref login gw"):
+                with self.subTest(prompt):
+                    self.assertIsNone(self._mod(prompt))
 
 
 class HookAnswerTests(unittest.TestCase):
@@ -266,6 +276,41 @@ class OutputTests(unittest.TestCase):
         self.assertIn("a gateway login from Cowork is not tested yet", login["text"])
         self.assertTrue(login["text"].startswith(cowork._SHOW))
         self.assertIn("not tested in Cowork", status["text"])
+
+    def test_a_sref_that_runs_too_long_in_cowork_is_ended_and_says_so(self):
+        import re
+        seen = {}
+
+        def slow(argv, **kw):
+            seen["timeout"] = kw.get("timeout")
+            raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+        with mock.patch.dict(os.environ, self._isolated(COWORK)), mock.patch("subprocess.run", slow):
+            hooks._live_cache.clear()
+            out = prompt_commands.mod_command({"prompt": "maisecrets: sref", "session_id": SESSION, "cwd": "",
+                                               "origin": "composer"})
+        self.assertIn("the gateway did not answer in time", out["text"])
+        self.assertTrue(out["text"].startswith(cowork._SHOW))
+        mod = (ROOT / "claude-mod" / "maisecrets-mod.mjs").read_text(encoding="utf-8")
+        budget = int(re.search(r"const BUDGET_MS = (\d+)", mod).group(1)) / 1000
+        # the start of Python and the mask of the answer need the rest of the mod's budget
+        self.assertLessEqual(seen["timeout"] + 2, budget)
+
+    def test_the_sref_discovery_in_cowork_ends_before_the_run_is_ended(self):
+        from contextlib import redirect_stdout
+        from maisecrets import cli, sref_client, vault_refs
+        left = []
+
+        def discover(cfg, url, end=None, **kw):
+            left.append(end - time.monotonic())
+            return None, "timeout"
+        with mock.patch.dict(os.environ, self._isolated(COWORK)), \
+                mock.patch.object(vault_refs, "user_servers", lambda: {"gw": "https://gw.example/mcp"}), \
+                mock.patch.object(vault_refs, "connectors", lambda **kw: {}), \
+                mock.patch.object(sref_client, "discover_typed", discover), redirect_stdout(io.StringIO()):
+            cli.cmd_sref([])
+        self.assertEqual(len(left), 1)
+        self.assertLessEqual(left[0], cli.SREF_COWORK_DISCOVERY_S)
+        self.assertLess(cli.SREF_COWORK_DISCOVERY_S + 1, prompt_commands.COWORK_SREF_S)
 
     def test_a_refusal_the_ai_relays_names_the_text_form_in_cowork(self):
         out = io.StringIO()

@@ -235,24 +235,36 @@ COWORK_SREF_LOGIN = ("maisecrets: a gateway login from Cowork is not tested yet.
                      "the desktop app's Code tab.")
 
 
-def _cowork_sref(payload: dict, prompt: str, slash: bool) -> dict | None:
-    """Cowork's answer to the person's sref command: the AI may not start it (commands/sref.md), and in Cowork a typed
-    command reaches only the AI, which then ran the command file by hand (measured 2026-11-21). maisecrets runs the
-    status itself and shows its output (cowork.show_answer); a login gets the line that it is not tested in Cowork.
-    None for every other command: its command file shows its output there."""
+# the sref run in Cowork ends inside the mod's budget for one prompt (BUDGET_MS, 8 s, claude-mod/maisecrets-mod.mjs),
+# with time left for the start and the mask; its discovery ends earlier still (cli.SREF_COWORK_DISCOVERY_S)
+COWORK_SREF_S = 5.0
+COWORK_SREF_SLOW = ("maisecrets: the gateway did not answer in time; send maisecrets: sref again, or check it in "
+                    "Claude Code in the terminal.")
+
+
+def _cowork_sref(payload: dict, prompt: str) -> dict | None:
+    """Cowork's answer to the person's typed `maisecrets: sref`: the AI may not start it (commands/sref.md), and in
+    Cowork a typed command reaches only the AI, which then ran the command file by hand (measured 2026-11-21).
+    maisecrets runs the status itself and shows its output (cowork.show_answer); a login gets the line that it is not
+    tested in Cowork. The slash form gets None, as every other command: the engine sends a slash line as typed (#44),
+    so no answer of the mod reaches the model for it, and the hints in Cowork name the text form (forms.cowork)."""
     import os
     import subprocess
     import sys
     from . import cowork
-    m = (_SLASH_FORM_RE if slash else _TYPED_FORM_RE).match(prompt)
+    m = _TYPED_FORM_RE.match(prompt)
     if not m or m.group("name").lower() != "sref":
         return None
     args = (m.group("args") or "").strip()
     session = payload.get("session_id")
+    in_demo = demo.active(session)
 
     def shown(text: str) -> dict:
         # in a demo session a request to show it would get the demo line: the demo answer carries it
-        return demo.cowork_own(session, text) if demo.active(session) else cowork.show_answer(payload, text)
+        return demo.cowork_own(payload, text) if in_demo else cowork.show_answer(payload, text)
+    if in_demo and demo.own_argv(f"maisecrets: sref {args}") is None:
+        # the demo runs only the sref forms it permits (a login or a logout goes to the network)
+        return shown(demo.own_answer(f"maisecrets: sref {args}", session))
     if args.split()[:1] == ["login"]:
         return shown(COWORK_SREF_LOGIN)
     plan = run_plan("/maisecrets:sref" + (f" {args}" if args else ""))
@@ -260,12 +272,15 @@ def _cowork_sref(payload: dict, prompt: str, slash: bool) -> dict | None:
         return None
     entry = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", "dispatch.py")
     env = {**os.environ, "PYTHONUTF8": "1"}
-    if isinstance(payload.get("session_id"), str):
-        env["CLAUDE_CODE_SESSION_ID"] = payload["session_id"]
+    if isinstance(session, str):
+        env["CLAUDE_CODE_SESSION_ID"] = session
     try:
+        # subprocess.run kills the child when the time is up
         r = subprocess.run([sys.executable, entry, *plan["argv"]], input=plan.get("stdin", ""), capture_output=True,
-                           text=True, env=env, timeout=30)
+                           text=True, env=env, timeout=COWORK_SREF_S)
         output = (r.stdout + r.stderr).strip() or "maisecrets: the sref command gave no output."
+    except subprocess.TimeoutExpired:
+        output = COWORK_SREF_SLOW
     except (OSError, subprocess.SubprocessError):
         output = "maisecrets: the sref command could not run. Send it again."
     return shown(output)
@@ -353,14 +368,14 @@ def mod_command(payload: dict) -> dict | None:
                 # demo on, or a command in a demo session: a request to show the answer would get the demo line, so
                 # the demo answer itself carries it, and nothing goes to the AI (demo.cowork_own)
                 line = incidents.cowork_line() if incidents.recognize(prompt, "claude") else out["reason"]
-                return demo.cowork_own(session, line)
+                return demo.cowork_own(payload, line)
             if in_cowork and incidents.recognize(prompt, "claude"):
                 # the AI never reads the incident report (docs/DIAGNOSTICS.md), and Cowork shows only what it writes
                 return cowork.show_answer(payload, incidents.cowork_line())
             return cowork.show_answer(payload, out["reason"]) if in_cowork else {"drop": out["reason"]}
         return {}
     if in_cowork:
-        return _cowork_sref(payload, prompt, slash)
+        return _cowork_sref(payload, prompt)
     plan = run_plan(prompt) if slash else None
     m = None if slash else _TYPED_FORM_RE.match(prompt)
     name = m.group("name").lower() if m else ""
@@ -437,7 +452,8 @@ def _command_route(payload: dict) -> dict:
         from . import forms
         m = _SLASH_FORM_RE.match(prompt)
         words = f"{m.group('name').lower()} {m.group('args') or ''}".strip() if m else ""
-        typed = forms.cowork(f"/maisecrets {words}")
+        # sref keeps its slash form here: its text form runs only in Cowork (_cowork_sref)
+        typed = f"/maisecrets {words}" if words.split()[:1] == ["sref"] else forms.cowork(f"/maisecrets {words}")
         if typed.startswith("/"):
             # a plugin command the menu shows: the person's Enter goes through the prompt hook
             typed = f"/maisecrets:{words}" if words.split()[:1] in (["sref"], ["report"]) else \

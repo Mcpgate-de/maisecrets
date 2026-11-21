@@ -1249,6 +1249,8 @@ def cmd_ner(args: list[str]) -> int:
 # a command ends inside the 2 minutes a client gives it: the discovery of all servers (less for a login, which also
 # registers, waits for the browser and exchanges the code, each request with SREF_LOGIN_REQUEST_S)
 SREF_DISCOVERY_S = 60.0
+# Cowork: maisecrets runs the status inside the mod's budget for one prompt (prompt_commands.COWORK_SREF_S)
+SREF_COWORK_DISCOVERY_S = 3.5
 SREF_LOGIN_DISCOVERY_S = 40.0
 SREF_LOGIN_REQUEST_S = 15.0
 SREF_LOGIN_END_S = 115.0
@@ -1294,7 +1296,9 @@ def cmd_sref(args: list[str]) -> int:
     # the whole discovery ends after this, however many servers are slow: the client ends a command after 2 minutes,
     # and a login waits for the browser after it. Each server gets an equal share of the time that is left, so a slow
     # server never takes the time of the gateway after it (a login with a NAME asks that server only)
-    phase_end = start + (SREF_LOGIN_DISCOVERY_S if action == "login" else SREF_DISCOVERY_S)
+    from . import cowork
+    phase_end = start + (SREF_LOGIN_DISCOVERY_S if action == "login" else
+                         SREF_COWORK_DISCOVERY_S if cowork.active() else SREF_DISCOVERY_S)
     found, failed = {}, []
     for i, (server, url) in enumerate(servers.items()):
         now = time.monotonic()
@@ -1313,7 +1317,6 @@ def cmd_sref(args: list[str]) -> int:
     if not found:
         if failed:
             return 1
-        from . import cowork
         if cowork.active():
             print("maisecrets: in Cowork no gateway offers Sensitive References yet, and Sensitive References are not "
                   "tested in Cowork. Use them in Claude Code in the terminal or in the desktop app's Code tab.")

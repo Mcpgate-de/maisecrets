@@ -2,7 +2,8 @@
 (commands/maisecrets.md). Codex has no slash commands: there a command is the prompt `maisecrets: status`. Cowork shows
 no answer of the prompt hook to a slash command (it shows no dropped or blocked prompt), but it shows it for the text
 form, which the mod answers there (cowork.show_answer): a command that the prompt hook answers is named as text in
-Cowork. Light: no import of the hooks."""
+Cowork, and so is sref, which maisecrets runs there only in its text form (the engine sends a slash line as typed).
+Light: no import of the hooks."""
 from __future__ import annotations
 
 import re
@@ -31,6 +32,9 @@ _TYPED = [
     (LazyRx(r"/maisecrets settings (?!all\b|--all\b)([A-Za-z_]+) ([A-Za-z0-9_-]+)(?![\w-])"), None),
     (LazyRx(r"/maisecrets forget import:"), "maisecrets: forget import:"),
     (LazyRx(r"/maisecrets report incident\b"), "maisecrets: report incident"),
+    # sref: the AI may not start its command file, and maisecrets runs only the text form in Cowork
+    # (prompt_commands._cowork_sref)
+    (LazyRx(r"/maisecrets[: ]sref\b"), "maisecrets: sref"),
     (LazyRx(r"/maisecrets ner (?=off\b|local\b|on\b|url\b|gateway\b|fallback\b|updates\b|unavailable\b)"),
      "maisecrets: ner "),
 ]
