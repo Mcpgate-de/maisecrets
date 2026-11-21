@@ -1392,10 +1392,28 @@ def cmd_sref(args: list[str]) -> int:
             print(f"maisecrets: logged in to {host}; the claude.ai connector {server} was not bound, because you did "
                   f"not type this login. To bind it, type /maisecrets sref login {server} yourself.")
             return 1
+        if f.get("pairing"):
+            # #91: a connector the person added that is not this gateway could have proposed its URL. The login only
+            # marks the proposal; the connector's proof for a nonce of the mod binds it (sref_hooks.pair_connector)
+            if not vault_refs.mark_login(server):
+                print(f"maisecrets: logged in to {host}, but the claude.ai connector {server} was not bound: its "
+                      "proposal is gone. It is proposed again after it shows a reference.")
+                return 1
+            print(f"maisecrets: logged in to {host}. The claude.ai connector {server} is bound only when it proves "
+                  f"that it reaches {host} with your account: in Claude Code the maisecrets mod asks it for that proof "
+                  "now. Without the mod (claude -p, Codex) nothing binds it.")
+            return 0
+        if "pairing" not in f:
+            # a discovery record of an older version (the cache of a failed discovery) does not say it
+            print(f"maisecrets: logged in to {host}, but the claude.ai connector {server} was not bound: maisecrets "
+                  f"could not check whether {host} gives a pairing proof. Send this command again.")
+            return 1
         if not vault_refs.bind_connector(server, proposed[server]):
             print(f"maisecrets: logged in to {host}, but the claude.ai connector {server} was not bound: another "
                   "server or connector holds that gateway now, or the connector named another one.")
             return 1
+        print(f"maisecrets: {host} gives no pairing proof, so your typed login bound the claude.ai connector "
+              f"{server}.")
     who = sref_client.account(backend, f["origin"])
     print(f"maisecrets: logged in to {host}" + (" (the account is shown to you only)" if who else "") + ". A reference "
           "that this gateway "

@@ -159,6 +159,70 @@ def connector_answer(session: str | None, server: str, answer: str, cwd: str | N
                     "give your consent there. Only your login binds the connector to that gateway."}
 
 
+PAIR_DISCOVERY_S = 6.0      # the pairing runs inside the mod's wait (PAIR_MS, 20 s): one discovery, one request
+PAIR_REQUEST_S = 8.0
+
+
+def pair_due(key: str) -> bool:
+    """The mod asks after a login of KEY succeeded: does a proposed connector wait for its pairing proof?"""
+    from .vault_refs import login_mark_due
+    return _SERVER_NAME_RE.fullmatch(key or "") is not None and login_mark_due(key)
+
+
+def pair_connector(key: str, nonce: str, answer: str) -> dict:
+    """#91: the connector's answer to the mod's nonce. It binds the proposed connector KEY only when the person's
+    typed login for it left a fresh mark (used once here), the answer names the proposed URL, and its proof equals
+    the one the gateway gives the person's own login for that nonce (compared in constant time). {"bound", "note"}:
+    the note is one line for the person; it never holds the nonce, a proof or a token, and the proof is not kept."""
+    import hmac
+    import json
+    import time
+    from urllib.parse import urlsplit
+
+    from . import sref_client, vault_refs
+    from .vault import load_config, make_backend
+
+    def no(why: str) -> dict:
+        return {"bound": False, "note": f"maisecrets: the claude.ai connector {key} was not bound: {why}. To try "
+                                        f"again, send /maisecrets:sref login {key}."}
+    if not _SERVER_NAME_RE.fullmatch(key or "") or vault_refs.connector_key("claude_ai_" + key) != key:
+        return {"bound": False, "note": "maisecrets: that is no claude.ai connector."}
+    if not isinstance(nonce, str) or not sref_client.NONCE_RE.fullmatch(nonce):
+        return no("the proof request had no valid form")
+    url = vault_refs.take_login_mark(key)
+    if not url:
+        return no("no login of yours for it in the last 15 minutes")
+    host = urlsplit(url).hostname
+    try:
+        data = json.loads(answer) if isinstance(answer, str) and answer else None
+    except (ValueError, RecursionError):
+        data = None
+    data = data if isinstance(data, dict) else {}
+    resource = data.get("resource").strip() if isinstance(data.get("resource"), str) else ""
+    proof = data.get("proof")
+    if resource != url:
+        return no(f"it no longer names {host} as its gateway")
+    if not isinstance(proof, str) or not sref_client.PROOF_RE.fullmatch(proof):
+        return no("it gave no pairing proof")
+    cfg = load_config()
+    found, _note = sref_client.discover_typed(cfg, url, budget=PAIR_DISCOVERY_S, tries=1)
+    if not found:
+        return no(f"the discovery at {host} failed")
+    if not found.get("pairing"):
+        return no(f"{host} gives no pairing proof now")
+    try:
+        mine = sref_client.pairing_proof(cfg, make_backend(cfg), found, nonce, time.monotonic() + PAIR_REQUEST_S)
+    except sref_client.Refused as exc:
+        return no(str(exc))
+    if not hmac.compare_digest(mine.encode("ascii"), proof.encode("ascii")):
+        return no(f"its proof does not match your login at {host}, so it is not your gateway there or it uses "
+                  "another account")
+    if not vault_refs.bind_connector(key, url):
+        return no("another server or connector holds that gateway now")
+    return {"bound": True, "note": f"maisecrets: the claude.ai connector {key} is bound to {host}: it proved that it "
+                                   "reaches that gateway with your account."}
+
+
 def login_offered(session: str | None, command: str) -> bool:
     """The mod put this login command into the input box: no second offer of that gateway in this session."""
     from . import sref_notes

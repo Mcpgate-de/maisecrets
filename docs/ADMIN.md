@@ -901,10 +901,20 @@ resolve, output that prints the value shows the reference instead.
    of the turn. Its answer is only a proposal (for an hour): the input box
    gets `/maisecrets sref login NAME` and a line that names the connector and
    the host, and only a login you type (or press in the panel) binds the
-   connector to that gateway; the AI cannot run `/maisecrets sref`. What stays:
-   a connector you added that is not your gateway can name your gateway's URL.
-   Log in only when the named connector is your gateway (a check by the
-   gateway itself is planned). Before that, its
+   connector to that gateway; the AI cannot run `/maisecrets sref`. A
+   connector you added that is not your gateway can name your gateway's URL,
+   so a gateway whose metadata names `sensitive_references.pairing_endpoint`
+   binds only after a proof: when your typed login for the connector
+   succeeded, the mod sends the connector a fresh random nonce (its only
+   argument), and the connector answers with a proof that only your account
+   at that gateway can give. maisecrets asks the gateway for the proof of
+   your own login (the same token as for a resolve) and compares the two in
+   constant time; only a match within 15 minutes of the login binds, and
+   each login allows one try. The nonce and the proof are never stored or
+   shown. Without the mod (`claude -p`) nothing binds. A gateway that names
+   no pairing endpoint gives no proof: there your typed login binds, as
+   before, the login output says so, and you log in only when the named
+   connector is your gateway. Before the binding, its
    references do not count; ask for them again after the login. A binding is
    never re-pointed, never takes a gateway that a server of your
    configuration or another connector holds, and never a name of your own

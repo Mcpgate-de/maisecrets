@@ -93,7 +93,10 @@ image). Connections start only from a command you run, or go to a service you se
 - In Claude Code, after a claude.ai connector of yours showed a gateway reference, the mod asks
   that connector once per session which gateway it belongs to (its tool
   `sensitive_references_resource`, with no argument). It sends no text of yours; the answer is a
-  proposal that only a login you type takes.
+  proposal that only a login you type takes. After that login, for a gateway that gives a pairing
+  proof, the mod calls the same tool once more with a random nonce as its only argument, and
+  maisecrets sends the same nonce with your login token to that gateway to check the
+  connector's proof. Neither holds text of yours.
 - `/maisecrets report` prints the issue text and a prefilled link to the configured
   `report_url`. It opens no browser and files nothing: the connection starts when you open
   the link, and you decide in GitHub's form. A prefilled GitHub link carries the issue text,

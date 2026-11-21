@@ -1,0 +1,13 @@
+# c31-a-login-mark-serves-one-pairing: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-login-mark-serves-one-pairing"
+control = "C31"
+serves = ["M3.3"]
+statement = "A typed login allows one pairing try: a wrong proof uses the mark, and the right proof after it binds nothing until the person logs in again."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_a_wrong_proof_binds_nothing_and_uses_the_login_mark"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''        entry.pop("login_t", None)
+'''
+replace = '''        pass
+'''

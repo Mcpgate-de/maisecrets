@@ -801,8 +801,8 @@ const STATUS_GAP_MS = 3000
 // a row in hooks.log within the call, so no row at or after it is a hook that did not run (maisecrets/hub.py)
 const lastToolCall = new Map()
 
-async function runSettings($, stdin) {
-  const init = { cwd: $.plugin.root, stdin, timeoutMs: ASK_MS, env: { PYTHONUTF8: '1' } }
+async function runSettings($, stdin, ms = ASK_MS) {
+  const init = { cwd: $.plugin.root, stdin, timeoutMs: ms, env: { PYTHONUTF8: '1' } }
   for (const argv of [['python3', 'hooks/dispatch.py', 'mod-settings'], ['py', '-3', 'hooks/dispatch.py', 'mod-settings'],
     ['python', 'hooks/dispatch.py', 'mod-settings']]) {
     try {
@@ -815,8 +815,8 @@ async function runSettings($, stdin) {
   return null
 }
 
-async function askEntry($, question) {
-  const r = await runSettings($, JSON.stringify(question))
+async function askEntry($, question, ms = ASK_MS) {
+  const r = await runSettings($, JSON.stringify(question), ms)
   try {
     const a = r ? JSON.parse(r.stdout) : null
     return a && a.maisecrets === 'mod-settings' ? a : null
@@ -890,16 +890,62 @@ const connectorsAsked = new Set()
 const CONNECTOR_NAME = /^claude_ai_[A-Za-z0-9_-]{1,64}$/
 const CONNECTOR_TOOL = 'sensitive_references_resource'
 
-async function askConnector($, session, server) {
-  // a connector that does not answer in 10 s gives no proposal; the other offers go on
+// the one call of an MCP server in the mod: the connector's own tool, with no argument (which gateway?) or with a
+// nonce of the mod only (its pairing proof, #91). The text of its answer, or null
+async function callConnector($, server, nonce) {
+  // a connector that does not answer in 10 s gives no answer; the other offers go on
   let timer = null
   const late = new Promise(resolve => { try { timer = $.clock.after(10000, () => resolve(null)) } catch { resolve(null) } })
-  const r = await Promise.race([$.mcp.call(server, CONNECTOR_TOOL), late])
+  const r = await Promise.race([$.mcp.call(server, CONNECTOR_TOOL, nonce === undefined ? undefined : { nonce }), late])
   try { timer?.cancel?.() } catch { /* ended */ }
   if (!r || r.isError) return null
-  const answer = (r.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('')
-  return askEntry($, { action: 'connector', session_id: session, server, answer: answer.slice(0, 2000),
-    cwd: await $.session.cwd() })
+  return (r.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('').slice(0, 2000)
+}
+
+async function askConnector($, session, server) {
+  const answer = await callConnector($, server)
+  if (answer === null) return null
+  return askEntry($, { action: 'connector', session_id: session, server, answer, cwd: await $.session.cwd() })
+}
+
+// #91: a proposed connector is bound only when it proves that it reaches the gateway with the person's account: after
+// the person's login for it succeeded, the connector answers a fresh nonce, and Python compares its proof with the
+// one the gateway gives that login (sref_hooks.pair_connector). The nonce goes to the connector and to Python only
+const PAIR_MS = 20000           // Python's discovery and one request to the gateway (PAIR_DISCOVERY_S, PAIR_REQUEST_S)
+const PAIR_KEY = /^[A-Za-z0-9_-]{1,64}$/
+const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+// 32 random bytes in base64url without padding (43 characters); no source of randomness: no nonce, no pairing
+function pairingNonce() {
+  const b = new Uint8Array(32)
+  globalThis.crypto.getRandomValues(b)
+  let s = ''
+  for (let i = 0; i < b.length; i += 3) {
+    const n = (b[i] << 16) | ((b[i + 1] ?? 0) << 8) | (b[i + 2] ?? 0)
+    s += B64URL[(n >> 18) & 63] + B64URL[(n >> 12) & 63]
+    if (i + 1 < b.length) s += B64URL[(n >> 6) & 63]
+    if (i + 2 < b.length) s += B64URL[n & 63]
+  }
+  return s
+}
+
+async function pairConnector($, key) {
+  if (!PAIR_KEY.test(key)) return
+  const due = await askEntry($, { action: 'pair_due', key })
+  if (due && due.due !== true) return          // no proposal waits for a proof (a gateway without pairing bound it)
+  let line = null
+  if (due) {
+    try {
+      const nonce = pairingNonce()
+      const answer = await callConnector($, 'claude_ai_' + key, nonce)
+      const a = await askEntry($, { action: 'pair', key, nonce, answer: answer ?? '' }, PAIR_MS)
+      line = typeof a?.note === 'string' ? a.note : null
+    } catch { line = null }
+  }
+  line = line ?? `maisecrets: the claude.ai connector ${key} was not bound: its proof could not be checked. To try ` +
+    `again, send /maisecrets:sref login ${key}.`
+  toast($, line)
+  try { $.ui.log(line.slice(0, 300)) } catch { /* the toast says it */ }
 }
 
 async function offerLogin($) {
@@ -1548,6 +1594,8 @@ function startOwn($, run, flight, title, entry = running.get(flight)) {
       // a row in the transcript too: the person is in the browser when the login ends, and a toast goes after 8 s
       try { $.ui.log(said.slice(0, 300)) } catch { /* the toast says it */ }
       $.ui.invalidate('ui.render')
+      // a proposed claude.ai connector of this login: its pairing proof binds it (#91)
+      if (result.code === 0 && typeof run.pair === 'string' && run.pair === server) await pairConnector($, run.pair)
       return
     }
     await showOutput($, id)

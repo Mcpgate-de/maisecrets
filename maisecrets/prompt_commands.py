@@ -297,7 +297,8 @@ def run_plan(prompt) -> dict | None:
     """What the mod runs for a slash command the person typed, in place of its command file: {"argv": the CLI words
     after hooks/dispatch.py (fixed words only), "stdin": the typed arguments for --args-stdin, "long": a run of up to
     two minutes (the login), "server": the server a login names, "view": "ner" for the panel's name-service view,
-    "fill": the output goes into the prompt box (/maisecrets:send), "markdown": the output is Markdown}. None keeps
+    "fill": the output goes into the prompt box (/maisecrets:send), "markdown": the output is Markdown, "pair": the
+    proposed claude.ai connector whose pairing proof the mod asks for after a login that succeeded}. None keeps
     the command file: a form that needs the model or its tool hooks, such as `status test`, whose value only the
     PreToolUse hook makes and whose proof is the tool output path."""
     m = _SLASH_FORM_RE.match(prompt) if isinstance(prompt, str) else None
@@ -329,6 +330,10 @@ def run_plan(prompt) -> dict | None:
         plan["long"] = True
         if len(words) == 2:
             plan["server"] = words[1][:64]
+            # #91: a proposed claude.ai connector: after the login the mod asks it for its pairing proof
+            from . import vault_refs
+            if words[1] in vault_refs.connectors(pending=True) and words[1] not in vault_refs.user_servers():
+                plan["pair"] = words[1]
     if name == "settings":
         plan["markdown"] = True
     return plan

@@ -1,0 +1,13 @@
+# c31-a-pairing-answer-must-name-the-proposed-gateway: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-pairing-answer-must-name-the-proposed-gateway"
+control = "C31"
+serves = ["M3.3"]
+statement = "A connector's pairing answer that names another resource than the proposed URL binds nothing, even with a valid proof."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_a_missing_proof_or_another_resource_binds_nothing_and_asks_the_gateway_nothing"]
+
+[proof]
+file = "maisecrets/sref_hooks.py"
+find = '''    if resource != url:
+        return no(f"it no longer names {host} as its gateway")
+'''
+replace = ''''''
