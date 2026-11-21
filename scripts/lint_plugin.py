@@ -91,7 +91,18 @@ def yaml_problems(block: str) -> list[str] | None:
 # from the person's menu and refuses it typed, measured on 2.1.330)
 BOOLEAN_KEYS = frozenset({"disable-model-invocation", "user-invocable"})
 # a command with both is reachable by nobody: the person cannot type it and the model cannot run it
-UNREACHABLE = ("disable-model-invocation: true", "user-invocable: false")
+UNREACHABLE = (("disable-model-invocation", "true"), ("user-invocable", "false"))
+
+
+def flag_value(block: str, key: str) -> str | None:
+    """The value of a top-level frontmatter key as a lower-case word: a comment and quotes taken off (`True`,
+    `"true"`, `true  # why` are all `true`). None when the key is missing."""
+    for line in block.splitlines():
+        m = re.match(rf"{re.escape(key)}[ \t]*:(.*)\Z", line)
+        if m:
+            value = re.sub(r"(?:^|\s)#.*\Z", "", m.group(1)).strip().strip("'\"").strip().lower()
+            return value
+    return None
 
 
 def check_frontmatter(root: Path = ROOT) -> tuple[list[str], bool]:
@@ -111,7 +122,7 @@ def check_frontmatter(root: Path = ROOT) -> tuple[list[str], bool]:
         for key in REQUIRED[rel.split("/", 1)[0]]:
             if key not in keys:
                 errors.append(f"{rel}: the key {key} is missing")
-        if all(line in block.splitlines() for line in UNREACHABLE):
+        if all(flag_value(block, key) == value for key, value in UNREACHABLE):
             errors.append(f"{rel}: disable-model-invocation: true and user-invocable: false together make the "
                           "command unreachable")
     return errors, parsed

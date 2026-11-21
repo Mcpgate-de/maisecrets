@@ -281,10 +281,17 @@ class InvocabilityTests(unittest.TestCase):
         import lint_plugin
         root = Path(tempfile.mkdtemp(prefix="ms-lint-"))
         (root / "commands").mkdir()
+        for both in ('disable-model-invocation: true\nuser-invocable: false\n',
+                     'disable-model-invocation: True\nuser-invocable: "false"  # hidden\n',
+                     "disable-model-invocation: 'true'   \nuser-invocable: False\n"):
+            with self.subTest(both):
+                (root / "commands" / "x.md").write_text('---\ndescription: "x"\n' + both + '---\nbody\n',
+                                                        encoding="utf-8")
+                errors, _ = lint_plugin.check_frontmatter(root)
+                self.assertTrue(any("unreachable" in e for e in errors), errors)
         (root / "commands" / "x.md").write_text('---\ndescription: "x"\ndisable-model-invocation: true\n'
-                                                'user-invocable: false\n---\nbody\n', encoding="utf-8")
-        errors, _ = lint_plugin.check_frontmatter(root)
-        self.assertTrue(any("unreachable" in e for e in errors), errors)
+                                                'user-invocable: true\n---\nbody\n', encoding="utf-8")
+        self.assertFalse(any("unreachable" in e for e in lint_plugin.check_frontmatter(root)[0]))
 
 
 class EntryCliTests(unittest.TestCase):
