@@ -58,6 +58,22 @@ _CLAIMED_RE = re.compile(r"\A" + re.escape(MARKER_PREFIX) + r"([a-z0-9.-]{1,48})
 # the command as Claude Code writes it before it expands it: a leading space or another spelling is not expanded
 # and reaches the model as plain text (measured, Claude Code 2.1.295)
 _COMMAND_RE = re.compile(r"\A/maisecrets:report(?=\s|\Z)")
+# the text form, which Cowork answers (it shows no answer to a slash command): `maisecrets: report incident`
+_TEXT_RE = re.compile(r"\Amaisecrets:[ \t]*report(?=\s|\Z)")
+# Cowork shows only what the AI writes, and the AI never reads the report (docs/DIAGNOSTICS.md): one fixed line
+COWORK_LINE = ("maisecrets: the incident report is for you only, and Cowork shows only what the AI writes, so it is "
+               "not shown here. maisecrets recorded {n} incident group(s) on the computer of this session. In "
+               "Claude Code in a terminal, /maisecrets report incident shows the report of that computer.")
+
+
+def cowork_line() -> str:
+    """The answer in Cowork to the incident report: the count of groups, never a code or a cause."""
+    try:
+        groups, _damaged = load()
+        n = len(groups)
+    except Exception:  # noqa: BLE001 - the line still says why the report is not shown
+        n = "an unknown number of"
+    return COWORK_LINE.format(n=n)
 
 
 def _home() -> Path:
@@ -585,7 +601,7 @@ def recognize(prompt, client: str) -> tuple[str, str | None] | None:
     """The incident form of a typed Claude Code prompt, or None. Pure: no config, no store, no file."""
     if client != "claude" or not isinstance(prompt, str):
         return None
-    m = _COMMAND_RE.match(prompt)
+    m = _COMMAND_RE.match(prompt) or _TEXT_RE.match(prompt)
     if not m:
         return None
     return form(words_of(prompt[m.end():]))

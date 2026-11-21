@@ -284,6 +284,9 @@ def mod_command(payload: dict) -> dict | None:
         found = demo._find_transcript(session) if isinstance(session, str) and session else None
         out = h.user_prompt({**payload, "prompt_id": "mod", "transcript_path": found or ""})
         if out.get("decision") == "block" and isinstance(out.get("reason"), str):
+            if in_cowork and incidents.recognize(prompt, "claude"):
+                # the AI never reads the incident report (docs/DIAGNOSTICS.md), and Cowork shows only what it writes
+                return cowork.show_answer(payload, incidents.cowork_line())
             return cowork.show_answer(payload, out["reason"]) if in_cowork else {"drop": out["reason"]}
         return {}
     if in_cowork:

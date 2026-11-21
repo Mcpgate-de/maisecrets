@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -55,20 +56,23 @@ class FormsTests(unittest.TestCase):
                             ("/maisecrets settings ssh_autonomous_hosts remove HOST", "maisecrets: ssh ask HOST"),
                             ("/maisecrets settings hints reset", "maisecrets: reset hints"),
                             ("/maisecrets forget import:ID", "maisecrets: forget import:ID"),
-                            ("/maisecrets ner local", "maisecrets: ner local")):
+                            ("/maisecrets ner local", "maisecrets: ner local"),
+                            ("/maisecrets report incident", "maisecrets: report incident")):
             with self.subTest(slash):
                 self.assertEqual(forms.cowork(f"→ {slash}."), f"→ {text}.")
 
     def test_each_text_form_is_one_the_mod_answers(self):
         # the parsers the mod's command branch reads (prompt_commands.mod_command)
-        from maisecrets import demo, not_a_secret, settings, term_files, value_files
+        from maisecrets import demo, incidents, not_a_secret, settings, term_files, value_files
         for text in ("maisecrets: term add Wibbleton Q", "maisecrets: not a secret NAME_c1",
                      "maisecrets: undo not a secret NAME_c1", "maisecrets: demo on", "maisecrets: set ssh_consent on",
                      "maisecrets: ssh autonomous web1", "maisecrets: reset hints", "maisecrets: forget import:abc",
-                     "maisecrets: ner local", "maisecrets: set rule_dirs add /tmp/rules"):
+                     "maisecrets: ner local", "maisecrets: set rule_dirs add /tmp/rules",
+                     "maisecrets: report incident"):
             with self.subTest(text):
                 self.assertTrue(term_files.parse_command(text) or not_a_secret.parse(text) or demo.parse(text)
-                                or settings.parse_prompt(text) or value_files.parse_removal(text), text)
+                                or settings.parse_prompt(text) or value_files.parse_removal(text)
+                                or incidents.recognize(text, "claude"), text)
 
     def test_a_command_its_file_shows_keeps_the_slash(self):
         for text in ("/maisecrets status test", "/maisecrets list", "/maisecrets term", "/maisecrets settings",
@@ -129,6 +133,24 @@ class HookAnswerTests(unittest.TestCase):
         self.assertNotIn(self.tm.NAME, out["text"], "the model gets the answer, never the term")
         masked = self.tm._mod(f"write to {self.tm.NAME} today")
         self.assertNotIn(self.tm.NAME, masked.get("text", self.tm.NAME), "the term was added")
+
+    def test_the_incident_report_never_reaches_the_model_and_a_fixed_line_shows(self):
+        # docs/DIAGNOSTICS.md: the model sees neither the typed command nor the report
+        from maisecrets import incidents
+        record = {"version": 1, "groups": {"store.lock/lock": {
+            "code": "store.lock", "cause": "lock", "class": "fail-closed", "event": "UserPromptSubmit",
+            "tool_class": "-", "client": "claude", "days": [time.strftime("%Y-%m-%d")], "count": 3,
+            "plugin_version": "0.6.9"}}}
+        incidents.record_path().write_text(json.dumps(record), encoding="utf-8")
+        self.addCleanup(incidents.record_path().unlink, missing_ok=True)
+        for prompt in ("maisecrets: report incident", "/maisecrets report incident", "/maisecrets:report incident",
+                       "maisecrets: report incident store.lock/lock"):
+            with self.subTest(prompt):
+                out = self.tm._mod(prompt)
+                self.assertIn("is not shown here", out["text"])
+                self.assertIn("recorded 1 incident group(s)", out["text"])
+                self.assertNotIn("store.lock", out["text"])
+                self.assertNotIn("lock/", out["text"])
 
     def test_a_value_in_an_answer_reaches_the_model_masked(self):
         token = "ghp_" + "R7kQ2mZx9VbT4nLp8WcY3sHd6FjA1uEo5GiN"

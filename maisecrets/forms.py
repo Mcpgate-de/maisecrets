@@ -29,6 +29,7 @@ _TYPED = [
     # a change has a key and a value; `/maisecrets settings` and `settings all` only show, through the command file
     (LazyRx(r"/maisecrets settings (?!all\b|--all\b)([a-z_]+)(?= \S)"), r"maisecrets: set \1"),
     (LazyRx(r"/maisecrets forget import:"), "maisecrets: forget import:"),
+    (LazyRx(r"/maisecrets report incident\b"), "maisecrets: report incident"),
     (LazyRx(r"/maisecrets ner (?=off\b|local\b|on\b|url\b|gateway\b|fallback\b|updates\b|unavailable\b)"),
      "maisecrets: ner "),
 ]

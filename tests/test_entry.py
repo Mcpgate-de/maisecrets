@@ -178,7 +178,7 @@ class CommandRouteTests(_HookBase):
                              ("/maisecrets:ner local", "maisecrets: ner local"),
                              ("/maisecrets:forget " + KEY, "/maisecrets:maisecrets forget " + KEY),
                              ("/maisecrets:sref login gw", "/maisecrets:maisecrets sref login gw"),
-                             ("/maisecrets:report incident", "/maisecrets:maisecrets report incident")):
+                             ("/maisecrets:report incident", "maisecrets: report incident")):
             with self.subTest(prompt):
                 out = self.route(prompt)
                 self.assertTrue(out["drop"].endswith("Send it as a prompt: " + form), out)
