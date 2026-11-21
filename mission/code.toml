@@ -22,6 +22,9 @@
 "hooks/ms.sh" = { none = "the fixed path of the person's /ms shortcut: it finds the newest installed copy and runs its `pending` (send the last blocked prompt), which the prompt hook checks again" }
 "hooks/proxy_connect.py" = { controls = ["C18"] }
 "hooks/resolve.py" = { none = "the Windows (Git Bash) launcher of the one-time read of a value: it starts the CLI's resolve command, whose grant Vault.redeem checks (maisecrets/vault.py)" }
+# limit: run.cmd does not run on macOS or Linux; its C13 belief reads the file (each hook event's refusal, exit 0),
+# so it proves the text of the launcher, not what cmd.exe does with it. The Windows runner of the windows_macos job
+# starts run.cmd with a Python (.github/workflows/ci.yml); its branch without a Python runs on no machine of the CI.
 "hooks/run.cmd" = { controls = ["C13"] }
 "hooks/run.sh" = { controls = ["C13"] }
 "hooks/sandbox_probe.py" = { controls = ["C18"] }

@@ -59,6 +59,14 @@ CHANNEL = {source: "both" for source in BANDS}
 VENDORED = frozenset({"detect-secrets", "betterleaks", "presidio"})   # synced from upstream by scripts/sync_*.py
 OWN_SPECIAL = {"fallback": "fallback", "user": "user", "terms": "term", "imports": "import"}
 
+
+def in_phase_order(**groups) -> tuple:
+    """The groups of a scan (rules, personal, user, terms, imports: lists of rules and passes) in the order of PHASES.
+    detect.scan runs them in this order, so the table is the order a scan claims spans in, not only what `maisecrets
+    rules list` shows: the terms run after every rule, and a listed name never cuts a value that a rule takes."""
+    return tuple(x for key in sorted(groups, key=lambda k: PHASES[k]) for x in groups[key])
+
+
 # a label rule finds a value by its label alone; a keyword rule is a label rule with no `=` or `:` of its own. Until
 # the registry these were id prefixes (detect.LABEL_RULES, detect.KEYWORD_RULES), and a stored kind still is one
 LABEL_PREFIXES = ("ds-keyword", "label-", "generic-api-key", "url-query-secret", "auth-scheme")

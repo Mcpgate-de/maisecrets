@@ -3062,8 +3062,9 @@ def _in_scan_order(every: list) -> tuple:
     it once."""
     d = _det()
     if d._order[0] is not every:
-        d._order = (every, tuple(r for r in every if not _runs_after_personal(r)) + (_PERSONAL,)
-                    + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS, _IMPORTS))
+        d._order = (every, _registry.in_phase_order(rules=[r for r in every if not _runs_after_personal(r)],
+                    personal=[_PERSONAL], user=[r for r in every if _runs_after_personal(r)], terms=[_TERMS],
+                    imports=[_IMPORTS]))
     return d._order[1]
 
 

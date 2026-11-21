@@ -1,0 +1,11 @@
+# c26-a-listed-name-never-cuts-a-value-a-rule-takes: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-listed-name-never-cuts-a-value-a-rule-takes"
+control = "C26"
+serves = ["M1.3"]
+statement = "The scan runs its passes in the order of the registry's phases, so the terms run after every rule: a listed name inside an address or a token never cuts it, and each value is masked whole as one placeholder of the rule's type."
+runner = ["tests/test_terms_hooks.py::TermInsideARuleValueTests::test_a_listed_name_inside_a_rule_value_does_not_cut_it"]
+
+[proof]
+file = "maisecrets/detection/registry.py"
+find = '''PHASES = {"export": 0, "rules": 1, "personal": 2, "user": 3, "terms": 4, "imports": 5}'''
+replace = '''PHASES = {"export": 0, "rules": 1, "personal": 2, "user": 3, "terms": 0, "imports": 5}'''
