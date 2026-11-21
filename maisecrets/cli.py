@@ -709,8 +709,15 @@ def upgrade_shortcuts() -> list[str]:
     of the files it rewrote."""
     from pathlib import Path as _P
     from .vault import HOME
-    commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
     done = []
+    # only for the store that installed the shortcut: a session start with another maisecrets home (a test, the
+    # harness against the person's own client) changes no command file of the person
+    try:
+        if (HOME / ".shortcut").read_text(encoding="utf-8").strip() != "installed":
+            return done
+    except (OSError, UnicodeDecodeError):
+        return done
+    commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
     try:
         files = sorted(commands.glob("*.md"))
     except OSError:

@@ -126,6 +126,8 @@ class ShortcutTests(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.cfg), "CLAUDE_PLUGIN_ROOT": str(ROOT)})
         env.start()
         self.addCleanup(env.stop)
+        Path(HOME, ".shortcut").unlink(missing_ok=True)
+        self.addCleanup(Path(HOME, ".shortcut").unlink, missing_ok=True)
 
     def commands(self) -> list[str]:
         d = self.cfg / "commands"
@@ -164,6 +166,8 @@ class ShortcutTests(unittest.TestCase):
         self.old_shortcut("send2")
         own = self.cfg / "commands" / "mine.md"
         own.write_text("---\ndescription: mine\n---\nmy own command\n", encoding="utf-8")
+        self.assertEqual(cli.upgrade_shortcuts(), [], "a store that installed no shortcut changes no file")
+        Path(HOME, ".shortcut").write_text("installed\n", encoding="utf-8")
         self.assertEqual(cli.upgrade_shortcuts(), [])        # no frontmatter: not the file the shortcut wrote
         for name in ("ms", "send2"):
             (self.cfg / "commands" / f"{name}.md").write_text(
