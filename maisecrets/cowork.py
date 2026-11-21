@@ -60,16 +60,17 @@ def masked_output(payload: dict, output: str) -> str:
     """A command's output for the demo answer in Cowork (demo.cowork_own), which enters the transcript: masked as in
     show_answer, or OUTPUT_UNCHECKED when the rewrite was not possible. No prompt hook reads a demo answer, so a text
     the rewrite left to that hook (an @mention) is shown only when the rules and the store find no value in it. The
-    caller keeps the demo's own step out of this rewrite (demo._INSIDE)."""
-    text = _masked_request(payload, output)
-    if text is None or not text.startswith(_SHOW):
-        return OUTPUT_UNCHECKED
-    text = text[len(_SHOW):]
-    from . import hooks
-    from .demo import _has_value
+    caller keeps the demo's own step out of this rewrite (demo._INSIDE). Any error (a lock that timed out, a store
+    that cannot be read) gives OUTPUT_UNCHECKED."""
     try:
+        text = _masked_request(payload, output)
+        if text is None or not text.startswith(_SHOW):
+            return OUTPUT_UNCHECKED
+        text = text[len(_SHOW):]
+        from . import hooks
+        from .demo import _has_value
         if _has_value(text, hooks.load_config()):
             return OUTPUT_UNCHECKED
+        return text
     except Exception:  # noqa: BLE001 - the output cannot be checked: it is not shown
         return OUTPUT_UNCHECKED
-    return text

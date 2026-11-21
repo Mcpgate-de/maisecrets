@@ -954,6 +954,13 @@ class CoworkDemoTests(_Base):
         self.assertNotIn(TOKEN, out["show"])
         self.assertTrue(out["show"].startswith(cowork.OUTPUT_UNCHECKED), out["show"])
 
+    def test_an_error_in_the_mask_of_an_output_shows_nothing_of_it(self):
+        from maisecrets.vault import LockTimeout
+        for exc in (LockTimeout("busy"), OSError("gone"), ValueError("broken")):
+            with self.subTest(type(exc).__name__), mock.patch.object(cowork, "_masked_request", side_effect=exc):
+                self.assertEqual(cowork.masked_output({"session_id": UUID.format(48)}, f"x {TOKEN}"),
+                                 cowork.OUTPUT_UNCHECKED)
+
     def test_a_sref_form_the_demo_does_not_run_starts_nothing_in_a_cowork_demo(self):
         session = UUID.format(44)
         self.on(session=session)
