@@ -11,6 +11,11 @@ Keeps passwords, tokens and personal data out of Claude Code and Codex. A value 
 model sees it, and goes back in on your machine only where a command or a file needs it. No model, no download, no
 package: Python's standard library only. Install takes two commands.
 
+<p align="center">
+  <a href="https://mcpgate.de/maisecrets/"><img src="https://mcpgate.de/media/maisecrets-demo.gif" width="800" alt="Claude Code with maisecrets: the person asks for a support ticket by the customer's name, and the name shows with a lock. Claude reads the ticket and mails the customer; the screen shows the real name and address with a lock, the password only as a placeholder. Last, the same conversation as the AI got it: placeholders only."></a>
+  <br><sub>The whole story, step by step: <a href="https://mcpgate.de/maisecrets/">mcpgate.de/maisecrets</a></sub>
+</p>
+
 You ask Claude to set up a deploy script and it reads your `.env`:
 
 ```
