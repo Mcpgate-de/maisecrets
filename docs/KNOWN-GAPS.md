@@ -168,6 +168,16 @@ a to-do.
   scrubber protects it. In Cowork every MCP server outside your own config counts as a connector, and in a remote
   session a server of the source `dynamic` does. A server of a plugin or an agent named `claude.ai X` is refused
   too.
+- **Your own rule makes a stored personal value strict only when it finds that value.** maisecrets keeps the first
+  kind that stored a value. If a built-in rule stored an e-mail address and your own rule or an import matches the
+  same value later, maisecrets marks the entry strict at that match; the address then goes only to a deposit
+  target. Until your rule sees the value again (for example, a rule that you add after the value was stored), the
+  entry can still go into any text field of a listed action.
+- **A changed copy of the gateway's metadata on your computer.** maisecrets keeps the gateway's metadata for at
+  most an hour in its home folder. When it reads that copy, it checks the types against its own list, so an added
+  type makes it read the metadata again from the gateway. An added tool or action in the copy passes that check.
+  The AI cannot write the maisecrets home folder (C14), and the gateway checks each call again and refuses an action
+  that it does not list (`binding_mismatch`); a process of your own user can change the copy (A3).
 - **Detection can take a secret for a personal value.** If maisecrets types a secret as a phone number or a
   name, the gateway's `deposit_any_field` lets that value go into any text field of a listed tool. A later read
   of that field through the connector passes Anthropic's proxy, and only the gateway's own result scrub masks it.
