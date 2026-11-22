@@ -293,9 +293,9 @@ class SrefBashTests(unittest.TestCase):
     def test_the_login_offer_comes_once_per_session_after_the_hint_and_never_with_a_login(self):
         self.assertIsNone(sref_hooks.login_offer("s1"))          # no reference yet: no offer
         self.gateway_result("s1")
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
         # asking records nothing: only a fill that happened (login_offered) ends the offer
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
         self.assertEqual(hub.mod_answer({"action": "login_offered", "session_id": "s1",
                                          "fill": "/maisecrets:sref login gw"}), {"recorded": True})
         self.assertIsNone(sref_hooks.login_offer("s1"))          # once per session and gateway
@@ -306,6 +306,20 @@ class SrefBashTests(unittest.TestCase):
         self.assertIsNone(sref_hooks.login_offer("s2"))          # logged in meanwhile
         self.assertEqual(self.srv.resolved, [])
         self.assertEqual(hub.mod_answer({"action": "login_offer", "session_id": "s3"}), {"fill": None})
+
+    def test_each_login_fill_is_one_the_mod_puts_into_the_box(self):
+        # live probe 2026-11-22: Python gave the spaced form, the mod's LOGIN_FILL took only the colon form, and the
+        # box stayed empty after the turn
+        import re
+        src = (ROOT / "claude-mod" / "maisecrets-mod.mjs").read_text(encoding="utf-8")
+        mod_fill = re.compile(re.search(r"const LOGIN_FILL = /(.+)/\n", src).group(1))
+        self.gateway_result("s1")
+        offer = sref_hooks.login_offer("s1")
+        self.assertRegex(offer, mod_fill)
+        self.assertTrue(sref_hooks.login_offered("s1", offer))     # the record of the fill takes the same form
+        self.connector_result(session="s5")
+        fill = sref_hooks.connector_answer("s5", "claude_ai_Team_GW", self.answer())["fill"]
+        self.assertRegex(fill, mod_fill)
 
     def test_a_text_with_sref_in_it_or_a_reference_the_model_sent_gives_no_hint_and_no_offer(self):
         out = hooks._post_tool_guarded({"tool_name": "mcp__gw__notes", "session_id": "s1", **CLAUDE,
@@ -328,7 +342,7 @@ class SrefBashTests(unittest.TestCase):
         cfg["mcpServers"]["g\u00e4tew\u00e4y"] = {"type": "http", "url": url.replace("/mcp", "/third/mcp")}
         (self.profile / ".claude.json").write_text(json.dumps(cfg))
         self.gateway_result("s1")                                 # sent by gw, the same origin as aa-other
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
         hooks._post_tool_guarded({"tool_name": "mcp__g\u00e4tew\u00e4y__read", "session_id": "s2", **CLAUDE,
                                   "mcp_server": {"name": "g\u00e4tew\u00e4y", "source": "user"}, "tool_input": {},
                                   "tool_response": {"content": [{"type": "text", "text": "author: " + self.shown}]}})
@@ -353,7 +367,7 @@ class SrefBashTests(unittest.TestCase):
         self.connector_result()                                        # before the binding: nothing is noted
         self.assertEqual(self.bash(f"printf %s {self.shown}")["hookSpecificOutput"]["permissionDecision"], "deny")
         out = sref_hooks.connector_answer("s1", "claude_ai_Team_GW", self.answer())
-        self.assertEqual(out["fill"], "/maisecrets sref login Team_GW")
+        self.assertEqual(out["fill"], "/maisecrets:sref login Team_GW")
         self.assertIn("your claude.ai connector Team_GW names 127.0.0.1", out["note"])
         self.assertEqual(vault_refs.connectors(), {})                  # a proposal only
         self.assertEqual(vault_refs.connectors(pending=True), {"Team_GW": self.srv.url + "/mcp"})
