@@ -235,6 +235,35 @@ class HookAnswerTests(unittest.TestCase):
                 self.assertEqual(cowork.show_answer(payload, "maisecrets: done")["text"], cowork.UNCHECKED)
 
 
+class SessionStartTests(unittest.TestCase):
+    """What the model reads at the session start: the forms of a command that the client knows; never a hidden single
+    command such as /maisecrets:term."""
+
+    def start(self, env: dict) -> str:
+        r = _dispatch("session-start", env=env, stdin=json.dumps({"session_id": SESSION, "source": "startup"}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def test_in_cowork_the_model_names_the_entry_and_the_text_form(self):
+        context = self.start(COWORK)
+        self.assertIn(hooks.COMMANDS_COWORK, context)
+        self.assertIn("maisecrets: term add NAME", context)
+        self.assertNotRegex(context, r"/maisecrets:[a-z]")
+
+    def test_outside_cowork_the_model_names_the_entry_and_reads_no_cowork_line(self):
+        context = self.start({"CLAUDE_CODE_ENTRYPOINT": "cli"})
+        self.assertIn(hooks.COMMANDS_CLAUDE, context)
+        self.assertIn("/maisecrets term add NAME", context)
+        self.assertNotIn("Cowork", context)
+        self.assertNotRegex(context, r"/maisecrets:[a-z]")
+
+    def test_codex_names_its_prompt_form(self):
+        with mock.patch.dict(os.environ, COWORK):
+            context = hooks.session_context({}, "codex")
+        self.assertIn(hooks.COMMANDS_CODEX, context)
+        self.assertNotIn("Cowork", context)
+
+
 class OutputTests(unittest.TestCase):
     def test_a_command_output_names_the_text_form_in_cowork(self):
         r = _dispatch("terms", env=COWORK)

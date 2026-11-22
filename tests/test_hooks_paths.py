@@ -957,9 +957,9 @@ class PayloadMatrixTests(unittest.TestCase):
             with self.subTest(garbage):
                 out = self._one(_dispatch("session-start", garbage))
                 self.assertIn("maisecrets", out["systemMessage"])
-        for out in (claude, codex):
+        for out, client in ((claude, "claude"), (codex, "codex")):
             self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "SessionStart",
-                                                         "additionalContext": hooks.primer()})
+                                                         "additionalContext": hooks.session_context(None, client)})
 
 
 if __name__ == "__main__":

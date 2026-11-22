@@ -527,6 +527,28 @@ def primer(cfg: dict | None = None, client: str = "claude") -> str:
     return PRIMER_WINDOWS
 
 
+# how the model names a maisecrets command to the person: the single commands are hidden since 0.9.22, and Cowork knows
+# only the entry. A command that maisecrets answers itself (forms._TYPED) shows its answer in Cowork only as text
+COMMANDS_CLAUDE = ("When you name a maisecrets command to the user, write the entry /maisecrets NAME ARGS, for example "
+                   "/maisecrets status or /maisecrets term add NAME.")
+COMMANDS_CODEX = ("When you name a maisecrets command to the user, write the prompt maisecrets: NAME ARGS, for example "
+                  "maisecrets: status.")
+COMMANDS_COWORK = ("When you name a maisecrets command to the user, write /maisecrets NAME, for example /maisecrets "
+                   "status. Write a command that maisecrets answers itself (term add or remove, not-a-secret, demo, a "
+                   "settings change, a ner change, sref, report incident) as text: maisecrets: NAME ARGS, for example "
+                   "maisecrets: term add NAME.")
+
+
+def session_context(cfg: dict | None = None, client: str = "claude") -> str:
+    """What the model reads at the session start: the primer and the form of a command for the person."""
+    from . import cowork
+    if client == "codex":
+        return primer(cfg, client) + " " + COMMANDS_CODEX
+    if not cowork.active():
+        return primer(cfg, client) + " " + COMMANDS_CLAUDE
+    return primer(cfg, client) + " " + COMMANDS_COWORK
+
+
 # --------------------------------------------------------- UserPromptSubmit --
 def agent_report(payload: dict, prompt: str) -> bool:
     """True when the prompt is nothing but proven reports of this session's subagents, and no value is outside their
