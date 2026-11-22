@@ -45,6 +45,12 @@ INTERCEPTION_MARKS = ("interception ca", "egress gateway")
 CALL_CODES = ("expired", "unknown_handle", "binding_mismatch", "used", "unavailable")
 _REFUSED_RE = re.compile(r"\s*deposit_refused: (" + "|".join(CALL_CODES) + r")\s*")
 _MAC_ENTRY = "_maisecrets_binding_mac"
+# deposit_any_field (section 6.1.5): the personal types whose placeholder may stand in any string of a listed tool's
+# call. maisecrets applies the intersection with the gateway's list, so a gateway can narrow it and never widen it.
+# ID_NUMBER, CARD, SECRET and every type not named here stay strict (deposit_targets only)
+ANY_FIELD_TYPES = frozenset({"ADDRESS", "BIRTH_DATE", "EMAIL", "IBAN", "IP", "IPV6", "NAME", "PHONE", "USERNAME"})
+# an own rule, a term and a model's finding stay strict whatever type they carry
+STRICT_KINDS = ("user:", "term:", "remote:")
 
 
 class Refused(_VaultRefused):
@@ -250,8 +256,46 @@ def fields(block: object, origin: str | None) -> dict | None:
         if not isinstance(paths, list) or not paths or not all(_segments(p) is not None for p in paths):
             return None
         targets.append({"tool": t["tool"], "when": dict(when), "paths": list(paths)})
-    return {"deposit_endpoint": block["deposit_endpoint"], "deposit_profile": PROFILE, "deposit_scope": scope,
-            "deposit_max_lifetime": life, "deposit_targets": targets}
+    out = {"deposit_endpoint": block["deposit_endpoint"], "deposit_profile": PROFILE, "deposit_scope": scope,
+           "deposit_max_lifetime": life, "deposit_targets": targets}
+    free = any_field(block.get("deposit_any_field"))
+    if free:
+        out["deposit_any_field"] = free
+    return out
+
+
+def any_field(raw: object) -> dict | None:
+    """The `deposit_any_field` of the metadata, narrowed to ANY_FIELD_TYPES; None when it is absent or has a wrong
+    shape. A wrong shape drops only this field: deposit_targets still apply."""
+    if not isinstance(raw, dict):
+        return None
+    types, tools = raw.get("types"), raw.get("tools")
+    if not isinstance(types, list) or not isinstance(tools, list) or len(types) > 64 or len(tools) > MAX_TARGETS:
+        return None
+    if not all(isinstance(t, str) for t in types) or not all(isinstance(t, str) and TOOL_RE.fullmatch(t)
+                                                             for t in tools):
+        return None
+    return {"types": sorted(ANY_FIELD_TYPES.intersection(types)), "tools": sorted(set(tools))}
+
+
+def any_field_class(vault, placeholder: str) -> str | None:
+    """The class of a placeholder for deposit_any_field: the type of its vault entry, never text the model wrote. None
+    (strict) when the entry is missing, purged or weak (a masked gateway reference, a word), comes from an own rule,
+    a term or a model, or when its stored type differs from the prefix of the key."""
+    key = key_of(placeholder)
+    meta = vault._index.get("entries", {}).get(key) if key else None
+    if not isinstance(meta, dict) or meta.get("purged") or meta.get("weak"):
+        return None
+    if str(meta.get("kind", "")).startswith(STRICT_KINDS):
+        return None
+    kind = meta.get("type")
+    return kind if isinstance(kind, str) and kind == key.rsplit("_c", 1)[0] else None
+
+
+def _in_a_key(node: object) -> bool:
+    if isinstance(node, dict):
+        return any(REF_RE.search(k) or _in_a_key(v) for k, v in node.items())
+    return isinstance(node, list) and any(_in_a_key(x) for x in node)
 
 
 def _cache_path():
@@ -489,12 +533,21 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
     if not TOOL_RE.fullmatch(name):
         raise Refused("the tool name has no form a gateway lists")
     places = occurrences(tool_input)                                                  # 6.1.5
+    if _in_a_key(tool_input):
+        raise Refused("a placeholder stands in a key of the arguments, and a deposit takes only a string value")
     targets = matching_targets(dep["deposit_targets"], name, tool_input)
-    if not places or not targets:
+    free = dep.get("deposit_any_field") or {}
+    free_tool = name in free.get("tools", ())
+    if not places or not (targets or free_tool):
         raise Refused(f"{host} takes no deposit for this call of {name}")
-    for pointer, segs, _a, _b, _ph in places:
-        if not any(_path_matches(p, segs) for t in targets for p in t["paths"]):
-            raise Refused(f"{host} takes no deposit at {pointer} of {name}")
+    loose = set()                      # the keys that stand outside a target's paths, by their class
+    for pointer, segs, _a, _b, ph in places:
+        if any(_path_matches(p, segs) for t in targets for p in t["paths"]):
+            continue
+        if free_tool and any_field_class(vault, ph) in free.get("types", ()):
+            loose.add(key_of(ph))
+            continue
+        raise Refused(f"{host} takes no deposit at {pointer} of {name}")
     if HANDLE_MARK in json.dumps(tool_input, ensure_ascii=False):                     # 6.1.6
         raise Refused("the arguments already hold a deposit handle")
     for t in dep["deposit_targets"]:
@@ -535,6 +588,8 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
         if not MIN_BYTES <= len(value.encode("utf-8")) <= MAX_BYTES:          # the value changed since
             raise Refused(f"⟦{k}⟧ has {len(value.encode('utf-8'))} bytes, and a deposit takes "
                           f"{MIN_BYTES} to {MAX_BYTES}")
+        if k in loose and "\u27e6sref:" in value:                        # a gateway reference stays strict
+            raise Refused(f"⟦{k}⟧ holds a reference of a gateway, and such a value goes only to a target's path")
         values[k] = value
     stop = hooks._unnoted(cfg, hooks._note_destinations(cfg, payload, tool, tool_input, keys), keys,
                           "The call did not run.")                                    # C23
@@ -583,8 +638,10 @@ def _line(code: str, keys: list) -> str:
         "expired": f"the deposit for {names} expired before the call ran. Call the tool again.",
         "used": f"the gateway took the deposit for {names} as used already. Call the tool again.",
         "unknown_handle": f"the gateway knows no deposit for {names} for this account. Call the tool again.",
-        "binding_mismatch": f"the call did not match the deposit for {names}, so the gateway did not run it. Do not "
-                            "change the call to get around this; tell the user.",
+        "binding_mismatch": f"the call did not match the deposit for {names}, so the gateway did not run it. A "
+                            "gateway also refuses a personal value in a tool that sends no JSON body, in a tool "
+                            "outside its list, or in a body that the gateway encodes before it sends it (such as a "
+                            "mail). Do not change the call to get around this; tell the user.",
         "unavailable": "the deposit store of the gateway did not answer, so the call did not run. Try again later.",
     }[code]
 

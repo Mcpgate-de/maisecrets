@@ -560,6 +560,167 @@ class DepositHookTests(_Base):
                 self.assertNotIn("expired before the call ran", json.dumps(out))
 
 
+MAIL = "anyfield.person@example.com"          # synthetic, example.com
+ANY_TOOL = "gitlab_write_actions"
+
+
+class AnyFieldShapeTests(unittest.TestCase):
+    """deposit_any_field of the metadata: a wrong shape drops the field alone, and the gateway can only narrow."""
+    ORIGIN = "https://gateway.example.com"
+
+    def block(self, free: object) -> dict:
+        return {"deposit_endpoint": self.ORIGIN + "/d", "deposit_profile": "deposit-1",
+                "deposit_scope": "sensitive-references.deposit",
+                "deposit_targets": [{"tool": ANY_TOOL, "paths": ["/token"]}], "deposit_any_field": free}
+
+    def test_a_wrong_any_field_is_ignored_and_the_targets_stay(self):
+        for free in ([], "EMAIL", {"types": "EMAIL", "tools": [ANY_TOOL]}, {"types": ["EMAIL"]},
+                     {"types": ["EMAIL"], "tools": ANY_TOOL}, {"types": [1], "tools": [ANY_TOOL]},
+                     {"types": ["EMAIL"], "tools": [7]}, {"types": ["EMAIL"], "tools": ["a tool"]},
+                     {"types": ["EMAIL"] * 65, "tools": [ANY_TOOL]}):
+            with self.subTest(free=str(free)[:60]):
+                got = D.fields(self.block(free), self.ORIGIN)
+                self.assertIsNotNone(got, "the deposit stays usable")
+                self.assertNotIn("deposit_any_field", got)
+                self.assertEqual(got["deposit_targets"], [{"tool": ANY_TOOL, "when": {}, "paths": ["/token"]}])
+
+    def test_the_gateway_can_narrow_the_list_and_never_widen_it(self):
+        wide = ["EMAIL", "SECRET", "CARD", "ID_NUMBER", "FUTURE_TYPE", "PHONE"]
+        got = D.fields(self.block({"types": wide, "tools": ["b", ANY_TOOL]}), self.ORIGIN)
+        self.assertEqual(got["deposit_any_field"], {"types": ["EMAIL", "PHONE"], "tools": ["b", ANY_TOOL]})
+        self.assertEqual(D.fields(got, self.ORIGIN), got, "a kept copy passes the same check")
+
+    def test_the_own_list_holds_only_personal_types(self):
+        from maisecrets.detection import personal
+        self.assertLessEqual({personal.NAME, personal.ADDRESS, personal.BIRTH_DATE, personal.USERNAME,
+                              personal.PHONE}, D.ANY_FIELD_TYPES)
+        self.assertFalse({"SECRET", "CARD", personal.ID_NUMBER} & D.ANY_FIELD_TYPES)
+
+    def test_the_binding_mismatch_line_names_the_other_causes_and_no_value(self):
+        line = D._line("binding_mismatch", ["EMAIL_c1"])
+        self.assertIn("sends no JSON body", line)
+        self.assertIn("outside its list", line)
+        self.assertIn("encodes", line)
+        self.assertIn("tell the user", line)
+
+
+@unittest.skipUnless(T.HAS_OPENSSL and os.name != "nt", "openssl on POSIX")
+class AnyFieldTests(_Base):
+    """Section 6.1.5 with deposit_any_field: a personal placeholder in any string value of a listed tool's call."""
+
+    def free(self, types: list | None = None, tools: list | None = None) -> None:
+        self.srv.deposit_fields = {"deposit_any_field": {"types": types or sorted(D.ANY_FIELD_TYPES),
+                                                         "tools": tools or [ANY_TOOL]}}
+
+    def put(self, value: str, type_: str, kind: str = "manual") -> str:
+        return Vault().put(value, type_, kind, session="s1").ref
+
+    def change(self, ref: str, **meta) -> None:
+        v = Vault()
+        v._index["entries"][ref[1:-1].split(":", 1)[0]].update(meta)
+        v._save_index()
+
+    def issue(self, text: str) -> dict:
+        return {"action": "create_issue", "project": "group/app", "params": {"title": "t", "description": text}}
+
+    def test_a_personal_value_goes_into_any_string_of_a_listed_tool(self):
+        self.free()
+        self.bind()
+        mail = self.put(MAIL, "EMAIL", "email")
+        hso = self.pre(self.issue("write to " + mail + " today"))
+        text = hso["updatedInput"]["params"]["description"]
+        self.assertRegex(text, r"^write to msdep1_[A-Za-z0-9_-]{65} today$")
+        req = self.srv.deposit_requests[0]
+        self.assertEqual([(v["path"], v["value"]) for v in req["values"]], [("/params/description", MAIL)])
+        self.assertEqual(self.srv.call(ANY_TOOL, hso["updatedInput"])["params"]["description"],
+                         "write to " + MAIL + " today")
+
+    def test_without_the_field_a_personal_value_stays_strict(self):
+        self.bind()
+        mail = self.put(MAIL, "EMAIL", "email")
+        self.assert_refused(self.pre(self.issue(mail)), "takes no deposit for this call")
+        self.srv.deposit_fields = {"deposit_any_field": {"types": ["EMAIL"]}}          # a wrong shape
+        (HOME / "sref" / "deposit-metadata.json").unlink()
+        self.assert_refused(self.pre(self.issue(mail)), "takes no deposit for this call")
+        self.assertEqual(self.srv.deposit_requests, [])
+        self.assertIn("updatedInput", self.pre(call="t2"), "the targets still apply")
+
+    def test_secret_card_and_id_number_stay_strict_when_the_gateway_lists_them(self):
+        self.free(types=["SECRET", "CARD", "ID_NUMBER", "EMAIL"])
+        self.bind()
+        for value, type_ in ((VALUE, "SECRET"), ("anyfield-card-synthetic", "CARD"),
+                             ("anyfield-id-synthetic", "ID_NUMBER")):
+            with self.subTest(type_=type_):
+                self.assert_refused(self.pre(self.issue(self.put(value, type_))),
+                                    "takes no deposit at /params/description")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_an_own_rule_or_a_term_stays_strict(self):
+        self.free()
+        self.bind()
+        ref = self.put("own." + MAIL, "EMAIL", "user:my-mails")
+        self.assert_refused(self.pre(self.issue(ref)), "takes no deposit at /params/description")
+        self.assertEqual(self.srv.deposit_requests, [])
+        # a term is never resolved (hooks._term_keys); its class is strict too, should it ever reach a deposit
+        term = self.put("term." + MAIL, "EMAIL", "term:abc123")
+        self.assertIsNone(D.any_field_class(Vault(), term))
+        plain = self.put("plain." + MAIL, "EMAIL", "email")
+        self.assertEqual(D.any_field_class(Vault(), plain), "EMAIL")
+
+    def test_a_weak_entry_stays_strict(self):
+        self.free()
+        self.bind()
+        ref = self.put("weak." + MAIL, "EMAIL", "email")
+        self.change(ref, weak=True)
+        self.assert_refused(self.pre(self.issue(ref)), "takes no deposit at /params/description")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_a_value_with_a_gateway_reference_stays_strict(self):
+        self.free()
+        self.bind()
+        ref = self.put(OPEN + "sref:gw:anyfield-synthetic-reference" + CLOSE, "NAME", "name")
+        self.change(ref, weak=False)                    # an entry stored before the weak mark of the reference
+        self.assert_refused(self.pre(self.issue(ref)), "holds a reference of a gateway")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_the_class_is_the_type_of_the_vault_entry_never_the_key_prefix(self):
+        self.free()
+        self.bind()
+        ref = self.put(VALUE + "-other", "SECRET")
+        self.change(ref, type="EMAIL")                  # the entry claims a personal type its key does not carry
+        self.assert_refused(self.pre(self.issue(ref)), "takes no deposit at /params/description")
+        self.assertNotIn("deposit 127.0.0.1", self.audit(), "no value left the computer")
+
+    def test_a_placeholder_in_an_object_key_is_refused(self):
+        self.free()
+        self.bind()
+        mail = self.put(MAIL, "EMAIL", "email")
+        self.assert_refused(self.pre({"action": "create_issue", "params": {mail: mail}}),
+                            "stands in a key of the arguments")
+        # a placeholder only in a key is no string value: the hook finds none, and the call keeps the placeholder
+        self.assertEqual(self.pre({"action": "create_issue", "params": {mail: "x"}}, call="t2"), {})
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_a_tool_outside_the_list_is_refused(self):
+        self.free(tools=["slack_write_actions"])
+        self.bind()
+        self.assert_refused(self.pre(self.issue(self.put(MAIL, "EMAIL", "email"))), "takes no deposit for this call")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_in_a_mixed_call_each_placeholder_passes_one_of_the_two_rules(self):
+        self.free()
+        self.bind()
+        mail = self.put(MAIL, "EMAIL", "email")
+        hso = self.pre(self.args(description="owner " + mail))
+        self.assertRegex(hso["updatedInput"]["token"], r"^msdep1_[A-Za-z0-9_-]{65}$")
+        self.assertRegex(hso["updatedInput"]["description"], r"^owner msdep1_[A-Za-z0-9_-]{65}$")
+        self.assertEqual(sorted(v["path"] for v in self.srv.deposit_requests[0]["values"]), ["/description", "/token"])
+        # a secret outside the target's paths fails both rules, and the whole call is refused
+        self.assert_refused(self.pre(self.args(token="x", description=self.ref + " " + mail), call="t2"),
+                            "takes no deposit at /description")
+        self.assertEqual(len(self.srv.deposit_requests), 1)
+
+
 @unittest.skipUnless(T.HAS_OPENSSL and os.name != "nt", "openssl on POSIX")
 class TripwireTests(_Base):
     """D9 against a gateway whose certificate an interception CA issued."""
