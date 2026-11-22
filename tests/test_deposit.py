@@ -536,6 +536,26 @@ class DepositHookTests(_Base):
                                         **CLAUDE})
         self.assertNotIn("knows no deposit", json.dumps(out))
 
+    def test_a_refusal_that_comes_as_a_failed_call_gets_its_line_too(self):
+        # live probe 2026-11-22: the refusal has isError, so Claude Code 2.1.330 sends PostToolUseFailure, whose
+        # answer cannot replace the output (#97278): the line goes to the model as additional context
+        self.bind()
+        hso = self.pre(call="t12")
+        self.assertTrue(hso["updatedInput"])
+        for error in ("deposit_refused: expired", json.dumps([{"type": "text", "text": "deposit_refused: expired"}])):
+            with self.subTest(error=error):
+                out = hooks.post_tool_failure({"tool_name": TOOL, "tool_use_id": "t12", "session_id": "s1",
+                                               "mcp_server": SERVER, "tool_input": {}, "error": error, **CLAUDE})
+                self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUseFailure")
+                self.assertIn("the deposit for " + self.ref + " expired before the call ran",
+                              out["hookSpecificOutput"]["additionalContext"])
+        # a call that carried no deposit, and a refusal next to other text, keep the failure path as it was
+        for call, error in (("t13", "deposit_refused: expired"), ("t12", "deposit_refused: expired; echo: x")):
+            with self.subTest(call=call, error=error):
+                out = hooks.post_tool_failure({"tool_name": TOOL, "tool_use_id": call, "session_id": "s1",
+                                               "mcp_server": SERVER, "tool_input": {}, "error": error, **CLAUDE})
+                self.assertNotIn("expired before the call ran", json.dumps(out))
+
 
 @unittest.skipUnless(T.HAS_OPENSSL and os.name != "nt", "openssl on POSIX")
 class TripwireTests(_Base):

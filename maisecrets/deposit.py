@@ -598,6 +598,31 @@ def post_tool(payload: dict) -> dict | None:
         return None
 
 
+def post_tool_failure(payload: dict) -> dict | None:
+    """A refused deposit comes back with isError, so Claude Code (2.1.330) reports it as PostToolUseFailure, whose
+    answer cannot replace the output (anthropics/claude-code#97278): the line of section 6.5 goes to the model as
+    additional context next to the gateway's code. None for every other failure, and on any failure here."""
+    try:
+        return _failure_line(payload)
+    except Exception:  # noqa: BLE001 - the line is a convenience; the failure path goes on as before
+        return None
+
+
+def _failure_line(payload: dict) -> dict | None:
+    tool, error = str(payload.get("tool_name") or ""), payload.get("error")
+    if not tool.startswith("mcp__") or not isinstance(error, str) or "deposit_refused: " not in error:
+        return None
+    try:
+        parsed = loads_strict(error)
+    except ValueError:
+        parsed = error
+    code = _sole_block(error) or _sole_refusal(parsed)
+    keys = _keys_of_call(payload.get("tool_use_id")) if code else None
+    if keys is None:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": _line(code, keys)}}
+
+
 def _sole_block(node: object) -> str | None:
     if isinstance(node, str):
         m = _REFUSED_RE.fullmatch(node)

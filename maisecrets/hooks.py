@@ -2997,9 +2997,12 @@ def post_tool_failure(payload: dict) -> dict:
     printed reaches the model as it is. What is left to do: store each value, so a later output, file or command
     that repeats it is redacted exactly; clean the transcript on disk; tell the model not to use the values and the
     person what happened. Measured over one user's transcripts: 14 such outputs with a hit in 105,241 Bash calls."""
+    from .deposit import post_tool_failure as deposit_line
     error = payload.get("error")
     if not isinstance(error, str) or not error or client_of(payload) == "codex":
         return {}
+    if line := deposit_line(payload):
+        return line
     cfg = load_config()
     session = payload.get("session_id")
     matches = detect.findings(error, channel="tool")
