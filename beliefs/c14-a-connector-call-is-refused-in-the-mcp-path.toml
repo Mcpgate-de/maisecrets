@@ -1,0 +1,14 @@
+# c14-a-connector-call-is-refused-in-the-mcp-path: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-connector-call-is-refused-in-the-mcp-path"
+control = "C14"
+serves = ["M3.8"]
+statement = "The MCP path of the PreToolUse hook asks whether the tool is a claude.ai connector before it resolves a stored value, in Claude Code and in Cowork."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_cowork_connector_call_gets_no_stored_value"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''
+    if claude_ai_connector(payload, tool):
+        return _deny(_connector_refusal(tool, found))
+'''
+replace = ''''''
