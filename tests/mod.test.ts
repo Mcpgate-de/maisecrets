@@ -1356,6 +1356,38 @@ test('a refused change from the command.run route never fills the input box', as
   expect(st.spawns.length).toBe(0)
 })
 
+// live probe 2026-11-22: `/maisecrets sref login` and `logout` typed were refused. Python names a login or a logout as
+// a form for the box (prompt_commands._BOX_SREF_RE): it waits in an empty box for the person's Enter, as the login offer
+test('a refused sref login or logout from the command.run route waits in an empty input box', async ($, on) => {
+  const HINT = 'maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. ' +
+    'Nothing was changed. Send it as a prompt: '
+  let box = ''
+  let form = '/maisecrets:sref login gw'
+  const st = runSetup(on, { answer: () => ({ drop: HINT + form, box: form }) })
+  on('prompt.read', () => ({ value: { text: box, cursor: 0 } }))
+  on('command.run', () => ({ text: 'engine' }))
+  let r = await $.command.run({ command: 'maisecrets', args: 'sref login gw', origin: { kind: 'composer' } } as any)
+  expect(st.fills).toEqual([form])
+  expect(r.text).toBe('I put /maisecrets:sref login gw into the input box. Press Enter to run it, or clear the box.')
+  form = '/maisecrets:sref logout'
+  r = await $.command.run({ command: 'maisecrets', args: 'sref logout', origin: { kind: 'composer' } } as any)
+  expect(st.fills).toEqual(['/maisecrets:sref login gw', form])
+  // the person's own text stays: the command is only named
+  box = 'my draft'
+  r = await $.command.run({ command: 'maisecrets', args: 'sref logout', origin: { kind: 'composer' } } as any)
+  expect(r.text).toBe((HINT + form).replace(/^maisecrets: /, ''))
+  // any other form that an answer names for the box never goes there
+  box = ''
+  for (const other of ['maisecrets: ner https://ner.example.com/ner', '/maisecrets:maisecrets forget SECRET_c1',
+    '/maisecrets:sref login gw; status']) {
+    form = other
+    r = await $.command.run({ command: 'maisecrets', args: 'sref login gw', origin: { kind: 'composer' } } as any)
+    expect(r.text).toBe((HINT + other).replace(/^maisecrets: /, ''))
+  }
+  expect(st.fills.length).toBe(2)
+  expect(st.spawns.length).toBe(0)
+})
+
 test('a hidden command that no person typed goes on to the engine, and the mod asks nothing', async ($, on) => {
   const st = runSetup(on, { answer: LIST })
   on('command.run', () => ({ text: 'engine' }))

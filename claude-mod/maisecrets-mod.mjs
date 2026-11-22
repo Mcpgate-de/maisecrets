@@ -1708,7 +1708,7 @@ async function runOwn($, own, kind, runnable, ownCmd, fill, viaMs = false) {
   }
   if (ownAnswer !== null && typeof ownAnswer.drop === 'string') {
     if (fill) fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
-    return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE) }
+    return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE), box: ownAnswer.box }
   }
   return { answer: ownAnswer }
 }
@@ -1738,6 +1738,17 @@ const ownText = (line) => ({ text: String(line).replace(/^maisecrets: /, ''), is
 // `composer`, so it is no proof that the person typed it. Python makes no change there that only the person's own
 // prompt may make (C22): it names the prompt to send, which goes through prompt.submit and the prompt hook
 const COMMAND_ROUTE = 'command'
+// the refused commands of this route that may wait in an empty input box (prompt_commands._BOX_SREF_RE): a logout,
+// and a login, which opens the browser for the person's consent and binds a connector only with its proof, as the
+// login offer (LOGIN_FILL). The person's Enter sends it as their own prompt; every other change is only named
+const SREF_BOX = /^\/maisecrets:sref log(?:in|out)(?: [A-Za-z0-9_.-]{1,64})?$/
+async function boxed($, text) {
+  if (typeof text !== 'string' || !SREF_BOX.test(text)) return false
+  try {
+    if (!(await boxEmpty($))) return false
+    return (await $.prompt.fill({ text, mode: 'append' }))?.isFilled === true
+  } catch { return false }
+}
 async function runTyped($, own) {
   const kind = COMMAND_ROUTE
   if (DEMO_CMD.test(own)) {
@@ -1760,6 +1771,7 @@ async function runTyped($, own) {
   }
   let done = null
   try { done = await runOwn($, own, kind, RUN_CMD.test(own), true, false) } catch { done = null }
+  if (typeof done?.drop === 'string' && await boxed($, done.box)) return ownText(filledNote(done.box))
   return ownText(typeof done?.drop === 'string' ? done.drop : OWN_FAILED)
 }
 

@@ -240,6 +240,22 @@ class CommandRouteTests(_HookBase):
         # the person's own prompt of the named form makes the change (the mod sends it as composer, not the route)
         self.assertIn("on your list now", self.mod("maisecrets: term add " + NAME).get("drop", ""))
 
+    def test_only_a_login_or_a_logout_may_wait_in_the_input_box(self):
+        # live probe 2026-11-22: `/maisecrets sref login` and `logout` typed were refused. A logout loosens nothing;
+        # a login needs the consent in the browser and binds a connector only with its proof
+        for form in ("/maisecrets:sref login", "/maisecrets:sref login gw", "/maisecrets:sref logout",
+                     "/maisecrets:sref logout gw"):
+            with self.subTest(form):
+                out = self.route(form)
+                self.assertEqual(out.get("box"), form, out)
+                self.assertTrue(out["drop"].endswith("Send it as a prompt: " + form), out)
+        # a forget ends the search for a value, and every other change loosens or sets something: named only
+        for prompt in ("/maisecrets:forget " + KEY, "/maisecrets:settings ssh_consent on", "/maisecrets:ner local",
+                       "/maisecrets:not-a-secret " + KEY, "/maisecrets:sref login gw; status"):
+            with self.subTest(prompt):
+                self.assertNotIn("box", self.route(prompt))
+        self.assertFalse(events.take_typed_login("gw", [SESSION]))
+
     def test_a_text_form_the_prompt_hook_does_not_parse_keeps_the_slash_form(self):
         for prompt, form in (("/maisecrets:ner local --model x", "/maisecrets:maisecrets ner local --model x"),
                              ("/maisecrets:ner local; status", "/maisecrets:maisecrets ner local; status")):

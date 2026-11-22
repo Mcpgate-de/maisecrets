@@ -1,0 +1,11 @@
+# c22-the-command-route-offers-the-box-only-for-a-sref-login-or-logout: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-the-command-route-offers-the-box-only-for-a-sref-login-or-logout"
+control = "C22"
+serves = ["M4.2"]
+statement = "On the mod's command route, Python names a form for the input box only for /maisecrets:sref login or logout with at most a server name and no value; a forget, a setting, a term, not-a-secret, the demo and the name service are only named, because an AI that starts a hidden command could put them there."
+runner = ["tests/test_entry.py::CommandRouteTests::test_only_a_login_or_a_logout_may_wait_in_the_input_box"]
+
+[proof]
+file = "maisecrets/prompt_commands.py"
+find = '''        if named == typed and _BOX_SREF_RE.fullmatch(typed):'''
+replace = '''        if True:'''
