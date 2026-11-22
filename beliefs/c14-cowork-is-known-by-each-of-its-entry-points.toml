@@ -1,0 +1,11 @@
+# c14-cowork-is-known-by-each-of-its-entry-points: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-cowork-is-known-by-each-of-its-entry-points"
+control = "C14"
+serves = ["M3.8"]
+statement = "The connector refusal fails closed for each entry point where a connector can arrive under a name the host chooses: remote_cowork, remote_cowork_trigger and local-agent."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_cowork_connector_call_gets_no_stored_value"]
+
+[proof]
+file = "maisecrets/connector_proxy.py"
+find = '''FAIL_CLOSED_ENTRYPOINTS = cowork.ENTRYPOINTS | {"local-agent"}'''
+replace = '''FAIL_CLOSED_ENTRYPOINTS = cowork.ENTRYPOINTS'''

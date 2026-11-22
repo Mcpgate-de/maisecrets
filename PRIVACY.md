@@ -128,6 +128,9 @@ image). Connections start only from a command you run, or go to a service you se
 - The Windows Credential Locker may roam through a Microsoft account on a machine that is
   not domain-joined. Choose the `encrypted-file` store there if that matters.
 
+A tool result of a claude.ai connector passes Anthropic's connector proxy before maisecrets masks it, so there
+only the gateway's own scrubber protects it; a stored value never goes into a connector's tool call.
+
 ## Who processes what
 
 The plugin has no server and no telemetry. mcpgate (the publisher) receives no data from

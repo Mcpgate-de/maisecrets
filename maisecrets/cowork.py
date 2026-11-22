@@ -9,11 +9,14 @@ from __future__ import annotations
 import os
 
 ENTRYPOINT = "remote_cowork"
+# the Cowork cloud entry points: Claude Code's own list of them is remote_cowork and remote_cowork_trigger (desktop app
+# 6.28899.6, app.asar)
+ENTRYPOINTS = frozenset({ENTRYPOINT, "remote_cowork_trigger"})
 
 
 def active() -> bool:
     """Whether this process serves a Cowork session."""
-    return os.environ.get("CLAUDE_CODE_ENTRYPOINT") == ENTRYPOINT
+    return os.environ.get("CLAUDE_CODE_ENTRYPOINT") in ENTRYPOINTS
 
 
 def names_off(cfg) -> bool:

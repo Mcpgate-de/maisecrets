@@ -1,0 +1,17 @@
+# c14-a-claude-ai-connector-call-gets-no-stored-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-claude-ai-connector-call-gets-no-stored-value"
+control = "C14"
+serves = ["M3.8"]
+statement = "In Claude Code, an MCP call whose mcp_server source is claudeai (a claude.ai connector, whatever its tool name) gets no stored value: the PreToolUse hook refuses it, and nothing is resolved, audited or counted."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_claude_code_connector_call_gets_no_stored_value_and_nothing_is_counted"]
+
+[proof]
+file = "maisecrets/connector_proxy.py"
+find = '''
+    if source == "claudeai":
+        return True
+'''
+replace = '''
+    if False:
+        return True
+'''

@@ -1,0 +1,13 @@
+# c14-a-payload-with-a-server-is-not-taken-for-codex: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-payload-with-a-server-is-not-taken-for-codex"
+control = "C14"
+serves = ["M3.8"]
+statement = "A payload that carries mcp_server is Claude Code's: with a model key, no prompt_id and a CODEX_* variable, a tool named mcp__claude_ai_… of a plugin source still gets no stored value."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_payload_with_a_server_is_not_taken_for_codex"]
+
+[proof]
+file = "maisecrets/connector_proxy.py"
+find = '''    if "mcp_server" not in payload and client_of(payload) == "codex":
+'''
+replace = '''    if client_of(payload) == "codex":
+'''

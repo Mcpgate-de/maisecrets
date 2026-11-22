@@ -46,6 +46,7 @@
 "maisecrets/codex_vault.py" = { controls = ["C27"] }
 "maisecrets/consent_report.py" = { none = "a report the person runs over the ssh consent check (C21) of earlier sessions; it changes no setting, consent or decision" }
 "maisecrets/consent_store.py" = { controls = ["C21"] }
+"maisecrets/connector_proxy.py" = { controls = ["C14"] }
 "maisecrets/cowork.py" = { controls = ["C1", "C4"] }
 "maisecrets/debug_log.py" = { none = "appends the line its caller gives to the debug log of the harness; each caller writes no value" }
 "maisecrets/demo.py" = { controls = ["C22"] }

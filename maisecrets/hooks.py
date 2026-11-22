@@ -2029,6 +2029,9 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
     _walk_strings(tool_input, collect)
     if not found:
         return {}
+    from . import connector_proxy
+    if connector_proxy.claude_ai_connector(payload, tool):
+        return _deny(connector_proxy.refusal(tool, found))
     in_keys = [k for k, _a, _b in find_refs(" ".join(_dict_keys(tool_input)))]
     if in_keys:
         return _deny(f"maisecrets: ⟦{in_keys[0]}⟧ is used as a field name, where it is not resolved. "

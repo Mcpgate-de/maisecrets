@@ -116,6 +116,16 @@ class FormsTests(unittest.TestCase):
             self.assertFalse(cowork.active())
             self.assertEqual(forms.for_this_client("/maisecrets demo on"), "/maisecrets demo on")
 
+    def test_active_knows_each_cowork_entry_point(self):
+        # remote_cowork: measured in the Cowork VM (2026-11-21); remote_cowork_trigger: Claude Code's own list of
+        # Cowork cloud entry points. local-agent may run on the computer itself, so the texts and names stay as there
+        for entry in ("remote_cowork", "remote_cowork_trigger"):
+            with self.subTest(entry=entry), mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
+                self.assertTrue(cowork.active())
+        for entry in ("local-agent", "cli", "claude-desktop", "sdk-ts", "remote", ""):
+            with self.subTest(entry=entry), mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
+                self.assertFalse(cowork.active())
+
 
 class ModCommandTests(unittest.TestCase):
     """Cowork draws no dropped-prompt line: a typed command goes on to the command file, which shows its output."""
