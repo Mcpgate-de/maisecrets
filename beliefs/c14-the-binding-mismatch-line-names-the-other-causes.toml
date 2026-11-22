@@ -2,10 +2,10 @@
 belief = "c14-the-binding-mismatch-line-names-the-other-causes"
 control = "C14"
 serves = ["M3.8"]
-statement = '''The line for a gateway's binding_mismatch names, with no value, that a gateway also refuses a personal value in a tool that sends no JSON body, in a tool outside its list, or in a body it encodes.'''
+statement = '''The line for a gateway's binding_mismatch says, with no value, that the value was not sent and that this action of the connector may not take a stored value: an encoded body (a Gmail send) or fields that go into the URL.'''
 runner = ["tests/test_deposit.py::AnyFieldShapeTests::test_the_binding_mismatch_line_names_the_other_causes_and_no_value"]
 
 [proof]
 file = "maisecrets/deposit.py"
-find = '''                            "gateway also refuses a personal value in a tool that sends no JSON body, in a tool "'''
-replace = '''                            "gateway also refuses a personal value in a tool "'''
+find = '''                            "the call did not match its deposit, or this action of the connector does not take a "'''
+replace = '''                            "the call did not match its deposit. "'''

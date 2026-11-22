@@ -600,10 +600,12 @@ class AnyFieldShapeTests(unittest.TestCase):
 
     def test_the_binding_mismatch_line_names_the_other_causes_and_no_value(self):
         line = D._line("binding_mismatch", ["EMAIL_c1"])
-        self.assertIn("sends no JSON body", line)
-        self.assertIn("outside its list", line)
-        self.assertIn("encodes", line)
+        self.assertIn("this action of the connector does not take a stored value", line)
+        self.assertIn("the value was not sent", line)
+        self.assertIn("encodes its body (for example a Gmail send)", line)
+        self.assertIn("fields go into the URL", line)
         self.assertIn("tell the user", line)
+        self.assertIn("EMAIL_c1", line)
 
 
 @unittest.skipUnless(T.HAS_OPENSSL and os.name != "nt", "openssl on POSIX")

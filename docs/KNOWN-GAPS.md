@@ -169,8 +169,12 @@ a to-do.
 - **Detection can take a secret for a personal value.** If maisecrets types a secret as a phone number or a
   name, the gateway's `deposit_any_field` lets that value go into any text field of a listed tool. A later read
   of that field through the connector passes Anthropic's proxy, and only the gateway's own result scrub masks it.
-  A gateway also refuses a personal value at call time (`binding_mismatch`) in a tool that sends no JSON body, in a
-  tool outside its list, or in a body that it encodes before it sends it, such as a mail.
+- **Not every action of a listed tool takes a personal value, and maisecrets cannot see which.** The gateway
+  lists tools, but it checks each action at call time: an action takes a personal value only when it sends a JSON
+  body (POST, PUT or PATCH) and every hook that it runs is on the gateway's audited list. Examples that do not take
+  one: an action that encodes its body (a Gmail send), a dispatcher, an action whose fields go into the URL (such as
+  a project or an issue key of a lookup). The gateway then answers `binding_mismatch` before it uses the deposit, so
+  the value is not sent upstream; the deposit expires unused. The AI gets one line that says so.
 - **The deposit does not work in Cowork.** maisecrets finds the binding of a connector by the tool-name prefix
   `mcp__claude_ai_<connector>__`. Cowork drops `claude_ai_` from the tool names (measured 2026-11-22), and the
   sref login has no way into the VM yet. So in Cowork (and in the desktop app's local agent session) a connector

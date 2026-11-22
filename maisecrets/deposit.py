@@ -638,10 +638,11 @@ def _line(code: str, keys: list) -> str:
         "expired": f"the deposit for {names} expired before the call ran. Call the tool again.",
         "used": f"the gateway took the deposit for {names} as used already. Call the tool again.",
         "unknown_handle": f"the gateway knows no deposit for {names} for this account. Call the tool again.",
-        "binding_mismatch": f"the call did not match the deposit for {names}, so the gateway did not run it. A "
-                            "gateway also refuses a personal value in a tool that sends no JSON body, in a tool "
-                            "outside its list, or in a body that the gateway encodes before it sends it (such as a "
-                            "mail). Do not change the call to get around this; tell the user.",
+        "binding_mismatch": f"the gateway did not run this call with {names}, and the value was not sent. Either "
+                            "the call did not match its deposit, or this action of the connector does not take a "
+                            "stored value: an action that encodes its body (for example a Gmail send) or an action "
+                            "whose fields go into the URL. Do not change the call to get around this; tell the "
+                            "user.",
         "unavailable": "the deposit store of the gateway did not answer, so the call did not run. Try again later.",
     }[code]
 

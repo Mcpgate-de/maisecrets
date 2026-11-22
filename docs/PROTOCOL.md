@@ -354,7 +354,9 @@ second gateway implements it, decision D12). The client side is `maisecrets/depo
   the type of the vault entry, and it must equal the prefix of the key; an own rule, a term, a model's finding, a
   weak entry and a value that holds a gateway reference stay strict. A field of a wrong shape is ignored, and the
   targets still apply. Each placeholder of a call passes the target rule or this rule, or the call is refused. The
-  request is unchanged. BIRTH_DATE is in the list, but its placeholder has a `_` in the type, which the form of the
+  request is unchanged. The gateway also checks each action at call time (a JSON body and audited hooks only, no
+  handle in a URL field) and answers `binding_mismatch` for any other action; the client cannot see that check, and
+  its line for the model says that this action takes no stored value and that the value was not sent. BIRTH_DATE is in the list, but its placeholder has a `_` in the type, which the form of the
   contract's section 5.1 does not take, so it gets no deposit.
 - **The request.** `POST deposit_endpoint` with the person's sref access token, the JCS digest of the arguments as
   the model wrote them, and each value padded (section 5.1). The metadata read, a token renewal and the request
