@@ -11,19 +11,9 @@ Keeps passwords, tokens and personal data out of Claude Code and Codex. A value 
 model sees it, and goes back in on your machine only where a command or a file needs it. No model, no download, no
 package: Python's standard library only. Install takes two commands.
 
-You ask Claude to set up a deploy script and it reads your `.env`:
+[![maisecrets demo: values with a lock on your screen, placeholders for the AI](https://mcpgate.de/media/maisecrets-demo.gif)](https://mcpgate.de/maisecrets/)
 
-```
-$ cat .env                          # what the command printed
-DB_PASSWORD=<the real password>
-STRIPE_KEY=<the real Stripe key>
-
-                                    # what the model received
-DB_PASSWORD=⟦SECRET_c1⟧
-STRIPE_KEY=⟦SECRET_c2⟧
-```
-
-Claude writes the next command with the placeholder. The real value goes back in only when that command runs on your
+Claude works with the placeholders. The real value goes back in only when a command or a tool call runs on your
 machine, and the output comes back masked again. More examples: [What it looks like](docs/USING.md#what-it-looks-like).
 
 ## What it does
