@@ -3,7 +3,7 @@
 ## Unreleased
 
 - A command that changes maisecrets (a term, not-a-secret, the demo, a setting or the name service) is the text you type, such as `maisecrets: term add NAME`. Typed as `/maisecrets NAME` in the terminal, it changes nothing, and maisecrets names the text for you to type.
-- A tool call of a claude.ai connector (`mcp__claude_ai_…`, in Claude Code and in Cowork) no longer gets a stored value: the call goes through Anthropic's connector proxy, where the value would be in clear text, so maisecrets refuses it and the call does not run. Use the gateway's own references through the connector, or add the MCP server directly; a directly added server gets the value as before.
+- A tool call of a claude.ai connector (`mcp__claude_ai_…`, in Claude Code and in Cowork) no longer gets a stored value: the call goes through Anthropic's connector proxy, where the value would be in clear text, so maisecrets refuses it and the call does not run. Add the MCP server directly, or, if the connector is your gateway, use the gateway's own references; a directly added server gets the value as before. In Cowork every MCP server outside your own config counts as a connector.
 
 ## [0.9.22] - 2026-11-22
 

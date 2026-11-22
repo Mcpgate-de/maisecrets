@@ -2,12 +2,16 @@
 belief = "c14-a-cowork-connector-call-gets-no-stored-value"
 control = "C14"
 serves = ["M3.8"]
-statement = "In Cowork, and wherever the source is no scope of the client's own config, a call of a tool named mcp__claude_ai_… gets no stored value: the PreToolUse hook refuses it."
+statement = "In Cowork (cowork.active()), an MCP call whose source is no scope of the client's own config gets no stored value, whatever its tool name: a connector can arrive there as an sdk server with a name the host chooses."
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_cowork_connector_call_gets_no_stored_value"]
 
 [proof]
 file = "maisecrets/hooks.py"
-find = '''    return tool.startswith(CONNECTOR_PREFIX) and source not in _CONFIG_SOURCES
+find = '''
+    if cowork.active():
+        return True
 '''
-replace = '''    return False
+replace = '''
+    if False:
+        return True
 '''

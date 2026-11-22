@@ -1,0 +1,15 @@
+# c14-a-remote-session-refuses-a-dynamic-server: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-remote-session-refuses-a-dynamic-server"
+control = "C14"
+serves = ["M3.8"]
+statement = "In a remote session (CLAUDE_CODE_REMOTE set), an MCP call whose source is dynamic gets no stored value: a connector can have that source and no claude_ai_ prefix there."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_remote_session_refuses_a_dynamic_server"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''
+    if source == "dynamic" and os.environ.get("CLAUDE_CODE_REMOTE"):
+'''
+replace = '''
+    if False:
+'''

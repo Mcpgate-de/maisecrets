@@ -1,0 +1,19 @@
+# c14-a-claudeai-source-is-refused-before-the-client-is-read: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-claudeai-source-is-refused-before-the-client-is-read"
+control = "C14"
+serves = ["M3.8"]
+statement = "The mcp_server source claudeai is read before the client: a Claude Code payload without prompt_id, with a model key or a CODEX_* variable, is not taken for Codex there, and its connector call gets no stored value."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_claudeai_source_is_refused_also_when_the_payload_reads_like_codex"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''
+    source = server.get("source")
+    if source == "claudeai":
+'''
+replace = '''
+    source = server.get("source")
+    if client_of(payload) == "codex":
+        return False
+    if source == "claudeai":
+'''

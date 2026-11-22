@@ -1,0 +1,11 @@
+# c14-cowork-is-known-by-each-of-its-entry-points: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-cowork-is-known-by-each-of-its-entry-points"
+control = "C14"
+serves = ["M3.8"]
+statement = "cowork.active() is true for each entry point of a Cowork session: remote_cowork, remote_cowork_trigger and local-agent."
+runner = ["tests/test_cowork.py::FormsTests::test_active_knows_each_cowork_entry_point", "tests/test_connector_proxy.py::ConnectorProxyTests::test_a_cowork_connector_call_gets_no_stored_value"]
+
+[proof]
+file = "maisecrets/cowork.py"
+find = '''ENTRYPOINTS = frozenset({ENTRYPOINT, "remote_cowork_trigger", "local-agent"})'''
+replace = '''ENTRYPOINTS = frozenset({ENTRYPOINT})'''

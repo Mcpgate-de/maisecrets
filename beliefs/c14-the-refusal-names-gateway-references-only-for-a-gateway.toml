@@ -1,0 +1,13 @@
+# c14-the-refusal-names-gateway-references-only-for-a-gateway: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-the-refusal-names-gateway-references-only-for-a-gateway"
+control = "C14"
+serves = ["M3.8"]
+statement = "The refusal of a connector call names the gateway's own references only as the way for a connector that is the person's gateway, and it holds no value."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_claude_code_connector_call_gets_no_stored_value_and_nothing_is_counted"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''If this connector is your gateway, use the "
+            "gateway's own references'''
+replace = '''Use the "
+            "gateway's own references'''

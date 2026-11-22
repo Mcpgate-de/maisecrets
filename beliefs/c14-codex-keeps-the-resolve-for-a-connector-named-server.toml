@@ -2,16 +2,16 @@
 belief = "c14-codex-keeps-the-resolve-for-a-connector-named-server"
 control = "C14"
 serves = ["M3.8"]
-statement = "Codex has no claude.ai connectors: a Codex MCP tool named mcp__claude_ai_… keeps the resolve of a stored value."
+statement = "A Codex payload carries no mcp_server, so a Codex MCP tool named mcp__claude_ai_… keeps the resolve of a stored value. Codex's own connectors (codex_apps) are not detected: a known gap."
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_directly_configured_server_keeps_the_resolve"]
 
 [proof]
 file = "maisecrets/hooks.py"
 find = '''
-    if client_of(payload) == "codex":
+    if "mcp_server" not in payload and client_of(payload) == "codex":
         return False
-    server ='''
+'''
 replace = '''
     if False:
         return False
-    server ='''
+'''

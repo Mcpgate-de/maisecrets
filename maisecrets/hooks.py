@@ -2025,24 +2025,33 @@ CONNECTOR_PREFIX = "mcp__claude_ai_"
 
 def claude_ai_connector(payload: dict, tool: str) -> bool:
     """True for a tool of a claude.ai connector: its call goes through Anthropic's connector proxy, where TLS ends.
-    The source `claudeai` names one whatever its tool name. A tool name `mcp__claude_ai_…` names one unless the
-    source is a scope of the client's own config (Cowork's source is not measured; a payload without `mcp_server` is
-    decided by the name too). Codex has no claude.ai connectors."""
-    if client_of(payload) == "codex":
-        return False
+    The source `claudeai` names one whatever its tool name. A scope of the client's own config names none. In Cowork
+    every other source counts as one (a connector can arrive there as an `sdk` server with a tool name the host
+    chooses), and in a remote session (CLAUDE_CODE_REMOTE) the source `dynamic` does. Else the tool name
+    `mcp__claude_ai_…` decides (a payload without `mcp_server` too). Codex sends no `mcp_server`: its tools keep the
+    resolve, and its own connectors (`codex_apps`) are not detected (docs/KNOWN-GAPS.md)."""
     server = payload.get("mcp_server") if isinstance(payload.get("mcp_server"), dict) else {}
     source = server.get("source")
     if source == "claudeai":
         return True
-    return tool.startswith(CONNECTOR_PREFIX) and source not in _CONFIG_SOURCES
+    if source in _CONFIG_SOURCES:
+        return False
+    from . import cowork
+    if cowork.active():
+        return True
+    if source == "dynamic" and os.environ.get("CLAUDE_CODE_REMOTE"):
+        return True
+    if "mcp_server" not in payload and client_of(payload) == "codex":
+        return False
+    return tool.startswith(CONNECTOR_PREFIX)
 
 
 def _connector_refusal(tool: str, keys: list[str]) -> str:
     names = ", ".join("⟦" + k + "⟧" for k in dict.fromkeys(keys))
     return (f"maisecrets: {tool} is a claude.ai connector. Its call passes Anthropic's connector proxy, where "
             f"{names} would be in clear text, so maisecrets puts no stored value into it. The call did not run. "
-            "Use the gateway's own references (⟦sref:…⟧) through this connector, or a directly configured MCP "
-            "server for this value.")
+            "Use a directly configured MCP server for this value. If this connector is your gateway, use the "
+            "gateway's own references (⟦sref:…⟧) through it.")
 
 
 def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:

@@ -3,7 +3,8 @@
 The call of a claude.ai connector does not go from the client to the server: it goes through Anthropic's connector
 proxy, where TLS ends, so a value resolved into its arguments is in clear text there. The PreToolUse hook refuses such
 a call before anything is resolved: no value, no audit line, no use counted. A directly configured MCP server keeps
-the resolve. A server token (C27) and a gateway reference (C31) are no stored values; they pass unchanged.
+the resolve. In Cowork every source that is no scope of the own config counts as a connector, and in a remote session
+the source dynamic does. A server token (C27) and a gateway reference (C31) are no stored values; they pass unchanged.
 
 Run: python3 -m unittest tests.test_connector_proxy -v
 """
@@ -23,7 +24,7 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
-from maisecrets import hooks  # noqa: E402
+from maisecrets import cowork, hooks  # noqa: E402
 from maisecrets.vault import HOME, Vault  # noqa: E402
 import _hygiene  # noqa: E402
 from _hygiene import CLAUDE, CODEX  # noqa: E402
@@ -57,8 +58,24 @@ def _state() -> dict:
     return out
 
 
+# the variables that change the decision: the entry point (Cowork), a remote session, and Codex's own variables
+_DECIDING = ("CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_REMOTE")
+
+
+def _env(**extra: str) -> dict:
+    env = {k: v for k, v in os.environ.items() if k not in _DECIDING and not k.startswith("CODEX_")}
+    return {**env, "CLAUDE_CODE_ENTRYPOINT": "cli", **extra}
+
+
 class ConnectorProxyTests(unittest.TestCase):
     def setUp(self):
+        env = mock.patch.dict(os.environ, _env(), clear=True)
+        env.start()
+        self.addCleanup(env.stop)
+        _reset()
+        self.ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
+
+    def fresh(self) -> None:
         _reset()
         self.ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
 
@@ -77,6 +94,8 @@ class ConnectorProxyTests(unittest.TestCase):
         self.assertIn(self.ref, reason, what)
         self.assertIn("connector proxy", reason, what)
         self.assertIn("directly configured MCP server", reason, what)
+        # the gateway's references are a hint only for a connector that is the person's gateway
+        self.assertIn("If this connector is your gateway, use the gateway's own references", reason, what)
 
     def assert_resolved(self, hso: dict, what: str) -> None:
         self.assertNotEqual(hso.get("permissionDecision"), "deny", f"{what}: {hso}")
@@ -94,18 +113,55 @@ class ConnectorProxyTests(unittest.TestCase):
                 self.assert_refused(self.pre(tool, {"name": name, "source": "claudeai"}), tool)
                 self.assertEqual(_state(), before, "a refused call resolves, audits and counts nothing")
 
+    def test_a_claudeai_source_is_refused_also_when_the_payload_reads_like_codex(self):
+        # Claude Code sends no prompt_id before the first user input of the process; with a `model` key or a CODEX_*
+        # variable client_of() then says codex. The source claudeai is Claude Code's alone: Codex sends no mcp_server
+        server = {"name": "claude.ai Slack", "source": "claudeai"}
+        for client, env in (({}, {"CODEX_HOME": "/nonexistent/codex-home"}), ({"model": "m"}, {})):
+            with self.subTest(client=client, env=env), mock.patch.dict(os.environ, env):
+                self.fresh()
+                before = _state()
+                self.assert_refused(self.pre("mcp__claude_ai_Slack__slack_send_message", server, client), str(env))
+                self.assertEqual(_state(), before)
+
     def test_a_cowork_connector_call_gets_no_stored_value(self):
-        # Cowork runs Claude Code in a VM with the same tool-name prefix; its mcp_server source is not measured there,
-        # so the name decides for every source that is no scope of the client's own config
-        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"}):
-            for server in ({"name": "claude.ai Gmail", "source": "claudeai"},
-                           {"name": "claude.ai Gmail", "source": "dynamic"}, {"name": "claude.ai Gmail"}, None):
-                with self.subTest(server=server):
-                    _reset()
-                    self.ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
+        # In Cowork (cowork.active(), each of its entry points) a connector can arrive as an `sdk` server with a tool
+        # name the host chooses: every source that is no scope of the client's own config counts as a connector
+        servers = ({"name": "claude.ai Gmail", "source": "claudeai"}, {"name": "Gmail", "source": "sdk"},
+                   {"name": "Gmail", "source": "dynamic"}, {"name": "Gmail", "source": "plugin"},
+                   {"name": "Gmail", "source": "agent"}, {"name": "Gmail"}, None)
+        for entry in sorted(cowork.ENTRYPOINTS):
+            for server in servers:
+                with self.subTest(entry=entry, server=server), \
+                        mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
+                    self.assertTrue(cowork.active())
+                    self.fresh()
                     before = _state()
-                    self.assert_refused(self.pre("mcp__claude_ai_Gmail__create_draft", server), str(server))
+                    self.assert_refused(self.pre("mcp__Gmail__create_draft", server), str(server))
                     self.assertEqual(_state(), before)
+
+    def test_in_cowork_a_server_of_the_own_config_keeps_the_resolve(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": cowork.ENTRYPOINT}):
+            for source in ("user", "project", "local", "managed", "enterprise"):
+                with self.subTest(source=source):
+                    self.fresh()
+                    self.assert_resolved(self.pre("mcp__svc__lookup", {"name": "svc", "source": source}), source)
+
+    def test_a_remote_session_refuses_a_dynamic_server(self):
+        # in a remote session (CLAUDE_CODE_REMOTE) a connector can have the source dynamic and no claude_ai_ prefix
+        server = {"name": "Slack", "source": "dynamic"}
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": "true"}):
+            self.assert_refused(self.pre("mcp__Slack__slack_send_message", server), "remote, dynamic")
+        self.fresh()
+        self.assert_resolved(self.pre("mcp__Slack__slack_send_message", server), "local, dynamic")
+
+    def test_a_server_named_like_a_connector_from_a_plugin_agent_or_dynamic_source_is_refused(self):
+        # an over-refusal, accepted: the name is all that tells such a server from a connector there
+        for source in ("plugin", "agent", "dynamic", "sdk"):
+            with self.subTest(source=source):
+                self.fresh()
+                self.assert_refused(self.pre("mcp__claude_ai_mine__lookup", {"name": "claude.ai mine",
+                                                                           "source": source}), source)
 
     def test_a_directly_configured_server_keeps_the_resolve(self):
         # a server of the person's own config, also one named like a connector, and any server in Codex
@@ -120,8 +176,9 @@ class ConnectorProxyTests(unittest.TestCase):
                 self.ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
                 self.assert_resolved(self.pre(tool, server, client), tool)
 
-    def test_a_server_token_and_a_gateway_reference_pass_a_connector_call_unchanged(self):
-        # C27 and C31 never resolve into an MCP call: the token or reference goes to the server as text
+    def test_a_connector_call_with_only_a_server_token_or_a_gateway_reference_gets_no_decision(self):
+        # find_refs reads no stored value in a server token (C27) or a gateway reference (C31), so the hook gives no
+        # decision and no rewrite; what the server does with the text is not checked here
         server = {"name": "claude.ai Team GW", "source": "claudeai"}
         for text in (SREF, SERVER_TOKEN):
             with self.subTest(text=text):
