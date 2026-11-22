@@ -318,6 +318,12 @@ class NerGatewayTests(unittest.TestCase):
                     text = self.answer(prompt, COWORK)
                     self.assertIn(ner_setup.COWORK_GATEWAY, text)
                     self.assertEqual(self.config.read_text(), self.before)
+
+    def test_outside_cowork_a_bare_server_name_names_its_gateway(self):
+        from maisecrets import ner_setup
+        servers = {"Team_GW": "https://gw.example.com/mcp"}
+        with mock.patch.object(ner_setup, "_servers", return_value=servers), \
+                mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
             self.assertEqual(ner_setup.typed_word("other:Team_GW")[0], "gateway:https://gw.example.com/mcp")
 
     def test_outside_cowork_an_unknown_server_name_still_names_the_configuration(self):
