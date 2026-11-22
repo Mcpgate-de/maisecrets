@@ -24,7 +24,7 @@
 # A belief with serves = [] proves no control of its file.
 
 [file]
-"claude-mod/maisecrets-mod.mjs" = { controls = ["C1", "C32", "C33", "I5"] }
+"claude-mod/maisecrets-mod.mjs" = { controls = ["C1", "C31", "C32", "C33", "I5"] }
 "hooks/dispatch.py" = { controls = ["C1", "C2", "C13", "C22", "C27"] }
 "hooks/guard.py" = { controls = ["C13", "C33"] }
 "hooks/ms.sh" = { none = "the fixed path of the person's /ms shortcut: it runs `pending` (send the last blocked prompt) of the highest maisecrets version installed from any marketplace or synced folder; the prompt hook checks that prompt again" }
@@ -144,7 +144,7 @@
 "maisecrets/value_files.py" = { controls = ["C26"] }
 "maisecrets/values.py" = { controls = ["C26"] }
 "maisecrets/vault.py" = { controls = ["C1", "C2", "C4", "C7", "C9", "C10", "C11", "C12", "C22", "C30", "C31", "I5"] }
-"maisecrets/vault_refs.py" = { controls = ["C27"] }
+"maisecrets/vault_refs.py" = { controls = ["C27", "C31"] }
 "maisecrets/verdict.py" = { controls = ["C29"] }
 "skills/secret-hygiene/scripts/_detector.py" = { none = "finds the detector for the skill scripts and runs it; what each script prints is the script's own rule (C17)" }
 "skills/secret-hygiene/scripts/_fast.py" = { none = "the fast tier of the session audit: it picks the lines the detector reads and prints nothing; what it can miss is named in its docstring, and --full reads every line" }

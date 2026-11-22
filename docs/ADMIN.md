@@ -134,7 +134,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 60 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 19 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 506 proofs: each control's test, and each path of the 17 invariant beliefs, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 527 proofs: each control's test, and each path of the 17 invariant beliefs, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -901,10 +901,34 @@ resolve, output that prints the value shows the reference instead.
    of the turn. Its answer is only a proposal (for an hour): the input box
    gets `/maisecrets sref login NAME` and a line that names the connector and
    the host, and only a login you type (or press in the panel) binds the
-   connector to that gateway; the AI cannot run `/maisecrets sref`. What stays:
-   a connector you added that is not your gateway can name your gateway's URL.
-   Log in only when the named connector is your gateway (a check by the
-   gateway itself is planned). Before that, its
+   connector to that gateway; the AI cannot run `/maisecrets sref`. A
+   connector you added that is not your gateway can name your gateway's URL,
+   so a gateway whose metadata names `sensitive_references.pairing_endpoint`
+   binds only after a proof: when your typed login for the connector
+   succeeded, the mod sends the connector a fresh random nonce (its only
+   argument), and the connector answers with a proof that only your account
+   at that gateway can give. maisecrets asks the gateway for the proof of
+   your own login (the same token as for a resolve) and compares the two in
+   constant time; only a match within 15 minutes of the login binds, and
+   each login allows one try. The nonce and the proof are never stored or
+   shown. Without the mod (`claude -p`) nothing binds. A gateway that names
+   no pairing endpoint gives no proof: there your typed login binds, as
+   before, the login output says so, and you log in only when the named
+   connector is your gateway. That fallback needs this login's own
+   discovery of the gateway (never a cached one), no broken pairing
+   endpoint, and no earlier discovery of that gateway that named one;
+   else nothing binds. What the proof does not cover: a connector that
+   passes your own consent on to your gateway (it reaches your gateway
+   with your account) passes it. While the pairing runs, the mod watches
+   every tool call, tool result and prompt: the nonce in any of them other
+   than its own connector call (the AI could carry it to your gateway's own
+   connector and its proof back) ends the pairing, nothing binds, and a
+   tool call that carries it never runs. The PreToolUse hook refuses every
+   call of `sensitive_references_resource` with a nonce that the AI makes;
+   only the mod's own call (its tool_use_id starts with `toolu_plugin_`,
+   measured on Claude Code 2.1.330) runs. A gateway's refusal to give a proof (a delegated call, an
+   account the gateway does not enable, no pairing key set up) gets its
+   own line, and nothing binds. Before the binding, its
    references do not count; ask for them again after the login. A binding is
    never re-pointed, never takes a gateway that a server of your
    configuration or another connector holds, and never a name of your own

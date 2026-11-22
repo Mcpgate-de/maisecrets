@@ -186,6 +186,11 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None, patient: bo
             "process_scope": process_scope if isinstance(process_scope, str) else None,
             "display_scope": display_scope if isinstance(display_scope, str) else None,
             "sinks": sinks, "sink_types": types,
+            # #91: the endpoint that answers a nonce with the proof of the token's user; None when the gateway names
+            # none. A named one that is no https URL on this origin is None too, with `pairing_invalid`: then no
+            # proposed claude.ai connector is bound at all (never the fallback to the typed login)
+            "pairing": block["pairing_endpoint"] if origin_of(block.get("pairing_endpoint")) == origin else None,
+            "pairing_invalid": "pairing_endpoint" in block and origin_of(block.get("pairing_endpoint")) != origin,
             "authorize": ends["authorization"], "token": ends["token"], "register": ends["registration"]}
 
 
@@ -195,6 +200,8 @@ def _same_origin(found: object, origin: str | None) -> bool:
             or not isinstance(found.get("scope"), str) or not isinstance(found.get("sinks"), list):
         return False
     ends = [found.get(k) for k in ("resolve", "authorize", "token", "register")]
+    if found.get("pairing") is not None:
+        ends.append(found["pairing"])
     ner = found.get("ner")
     if ner is not None:
         if not isinstance(ner, dict):
@@ -237,6 +244,8 @@ def discover_typed(cfg: dict, mcp_url: str, budget: float = TYPED_BUDGET, tries:
         found = discover(cfg, mcp_url, time.monotonic() + left, True)
         if found:
             ner_gateway._keep(found["origin"], found, mcp_url)
+            if found.get("pairing"):
+                note_pairing(found["origin"])
             return found, ""
         if DISCOVERY.get("why") not in ("timeout", "network"):
             return None, ""
@@ -250,6 +259,41 @@ def discover_typed(cfg: dict, mcp_url: str, budget: float = TYPED_BUDGET, tries:
     if timeout:
         return None, f"the gateway did not answer within {_seconds(budgets)}"
     return None, "no connection to the gateway" + (", twice" if len(budgets) == 2 else "")
+
+
+# #91: the origins whose live discovery named a pairing endpoint once. A later binding there without a proof is
+# refused, so a gateway that drops the endpoint (or an answer that hides it) does not bring back the typed-login rule.
+# The origin and a time only, in maisecrets' home (no store entry)
+def _pairing_path():
+    from .vault import HOME
+    return HOME / "sref-pairing.json"
+
+
+def note_pairing(origin: str) -> None:
+    """Record that the gateway at this origin gives a pairing proof. Never raises."""
+    from .vault import HOME, LockTimeout, _lock_for, atomic_write
+    if pairing_seen(origin):
+        return
+    try:
+        with _lock_for(HOME / ".sref-pairing.lock"):
+            try:
+                data = json.loads(_pairing_path().read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            data = data if isinstance(data, dict) else {}
+            data.setdefault(origin, time.time())
+            atomic_write(_pairing_path(), json.dumps(data))
+    except (OSError, LockTimeout):
+        pass
+
+
+def pairing_seen(origin: str) -> bool:
+    """A live discovery of this origin named a pairing endpoint once."""
+    try:
+        data = json.loads(_pairing_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and origin in data
 
 
 def discovery_failed() -> bool:
@@ -1008,6 +1052,76 @@ def audit_id_of(answer: object) -> str | None:
 class Resolved(dict):
     """canonical reference -> value, with `audit_id`: the gateway's audit id of this release, or None."""
     audit_id: str | None = None
+def _post(cfg: dict, backend, found: dict, url: str, body: bytes, deadline: float) -> tuple:
+    """(status, JSON object or {}) of a POST with the person's access token; a 401 gets one refresh and one more
+    try. Refused when the gateway cannot be reached."""
+    host = urlsplit(found["origin"]).hostname
+    token = None
+    status, answer = 0, {}
+    for attempt in (0, 1):
+        token = _access(cfg, backend, found, deadline, stale=token if attempt == 1 else None)
+        try:
+            status, headers, raw = _request(cfg, "POST", url,
+                                            {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                                             "Accept": "application/json"}, body, deadline)
+        except _net_errors() as exc:
+            raise Refused(f"{host} could not be reached ({type(exc).__name__})") from None
+        try:
+            answer = json.loads(raw.decode("utf-8")) if _is_json(headers) else None
+        except (ValueError, RecursionError):
+            answer = None
+        answer = answer if isinstance(answer, dict) else {}
+        if status == 401 and attempt == 0:
+            continue                       # an access token that expired early: one refresh, then once again
+        break
+    return status, answer
+
+
+# #91: a nonce of the mod (32 random bytes, base64url) and the proof the gateway derives from it for one user,
+# base64url(HMAC-SHA256) without padding
+NONCE_RE = re.compile(r"[A-Za-z0-9_-]{22,64}")
+PROOF_RE = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+# the gateway's reasons for no proof (ai-gateway 2.0.4024), from its pairing endpoint or the connector's tool: a fixed
+# text each, never the gateway's own words
+PAIRING_REFUSALS = {
+    "DELEGATED_CALL": "the call came on someone else's behalf (a delegated call), and such a call gets no proof",
+    "NOT_ENABLED": "your account there gets no pairing proof (a service account, or a person the gateway blocked)",
+    "NOT_CONFIGURED": "the gateway has no pairing key set up yet; its administrator sets one up",
+}
+
+
+def pairing_proof(cfg: dict, backend, found: dict, nonce: str, deadline: float | None = None) -> str:
+    """The proof the gateway gives the person's own login for this nonce (its `pairing_endpoint`), or Refused. The
+    caller compares it with a connector's proof; neither is stored or printed."""
+    deadline = deadline if deadline is not None else time.monotonic() + BUDGET
+    host = urlsplit(found["origin"]).hostname
+    if not found.get("pairing") or origin_of(found["pairing"]) != found["origin"]:
+        raise Refused(f"{host} gives no pairing proof")
+    if not isinstance(nonce, str) or not NONCE_RE.fullmatch(nonce):
+        raise Refused("the nonce has no valid form")
+    status, answer = _post(cfg, backend, found, found["pairing"], json.dumps({"nonce": nonce}).encode(), deadline)
+    if status == 200:
+        proof = answer.get("proof")
+        if isinstance(proof, str) and PROOF_RE.fullmatch(proof):
+            return proof
+        raise Refused(f"{host} gave no usable proof")
+    if status == 400:
+        raise Refused(f"{host} refused the nonce (HTTP 400)")
+    if status == 401:
+        raise Refused(f"the login at {host} is no longer valid (consent withdrawn or expired); "
+                      "the person runs /maisecrets:sref login")
+    code = answer.get("error_code") or answer.get("error")
+    code = code.upper() if isinstance(code, str) else ""
+    if code in PAIRING_REFUSALS:
+        raise Refused(f"{host} gives no proof: {PAIRING_REFUSALS[code]}")
+    if status == 503:
+        raise Refused(f"{host} gives no proof: {PAIRING_REFUSALS['NOT_CONFIGURED']}")
+    if status == 403:
+        why = _FORBIDDEN.get(code.lower(), "forbidden")
+        raise Refused(f"{host} refused the pairing ({why})")
+    raise Refused(f"{host} gave no usable answer (HTTP {status})")
 
 
 def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destination: str,
@@ -1035,23 +1149,7 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
     body = json.dumps({"references": canon, "sink_type": sink_type, "destination": destination}).encode()
     if len(body) > MAX_REQUEST_BYTES:
         raise Refused(f"the request to {host} is larger than 64 KB")
-    token = None
-    for attempt in (0, 1):
-        token = _access(cfg, backend, found, deadline, stale=token if attempt == 1 else None)
-        try:
-            status, headers, raw = _request(cfg, "POST", found["resolve"],
-                                            {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-                                             "Accept": "application/json"}, body, deadline)
-        except _net_errors() as exc:
-            raise Refused(f"{host} could not be reached ({type(exc).__name__})") from None
-        try:
-            answer = json.loads(raw.decode("utf-8")) if _is_json(headers) else None
-        except (ValueError, RecursionError):
-            answer = None
-        answer = answer if isinstance(answer, dict) else {}
-        if status == 401 and attempt == 0:
-            continue                       # an access token that expired early: one refresh, then once again
-        break
+    status, answer = _post(cfg, backend, found, found.get("resolve"), body, deadline)
     if status == 200:
         values = answer.get("values")
         if isinstance(values, dict) and all(isinstance(values.get(r), str) for r in canon):

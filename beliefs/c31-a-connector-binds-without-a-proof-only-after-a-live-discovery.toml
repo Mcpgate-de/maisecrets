@@ -1,0 +1,11 @@
+# c31-a-connector-binds-without-a-proof-only-after-a-live-discovery: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-connector-binds-without-a-proof-only-after-a-live-discovery"
+control = "C31"
+serves = ["M3.3"]
+statement = "A proposed connector is bound without a pairing proof only when this login's own discovery read the gateway's document; a cached record never binds it."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_a_discovery_record_that_does_not_say_whether_the_gateway_pairs_binds_nothing"]
+
+[proof]
+file = "maisecrets/cli.py"
+find = '''"proof; send this command again" if server not in live or "pairing" not in f else None)'''
+replace = '''"proof; send this command again" if "pairing" not in f else None)'''

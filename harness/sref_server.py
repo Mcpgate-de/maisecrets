@@ -9,6 +9,9 @@
   once (`consent = True`) and the answer redirects to the loopback with `code` and `state`.
 - `POST /auth/token`: the code (with its verifier) or a refresh token for an access token of one hour and a refresh
   token that rotates on each use.
+- `POST /sensitive-references/pairing` (#91, while `pairing` is True): `{"nonce"}` with the person's access token gives
+  `{"proof"}`, base64url(HMAC-SHA256(the user's key, "sref-pairing-v1:" + nonce)) without padding; `proof(nonce)`
+  computes it as a connector of this gateway would.
 - `POST /sensitive-references/resolve`: all values or one error with counts (`unresolvable` 409, `quota_exceeded`
   429, `ineligible_sink` 403, `invalid_token` 401), as the contract says. A success names the gateway's audit event
   of the release (`audit_id`, RESOLVER-PROFILE 12.4); `audit_id = None` answers without it, as an older gateway.
@@ -21,7 +24,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
+import re
 import secrets
 import tempfile
 import threading
@@ -68,6 +73,11 @@ class SrefServer:
         self.process_scope = True        # mcpgate 2.0.3815: the process sink needs its own scope
         self.display_scope = True        # ai-gateway #1804: the display sink needs its own scope
         self.scopes: dict = {}           # access or refresh token -> the scope it was granted
+        self.pairing = True              # #91: the pairing endpoint in the metadata, and its answer
+        self.pair_key = secrets.token_bytes(32)   # K_user of the one user of this fake
+        self.pair_answer = None          # (status, body): the pairing endpoint answers this instead
+        self.pairing_named = None        # what the metadata names as pairing_endpoint instead (a broken one)
+        self.pairings: list = []         # the nonce of each pairing request (a test checks what the client sent)
         self.ner = False                 # ai-gateway #1819: the name endpoint and its scope, while the switch is on
         self.ner_answer = None           # (status, body): the name endpoint answers this instead
         self.ner_texts: list = []        # every text the name endpoint got
@@ -135,6 +145,10 @@ class SrefServer:
                                                  **({"process_scope": PROCESS_SCOPE} if server.process_scope else {}),
                                                  **({"display_scope": DISPLAY_SCOPE} if server.display_scope else {}),
                                                  "resolver_profiles": ["oauth-resolver-1"],
+                                                 **({"pairing_endpoint":
+                                                     server.url + "/sensitive-references/pairing"
+                                                     if server.pairing_named is None else server.pairing_named}
+                                                    if server.pairing else {}),
                                                  **({"refresh_reuse_interval": server.reuse_interval}
                                                     if server.reuse_interval is not None else {}),
                                                  "sink_profiles": server.sinks,
@@ -247,9 +261,27 @@ class SrefServer:
                     return self._send(400, {"error": "unsupported_grant_type"})
                 if self.path == "/sensitive-references/resolve":
                     return self._resolve(raw)
+                if self.path == "/sensitive-references/pairing" and server.pairing:
+                    return self._pairing(raw)
                 if self.path == "/sensitive-references/ner" and server.ner:
                     return self._ner(raw)
                 self._send(404, {"error": "not_found"})
+
+            def _pairing(self, raw: bytes) -> None:
+                auth = self.headers.get("Authorization", "")
+                token = auth[7:] if auth.startswith("Bearer ") else ""
+                if not server.consent or float(server.access.get(token, 0)) < time.time():
+                    return self._send(401, {"error": "invalid_token"})
+                if server.pair_answer is not None:
+                    return self._send(*server.pair_answer)
+                try:
+                    nonce = json.loads(raw or b"{}").get("nonce")
+                except (ValueError, AttributeError):
+                    nonce = None
+                if not isinstance(nonce, str) or not re.fullmatch(r"[A-Za-z0-9_-]{22,64}", nonce):
+                    return self._send(400, {"error": "invalid_nonce"})
+                server.pairings.append(nonce)
+                return self._send(200, {"proof": server.proof(nonce)})
 
             def _ner(self, raw: bytes) -> None:
                 auth = self.headers.get("Authorization", "")
@@ -368,6 +400,11 @@ class SrefServer:
         for k in list(self.reuse):
             self.reuse[k]["last"] = False
         return None
+
+    def proof(self, nonce: str, key: bytes | None = None) -> str:
+        """The pairing proof of this gateway's user (or of another key) for a nonce."""
+        mac = hmac.new(key or self.pair_key, b"sref-pairing-v1:" + nonce.encode(), hashlib.sha256).digest()
+        return base64.urlsafe_b64encode(mac).rstrip(b"=").decode()
 
     def __enter__(self) -> "SrefServer":
         self.thread.start()

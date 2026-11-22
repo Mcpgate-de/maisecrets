@@ -1,0 +1,11 @@
+# c33-the-mod-calls-the-connector-only-when-a-proof-is-due: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c33-the-mod-calls-the-connector-only-when-a-proof-is-due"
+control = "C33"
+serves = ["M6.5"]
+statement = "After a login, the mod calls the connector with a nonce only when Python says a proposal waits for its proof."
+runner = ["tests/mod.test.ts::no proposal that waits for a proof asks the connector nothing"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''  if (due && due.due !== true) return'''
+replace = ''''''

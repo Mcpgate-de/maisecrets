@@ -68,7 +68,8 @@ MAY_START = {
     "maisecrets/ner_setup.py": (36, "the container tool of the name service the person set up, its keeper, and its "
                                     "typed start"),
     "maisecrets/prompt_commands.py": (4, "hooks/dispatch.py sref, for a gateway status the person typed in Cowork"),
-    "maisecrets/sref_client.py": (5, "a Python child that serves a gateway value through a FIFO"),
+    "maisecrets/sref_client.py": (7, "a Python child that serves a gateway value through a FIFO, and the child that "
+                                     "renews a login (_access, through _post for a resolve and a pairing proof)"),
     "maisecrets/user_rules.py": (6, "a Python child that checks a rule of the person"),
     "maisecrets/vault.py": (34, "the tool of the operating system's store"),
     "skills/secret-hygiene/scripts/_detector.py": (2, "worker processes of the scan, and git log for the history"),
@@ -85,14 +86,17 @@ MOD_MEMBERS = {"clock", "command", "env", "mcp", "plugin", "process", "prompt", 
 MOD_GLOBALS = {"crypto"}
 MOD_PROCESS_RUNS = 9     # each $.process.run( or $.process.spawn(; any other use of $.process is a finding
 MEMBER = r"\$\s*\??\.\s*"  # $. and $?. and $ on one line with .x on the next
+# the one form of the MCP call: the connector's tool, and as its argument nothing or an object with the nonce alone
+MOD_MCP_CALL = r"\.call\(server, CONNECTOR_TOOL, nonce === undefined \? undefined : \{ nonce \}\)"
 MOD_FORBIDDEN = (r"\bfetch\b", r"\bXMLHttpRequest\b", r"\bWebSocket\b", r"\bEventSource\b", r"\bnavigator\b",
                  r"\bwindow\b", r"\bimport\s*\(", r"\brequire\s*\(", r"^\s*import\s", r"\bchild_process\b",
                  r"\$\s*\??\.?\s*\[", r"(?:^|[^}\s])\s*=\s*\$\s*(?:[;\n,)]|$)", r"\bglobalThis\s*\??\.?\s*\[",
                  r"\$\s*\??\.\s*process(?!\s*\??\.\s*(?:run|spawn)\s*\()",
-                 # $.mcp only as one question to a claude.ai connector that showed a reference, with no argument: the
-                 # tool sensitive_references_resource of a service the person set up (C31, C33)
-                 r"\$\s*\??\.\s*mcp(?!\.call\(server, CONNECTOR_TOOL\))")
-MOD_MCP_CALLS = 1         # the connector question (askConnector); any other use of $.mcp is a finding
+                 # $.mcp only as one call of a claude.ai connector that showed a reference: the tool
+                 # sensitive_references_resource of a service the person set up, with no argument or with the mod's
+                 # nonce only (its pairing proof, #91; C31, C33)
+                 r"\$\s*\??\.\s*mcp(?!" + MOD_MCP_CALL + ")")
+MOD_MCP_CALLS = 1         # callConnector (the question and the pairing); any other use of $.mcp is a finding
 
 
 def modules():
@@ -423,7 +427,7 @@ class ModNetworkTests(unittest.TestCase):
             self.assertGreater(len(starts), 100, "the canary reads no statement of the mod")
             lost = [i + 1 for i, w in starts if not code[i].lstrip().startswith(w.group(1))]
             self.assertEqual(lost, [], f"{path.name}: the reader swallowed code at these lines")
-        calls = sum(len(re.findall(r"\$\.mcp\.call\(server, CONNECTOR_TOOL\)", code_of(p.read_text(encoding="utf-8"))))
+        calls = sum(len(re.findall(r"\$\.mcp" + MOD_MCP_CALL, code_of(p.read_text(encoding="utf-8"))))
                     for p in mods)
         self.assertEqual(calls, MOD_MCP_CALLS, "a new place in the mod calls an MCP server; count it and say why (C33)")
         self.assertIn("const CONNECTOR_TOOL = 'sensitive_references_resource'",

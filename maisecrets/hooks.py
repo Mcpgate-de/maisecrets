@@ -2489,6 +2489,10 @@ def _pre_tool(payload: dict) -> dict:
     if tool == "SendMessage":
         return _pre_send_message(payload, cfg, tool_input)
     if tool.startswith("mcp__"):
+        from . import sref_hooks
+        refused = sref_hooks.pairing_call_refusal(payload)
+        if refused:
+            return _deny(refused)
         # Every server, a gateway too: a placeholder that reaches a gateway action unresolved is parsed as
         # text (measured 2026-09-26 with gmail_create_draft: the recipient was split at the colon). A token
         # of the server range stays as it is; it goes back to the server that minted it (PROTOCOL §4).

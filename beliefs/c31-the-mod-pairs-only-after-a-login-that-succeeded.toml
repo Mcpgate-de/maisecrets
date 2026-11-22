@@ -1,0 +1,11 @@
+# c31-the-mod-pairs-only-after-a-login-that-succeeded: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-the-mod-pairs-only-after-a-login-that-succeeded"
+control = "C31"
+serves = ["M3.3"]
+statement = "The mod asks a connector for its pairing proof only after the login of that same connector ended with exit code 0."
+runner = ["tests/mod.test.ts::a failed login asks the connector nothing"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''if (result.code === 0 && typeof run.pair === 'string' && run.pair === server) await pairConnector($, run.pair)'''
+replace = '''if (typeof run.pair === 'string') await pairConnector($, run.pair)'''

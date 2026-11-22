@@ -1,0 +1,14 @@
+# c31-a-nonce-in-another-tool-call-taints-the-pairing: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-nonce-in-another-tool-call-taints-the-pairing"
+control = "C31"
+serves = ["M3.3"]
+statement = "While a pairing runs, its nonce in any tool call other than the mod's own connector call taints it: nothing binds, and the login mark goes."
+runner = ["tests/mod.test.ts::the nonce in a call of another connector while the pairing runs binds nothing, and the login mark goes"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''    p.tainted = true
+    hit = true
+'''
+replace = '''    hit = true
+'''

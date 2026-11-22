@@ -1305,13 +1305,15 @@ def cmd_sref(args: list[str]) -> int:
     quick = cowork.active() and os.environ.get(COWORK_SREF_ENV) == "1"
     phase_end = start + (SREF_LOGIN_DISCOVERY_S if action == "login" else
                          SREF_COWORK_DISCOVERY_S if quick else SREF_DISCOVERY_S)
-    found, failed = {}, []
+    found, failed, live = {}, [], set()
     for i, (server, url) in enumerate(servers.items()):
         now = time.monotonic()
         share = max(0.0, phase_end - now) / (len(servers) - i)
         f, note = sref_client.discover_typed(cfg, url, end=now + share)
         if f:
             found[server] = f
+            if not note:
+                live.add(server)           # this login's own discovery, not the cache of an earlier one
             if note:
                 print(f"maisecrets: {server}: {note}.")
         elif note or sref_client.discovery_failed():
@@ -1377,6 +1379,8 @@ def cmd_sref(args: list[str]) -> int:
             webbrowser.open(url)
         except Exception:  # noqa: BLE001 - the printed URL is the way then
             pass
+    if server in proposed:
+        vault_refs.clear_login_mark(server)       # a mark of an earlier login is never used by this one (#91)
     try:
         # the browser gets up to 110 s, less the time of a slow discovery and registration
         sref_client.login(cfg, backend, f, open_browser, wait=110.0, budget=SREF_LOGIN_REQUEST_S, patient=True,
@@ -1392,10 +1396,32 @@ def cmd_sref(args: list[str]) -> int:
             print(f"maisecrets: logged in to {host}; the claude.ai connector {server} was not bound, because you did "
                   f"not type this login. To bind it, type /maisecrets sref login {server} yourself.")
             return 1
+        if f.get("pairing"):
+            # #91: a connector the person added that is not this gateway could have proposed its URL. The login only
+            # marks the proposal; the connector's proof for a nonce of the mod binds it (sref_hooks.pair_connector)
+            if not vault_refs.mark_login(server, proposed[server]):
+                print(f"maisecrets: logged in to {host}, but the claude.ai connector {server} was not bound: its "
+                      "proposal expired or changed. It is proposed again after it shows a reference.")
+                return 1
+            print(f"maisecrets: logged in to {host}. The claude.ai connector {server} is bound only when it proves "
+                  f"that it reaches {host} with your account: in Claude Code the maisecrets mod asks it for that proof "
+                  "now. Without the mod (claude -p, Codex) nothing binds it.")
+            return 0
+        # without a proof only where this login's own discovery read the gateway's document, that document names no
+        # pairing endpoint (none at all, not a broken one), and no earlier discovery of this origin named one
+        why = ("its pairing endpoint is not an https URL on its own origin" if f.get("pairing_invalid") else
+               "it named a pairing endpoint before and names none now" if sref_client.pairing_seen(f["origin"]) else
+               "maisecrets could not read its document now, so it could not check whether the gateway gives a pairing "
+               "proof; send this command again" if server not in live or "pairing" not in f else None)
+        if why:
+            print(f"maisecrets: logged in to {host}, but the claude.ai connector {server} was not bound: {why}.")
+            return 1
         if not vault_refs.bind_connector(server, proposed[server]):
             print(f"maisecrets: logged in to {host}, but the claude.ai connector {server} was not bound: another "
                   "server or connector holds that gateway now, or the connector named another one.")
             return 1
+        print(f"maisecrets: {host} gives no pairing proof, so your typed login bound the claude.ai connector "
+              f"{server}.")
     who = sref_client.account(backend, f["origin"])
     print(f"maisecrets: logged in to {host}" + (" (the account is shown to you only)" if who else "") + ". A reference "
           "that this gateway "

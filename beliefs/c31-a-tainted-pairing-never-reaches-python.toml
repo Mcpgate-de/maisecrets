@@ -1,0 +1,11 @@
+# c31-a-tainted-pairing-never-reaches-python: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-tainted-pairing-never-reaches-python"
+control = "C31"
+serves = ["M3.3"]
+statement = "The answer of a tainted pairing is never handed to Python, so its proof cannot bind."
+runner = ["tests/mod.test.ts::the nonce in a call of another connector while the pairing runs binds nothing, and the login mark goes"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''      if (p.tainted) why ='''
+replace = '''      if (false) why ='''
