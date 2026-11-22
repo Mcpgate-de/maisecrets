@@ -24,7 +24,7 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
-from maisecrets import cowork, hooks  # noqa: E402
+from maisecrets import connector_proxy, hooks  # noqa: E402
 from maisecrets.vault import HOME, Vault  # noqa: E402
 import _hygiene  # noqa: E402
 from _hygiene import CLAUDE, CODEX  # noqa: E402
@@ -124,6 +124,14 @@ class ConnectorProxyTests(unittest.TestCase):
                 self.assert_refused(self.pre("mcp__claude_ai_Slack__slack_send_message", server, client), str(env))
                 self.assertEqual(_state(), before)
 
+    def test_a_payload_with_a_server_is_not_taken_for_codex(self):
+        # Codex sends no mcp_server: a payload that has one is Claude Code's, also with a `model` key, no prompt_id
+        # and a CODEX_* variable, so the tool name still decides there
+        with mock.patch.dict(os.environ, {"CODEX_HOME": "/nonexistent/codex-home"}):
+            server = {"name": "claude.ai mine", "source": "plugin"}
+            hso = self.pre("mcp__claude_ai_mine__lookup", server, {"model": "m"})
+            self.assert_refused(hso, "plugin source, model key, CODEX_HOME")
+
     def test_a_cowork_connector_call_gets_no_stored_value(self):
         # In Cowork (each of its entry points) and in the desktop app's local agent session (local-agent, for this
         # refusal only) a connector can arrive as an `sdk` server with a tool name the host chooses: every source that
@@ -141,9 +149,10 @@ class ConnectorProxyTests(unittest.TestCase):
                     self.assertEqual(_state(), before)
 
     def test_in_cowork_a_server_of_the_own_config_keeps_the_resolve(self):
-        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": cowork.ENTRYPOINT}):
+        for entry in sorted(connector_proxy.FAIL_CLOSED_ENTRYPOINTS):
             for source in ("user", "project", "local", "managed", "enterprise"):
-                with self.subTest(source=source):
+                with self.subTest(entry=entry, source=source), \
+                        mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
                     self.fresh()
                     self.assert_resolved(self.pre("mcp__svc__lookup", {"name": "svc", "source": source}), source)
 
@@ -152,6 +161,11 @@ class ConnectorProxyTests(unittest.TestCase):
         server = {"name": "Slack", "source": "dynamic"}
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": "true"}):
             self.assert_refused(self.pre("mcp__Slack__slack_send_message", server), "remote, dynamic")
+            # only the source dynamic: an sdk or a plugin server without the prefix keeps the resolve there
+            for source in ("sdk", "plugin"):
+                with self.subTest(source=source):
+                    self.fresh()
+                    self.assert_resolved(self.pre("mcp__svc__lookup", {"name": "svc", "source": source}), source)
         self.fresh()
         self.assert_resolved(self.pre("mcp__Slack__slack_send_message", server), "local, dynamic")
 

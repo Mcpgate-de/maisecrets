@@ -1,0 +1,13 @@
+# c14-a-remote-session-refuses-only-the-dynamic-source: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-remote-session-refuses-only-the-dynamic-source"
+control = "C14"
+serves = ["M3.8"]
+statement = "In a remote session (CLAUDE_CODE_REMOTE set), only the source dynamic counts as a connector: an sdk or a plugin server without the claude_ai_ prefix keeps the resolve."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_remote_session_refuses_a_dynamic_server"]
+
+[proof]
+file = "maisecrets/connector_proxy.py"
+find = '''    if source == "dynamic" and os.environ.get("CLAUDE_CODE_REMOTE"):
+'''
+replace = '''    if os.environ.get("CLAUDE_CODE_REMOTE"):
+'''

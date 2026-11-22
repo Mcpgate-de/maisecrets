@@ -1,0 +1,19 @@
+# c14-a-server-of-the-own-config-keeps-the-resolve-in-cowork: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-server-of-the-own-config-keeps-the-resolve-in-cowork"
+control = "C14"
+serves = ["M3.8"]
+statement = "In Cowork and in a local agent session, a server of the client's own config (source user, project, local, managed or enterprise) keeps the resolve: the own-config check comes before the entry-point check."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_in_cowork_a_server_of_the_own_config_keeps_the_resolve"]
+
+[proof]
+file = "maisecrets/connector_proxy.py"
+find = '''    if source in _CONFIG_SOURCES:
+        return False
+    if os.environ.get("CLAUDE_CODE_ENTRYPOINT") in FAIL_CLOSED_ENTRYPOINTS:
+        return True
+'''
+replace = '''    if os.environ.get("CLAUDE_CODE_ENTRYPOINT") in FAIL_CLOSED_ENTRYPOINTS:
+        return True
+    if source in _CONFIG_SOURCES:
+        return False
+'''
