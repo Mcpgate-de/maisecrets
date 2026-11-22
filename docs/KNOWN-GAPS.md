@@ -8,6 +8,18 @@ was measured or documented. The controls and where each one ends are in [THREAT-
 What the plugin does not protect. Each item is a limit of the mechanism, not
 a to-do.
 
+- **The ids in the result of an Agent or Task call are not masked (#31).**
+  Claude Code writes the agent id, the task id and the output file into that
+  result, and it shows the AI the pointer it makes from the result that the
+  hook returns. maisecrets keeps the ids and the name of the output file as
+  they are, also when a rule, the name service or a stored value finds them: a
+  placeholder there stopped the AI from continuing the agent and blocked its
+  report. Only an id of the client's shape is kept, and of a SendMessage result
+  only its resumedAgentId. The folder of the output file, the task text and the
+  report are masked as usual. In the
+  cloud runtime (Cowork, Claude Code on the web) this is not measured: there a
+  blocked report shows no notice, so a report that maisecrets blocks for
+  another reason is still lost without a word.
 - **The output of a command that fails reaches the model as it is (Claude
   Code).** Claude Code reports a failed call through another hook event,
   whose answer cannot replace the output. A value that a failing command
