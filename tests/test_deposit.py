@@ -706,6 +706,24 @@ class AnyFieldTests(_Base):
         self.bind()
         self.assert_refused(self.pre(self.issue(self.put(MAIL, "EMAIL", "email"))), "takes no deposit for this call")
         self.assertEqual(self.srv.deposit_requests, [])
+        self.assertNotIn("deposit 127.0.0.1", self.audit(), "maisecrets refused it: no value left the computer")
+
+    def test_a_kept_metadata_copy_with_a_widened_list_is_read_again(self):
+        self.free(types=["EMAIL"])
+        self.bind()
+        self.assertIn("updatedInput", self.pre(self.issue(self.put(MAIL, "EMAIL", "email"))))
+        cache = HOME / "sref" / "deposit-metadata.json"
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        for rec in data.values():                       # a process on the computer widens the kept copy
+            rec["found"]["deposit"]["deposit_any_field"]["types"].append("SECRET")
+        cache.write_text(json.dumps(data), encoding="utf-8")
+        self.assert_refused(self.pre(self.issue(self.ref), call="t2"), "takes no deposit at /params/description")
+        self.assertEqual(len(self.srv.deposit_requests), 1)
+        self.assertEqual(sum("deposit 127.0.0.1" in line for line in self.audit().splitlines()), 1,
+                         "only the deposit of the e-mail address; the secret never left the computer")
+        kept = json.loads(cache.read_text(encoding="utf-8"))
+        self.assertEqual([r["found"]["deposit"]["deposit_any_field"]["types"] for r in kept.values()], [["EMAIL"]],
+                         "the gateway's metadata was read again over the direct channel")
 
     def test_in_a_mixed_call_each_placeholder_passes_one_of_the_two_rules(self):
         self.free()
