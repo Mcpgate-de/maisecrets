@@ -741,7 +741,9 @@ typed while a tool runs; the settings hook sees the placeholder; on 2.1.274 the
 mod does not load and the hook blocks. Seen live in the desktop app's Code tab
 with Claude Code 2.1.288: the prompt is rewritten and the model gets the
 placeholder; your own message bubble there shows the text as you typed it, which
-is the app's local display. Cowork (measured 2026-11-21) rewrites too, but it shows
+is the app's local display. Cowork (measured 2026-11-21) rewrites too (it keeps the value
+from the model; your text reaches Anthropic before the rewrite, see
+[KNOWN-GAPS.md](KNOWN-GAPS.md)), but it shows
 no lock and no panel, and it knows the commands by their short name: `/status`,
 `/list`, `/sref login NAME`. Mods are a rollout switch of the client:
 where they are off (a saved switch, some third-party setups), the hook blocks.

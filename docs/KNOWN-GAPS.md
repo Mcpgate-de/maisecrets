@@ -18,11 +18,12 @@ a to-do.
   redacted as usual. maisecrets then stores the value (a repeat is redacted),
   cleans the transcript on disk, tells the AI not to use it, and shows you a
   line about it. See the threat model, "What is knowingly not defended".
-- **No hook, no protection.** Claude Chat, ChatGPT Chat, the web and the
+- **No hook, no protection.** Claude Chat, ChatGPT Chat, the claude.ai chat on the web and the
   mobile apps run no plugin hooks. Cowork does, Claude Code does, Codex does.
 - **In Cowork and in a cloud session, the prompt you type reaches Anthropic in clear text before maisecrets
-  sees it.** The desktop app or the browser sends the text to Anthropic's session service, which stores it and
-  passes it to Claude Code in the cloud VM. maisecrets runs in that VM: it keeps the value from the model, not from
+  sees it.** The desktop app or the browser sends the text to Anthropic's session service, which passes it to
+  Claude Code in the cloud VM. Anthropic stores the session transcript; whether it keeps your original text is not
+  measured. maisecrets runs in that VM: it keeps the value from the model, not from
   Anthropic's servers. The same holds for a prompt that you type on another device in Remote Control. In Claude
   Code on your own computer the hook rewrites the prompt before it leaves the computer. See the threat model,
   "Network paths".
