@@ -157,6 +157,11 @@ a to-do.
   `mcp__claude_ai_<connector>__`. Cowork drops `claude_ai_` from the tool names (measured 2026-11-22), and the
   sref login has no way into the VM yet. So in Cowork (and in the desktop app's local agent session) a connector
   call with a stored value stays refused.
+- **A gateway's refusal of a deposit may reach the AI as raw text.** When the gateway refuses a call that
+  carried a deposit handle, its tool result is `deposit_refused: <code>` with `isError: true`, and maisecrets
+  turns it into one line in PostToolUse. Not measured: whether Claude Code gives such a result to PostToolUse or
+  to PostToolUseFailure, which cannot replace an output (anthropics/claude-code#97278). In the second case the AI
+  sees the code itself, which holds no value and no handle.
 - **Codex has connectors too, and maisecrets does not detect them.** Codex's `codex_apps` server (ChatGPT app
   connectors behind OpenAI's apps gateway) relays a call like a claude.ai connector. Codex sends no server source,
   so maisecrets cannot tell such a call from a direct server, and it puts the stored value in.

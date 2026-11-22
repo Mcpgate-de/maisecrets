@@ -213,10 +213,13 @@ class _Base(unittest.TestCase):
         return {"action": "create_webhook", "project": "group/app", "url": "https://hooks.example.com/in",
                 "token": self.ref, **change}
 
-    def pre(self, tool_input: dict | None = None, call: str = "t1", tool: str = TOOL) -> dict:
+    def pre(self, tool_input: dict | None = None, call: str = "t1", tool: str = TOOL, server: object = SERVER) -> dict:
         hooks._live_cache.clear()
-        out = hooks.pre_tool({"tool_name": tool, "tool_input": tool_input or self.args(), "session_id": "s1",
-                              "tool_use_id": call, "transcript_path": "", "mcp_server": SERVER, **CLAUDE})
+        payload = {"tool_name": tool, "tool_input": tool_input or self.args(), "session_id": "s1",
+                   "tool_use_id": call, "transcript_path": "", **CLAUDE}
+        if server is not None:
+            payload["mcp_server"] = server
+        out = hooks.pre_tool(payload)
         self.assertNotIn(VALUE, json.dumps(out, ensure_ascii=False), "the value never reaches the hook's answer")
         return out.get("hookSpecificOutput", {})
 
@@ -315,7 +318,9 @@ class DepositHookTests(_Base):
         vault_refs.propose_connector("claude_ai_Team_GW", json.dumps({"resource": self.url}))
         self.login()
         self.assertTrue(vault_refs.bind_connector("Team_GW", self.url))      # the typed-login fallback, no seal
-        self.assert_refused(self.pre(), "was bound without a pairing proof")
+        self.assert_refused(self.pre(), "carries no seal of a pairing proof (it was made without a proof, or by an "
+                                        "older maisecrets); pair it again: /maisecrets sref logout Team_GW, let the "
+                                        "connector show a reference, then /maisecrets sref login Team_GW")
         self.assertEqual(self.srv.deposit_requests, [])
 
     def test_a_changed_binding_file_stops_the_deposit(self):
@@ -391,6 +396,38 @@ class DepositHookTests(_Base):
         short = Vault().put("pin-123", "SECRET", "manual", session="s1").ref
         self.assert_refused(self.pre(self.args(token=short)), "has 7 bytes, and a deposit takes 8 to 4096")
 
+    def test_the_size_is_checked_before_the_policy_and_the_limiter(self):
+        # contract 6.1: the size (step 6) before the rehydration policy, the session rule and the limiter (step 7)
+        self.write_config({"rehydration": "block"})
+        self.bind()
+        short = Vault().put("pin-123", "SECRET", "manual", session="s1").ref
+        self.assert_refused(self.pre(self.args(token=short)), "has 7 bytes, and a deposit takes 8 to 4096")
+        # a key of another session is not measured: its length is no answer
+        other = Vault().put("pin-456", "SECRET", "manual", session="s2").ref
+        hso = self.pre(self.args(token=other))
+        self.assertNotIn("bytes", hso["permissionDecisionReason"])
+
+    def test_a_call_without_its_mcp_server_gets_no_deposit(self):
+        # without the server's own name, a `__` inside a connector's or a tool's name could route a handle elsewhere
+        self.bind()
+        self.assert_refused(self.pre(server=None), "names no claude.ai connector as its MCP server")
+        self.assert_refused(self.pre(server={"name": "Gmail", "source": "sdk"}), "names no claude.ai connector")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_the_budget_counts_from_the_start_of_the_hook(self):
+        # slow store reads before the network work use up the same 5 s
+        self.bind()
+        slow = S.logged_in
+
+        def logged_in(*a, **k):
+            time.sleep(2.5)
+            return slow(*a, **k)
+        self.srv.discovery_delays = [1.5]
+        self.srv.deposit_delay = 1.5
+        with mock.patch.object(S, "logged_in", logged_in):
+            self.assert_refused(self.pre(call="late"), "did not answer the deposit in time")
+        self.assertEqual(self.audit().count("deposit 127.0.0.1"), 1, "the request was sent and counts")
+
     def test_the_metadata_is_kept_at_most_an_hour(self):
         self.bind()
         self.pre(call="a")
@@ -428,6 +465,33 @@ class DepositHookTests(_Base):
                             "this connector is not bound to a gateway of yours")
 
     # -------------------------------------------------------------------------------------- the result (6.5) --
+    def test_a_refusal_block_next_to_a_block_with_the_value_keeps_the_redaction(self):
+        self.bind()
+        hso = self.pre(call="t11")
+        result = {"content": [{"type": "text", "text": "deposit_refused: expired"},
+                              {"type": "text", "text": "echo: " + VALUE}], "isError": True}
+        out = hooks._post_tool_guarded({"tool_name": TOOL, "tool_use_id": "t11", "session_id": "s1",
+                                        "mcp_server": SERVER, "tool_input": hso["updatedInput"],
+                                        "tool_response": result, **CLAUDE})
+        text = json.dumps(out, ensure_ascii=False)
+        self.assertNotIn(VALUE, text, "the value in the second block is masked")
+        self.assertIn("echo: " + self.ref, text, "the normal redaction ran on the whole result")
+        # the whole result is one refusal: the line, in the shape of the result
+        for shape in ("deposit_refused: used", [{"type": "text", "text": "deposit_refused: used"}],
+                      {"content": [{"type": "text", "text": "deposit_refused: used"}], "isError": True,
+                       "structuredContent": {"deposit_error": "used"}}):
+            with self.subTest(shape=shape):
+                out = hooks._post_tool_guarded({"tool_name": TOOL, "tool_use_id": "t11", "session_id": "s1",
+                                                "mcp_server": SERVER, "tool_input": {}, "tool_response": shape,
+                                                **CLAUDE})
+                self.assertIn("took the deposit for " + self.ref + " as used already",
+                              json.dumps(out["hookSpecificOutput"]["updatedToolOutput"], ensure_ascii=False))
+        for shape in ({"content": [{"type": "text", "text": "deposit_refused: used"}],
+                       "structuredContent": {"deposit_error": "expired"}},
+                      [{"type": "text", "text": "deposit_refused: used", "annotations": {}}]):
+            with self.subTest(shape=shape):
+                self.assertIsNone(D.post_tool({"tool_name": TOOL, "tool_use_id": "t11", "tool_response": shape}))
+
     def test_a_refusal_of_the_gateway_becomes_one_line_for_the_model(self):
         self.bind()
         hso = self.pre(call="t9")

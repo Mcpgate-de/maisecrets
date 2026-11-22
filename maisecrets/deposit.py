@@ -328,15 +328,21 @@ def binding(backend, payload: dict, tool: str) -> tuple:
     from .vault_refs import _connector_data, connector_key, connectors, own_servers
     server = payload.get("mcp_server") if isinstance(payload.get("mcp_server"), dict) else {}
     named = connector_key(server.get("name"))
+    # the server's own name decides; without it a `__` inside a connector's or tool's name could route the handle
+    # of one connector to another
+    if named is None:
+        raise Refused("the call names no claude.ai connector as its MCP server")
     keys = [k for k in connectors() if tool.startswith(f"mcp__claude_ai_{k}__") and k not in own_servers()
-            and (named is None or named == k)]
+            and named == k]
     if len(keys) != 1:
         return None, None
     key = keys[0]
     url = connectors()[key]
     entry = (_connector_data().get("bound") or {}).get(key)
     if not isinstance(entry, dict) or entry.get("paired") is not True:
-        raise Refused(f"the claude.ai connector {key} was bound without a pairing proof")
+        raise Refused(f"the binding of the claude.ai connector {key} carries no seal of a pairing proof (it was made "
+                      f"without a proof, or by an older maisecrets); pair it again: /maisecrets sref logout {key}, "
+                      f"let the connector show a reference, then /maisecrets sref login {key}")
     k = _mac_key(backend, False)
     mac = entry.get("mac")
     if k is None or not isinstance(mac, str) or not hmac.compare_digest(
@@ -442,8 +448,9 @@ def pre_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list)
     """The PreToolUse answer for a claude.ai connector's call that holds placeholders: the deposit, or the refusal of
     #99 with the first condition that failed. Any failure refuses."""
     from . import connector_proxy, hooks
+    start = time.monotonic()               # 6.4: the budget counts from here, the store reads included
     try:
-        return _deposit(payload, cfg, tool, tool_input, found)
+        return _deposit(payload, cfg, tool, tool_input, found, start)
     except Refused as exc:
         why = str(exc)
     except Exception as exc:  # noqa: BLE001 - every failure gives the refusal, never clear text
@@ -451,7 +458,7 @@ def pre_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list)
     return hooks._deny(connector_proxy.refusal(tool, found) + f" No deposit at a gateway: {why}.")
 
 
-def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list) -> dict:
+def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list, start: float) -> dict:
     import os
 
     from . import connector_proxy, hooks, rehydration, sref_client
@@ -470,7 +477,7 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list)
     origin, host = origin_of(url), urlsplit(url).hostname
     if not sref_client.logged_in(backend, origin):                                    # 6.1.3
         raise Refused(f"maisecrets has no login at {host}; the person types /maisecrets sref login {key}")
-    deadline = time.monotonic() + BUDGET                                              # 6.4
+    deadline = start + BUDGET                                                         # 6.4
     meta = metadata(cfg, url, deadline)                                               # 6.1.4
     dep = meta["deposit"]
     granted = str(sref_client._load(backend, origin).get("scope") or "").split()
@@ -504,12 +511,18 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list)
     if bad:
         raise Refused(f"the placeholder {bad[0]} has no form a deposit takes")
     keys = list(dict.fromkeys(key_of(ph) for *_x, ph in places))
+    session = payload.get("session_id")
+    for k in keys:
+        # 6.1.6 before 6.1.7; a key the session rule refuses is not measured (its length is no answer to give)
+        raw = backend.get(k) if vault.status(k, session) == "ok" else None
+        if raw is not None and not MIN_BYTES <= len(raw.encode("utf-8")) <= MAX_BYTES:
+            raise Refused(f"\u27e6{k}\u27e7 has {len(raw.encode('utf-8'))} bytes, and a deposit takes "
+                          f"{MIN_BYTES} to {MAX_BYTES}")
     names = ", ".join("⟦" + k + "⟧" for k in keys)
     stop = rehydration.refusal(cfg, "mcp", hooks.client_of(payload), names, "The call did not run.")   # 6.1.7
     if stop:
         return hooks._deny(stop)
     fresh = hooks._protect_fresh(cfg, tool, tool_input, keys)
-    session = payload.get("session_id")
     failed = hooks._precheck(vault, keys, session)
     if failed:
         return hooks._deny(hooks._deny_reason(failed))
@@ -518,7 +531,7 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list)
         value, status = vault.get(k, session)
         if status != "ok":
             return hooks._deny(hooks._deny_reason([f"{k} ({status})"]))
-        if not MIN_BYTES <= len(value.encode("utf-8")) <= MAX_BYTES:
+        if not MIN_BYTES <= len(value.encode("utf-8")) <= MAX_BYTES:          # the value changed since
             raise Refused(f"⟦{k}⟧ has {len(value.encode('utf-8'))} bytes, and a deposit takes "
                           f"{MIN_BYTES} to {MAX_BYTES}")
         values[k] = value
@@ -584,6 +597,29 @@ def post_tool(payload: dict) -> dict | None:
         return None
 
 
+def _sole_block(node: object) -> str | None:
+    if isinstance(node, str):
+        m = _REFUSED_RE.fullmatch(node)
+        return m.group(1) if m else None
+    if isinstance(node, list) and len(node) == 1 and isinstance(node[0], dict) \
+            and set(node[0]) <= {"type", "text"} and node[0].get("type") == "text":
+        return _sole_block(node[0].get("text"))
+    return None
+
+
+def _sole_refusal(response: object) -> str | None:
+    """The code when the whole result is one `deposit_refused: <code>` block and nothing else (the text, a list of
+    one text block, or a result whose content is that list, with isError and at most the gateway's structured
+    code); else None. A result with any other part keeps the normal redaction (review H1)."""
+    if not isinstance(response, dict):
+        return _sole_block(response)
+    if not set(response) <= {"content", "isError", "structuredContent"} or response.get("isError") not in (None, True):
+        return None
+    code = _sole_block(response.get("content"))
+    extra = response.get("structuredContent")
+    return code if extra is None or extra == {"deposit_error": code} else None
+
+
 def _post_line(payload: dict) -> dict | None:
     tool, call = str(payload.get("tool_name") or ""), payload.get("tool_use_id")
     response = payload.get("tool_response")
@@ -594,21 +630,14 @@ def _post_line(payload: dict) -> dict | None:
     keys = _keys_of_call(call)
     if keys is None:
         return None
-    hit = {"n": 0}
-
-    def swap(node: object) -> object:
-        if isinstance(node, str):
-            m = _REFUSED_RE.fullmatch(node)
-            if m:
-                hit["n"] += 1
-                return _line(m.group(1), keys)
-            return node
-        if isinstance(node, list):
-            return [swap(x) for x in node]
-        if isinstance(node, dict):
-            return {k: swap(v) for k, v in node.items()}
-        return node
-    new = swap(response)
-    if not hit["n"]:
-        return None
+    code = _sole_refusal(response)
+    if code is None:
+        return None                    # anything next to the refusal goes through the normal redaction
+    line = _line(code, keys)
+    if isinstance(response, str):
+        new: object = line
+    elif isinstance(response, list):
+        new = [{"type": "text", "text": line}]
+    else:
+        new = {**response, "content": [{"type": "text", "text": line}]}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new}}
