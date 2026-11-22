@@ -595,8 +595,29 @@ class AnyFieldShapeTests(unittest.TestCase):
         self.assertLessEqual({personal.NAME, personal.ADDRESS, personal.BIRTH_DATE, personal.USERNAME,
                               personal.PHONE}, D.ANY_FIELD_TYPES)
         self.assertFalse({"SECRET", "CARD", personal.ID_NUMBER} & D.ANY_FIELD_TYPES)
-        # deposit-1 (section 5.1) takes no `_` in the type: a birth date is listed but gets no deposit
-        self.assertIsNone(D.PLACEHOLDER_RE.fullmatch(OPEN + personal.BIRTH_DATE + "_c3" + CLOSE))
+
+    def test_the_class_is_the_type_before_the_last_c_and_digits(self):
+        from maisecrets.placeholder import key_of
+        for key, kind in (("BIRTH_DATE_c3", "BIRTH_DATE"), ("IPV6_c12", "IPV6"), ("X__c9", "X_"), ("EMAIL_c1", "EMAIL")):
+            with self.subTest(key=key):
+                self.assertEqual(D.class_of(key), kind)
+                self.assertIsNotNone(D.PLACEHOLDER_RE.fullmatch(OPEN + key + ":ab•••" + CLOSE))
+        # a type has no lower-case letter, so `_c1` inside a type cannot shift the split: such a key has no form
+        for key in ("A_c1_c2", "BIRTH_DATE_c3_c4", "EMAIL_c1x"):
+            with self.subTest(key=key):
+                self.assertIsNone(D.class_of(key))
+                self.assertIsNone(D.PLACEHOLDER_RE.fullmatch(OPEN + key + CLOSE))
+                self.assertIsNone(key_of(OPEN + key + CLOSE), "the placeholder module takes no such key either")
+
+    def test_a_type_has_at_most_32_characters(self):
+        for kind in ("A" * 32, "B" + "_" * 30 + "9"):
+            with self.subTest(kind=kind):
+                self.assertEqual(D.class_of(kind + "_c1"), kind)
+                self.assertIsNotNone(D.PLACEHOLDER_RE.fullmatch(OPEN + kind + "_c1" + CLOSE))
+        for kind in ("A" * 33, "B" + "_" * 31 + "9"):
+            with self.subTest(kind=kind):
+                self.assertIsNone(D.class_of(kind + "_c1"))
+                self.assertIsNone(D.PLACEHOLDER_RE.fullmatch(OPEN + kind + "_c1" + CLOSE))
 
     def test_the_binding_mismatch_line_names_the_other_causes_and_no_value(self):
         line = D._line("binding_mismatch", ["EMAIL_c1"])
@@ -638,6 +659,15 @@ class AnyFieldTests(_Base):
         self.assertEqual([(v["path"], v["value"]) for v in req["values"]], [("/params/description", MAIL)])
         self.assertEqual(self.srv.call(ANY_TOOL, hso["updatedInput"])["params"]["description"],
                          "write to " + MAIL + " today")
+
+    def test_a_birth_date_goes_into_any_string_of_a_listed_tool(self):
+        self.free()
+        self.bind()
+        born = self.put("1990-01-02", "BIRTH_DATE", "birth_date")
+        hso = self.pre(self.issue("born " + born))
+        self.assertRegex(hso["updatedInput"]["params"]["description"], r"^born msdep1_[A-Za-z0-9_-]{65}$")
+        req = self.srv.deposit_requests[0]
+        self.assertEqual([(v["path"], v["value"]) for v in req["values"]], [("/params/description", "1990-01-02")])
 
     def test_without_the_field_a_personal_value_stays_strict(self):
         self.bind()

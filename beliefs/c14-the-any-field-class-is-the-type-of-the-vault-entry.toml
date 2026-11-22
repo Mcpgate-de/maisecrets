@@ -7,5 +7,5 @@ runner = ["tests/test_deposit.py::AnyFieldTests::test_the_class_is_the_type_of_t
 
 [proof]
 file = "maisecrets/deposit.py"
-find = '''    return kind if isinstance(kind, str) and kind == key.rsplit("_c", 1)[0] else None'''
+find = '''    return kind if isinstance(kind, str) and kind == class_of(key) else None'''
 replace = '''    return kind if isinstance(kind, str) else None'''

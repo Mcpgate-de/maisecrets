@@ -27,9 +27,12 @@ from .vault_refs import Refused as _VaultRefused
 PROFILE = "deposit-1"
 HANDLE_MARK = "msdep1_"
 HANDLE_RE = re.compile(r"msdep1_[A-Za-z0-9_-]{65}")
-# the placeholder as section 5.1 takes it; a form outside it (a legacy <TYPE_cN>, a type with `_`, an empty display)
-# gets no deposit
-PLACEHOLDER_RE = re.compile("⟦[A-Z][A-Z0-9]{0,31}_c[0-9]{1,9}(?::[^⟦⟧]{1,200})?⟧")
+# the placeholder as section 5.1 takes it; a form outside it (a legacy <TYPE_cN>, an empty display) gets no deposit.
+# The type is the part before the LAST `_c<digits>`: the greedy type backtracks to it, and a type has no lower-case
+# letter, so no `_c` inside a type can shift the split
+_KEY_FORM = "([A-Z][A-Z0-9_]{0,31})_c[0-9]{1,9}"
+_KEY_RE = re.compile(_KEY_FORM)
+PLACEHOLDER_RE = re.compile("⟦" + _KEY_FORM + "(?::[^⟦⟧]{1,200})?⟧")
 TOOL_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 _SCOPE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 LIFETIME = 300                 # D3: the client asks for 300 s, the gateway allows at most 600 s
@@ -278,6 +281,13 @@ def any_field(raw: object) -> dict | None:
     return {"types": sorted(ANY_FIELD_TYPES.intersection(types)), "tools": sorted(set(tools))}
 
 
+def class_of(key: object) -> str | None:
+    """The type of a canonical key (EMAIL_c3 -> EMAIL, BIRTH_DATE_c2 -> BIRTH_DATE) by the split of section 5.1; None
+    for a key outside that form."""
+    m = _KEY_RE.fullmatch(key) if isinstance(key, str) else None
+    return m.group(1) if m else None
+
+
 def any_field_class(vault, placeholder: str) -> str | None:
     """The class of a placeholder for deposit_any_field: the type of its vault entry, never text the model wrote. None
     (strict) when the entry is missing, purged or weak (a masked gateway reference, a word), comes from an own rule,
@@ -289,7 +299,7 @@ def any_field_class(vault, placeholder: str) -> str | None:
     if str(meta.get("kind", "")).startswith(STRICT_KINDS):
         return None
     kind = meta.get("type")
-    return kind if isinstance(kind, str) and kind == key.rsplit("_c", 1)[0] else None
+    return kind if isinstance(kind, str) and kind == class_of(key) else None
 
 
 def _in_a_key(node: object) -> bool:

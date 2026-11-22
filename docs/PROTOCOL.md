@@ -356,8 +356,8 @@ second gateway implements it, decision D12). The client side is `maisecrets/depo
   targets still apply. Each placeholder of a call passes the target rule or this rule, or the call is refused. The
   request is unchanged. The gateway also checks each action at call time (a JSON body and audited hooks only, no
   handle in a URL field) and answers `binding_mismatch` for any other action; the client cannot see that check, and
-  its line for the model says that this action takes no stored value and that the value was not sent. BIRTH_DATE is in the list, but its placeholder has a `_` in the type, which the form of the
-  contract's section 5.1 does not take, so it gets no deposit.
+  its line for the model says that this action takes no stored value and that the value was not sent. The class is the type before the last `_c<digits>` of the key
+  (`deposit.class_of`; a type has 1 to 32 characters of A-Z, 0-9 and `_`, so BIRTH_DATE takes a deposit too).
 - **The request.** `POST deposit_endpoint` with the person's sref access token, the JCS digest of the arguments as
   the model wrote them, and each value padded (section 5.1). The metadata read, a token renewal and the request
   share one deadline of 5 s. A gateway certificate whose issuer names a known interception CA stops the request

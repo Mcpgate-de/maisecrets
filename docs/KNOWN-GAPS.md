@@ -159,10 +159,9 @@ a to-do.
   connector that is bound to your gateway by a pairing proof, and a call that the gateway names as a deposit
   target, maisecrets sends the value to the gateway over its own connection, and the call carries a one-time
   handle. When the gateway also names `deposit_any_field`, a name, an e-mail address, a phone number, a postal
-  address, an IBAN, an IP address or a user name can go in this way into any text field of a tool that
+  address, a birth date, an IBAN, an IP address or a user name can go in this way into any text field of a tool that
   the gateway lists. A secret, a card number, an ID number, a value of your own rule or of your term list, and every
-  other type go only to a deposit target. A birth date gets no deposit at all: the `_` in its type `BIRTH_DATE` is
-  outside the placeholder form that a deposit takes. The result of a connector passes the proxy before maisecrets masks it: there only the gateway's own
+  other type go only to a deposit target. The result of a connector passes the proxy before maisecrets masks it: there only the gateway's own
   scrubber protects it. In Cowork every MCP server outside your own config counts as a connector, and in a remote
   session a server of the source `dynamic` does. A server of a plugin or an agent named `claude.ai X` is refused
   too.
