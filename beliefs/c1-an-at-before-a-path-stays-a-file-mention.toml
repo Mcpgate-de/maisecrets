@@ -1,0 +1,11 @@
+# c1-an-at-before-a-path-stays-a-file-mention: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-at-before-a-path-stays-a-file-mention"
+control = "C1"
+serves = ["M1.1"]
+statement = "hooks.AT_MENTION_RE skips an @ before slashes alone (a sed expression, s/=.*@/x/), and only that: an @ before a path that starts with one or two slashes is still a file mention, which the prompt hook blocks when the file exists."
+runner = ["tests/test_hooks_paths.py::MentionAndPendingTests::test_slashes_alone_after_an_at_are_no_file_mention"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''@(?!/+(?![\w./~\\:-]))(?P<path>'''
+replace = '''@(?!/)(?P<path>'''

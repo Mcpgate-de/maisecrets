@@ -483,6 +483,17 @@ class MentionAndPendingTests(unittest.TestCase):
         _cfg({"block_at_mentions": False})
         self.assertEqual(hooks.user_prompt({"prompt": "see @notes.env", "cwd": str(self.dir), **CLAUDE}), {})
 
+    def test_slashes_alone_after_an_at_are_no_file_mention(self):
+        # live probe 2026-11-22: a sed expression was blocked as a mention of the folder /
+        for prompt in ('mask it with sed "s/=.*@/=***@/" in the log', "s|x @/|y|", "the root: @// then"):
+            with self.subTest(prompt):
+                self.assertIsNone(hooks._blocking_mention(prompt, str(self.dir), {}))
+        # a path after the slash is still a mention, and so is one with two slashes
+        for prompt in (f"see @{self.dir / 'notes.env'}", f"see @/{str(self.dir / 'notes.env').lstrip('/')}"):
+            with self.subTest(prompt):
+                self.assertIsNotNone(hooks._blocking_mention(prompt, "", {}))
+        self.assertEqual(hooks.AT_MENTION_RE.search("see @//etc").group("path"), "//etc")
+
     def test_a_pending_prompt_expires_after_15_minutes_and_two_sessions_are_not_mixed(self):
         hooks._save_pending("text of A ⟦SECRET_c1⟧", "A")
         p = hooks._pending_path("A")

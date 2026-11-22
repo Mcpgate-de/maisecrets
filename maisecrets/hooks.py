@@ -66,8 +66,8 @@ from .server_values import _all_refs, _elsewhere_reason, _server_fetch, _server_
 from .sref_hooks import canonical as _sref_canonical, note as _sref_note, precheck as _sref_precheck, \
     program_of as _program_of, refs as _sref_refs, never_reason as _sref_never_reason
 
-# a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
-AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
+# a Windows path carries a drive letter and backslashes: @C:\Users\x\.env; slashes alone are no file (s/=.*@/x/)
+AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?!/+(?![\w./~\\:-]))(?P<path>[\w./~\\:-]+)")
 
 
 # ---------------------------------------------------------------- helpers --
