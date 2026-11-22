@@ -2,12 +2,61 @@
 
 ## Unreleased
 
+## [0.9.23] - 2026-11-22
+
 - A command that changes maisecrets (a term, not-a-secret, the demo, a setting or the name service) is the text you type, such as `maisecrets: term add NAME`. Typed as `/maisecrets NAME` in the terminal, it changes nothing, and maisecrets names the text for you to type. A gateway login or logout typed as `/maisecrets sref login NAME` waits in your empty input box as `/maisecrets:sref login NAME` for your Enter.
 - A reference of your gateway that maisecrets masked whole, before the gateway was bound, is masked again wherever it shows up later, also with no label before it: a server can put a secret in its id. A reference that your gateway gave in this session stays whole.
 - A tool call of a claude.ai connector (in Claude Code `mcp__claude_ai_…`; in Cowork, where the tool names lack `claude_ai_`, every MCP server outside your own config) no longer gets a stored value: the call goes through Anthropic's connector proxy, where the value would be in clear text, so maisecrets refuses it and the call does not run. Add the MCP server directly, or, if the connector is your gateway, use the gateway's own references; a directly added server gets the value as before. In Cowork every MCP server outside your own config counts as a connector.
 - A claude.ai connector that is bound to your gateway by its pairing proof can get a stored value as a deposit: maisecrets sends the value to the gateway over its own connection, and the call carries a one-time handle, which the gateway replaces with the value. It works only for the calls that the gateway names as deposit targets, and only after a login that allows deposits (`/maisecrets sref login NAME` again for an older login). Every other case keeps the refusal, and so does Cowork.
 - When your gateway allows it (`deposit_any_field`), a name, an e-mail address, a phone number, a postal address, a birth date, an IBAN, an IP address or a user name can go as a deposit into any text field of a gateway action that the gateway lists, such as the text of an issue. Today these are the GitLab and Jira actions that create an issue, add a comment and update an issue. When your gateway allows every type (`all_types`), every stored value, a secret too, can go there; a later read of that ticket then sends the value back through Anthropic's connector proxy, where only the gateway's result scrub can mask it. A secret, a card number, an ID number and a value of your own rule or term list still go only to a deposit target. If the gateway refuses such a call, the AI gets one line that names the likely cause.
 - A subagent's report reaches your session also when a rule of your own, the name service or a stored value finds the agent's id. maisecrets keeps the agent id, the task id and the name of the output file in the result of an Agent or Task call, and the resumed agent id of a SendMessage call, so the AI can continue the agent and its report can prove itself. It does not read the id of a proven report as a value. The task text and the report are masked as before. Before, such a report was blocked, and Cowork shows no block, so the report was lost (#31).
+
+### Features
+
+- when your gateway allows every type (all_types), every stored value goes as a deposit into any text field of a listed action (38b2c6e)
+- a personal value goes into any text field only for the actions that your gateway lists, such as creating or commenting on a GitLab or Jira issue (1863e4b)
+- a name, an e-mail address or a phone number goes to any text field of a gateway tool that allows it, as a one-time deposit (b09fb6c)
+- a claude.ai connector of your gateway can get a stored value as a one-time deposit (64526a8)
+
+### Fixes
+
+- the resumed agent id of a SendMessage result keeps its text, and the folder of an agent's output file is masked as usual (5bcc268)
+- a subagent's report reaches the session also when a rule or a stored value finds the agent's id (4d48544)
+- with rehydration confirm or in auto mode, a claude.ai connector's call gets its deposit again, and you are asked as in 0.9.22 (466505a)
+- an e-mail address that your own rule or an import also finds goes only to a deposit target, unless your gateway allows every type (`all_types`) (32bf8c2)
+- a birth date goes as a deposit into any text field of a gateway tool that allows it, as the other personal values do (ced7802)
+- when your gateway refuses a personal value for an action, the AI learns that the action takes no stored value and that the value was not sent (7dbca16)
+- the leading literals file names the phone rule that skips an ISO date after a plus (6943bed)
+- /maisecrets sref login NAME and /maisecrets sref logout, typed, wait in your empty input box for your Enter (adc9643)
+- a deposit the gateway refused reaches the AI with its one line also when Claude Code reports the call as failed (24cfca6)
+- a sed expression such as s/=.*@/x/ in your prompt is no longer blocked as a mention of a file (c07977a)
+- a date such as +2026-11-22, the added line of a diff, is no longer masked as a phone number (60dca41)
+- a common word alone in capitals, such as NEUTRAL or WARNING, is no longer masked as a person's name (840d28d)
+- a forget you type answers in one line above the prompt and opens no panel (4fa4c94)
+- /maisecrets:sref no longer says that no claude.ai connector named its gateway right after it names one (abe7c0e)
+- the login command for your gateway is in your input box again after the turn that showed its references (b1a3398)
+- a gateway reference from a connector that is not bound yet is masked whole, not cut (56b6259)
+- a claude.ai connector whose name has brackets, a dot or two spaces finds its binding for a deposit and for gateway references (54b6515)
+- a local agent session of the desktop app keeps its texts and names; only the connector refusal counts it as Cowork (4c4cc89)
+- a session id or token of the form word=digits next to a count field is a secret again (6237e37)
+- a change typed as /maisecrets NAME names its text form for you to type and fills no input box (16fda45)
+- a change typed as /maisecrets NAME puts its text form into your input box; press Enter to make it (2fc0824)
+- the name service masks the given names Ner and Api again; only NER in capitals counts as an acronym (bcf8658)
+- a server name typed alone in Cowork no longer sets a gateway name service (26209e2)
+- a gateway name service typed in Cowork says where it works, not that your configuration has no such server (a735bd6)
+- the AI knows at the session start that names are not masked in a Cowork task, and why (2fecba6)
+- the AI names a maisecrets command in the form that you can send (8d6c1ae)
+- the status says that the settings hold for this task only, and why names are off (262b6c3)
+- the name service no longer masks a technical acronym such as NER as a person (a60ad86)
+
+### Security
+
+- a changed copy of the gateway's metadata is read again (6ceb746); the deposit still goes before maisecrets' question, as in 0.9.22, and stays unused at your gateway for at most 300 s when you decline (466505a)
+- a reference of your gateway that was masked whole is masked again where it shows up later, so a secret in its id stays hidden (9c3797d)
+- a stored value never cuts a reference of your gateway (53052ba)
+- a stored value next to a refused deposit in a tool result is masked, and a deposit needs its own connector named by the call (61cb3d2)
+- in Cowork and in a remote session, a call to an MCP server outside your own config gets no stored value (723877e)
+- a claude.ai connector's tool call no longer gets a stored value (cafeefc)
 
 ## [0.9.22] - 2026-11-22
 
