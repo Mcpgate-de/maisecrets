@@ -125,16 +125,16 @@ class ConnectorProxyTests(unittest.TestCase):
                 self.assertEqual(_state(), before)
 
     def test_a_cowork_connector_call_gets_no_stored_value(self):
-        # In Cowork (cowork.active(), each of its entry points) a connector can arrive as an `sdk` server with a tool
-        # name the host chooses: every source that is no scope of the client's own config counts as a connector
+        # In Cowork (each of its entry points) and in the desktop app's local agent session (local-agent, for this
+        # refusal only) a connector can arrive as an `sdk` server with a tool name the host chooses: every source that
+        # is no scope of the client's own config counts as a connector
         servers = ({"name": "claude.ai Gmail", "source": "claudeai"}, {"name": "Gmail", "source": "sdk"},
                    {"name": "Gmail", "source": "dynamic"}, {"name": "Gmail", "source": "plugin"},
                    {"name": "Gmail", "source": "agent"}, {"name": "Gmail"}, None)
-        for entry in sorted(cowork.ENTRYPOINTS):
+        for entry in ("remote_cowork", "remote_cowork_trigger", "local-agent"):
             for server in servers:
                 with self.subTest(entry=entry, server=server), \
                         mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
-                    self.assertTrue(cowork.active())
                     self.fresh()
                     before = _state()
                     self.assert_refused(self.pre("mcp__Gmail__create_draft", server), str(server))

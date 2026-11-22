@@ -9,10 +9,9 @@ from __future__ import annotations
 import os
 
 ENTRYPOINT = "remote_cowork"
-# Every entry point of a Cowork session (desktop app 6.28899.6, app.asar): Claude Code's own list of Cowork cloud entry
-# points is remote_cowork and remote_cowork_trigger, and the app starts its local agent session (and a Cowork one-shot)
-# with local-agent.
-ENTRYPOINTS = frozenset({ENTRYPOINT, "remote_cowork_trigger", "local-agent"})
+# the Cowork cloud entry points: Claude Code's own list of them is remote_cowork and remote_cowork_trigger (desktop app
+# 6.28899.6, app.asar)
+ENTRYPOINTS = frozenset({ENTRYPOINT, "remote_cowork_trigger"})
 
 
 def active() -> bool:

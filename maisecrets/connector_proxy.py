@@ -13,22 +13,27 @@ from . import cowork
 # plugin, and its type is `claudeai-proxy`). #99
 _CONFIG_SOURCES = frozenset({"user", "project", "local", "managed", "enterprise"})
 CONNECTOR_PREFIX = "mcp__claude_ai_"
+# Where every server outside the own config counts as a connector: Cowork (cowork.ENTRYPOINTS), and the desktop app's
+# local agent session (local-agent, app.asar 6.28899.6), which may serve Cowork too. Only for this refusal, where to
+# refuse too much is safe: cowork.active() leaves local-agent out, as it changes texts and names there.
+FAIL_CLOSED_ENTRYPOINTS = cowork.ENTRYPOINTS | {"local-agent"}
 
 
 def claude_ai_connector(payload: dict, tool: str) -> bool:
     """True for a tool of a claude.ai connector: its call goes through Anthropic's connector proxy, where TLS ends.
     The source `claudeai` names one whatever its tool name. A scope of the client's own config names none. In Cowork
-    every other source counts as one (a connector can arrive there as an `sdk` server with a tool name the host
-    chooses), and in a remote session (CLAUDE_CODE_REMOTE) the source `dynamic` does. Else the tool name
-    `mcp__claude_ai_…` decides (a payload without `mcp_server` too). Codex sends no `mcp_server`: its tools keep the
-    resolve, and its own connectors (`codex_apps`) are not detected (docs/KNOWN-GAPS.md)."""
+    and a local agent session (FAIL_CLOSED_ENTRYPOINTS) every other source counts as one (a connector can arrive there
+    as an `sdk` server with a tool name the host chooses), and in a remote session (CLAUDE_CODE_REMOTE) the source
+    `dynamic` does. Else the tool name `mcp__claude_ai_…` decides (a payload without `mcp_server` too). Codex sends no
+    `mcp_server`: its tools keep the resolve, and its own connectors (`codex_apps`) are not detected
+    (docs/KNOWN-GAPS.md)."""
     server = payload.get("mcp_server") if isinstance(payload.get("mcp_server"), dict) else {}
     source = server.get("source")
     if source == "claudeai":
         return True
     if source in _CONFIG_SOURCES:
         return False
-    if cowork.active():
+    if os.environ.get("CLAUDE_CODE_ENTRYPOINT") in FAIL_CLOSED_ENTRYPOINTS:
         return True
     if source == "dynamic" and os.environ.get("CLAUDE_CODE_REMOTE"):
         return True

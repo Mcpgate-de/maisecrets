@@ -118,11 +118,11 @@ class FormsTests(unittest.TestCase):
 
     def test_active_knows_each_cowork_entry_point(self):
         # remote_cowork: measured in the Cowork VM (2026-11-21); remote_cowork_trigger: Claude Code's own list of
-        # Cowork cloud entry points; local-agent: the desktop app's local agent session (app.asar 6.28899.6)
-        for entry in ("remote_cowork", "remote_cowork_trigger", "local-agent"):
+        # Cowork cloud entry points. local-agent may run on the computer itself, so the texts and names stay as there
+        for entry in ("remote_cowork", "remote_cowork_trigger"):
             with self.subTest(entry=entry), mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
                 self.assertTrue(cowork.active())
-        for entry in ("cli", "claude-desktop", "sdk-ts", "remote", ""):
+        for entry in ("local-agent", "cli", "claude-desktop", "sdk-ts", "remote", ""):
             with self.subTest(entry=entry), mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
                 self.assertFalse(cowork.active())
 

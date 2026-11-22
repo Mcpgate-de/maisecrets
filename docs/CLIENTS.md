@@ -186,10 +186,11 @@ prefix `mcp__claude_ai_` with any source that is no scope of the client's own co
 hook schema, and used by the tests of the connector binding (C31). In Cowork a connector can arrive as an `sdk`
 server (`capabilities.experimental["anthropic/claudeAiConnector"]`) with a tool name the host chooses, and the
 Cowork payload's source is not measured: there every source that is no own-config scope counts as a connector.
-Cowork is known by its entry point (`cowork.active()`): `remote_cowork` (measured in the VM, 2026-11-21),
+For this refusal the entry points are `remote_cowork` (measured in the Cowork VM, 2026-11-21),
 `remote_cowork_trigger` (Claude Code's own list of Cowork cloud entry points) and `local-agent` (the desktop
-app's local agent session, app.asar 6.28899.6). In a remote session (`CLAUDE_CODE_REMOTE`) a connector can have
-the source `dynamic` and no prefix, so that source counts there too. A server named `claude.ai X` from a plugin,
+app's local agent session, app.asar 6.28899.6, which may run on the computer itself). `cowork.active()`, which
+changes the texts and turns names off, knows only the first two. In a remote session (`CLAUDE_CODE_REMOTE`) a
+connector can have the source `dynamic` and no prefix, so that source counts there too. A server named `claude.ai X` from a plugin,
 agent or dynamic source is refused as well, an over-refusal. Codex sends no `mcp_server`; its `codex_apps`
 connectors (behind OpenAI's apps gateway) relay a call the same way, and maisecrets does not detect them
 (KNOWN-GAPS).
