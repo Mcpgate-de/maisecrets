@@ -169,14 +169,15 @@ _PLUGIN_CALL = "toolu_plugin_"
 
 
 def pairing_call_refusal(payload: dict) -> str | None:
-    """The reason to refuse a call of a server's `sensitive_references_resource` that carries a nonce and that the AI
-    made, not the mod (#91): the AI never needs a pairing proof, and with the nonce of a running pairing it could
-    carry the proof of the person's own gateway connector to the connector that pairs. None for any other call."""
+    """The reason to refuse a call of a server's `sensitive_references_resource` with any argument that the AI made,
+    not the mod (#91): the AI never needs a pairing proof, and with the nonce of a running pairing it could carry the
+    proof of the person's own gateway connector to the connector that pairs. The AI needs no argument for this tool, so
+    any argument counts, in any shape (`Nonce`, a nested `args`), not only the key `nonce`. None for any other call."""
     tool = str(payload.get("tool_name") or "")
     tool_input = payload.get("tool_input")
     if not (tool.startswith("mcp__") and tool.endswith("__sensitive_references_resource")):
         return None
-    if not isinstance(tool_input, dict) or "nonce" not in tool_input:
+    if not tool_input:
         return None
     if str(payload.get("tool_use_id") or "").startswith(_PLUGIN_CALL):
         return None

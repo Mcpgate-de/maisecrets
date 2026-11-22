@@ -2,7 +2,7 @@
 belief = "c31-the-ai-never-calls-a-pairing-tool-with-a-nonce"
 control = "C31"
 serves = ["M3.3"]
-statement = "The PreToolUse hook refuses a call of any server's sensitive_references_resource with a nonce that the AI made; only the mod's own call (toolu_plugin_) runs."
+statement = "The PreToolUse hook refuses a call of any server's sensitive_references_resource with any argument (a nonce in any shape) that the AI made; only the mod's own call (toolu_plugin_) runs."
 runner = ["tests/test_sref_hooks.py::PairingCallTests::test_the_ai_s_call_of_a_pairing_tool_with_a_nonce_is_refused"]
 
 [proof]

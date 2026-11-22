@@ -1059,6 +1059,16 @@ class PairingCallTests(unittest.TestCase):
                           ["permissionDecisionReason"])
             self.assertNotIn(nonce, json.dumps(out))
 
+    def test_a_nonce_in_another_shape_is_refused_too(self):
+        # review of MR !628: only the key `nonce` was refused; the AI needs no argument for this tool at all
+        nonce = "n" * 43
+        tool = "mcp__claude_ai_Real_GW__sensitive_references_resource"
+        for tool_input in ({"Nonce": nonce}, {"args": {"nonce": nonce}}, {"n": nonce}):
+            with self.subTest(keys=sorted(tool_input)):
+                out = self.pre(tool, tool_input, "toolu_01abc")
+                self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+                self.assertNotIn(nonce, json.dumps(out))
+
     def test_the_mod_s_own_call_and_a_call_without_a_nonce_are_not_refused_for_it(self):
         tool = "mcp__claude_ai_Real_GW__sensitive_references_resource"
         for tool_input, tool_use_id in (({"nonce": "n" * 43}, "toolu_plugin_0123"), ({}, "toolu_01abc")):
