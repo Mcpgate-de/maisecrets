@@ -2,7 +2,57 @@
 
 ## Unreleased
 
+## [0.9.22] - 2026-11-22
+
 - Every command is `/maisecrets NAME` now (`/ms NAME` too, and `/ms` alone opens the panel as `/maisecrets` does; a blocked prompt is sent with `/maisecrets send`), in the terminal and in Cowork; the menus show only the entry and /maisecrets:report and /maisecrets:sref. The older form `/maisecrets:NAME` still runs where Claude Code loads the mod (2.1.287 and later); without the mod the client refuses it, so type the entry `/maisecrets:maisecrets NAME` there.
+
+### Features
+
+- a claude.ai connector binds to your gateway only after it proves it reaches it with your account (afab0ea)
+- /ms is the same as /maisecrets, also alone: it opens the panel, and a blocked prompt is offered there (718d335)
+- the personal /ms is the entry: /ms status runs a command, /ms alone sends the blocked prompt (68c666d)
+- one entry in every client: /maisecrets status, /ms status; the menus show maisecrets, ms, report and sref only (8369539)
+- detects Daytona API keys, Coveralls tokens of 36 characters and InfluxDB tokens after INFLUX_TOKEN (8b64ed2)
+- the audit names the gateway's audit id of each released Sensitive Reference (8f3cc56)
+
+### Fixes
+
+- a claude.ai connector no longer binds without a proof where your gateway pairs, and a failed pairing names its cause (32a4c5d)
+- a gateway login refused in Cowork says at once where to log in, and an answer that cannot be checked shows a fixed line (2b8f99f)
+- a typed sref in Cowork answers inside its 5 s also with a slow name service, and the AI's own sref keeps its time (a5fe4f3)
+- in a Cowork demo an error in the mask of a command's output shows nothing of the output (f32c5ae)
+- when the AI tries a sref login or a report in Cowork, the answer names the prompt that works there (f492cd4)
+- when a removal names several import ids, the answer names the position of each wrong id (2d813de)
+- a file name such as /clear.log and an assignment such as x=/clear stay as they are in Cowork (8036da5)
+- in the desktop app the countries button "auto" has no dot, and "set by you" follows it as grey text (bc13f8c)
+- in Cowork the demo answer of a blocked prompt never shows for the next prompt (ac26ff5)
+- a path or a word with /clear in it stays as it is in Cowork, and the demo start names a new task (bf3b54a)
+- the Cowork demo answer masks a value that a command's output repeats, and sref answers in time (7308e27)
+- in the desktop app a chosen setting is a filled button without a dot, "set by you" stands after the buttons, and the buttons line up under their label (bc09a0b)
+- sref runs in Cowork, and the list, sref and settings texts say what is true there (90514bb)
+- the demo shows in Cowork what it does: the confirmation, what the AI would have got, and a new task as the way out (330b2e7)
+- a command file with both flags is refused in every YAML spelling (True, quotes, a comment) (8c21f95)
+- the shortcut never overwrites or upgrades a command of your own, and /ms NAME stays yours when your /ms is your own (3bd2f2b)
+- a sentence after a settings key, such as "shows which", stays a hint and is not named as a change (001b7d6)
+- the session start upgrades /ms only for the maisecrets store that installed it (c896b2d)
+- an installed /ms of 0.9.21 and before becomes the entry at the next session start (133bfdc)
+- every hint names the entry, /maisecrets status test; in Cowork a command maisecrets answers itself is named as text, maisecrets: term add NAME (af6b935)
+- a command that maisecrets answers itself, such as term add, shows its answer in Cowork (9b5586f)
+- commands typed in Cowork show their output, and every hint names the short command that Cowork knows (7015546)
+- a long run of characters after an InfluxDB label no longer slows the scan, and a UUID after a Coveralls label is no token (026c837)
+- the audit keeps no gateway audit id that holds a released value, and the audit view checks the id again (5559601)
+- the name service no longer masks a code with a digit, an initial with an acronym, Loki or a greeting phrase as a person (d433495)
+- finds the account holder's name on the first line of a message above its bank details (4a0ea23)
+- a census count such as "token bound=1234" is no secret (8eb7f7c)
+
+### Security
+
+- the AI cannot call a gateway's pairing tool with an argument of any shape (3914247)
+- an AI tool call can no longer carry a claude.ai connector's pairing nonce to your gateway (9d7dc30)
+- an answer never repeats a typed word that maisecrets does not know (7db8eff)
+- the entry starts no report or login for the AI, and a Cowork answer sends nothing unchecked to it (a1b6512)
+- the incident report never reaches the AI in Cowork; maisecrets: report incident shows a fixed line there (66c603c)
+- a command the mod gets from the client's command run never counts as the person's own prompt (6a0af3a)
 
 ## [0.9.21] - 2026-11-20
 
