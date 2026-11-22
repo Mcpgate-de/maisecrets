@@ -254,6 +254,13 @@ class CommandRouteTests(_HookBase):
                        "/maisecrets:not-a-secret " + KEY, "/maisecrets:sref login gw; status"):
             with self.subTest(prompt):
                 self.assertNotIn("box", self.route(prompt))
+        # a server name that is a stored value: the refusal names the type, and nothing waits in the box
+        Vault().put(PASSWORD, "SECRET", "manual", session=SESSION)
+        for form in ("/maisecrets:sref login " + PASSWORD, "/maisecrets:sref logout " + PASSWORD):
+            with self.subTest(form):
+                out = self.route(form)
+                self.assertNotIn("box", out)
+                self.assertNotIn(PASSWORD, json.dumps(out))
         self.assertFalse(events.take_typed_login("gw", [SESSION]))
 
     def test_a_text_form_the_prompt_hook_does_not_parse_keeps_the_slash_form(self):
