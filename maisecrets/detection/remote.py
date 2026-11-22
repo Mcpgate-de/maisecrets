@@ -608,12 +608,12 @@ def is_product_name(span: str) -> bool:
 def is_no_person(span: str) -> bool:
     """Whether a NAME span is no person: a product name (is_product_name), a word of GREETING_WORDS, of
     UI_LABEL_WORDS, of RUNNER_WORDS or of NEVER_A_NAME alone, a hook label (is_hook_label), a path of folder names
-    (is_path_words), a span with a digit, a word of ACRONYMS alone or after an initial, or a greeting phrase
+    (is_path_words), a span with a digit, a word of ACRONYMS alone in capitals or after an initial, or a greeting phrase
     (is_greeting_phrase). Public since 0.9.8: a caller that applies the spans itself drops these, the same rule as the
     remote path here (#41)."""
     word = span.strip().lower()
     return (is_product_name(span) or word in GREETING_WORDS or word in UI_LABEL_WORDS
-            or word in RUNNER_WORDS or word in NEVER_A_NAME or word in ACRONYMS or is_hook_label(span)
+            or word in RUNNER_WORDS or word in NEVER_A_NAME or _is_acronym(span) or is_hook_label(span)
             or is_path_words(span)
             or _has_digit(span) or _is_initial_and_acronyms(span) or is_greeting_phrase(span))
 
@@ -627,6 +627,12 @@ def _has_digit(span: str) -> bool:
 
 
 _WORD_OF_3_RE = re.compile(r"[^\W\d_]{3}|[A-Z][a-z]")
+
+
+def _is_acronym(span: str) -> bool:
+    """A word of ACRONYMS alone, in capitals ("NER", "MCP"): "Ner" and "Api" are given names."""
+    word = span.strip()
+    return word.isupper() and word.lower() in ACRONYMS
 
 
 def _is_initial_and_acronyms(span: str) -> bool:

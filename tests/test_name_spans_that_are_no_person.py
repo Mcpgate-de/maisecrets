@@ -47,10 +47,16 @@ class SpanRuleTests(unittest.TestCase):
 
     def test_a_technical_acronym_alone_is_no_person(self):
         # "NER" alone was masked as a person in a Cowork session (0.9.22): a word of ACRONYMS is never a surname
-        for span in ("NER", "ner", " NER ", "Ner", "MCP", "PII", "API"):
+        for span in ("NER", " NER ", "MCP", "PII", "API"):
             with self.subTest(span=span):
                 self.assertTrue(rm.is_no_person(span))
                 self.assertTrue(rm.is_no_person_in(f"the {span} service", 4, 4 + len(span)))
+
+    def test_an_acronym_word_not_in_capitals_stays_a_name(self):
+        # "Ner" and "Api" are given names: only the capitals make the word an acronym
+        for span in ("Ner", "ner", "Api", " Mcp "):
+            with self.subTest(span=span):
+                self.assertFalse(rm.is_no_person(span))
 
     def test_a_short_name_that_is_no_acronym_stays_a_name(self):
         for span in ("Lee", "Kim", "Nera", "NER Lee", "Lee NER", "Neri"):
