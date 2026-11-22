@@ -467,7 +467,10 @@ def _command_route(payload: dict) -> dict:
         # sref keeps its slash form here: its text form runs only in Cowork (_cowork_sref)
         typed = f"/maisecrets {words}" if words.split()[:1] == ["sref"] else forms.cowork(f"/maisecrets {words}")
         if typed.startswith("/"):
-            # a plugin command the menu shows: the person's Enter goes through the prompt hook
+            # a plugin command the menu shows: the person's Enter goes through the prompt hook. Not the plain entry
+            # `/maisecrets NAME`: with the mod it is the mod's own command, which reaches only command.run, never
+            # prompt.submit or the prompt hook (claude-mod/maisecrets-mod.mjs runTyped, measured on 2.1.330), and
+            # comes back here to be refused again
             typed = f"/maisecrets:{words}" if words.split()[:1] in (["sref"], ["report"]) else \
                 f"/maisecrets:maisecrets {words}"
         return {"drop": "maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. "
