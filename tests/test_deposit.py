@@ -198,15 +198,15 @@ class _Base(unittest.TestCase):
         S.login(self.cfg, self.backend, found, helper.browser, wait=10)
         return found
 
-    def bind(self, login: bool = True) -> None:
+    def bind(self, login: bool = True, key: str = "Team_GW") -> None:
         """The connector proposes its gateway, the person logs in, and its pairing proof binds it (#91)."""
-        key, url, why = vault_refs.propose_connector("claude_ai_Team_GW", json.dumps({"resource": self.url}))
+        _key, url, why = vault_refs.propose_connector("claude_ai_" + key, json.dumps({"resource": self.url}))
         self.assertIsNone(why)
         if login:
             self.login()
-        self.assertTrue(vault_refs.mark_login("Team_GW", self.url))
-        got = sref_hooks.pair_connector("Team_GW", NONCE, json.dumps({"resource": self.url,
-                                                                      "proof": self.srv.proof(NONCE)}))
+        self.assertTrue(vault_refs.mark_login(key, self.url))
+        got = sref_hooks.pair_connector(key, NONCE, json.dumps({"resource": self.url,
+                                                                "proof": self.srv.proof(NONCE)}))
         self.assertTrue(got["bound"], got)
 
     def args(self, **change) -> dict:
@@ -410,7 +410,8 @@ class DepositHookTests(_Base):
     def test_a_call_without_its_mcp_server_gets_no_deposit(self):
         # without the server's own name, a `__` inside a connector's or a tool's name could route a handle elsewhere
         self.bind()
-        self.assert_refused(self.pre(server=None), "names no claude.ai connector as its MCP server")
+        self.assert_refused(self.pre(server=None), "names no claude.ai connector as its MCP server (a Claude Code "
+                                                   "older than 2.1.330 may send no server name; update Claude Code)")
         self.assert_refused(self.pre(server={"name": "Gmail", "source": "sdk"}), "names no claude.ai connector")
         self.assertEqual(self.srv.deposit_requests, [])
 
@@ -457,6 +458,31 @@ class DepositHookTests(_Base):
         for entry in ("remote_cowork", "local-agent"):
             with self.subTest(entry=entry), mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
                 self.assert_refused(self.pre(), "does not work in Cowork")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_a_display_name_with_runs_of_marks_finds_its_binding(self):
+        # Claude Code 2.1.330 (its function xn) spells "claude.ai Acme (prod)" as claude_ai_Acme_prod in the tool name:
+        # each run of `_` becomes one and a `_` at either end goes. The key from the hook's display name must be the
+        # same, for the deposit and for the noting of a gateway reference (C31)
+        for display, key in (("claude.ai Acme (prod)", "Acme_prod"), ("claude.ai Team  GW", "Team_GW"),
+                             ("claude.ai GW.", "GW"), ("claude.ai Ops / GW", "Ops_GW")):
+            with self.subTest(display=display):
+                self.assertEqual(vault_refs.connector_key(display), key)
+                self.assertEqual(vault_refs.connector_key("claude_ai_" + key), key)
+                self.bind(key=key, login=not S.logged_in(self.backend, "https://127.0.0.1:"
+                                                         + self.srv.url.rsplit(":", 1)[1]))
+                server = {"name": display, "source": "claudeai"}
+                self.assertEqual(vault_refs.server_key({"mcp_server": server}), key, "the C31 noting finds it")
+                hso = self.pre(tool=f"mcp__claude_ai_{key}__gitlab_write_actions", server=server, call=key)
+                self.assertRegex(hso["updatedInput"]["token"], D.HANDLE_RE.pattern)
+                self.assertTrue(vault_refs.forget_connector(key))
+        self.assertEqual(vault_refs.connector_key("Acme (prod)"), None, "no claude.ai name, no key")
+        self.assertEqual(vault_refs.mangled("my  server"), "my__server", "other names keep their runs")
+
+    def test_another_connector_name_on_a_bound_tool_gets_the_refusal(self):
+        self.bind()
+        self.assert_refused(self.pre(server={"name": "claude.ai Other", "source": "claudeai"}),
+                            "this connector is not bound to a gateway of yours")
         self.assertEqual(self.srv.deposit_requests, [])
 
     def test_another_connector_or_an_unbound_one_gets_the_refusal(self):

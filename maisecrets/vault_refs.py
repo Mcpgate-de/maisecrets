@@ -247,8 +247,16 @@ _CONNECTOR_KEY = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def mangled(name: object) -> str | None:
-    """A server name as Claude Code spells it in a tool name: each character outside [A-Za-z0-9_-] becomes `_`."""
-    return re.sub(r"[^A-Za-z0-9_-]", "_", name.strip()) if isinstance(name, str) and name.strip() else None
+    """A server name as Claude Code spells it in a tool name: each character outside [A-Za-z0-9_-] becomes `_`; for a
+    name that starts with "claude.ai ", each run of `_` becomes one and a `_` at either end goes (Claude Code 2.1.330,
+    its function `xn`): "claude.ai Acme (prod)" is "claude_ai_Acme_prod". So the key from the hook's display name equals
+    the key from the tool name, and a key of a connector never holds `__`."""
+    if not isinstance(name, str) or not name.strip():
+        return None
+    out = re.sub(r"[^A-Za-z0-9_-]", "_", name.strip())
+    if name.startswith("claude.ai "):
+        out = re.sub(r"^_|_$", "", re.sub(r"_+", "_", out))
+    return out or None
 
 
 def connector_key(name: object) -> str | None:

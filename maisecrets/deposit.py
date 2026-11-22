@@ -331,7 +331,8 @@ def binding(backend, payload: dict, tool: str) -> tuple:
     # the server's own name decides; without it a `__` inside a connector's or tool's name could route the handle
     # of one connector to another
     if named is None:
-        raise Refused("the call names no claude.ai connector as its MCP server")
+        raise Refused("the call names no claude.ai connector as its MCP server (a Claude Code older than 2.1.330 may "
+                      "send no server name; update Claude Code)")
     keys = [k for k in connectors() if tool.startswith(f"mcp__claude_ai_{k}__") and k not in own_servers()
             and named == k]
     if len(keys) != 1:
