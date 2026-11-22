@@ -1,0 +1,13 @@
+# c19-a-task-id-that-names-no-subagent-is-read-as-text: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c19-a-task-id-that-names-no-subagent-is-read-as-text"
+control = "C19"
+serves = ["M1.7"]
+statement = "A task id that names no subagent transcript of this session stays in the text outside the result: a stored value there blocks the report (#31)."
+runner = ["tests/test_agent_reports.py::AgentReportTests::test_a_stored_value_as_a_task_id_that_names_no_subagent_is_blocked"]
+
+[proof]
+file = "maisecrets/agent_reports.py"
+find = '''        if not tid or _subagent_by_task_id(f"<task-id>{tid}</task-id>", subagents) is None:
+'''
+replace = '''        if not tid:
+'''
