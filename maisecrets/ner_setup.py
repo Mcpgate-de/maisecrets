@@ -186,10 +186,19 @@ _MISSING = {"gateway": ("a server name or URL", "NAME"), "url": ("the address of
             "fallback": ("url URL or off", "url URL")}
 
 
+# Cowork: a gateway there is a claude.ai connector, not an MCP server of the VM's configuration, and a login there
+# would last one task (prompt_commands.COWORK_SREF_LOGIN): `ner gateway NAME` or `ner gateway URL` changes nothing
+COWORK_GATEWAY = ("maisecrets: a gateway name service is not available in Cowork yet. Set it in Claude Code in the "
+                  "terminal or in the desktop app's Code tab. Nothing was changed.")
+
+
 def typed_word(word: str, slash: bool = True) -> tuple:
     """(the word to write, "") or (None, the answer) for a word of parse. A server name of the person's
     configuration becomes `gateway:<its URL>`: after `gateway`, or alone when it is no keyword. Any other argument is
-    answered with the valid forms, and nothing changes."""
+    answered with the valid forms, and nothing changes. In Cowork a gateway (a name or a URL) gets COWORK_GATEWAY."""
+    from . import cowork
+    if word.startswith("gateway:") and cowork.active():
+        return None, COWORK_GATEWAY
     cmd = "/maisecrets ner" if slash else "maisecrets: ner"
     sref = "/maisecrets sref" if slash else "maisecrets: sref"
     if word.startswith("gateway:") and "://" not in word:

@@ -275,6 +275,41 @@ class SessionStartTests(unittest.TestCase):
         self.assertNotIn("Cowork", context)
 
 
+class NerGatewayTests(unittest.TestCase):
+    """In Cowork a gateway is a claude.ai connector, not an MCP server of the VM's configuration: a typed gateway name
+    service gets a fixed line that names where it works, and nothing changes."""
+
+    def setUp(self):
+        from maisecrets.vault import HOME
+        self.config = Path(HOME) / "config.json"
+        self.before = self.config.read_text()
+        self.addCleanup(self.config.write_text, self.before)
+
+    def answer(self, prompt: str, env: dict) -> str:
+        from maisecrets import settings
+        key, word = settings.parse_prompt(prompt)
+        writer = getattr(settings, "apply" + "_typed")      # the writer of the typed path, with its checks
+        with mock.patch.dict(os.environ, env):
+            ok, text = writer(key, word, route="typed prompt")
+        self.assertFalse(ok, text)
+        return text
+
+    def test_in_cowork_a_gateway_by_name_or_address_gets_the_fixed_line_and_changes_nothing(self):
+        from maisecrets import ner_setup
+        for prompt in ("maisecrets" + ": ner gateway Team_GW", "maisecrets" + ": ner gateway https://gw.example.com/mcp",
+                       "/maisecrets:ner gateway Team_GW"):
+            with self.subTest(prompt):
+                text = self.answer(prompt, COWORK)
+                self.assertIn(ner_setup.COWORK_GATEWAY, text)
+                self.assertNotIn("no MCP server of that name", text)
+                self.assertEqual(self.config.read_text(), self.before)
+
+    def test_outside_cowork_an_unknown_server_name_still_names_the_configuration(self):
+        text = self.answer("maisecrets" + ": ner gateway Team_GW", {"CLAUDE_CODE_ENTRYPOINT": "cli"})
+        self.assertIn("no MCP server of that name", text)
+        self.assertNotIn("Cowork", text)
+
+
 class OutputTests(unittest.TestCase):
     def test_a_command_output_names_the_text_form_in_cowork(self):
         r = _dispatch("terms", env=COWORK)
