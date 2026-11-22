@@ -199,6 +199,15 @@ def typed_word(word: str, slash: bool = True) -> tuple:
     from . import cowork
     if word.startswith("gateway:") and cowork.active():
         return None, COWORK_GATEWAY
+    out = _resolve_word(word, slash)
+    # a bare server name (`ner NAME`) resolves to a gateway only here; in Cowork its list holds claude.ai connectors
+    if isinstance(out[0], str) and out[0].startswith("gateway:") and cowork.active():
+        return None, COWORK_GATEWAY
+    return out
+
+
+def _resolve_word(word: str, slash: bool) -> tuple:
+    """typed_word without the Cowork check."""
     cmd = "/maisecrets ner" if slash else "maisecrets: ner"
     sref = "/maisecrets sref" if slash else "maisecrets: sref"
     if word.startswith("gateway:") and "://" not in word:

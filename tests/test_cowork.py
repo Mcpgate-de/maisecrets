@@ -304,6 +304,18 @@ class NerGatewayTests(unittest.TestCase):
                 self.assertNotIn("no MCP server of that name", text)
                 self.assertEqual(self.config.read_text(), self.before)
 
+    def test_in_cowork_a_bare_server_name_that_resolves_to_a_gateway_changes_nothing(self):
+        # `ner NAME` without the word gateway: in Cowork the server list holds claude.ai connectors
+        from maisecrets import ner_setup
+        servers = {"Team_GW": "https://gw.example.com/mcp"}
+        with mock.patch.object(ner_setup, "_servers", return_value=servers):
+            for prompt in ("maisecrets" + ": ner Team_GW", "/maisecrets:ner Team_GW"):
+                with self.subTest(prompt):
+                    text = self.answer(prompt, COWORK)
+                    self.assertIn(ner_setup.COWORK_GATEWAY, text)
+                    self.assertEqual(self.config.read_text(), self.before)
+            self.assertEqual(ner_setup.typed_word("other:Team_GW")[0], "gateway:https://gw.example.com/mcp")
+
     def test_outside_cowork_an_unknown_server_name_still_names_the_configuration(self):
         text = self.answer("maisecrets" + ": ner gateway Team_GW", {"CLAUDE_CODE_ENTRYPOINT": "cli"})
         self.assertIn("no MCP server of that name", text)
