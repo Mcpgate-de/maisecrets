@@ -192,13 +192,25 @@ class TrustedReferenceTests(unittest.TestCase):
         self.assertEqual(_exact_redact(text, Vault(), "s2", {"n": 0}, [], [], []), text)
         self.assertEqual(_exact_redact(f"id {self.RID}", Vault(), "s2", {"n": 0}, [], [], []), f"id {e.ref}")
 
-    def test_a_whole_reference_is_masked_where_it_was_found_and_never_hunted(self):
-        ref = "\u27e6sref:email:" + self.RID + "\u27e7"
+    def test_a_whole_reference_is_hunted_and_a_trusted_one_stays_whole(self):
+        # review of !639: a server can put a secret in the id. A keyword rule masked `password: <reference>` whole; a
+        # weak mark let the same reference without the label reach the model in clear in a later result
+        from maisecrets import placeholder
+        from maisecrets.tool_output import _exact_redact
+        wordy = "orchid_" + "lantern_" + "meadow_7"      # no shape rule takes it: only the hunt masks it
+        ref = "\u27e6sref:doc:" + wordy + "\u27e7"
         e = Vault().put(ref, "SECRET", "ds-keyword-colon", session="s1")
-        self.assertTrue(e.weak)
-        self.assertNotIn(e.fingerprint, Vault().live_fingerprints())
-        out = self.bash(f"later: {ref}\n", session="s2")
-        self.assertNotIn(e.ref, json.dumps(out))
+        self.assertFalse(e.weak)
+        # an unknown reference in a second session, with no label: still masked
+        out = json.dumps(self.bash(f"the row {ref} ok\n", session="s2"), ensure_ascii=False)
+        self.assertIn(e.ref, out)
+        self.assertNotIn(wordy, out)
+        # the same reference after a gateway gave it this session stays whole, also next to a stored value
+        other = Vault().put(RANDOM, "SECRET", "manual", session="s1")
+        placeholder.TRUSTED.add(ref)
+        self.addCleanup(placeholder.TRUSTED.clear)
+        self.assertEqual(_exact_redact(f"to {ref} {RANDOM}", Vault(), "s2", {"n": 0}, [], [], []),
+                         f"to {ref} {other.ref}")
 
 
 if __name__ == "__main__":

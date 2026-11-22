@@ -248,14 +248,12 @@ def is_weak(kind: str, value: str, tool: bool = False) -> bool:
     a file (tool), an English word (is_dictionary_word); or a name or shape rule's hit that is an English word:
     replaced where it was found, never hunted in other texts. A word the person gives in a prompt after a label is a
     chosen password and stays hunted (is_quiet). The plugin's own name
-    (OWN_NAME, any case) is weak before every other rule, whoever stored it (#53)."""
+    (OWN_NAME, any case) is weak before every other rule, whoever stored it (#53). A gateway reference masked whole is
+    not weak: a server can put a secret in its id. The exact replacement keeps a trusted reference whole
+    (tool_output._replace_outside_references)."""
     from .registry import is_label
     if value.strip().lower() == OWN_NAME:
         return True    # the plugin's own name, even a chosen one (#53)
-    if "\u27e6sref:" in value:
-        # a gateway reference masked whole (placeholder.whole_references): masked where it was found, never hunted, so
-        # the same reference from a gateway that is bound later stays whole (live probe, 2026-11-22)
-        return True
     if kind.startswith("remote:"):
         return True    # a model's finding (remote_layer.py): masked where it was found, never hunted
     if not is_label(kind):
