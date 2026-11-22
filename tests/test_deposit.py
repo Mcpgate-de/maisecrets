@@ -447,6 +447,8 @@ class DepositHookTests(_Base):
         path = HOME / "sref" / "deposit-metadata.json"
         data = json.loads(path.read_text())
         data[self.url]["t"] = time.time() - 3601
+        # signed again, so only the age decides (an unsigned copy is read again for its MAC alone)
+        data[self.url]["mac"] = D._meta_mac(self.backend, self.url, data[self.url]["t"], data[self.url]["found"], False)
         path.write_text(json.dumps(data))
         self.srv.deposit_fields = {"deposit_profile": "deposit-9"}       # the gateway switched the deposit off
         self.assert_refused(self.pre(call="c"), "offers no deposit")
