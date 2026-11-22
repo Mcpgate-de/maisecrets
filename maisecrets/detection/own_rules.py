@@ -99,8 +99,11 @@ OWN_RULES: list[dict] = [
      "regex": r"(?:(?<![\w.+%-])|(?<=(?i:mailto%3a))|(?<=%3[Dd]))[\w.+-]{1,64}(?:%40|\\u0040)"
               r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
-     # a CJK letter before or after the number is a boundary, as in the e-mail rule
-     "regex": r"(?:(?<=[" + _CJK + r"])|(?<!\w))(?<!\+)\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}"
+     # a CJK letter before or after the number is a boundary, as in the e-mail rule. An ISO date after the plus is no
+     # number: the added line of a diff, "+2026-11-22", was masked as a phone (live probe, 2026-11-22)
+     "regex": r"(?:(?<=[" + _CJK + r"])|(?<!\w))(?<!\+)\+(?!0)"
+              r"(?!(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?!\d))"
+              r"\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}"
               r"(?:[ \-]?\d{2,5}){1,4}(?![\w.](?<![xX])\d|" + _NOT_CJK_WORD + r")"},
     # a BitLocker recovery key: 48 digits in 8 groups of 6; each group is a 16-bit number times 11 (Microsoft Graph
     # bitlockerRecoveryKey, manage-bde -protectors -get). 65,536 of the 10^6 groups pass the check, so a random
