@@ -147,7 +147,7 @@ class TypedStartTests(unittest.TestCase):
         from maisecrets import ner_health
         fact, step = ner_health.fact_and_step("local_down", {"url": ner_setup.LOCAL_URL})
         self.assertIn("not running", fact)
-        self.assertIn("/maisecrets:ner local", step)
+        self.assertIn("/maisecrets ner local", step)
 
 
 if __name__ == "__main__":

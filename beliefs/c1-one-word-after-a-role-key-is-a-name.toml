@@ -1,0 +1,11 @@
+# c1-one-word-after-a-role-key-is-a-name: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-one-word-after-a-role-key-is-a-name"
+control = "C1"
+serves = ["M1.3"]
+statement = "In API data, one word after the role key of a person (assignee_display_name: Dana) is a name; after a weak key it is not."
+runner = ["tests/test_detection_leaves.py::LinesLayoutTests::test_one_word_is_a_name_under_a_role_and_not_under_a_weak_key"]
+
+[proof]
+file = "maisecrets/detection/role_names.py"
+find = "        if (_ROLE_KEY_RE.search(key) or key.endswith(\"full_name\")) and one_word_name(m.group(2)):"
+replace = "        if False:"

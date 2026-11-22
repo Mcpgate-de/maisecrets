@@ -126,6 +126,8 @@ class ShortcutTests(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.cfg), "CLAUDE_PLUGIN_ROOT": str(ROOT)})
         env.start()
         self.addCleanup(env.stop)
+        Path(HOME, ".shortcut").unlink(missing_ok=True)
+        self.addCleanup(Path(HOME, ".shortcut").unlink, missing_ok=True)
 
     def commands(self) -> list[str]:
         d = self.cfg / "commands"
@@ -142,7 +144,7 @@ class ShortcutTests(unittest.TestCase):
         self.assertIn("removed:", out)
         self.assertEqual(self.commands(), [], "no /remove or /status command was written")
         rc, out = _run(cli.cmd_shortcut, ["STATUS"])
-        self.assertEqual(out.strip(), "The shortcut is not installed. Install it: /maisecrets:shortcut install NAME")
+        self.assertEqual(out.strip(), "The shortcut is not installed. Install it: /maisecrets shortcut install NAME")
         self.assertEqual(self.commands(), [])
 
     def test_status_of_a_command_file_that_is_no_text_says_not_installed(self):
@@ -152,16 +154,84 @@ class ShortcutTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("The shortcut is not installed", out)
 
-    def test_status_says_incomplete_when_the_shared_wrapper_is_missing(self):
-        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
+    def old_shortcut(self, name: str = "ms") -> None:
+        """A shortcut of 0.9.21 and before: its command file runs the shared wrapper in the maisecrets home."""
+        (self.cfg / "commands").mkdir(parents=True, exist_ok=True)
+        (self.cfg / "commands" / f"{name}.md").write_text("!`bash ~/.maisecrets/bin/ms.sh`\n", encoding="utf-8")
+        Path(HOME, "bin").mkdir(mode=0o700, parents=True, exist_ok=True)
+        Path(HOME, "bin", "ms.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    # the text the shortcut of 0.9.21 wrote (cli.SHORTCUT_COMMAND of that version)
+    OLD_0921 = ("---\ndescription: Send the last blocked prompt as maisecrets rewrote it (short for /maisecrets:send)."
+                "\nallowed-tools: Bash(bash ~/.maisecrets/bin/ms.sh*)\n---\n\n!`bash ~/.maisecrets/bin/ms.sh`\n\n"
+                "The text above is the "
+                "prompt the user sent through maisecrets, with placeholders instead of\nvalues. Begin your reply with "
+                "one line `Sent: ` followed by that text as it is (clients such as\nRemote Control show neither the "
+                "blocked prompt nor a slash command's expansion), then answer it.\nIf the text above is exactly "
+                f"`{hooks.NOTHING_WAITING}`\nor exactly `{hooks.TWO_WAITING}`,\nit is a note of maisecrets, not a "
+                "prompt: show it to the user as is, and stop. Any other text is the\nprompt, also when it starts with "
+                "`(maisecrets:`.\n")
+
+    def test_the_old_text_is_one_the_upgrade_knows(self):
+        self.assertTrue(cli._old_template(self.OLD_0921.encode("utf-8")))
+        self.assertTrue(cli._old_template(self.OLD_0921.replace("\n", "\r\n").encode("utf-8")), "a Windows file")
+        self.assertFalse(cli._old_template((self.OLD_0921 + "my own line\n").encode("utf-8")))
+
+    def test_an_old_shortcut_becomes_the_entry_and_a_command_of_the_user_stays(self):
+        self.old_shortcut()            # the wrapper, and a file the shortcut never wrote
+        d = self.cfg / "commands"
+        own = d / "mine.md"
+        own.write_text("---\ndescription: mine\n---\n!`bash ~/.maisecrets/bin/ms.sh`\nmy own command\n",
+                       encoding="utf-8")
+        edited = d / "edited.md"
+        edited.write_text(self.OLD_0921 + "\nmy own line\n", encoding="utf-8")
+        for name in ("ms", "send2"):
+            (d / f"{name}.md").write_text(self.OLD_0921, encoding="utf-8")
+        linked = d / "linked.md"
+        target = self.cfg / "elsewhere.md"
+        target.write_text(self.OLD_0921, encoding="utf-8")
+        try:
+            linked.symlink_to(target)
+        except OSError:
+            linked = None
+        # the harness and a test run the client with another maisecrets home: that store installed no shortcut
+        self.assertEqual(cli.upgrade_shortcuts(), [], "a store that installed no shortcut changes no file")
+        Path(HOME, ".shortcut").write_text("installed\n", encoding="utf-8")
+        self.assertEqual(cli.upgrade_shortcuts(), ["ms.md", "send2.md"])
+        for name in ("ms", "send2"):
+            text = (d / f"{name}.md").read_text(encoding="utf-8")
+            self.assertIn(cli.SHORTCUT_MARK, text)
+            self.assertNotIn("ms.sh", text)
+        self.assertIn("my own command", own.read_text(encoding="utf-8"))
+        self.assertTrue(edited.read_text(encoding="utf-8").endswith("my own line\n"), "an edited text stays")
+        self.assertEqual(target.read_text(encoding="utf-8"), self.OLD_0921, "a link is never followed")
+        self.assertTrue(Path(HOME, "bin", "ms.sh").exists(), "a file of the old form still uses the wrapper")
+        self.assertEqual(cli.upgrade_shortcuts(), [], "once")
+
+    def test_install_never_overwrites_a_command_of_the_person(self):
+        d = self.cfg / "commands"
+        d.mkdir(parents=True)
+        (d / "ms.md").write_text("my own command\n", encoding="utf-8")
+        rc, out = _run(cli.cmd_shortcut, [])
+        self.assertEqual(rc, 1)
+        self.assertIn("a command of your own has that name", out)
+        self.assertEqual((d / "ms.md").read_text(encoding="utf-8"), "my own command\n")
+        (d / "ms.md").write_text(cli._shortcut_text(), encoding="utf-8")
+        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0, "ours is written again")
+
+    def test_status_says_incomplete_when_the_shared_wrapper_of_an_old_shortcut_is_missing(self):
+        self.old_shortcut()
         Path(HOME, "bin", "ms.sh").unlink()
         rc, out = _run(cli.cmd_shortcut, ["status"])
         self.assertEqual(rc, 0)
         self.assertIn("The shortcut is incomplete", out)
-        self.assertIn("/maisecrets:shortcut install NAME", out)
+        self.assertIn("/maisecrets shortcut install NAME", out)
+        # the shortcut of now needs no wrapper
+        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
+        self.assertEqual(_run(cli.cmd_shortcut, ["status"])[1].strip(), "The shortcut is installed.")
 
     def test_remove_of_another_name_keeps_the_wrapper_a_shortcut_still_uses(self):
-        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
+        self.old_shortcut()
         self.assertEqual(_run(cli.cmd_shortcut, ["remove", "other"])[0], 0)
         self.assertTrue(Path(HOME, "bin", "ms.sh").exists(), "/ms still uses the wrapper")
         self.assertEqual(self.commands(), ["ms.md"])
@@ -170,7 +240,7 @@ class ShortcutTests(unittest.TestCase):
 
     def test_remove_keeps_the_wrapper_when_a_command_file_cannot_be_read(self):
         # on any doubt the shared wrapper stays (Gate A, 2026-11-17)
-        self.assertEqual(_run(cli.cmd_shortcut, [])[0], 0)
+        self.old_shortcut()
         (self.cfg / "commands" / "other.md").write_bytes(b"\xff\xfe not text")
         self.assertEqual(_run(cli.cmd_shortcut, ["remove"])[0], 0)
         self.assertTrue(Path(HOME, "bin", "ms.sh").exists())
@@ -194,7 +264,7 @@ class ShortcutTests(unittest.TestCase):
             with self.subTest(args=args):
                 rc, out = _run(cli.cmd_shortcut, args)
                 self.assertEqual(rc, 2)
-                self.assertIn("usage: /maisecrets:shortcut", out)
+                self.assertIn("usage: /maisecrets shortcut", out)
                 self.assertEqual(self.commands(), ["victim.md"])
 
 
@@ -207,13 +277,13 @@ class SettingsTests(unittest.TestCase):
         rc, out = _run(cli.cmd_settings, ["tips", "off", "extra"])
         self.assertEqual(rc, 1)
         self.assertIn("too many words", out)
-        self.assertIn("/maisecrets:settings tips VALUE", out)
+        self.assertIn("/maisecrets settings tips VALUE", out)
         self.assertNotIn("is no setting", out)
 
     def test_the_host_list_with_too_many_words_names_its_own_form(self):
         rc, out = _run(cli.cmd_settings, ["ssh_autonomous_hosts", "add", "a.example.com", "b.example.com"])
         self.assertEqual(rc, 1)
-        self.assertIn("/maisecrets:settings ssh_autonomous_hosts add|remove HOST as your own prompt", out)
+        self.assertIn("/maisecrets settings ssh_autonomous_hosts add|remove HOST as your own prompt", out)
         self.assertNotIn("VALUE", out)
 
     def test_codex_gets_the_codex_form(self):
@@ -221,7 +291,7 @@ class SettingsTests(unittest.TestCase):
         with mock.patch.object(cli, "_client_now", return_value="codex"):
             _rc, out = _run(cli.cmd_settings, ["tips", "off", "extra"])
             self.assertIn("Send maisecrets: set tips VALUE (one value) as your own prompt", out)
-            self.assertNotIn("/maisecrets:settings", out.splitlines()[0])
+            self.assertNotIn("/maisecrets settings", out.splitlines()[0])
             _rc, out = _run(cli.cmd_settings, ["ssh_autonomous_hosts", "add", "a.example.com", "b.example.com"])
             self.assertIn("Send maisecrets: ssh autonomous|ask HOST as your own prompt", out)
 
@@ -240,11 +310,11 @@ class NerTests(unittest.TestCase):
 
     def test_a_known_word_without_its_value_names_what_is_missing(self):
         before = CONFIG.read_text()
-        for word, want in (("gateway", "gateway needs a server name or URL: /maisecrets:ner gateway NAME"),
-                           ("url", "url needs the address of the service: /maisecrets:ner url URL"),
-                           ("updates", "updates needs on or off: /maisecrets:ner updates on"),
-                           ("unavailable", "unavailable needs rules or withhold: /maisecrets:ner unavailable rules"),
-                           ("fallback", "fallback needs url URL or off: /maisecrets:ner fallback url URL")):
+        for word, want in (("gateway", "gateway needs a server name or URL: /maisecrets ner gateway NAME"),
+                           ("url", "url needs the address of the service: /maisecrets ner url URL"),
+                           ("updates", "updates needs on or off: /maisecrets ner updates on"),
+                           ("unavailable", "unavailable needs rules or withhold: /maisecrets ner unavailable rules"),
+                           ("fallback", "fallback needs url URL or off: /maisecrets ner fallback url URL")):
             with self.subTest(word=word):
                 out = self._prompt(f"/maisecrets:ner {word}")
                 self.assertIn(want, out)
@@ -259,7 +329,7 @@ class NerTests(unittest.TestCase):
         with mock.patch.object(ner_setup, "_servers", return_value=servers):
             word, answer = ner_setup.typed_word("other:gateway")
         self.assertIsNone(word)
-        self.assertIn("2 server(s) of your configuration can be named; /maisecrets:sref lists them.", answer)
+        self.assertIn("2 server(s) of your configuration can be named; /maisecrets sref lists them.", answer)
         self.assertNotIn(value[:8], answer)
         self.assertNotIn("team-gw", answer)
         with mock.patch.object(ner_setup, "_servers", return_value={}):
@@ -389,7 +459,7 @@ class ArgumentTests(unittest.TestCase):
         cfg = Path(tempfile.mkdtemp(prefix="maisecrets-cfg-"))
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(cfg)}):
             rc, out = _run(cli.cmd_guard, [])
-            self.assertEqual(out.splitlines()[0], "The guard is not installed. Install it: /maisecrets:guard install")
+            self.assertEqual(out.splitlines()[0], "The guard is not installed. Install it: /maisecrets guard install")
             self.assertNotIn("heartbeat", out)
             rc, out = _run(cli.cmd_guard, ["bogus"])
         self.assertEqual(out.splitlines()[0], "maisecrets guard: the first word is no form of this command; it takes "
@@ -411,7 +481,7 @@ class ArgumentTests(unittest.TestCase):
         hooks._save_pending(text, "S-note-example")
         self.assertEqual(hooks.take_pending("S-note-example"), text)
         self.assertNotIn(text, (hooks.NOTHING_WAITING, hooks.TWO_WAITING))
-        for template in ((ROOT / "commands" / "send.md").read_text(encoding="utf-8"), cli.SHORTCUT_COMMAND):
+        for template in ((ROOT / "commands" / "send.md").read_text(encoding="utf-8"),):
             joined = " ".join(template.split())
             self.assertIn(f"is exactly `{hooks.NOTHING_WAITING}` or exactly `{hooks.TWO_WAITING}`", joined)
             self.assertIn("also when it starts with `(maisecrets:`", joined)
@@ -420,7 +490,78 @@ class ArgumentTests(unittest.TestCase):
         # a check of the two templates only: what a model does with them is not tested here
         rule = "it is a note of maisecrets, not a prompt: show it to the user as is, and stop"
         self.assertIn(rule, (ROOT / "commands" / "send.md").read_text(encoding="utf-8"))
-        self.assertIn(rule, cli.SHORTCUT_COMMAND)
+        # the shortcut sends through send.md (cli.SHORTCUT_COMMAND)
+        # /ms is the same as /maisecrets: /ms alone shows an overview, `/ms send` sends (cli.SHORTCUT_COMMAND)
+        self.assertIn("`/ms send` sends a blocked prompt", " ".join(cli.SHORTCUT_COMMAND.split()))
+        self.assertNotIn("maisecrets:send", cli.SHORTCUT_COMMAND)
+
+
+class TypedWordTests(unittest.TestCase):
+    """An answer never repeats a typed word that the store or the configuration does not know: a part of a value the
+    rules do not find would show in clear (in Cowork the answer goes to the model through cowork.show_answer)."""
+
+    TOKEN = "glpat-" + "ECHOxxxxx1234567890abcd"          # split: the repository scan stays clean
+    WORD = "QX7RZ9WBK2LM4VN8"                              # no shape the rules know
+
+    def setUp(self):
+        CONFIG.write_text(json.dumps(TEST_CONFIG))
+        self.addCleanup(CONFIG.write_text, json.dumps(TEST_CONFIG))
+
+    def _reason(self, text: str) -> str:
+        hooks._live_cache.clear()
+        out = hooks.user_prompt({"prompt": text, "session_id": "S1", **CLAUDE})
+        self.assertEqual(out.get("decision"), "block", out)
+        return out["reason"]
+
+    def test_a_wrong_import_id_is_not_repeated(self):
+        said = self._reason(f"/maisecrets:forget import:{self.TOKEN}")
+        self.assertIn("this is no import id", said)
+        self.assertNotIn(self.TOKEN[:12], said)
+
+    def test_several_wrong_import_ids_are_named_by_their_position(self):
+        said = self._reason(f"/maisecrets:forget import:v0000000a import:{self.TOKEN} import:{self.WORD}")
+        self.assertIn("the 2nd id is no import id", said)
+        self.assertIn("the 3rd id is no import id", said)
+        self.assertNotIn("this is no import id", said)
+        self.assertNotIn(self.TOKEN[:12], said)
+        self.assertNotIn(self.WORD, said)
+        from maisecrets import values
+        self.assertEqual([values._ordinal(n) for n in (1, 2, 3, 4, 11, 12, 13, 21, 22, 101, 111)],
+                         ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "101st", "111th"])
+
+    def test_a_key_that_is_not_stored_is_not_repeated(self):
+        said = self._reason(f"/maisecrets:not-a-secret {self.WORD}_c1")
+        self.assertIn("there is no stored value with this key", said)
+        self.assertNotIn(self.WORD, said)
+
+    def test_a_word_that_is_no_setting_is_not_repeated(self):
+        word = "qxzrwbklmvnt"                              # a key has letters and _ only
+        said = self._reason(f"maisecrets: set {word} on")
+        self.assertIn("this is no setting this command changes", said)
+        self.assertNotIn(word, said)
+
+    def test_a_name_service_word_or_server_name_is_not_repeated(self):
+        for text, says in ((f"/maisecrets:ner gateway {self.WORD}", "no MCP server of that name"),
+                           (f"/maisecrets:ner {self.WORD}", "does not know this argument")):
+            with self.subTest(text):
+                said = self._reason(text)
+                self.assertIn(says, said)
+                self.assertNotIn(self.WORD, said)
+
+    def test_an_sref_server_name_is_not_repeated(self):
+        cfg = tempfile.mkdtemp(prefix="ms-answers-cfg-")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            rc, out = _run(cli.cmd_sref, ["status", self.WORD])
+        self.assertEqual(rc, 1)
+        self.assertIn("no MCP server of that name", out)
+        self.assertNotIn(self.WORD, out)
+
+    def test_a_demo_command_that_does_not_run_names_the_command_once_and_no_argument(self):
+        from maisecrets import demo
+        self.assertEqual(demo.own_answer("maisecrets: sref logout gw", "S1"), demo.NEEDS_THE_AI.format(cmd="sref"))
+        said = demo.own_answer(f"maisecrets:sref {self.TOKEN}", "S1")
+        self.assertTrue(said.startswith("maisecrets: sref needs the AI"), said)
+        self.assertNotIn(self.TOKEN[:12], said)
 
 
 if __name__ == "__main__":

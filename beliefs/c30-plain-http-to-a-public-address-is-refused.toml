@@ -1,0 +1,11 @@
+# c30-plain-http-to-a-public-address-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30-plain-http-to-a-public-address-is-refused"
+control = "C30"
+serves = ["M6.4"]
+statement = "A name service URL of plain http to a public address is refused, for url and for the fallback: tool results would cross the internet in clear text."
+runner = ["tests/test_ner_setup.py::FallbackTests::test_plain_http_to_a_public_address_is_refused_for_url_and_fallback"]
+
+[proof]
+file = "maisecrets/ner_setup.py"
+find = "    if parts.scheme.lower() == \"http\" and ip is not None and not remote._private(host):"
+replace = "    if False:"

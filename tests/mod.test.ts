@@ -383,6 +383,32 @@ test('a demo prompt enters with its masked text, and no model step sends a reque
   expect(asked).toEqual(['mod-prompt'])        // the prompt's answer said inDemo: no second question
 })
 
+test('in Cowork the first demo step answers with the text Python gave for the prompt, once, and sends nothing', async ($, on) => {
+  const sent: number[] = []
+  const SHOW = 'What the AI would have got:\n\nmasked\n\nDemo mode: nothing was sent to the AI. Start a new task to switch it off.'
+  demoWorld(on, { sent, promptExtra: { show: SHOW } } as any)
+  await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
+  const first = await step($)
+  expect(first.result.answer).toBe(SHOW)
+  expect(first.chunks.some(c => c.kind === 'text' && c.text === SHOW)).toBe(true)
+  expect((await step($, 1)).result.answer).toBe(DEMO_LINE)     // used once
+  expect(sent).toEqual([])
+})
+
+test('in Cowork a demo answer Python gave for an earlier prompt is never shown for a later one', async ($, on) => {
+  // the prompt hook may block a prompt the mod passed on: then no step takes its answer, and the next prompt's step
+  // must not show it
+  const sent: number[] = []
+  const OLD = 'What the AI would have got:\n\nold\n\nDemo mode: nothing was sent to the AI. Start a new task to switch it off.'
+  const opts: any = { sent, promptExtra: { show: OLD } }
+  demoWorld(on, opts)
+  await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
+  opts.promptExtra = {}
+  await $.prompt.submit({ text: TYPED, wait: false, origin: { kind: 'composer' } })
+  expect((await step($)).result.answer).toBe(DEMO_LINE)
+  expect(sent).toEqual([])
+})
+
 test('a session the mod has not seen asks at the step: in the demo no request goes out', async ($, on) => {
   const sent: number[] = []
   demoWorld(on, { demo: true, sent })
@@ -649,29 +675,41 @@ test('a command after /maisecrets with a space, typed by the person, takes the p
   }
 })
 
-test('a command file command after /maisecrets with a space goes into the box with its colon', async ($, on) => {
+test('an entry form that the mod does not answer goes on as typed to its command file, with no fill', async ($, on) => {
+  // Cowork: the command file shows the output there, and the prompt hook reads the line as its colon form
   const seen = ownSetup(on, (q) => own(q.fill_check === true ? { masked: q.prompt, count: 0 } : {}))
-  for (const [spaced, colon] of [['/maisecrets status', '/maisecrets:status'], ['/maisecrets list', '/maisecrets:list'],
-    ['/maisecrets settings rehydration confirm', '/maisecrets:settings rehydration confirm'],
-    ['/maisecrets forget SECRET_c1', '/maisecrets:forget SECRET_c1'], ['/maisecrets sref login', '/maisecrets:sref login'],
-    ['/maisecrets audit 5', '/maisecrets:audit 5'], ['/maisecrets rules', '/maisecrets:rules'],
-    ['/maisecrets put', '/maisecrets:put'], ['/maisecrets send', '/maisecrets:send'],
-    ['/maisecrets guard status', '/maisecrets:guard status'], ['/maisecrets shortcut', '/maisecrets:shortcut'],
-    ['/maisecrets ner local', '/maisecrets:ner local'], ['/maisecrets report last', '/maisecrets:report last']]) {
-    seen.filled.length = 0
-    seen.downstream = 0
-    const r = await $.prompt.submit({ text: spaced, wait: false, origin: { kind: 'composer' } })
-    expect(r.drop).toBe(`maisecrets: I put ${colon} into the input box. Press Enter to run it, or clear the box.`)
-    await settleFill()
-    expect(seen.filled).toEqual([colon])
-    expect(seen.downstream).toBe(0)
+  for (const text of ['/maisecrets status', '/maisecrets list', '/maisecrets settings rehydration confirm',
+    '/maisecrets forget SECRET_c1', '/ms sref login', '/maisecrets:maisecrets audit 5', '/maisecrets:ms rules',
+    '/maisecrets status test', '/ms', '/maisecrets:maisecrets']) {
+    for (const kind of ['composer', 'sdk']) {
+      seen.filled.length = 0
+      seen.downstream = 0
+      const r = await $.prompt.submit({ text, wait: false, origin: { kind } })
+      expect(r.drop).toBeUndefined()
+      expect(r.text).toBe(text)
+      await settleFill()
+      expect(seen.filled).toEqual([])
+      expect(seen.downstream).toBe(1)
+    }
   }
-  // claude -p and an SDK host have no input box: the line names the command
-  seen.filled.length = 0
-  const r = await $.prompt.submit({ text: '/maisecrets status', wait: false, origin: { kind: 'sdk' } })
-  expect(r.drop).toBe('maisecrets: send /maisecrets:status with the colon to run it. Nothing was sent.')
-  await settleFill()
-  expect(seen.filled).toEqual([])
+})
+
+test('the slash entry /maisecrets sref goes on as typed even when Python answers with a text', async ($, on) => {
+  // the engine throws away a change of a slash line (#44): a text answer never replaces it. In Cowork Python gives
+  // none for it, and the hints name the text form `maisecrets: sref`, which the mod rewrites
+  const SHOW = 'The person ran a maisecrets command, and maisecrets carried it out. Show the person this answer'
+  const seen = ownSetup(on, () => own({ text: SHOW, count: 0 }))
+  for (const text of ['/maisecrets sref', '/maisecrets sref status', '/maisecrets:sref']) {
+    seen.downstream = 0
+    const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBeUndefined()
+    expect(r.text).toBe(text)
+    expect(seen.downstream).toBe(1)
+  }
+  seen.downstream = 0
+  const typed = await $.prompt.submit({ text: 'maisecrets: sref', wait: false, origin: { kind: 'composer' } })
+  expect(typed.text).toBe(SHOW)
+  expect(seen.downstream).toBe(1)
 })
 
 test('a prompt that is not the person\'s own keeps the space form: Python is not asked, nothing runs', async ($, on) => {
@@ -705,7 +743,7 @@ test('a command with a value goes into the box masked, and with no check nothing
   const MASKED = '/maisecrets:status \u27e6SECRET_c1\u27e7'
   const asked: any[] = []
   const seen = ownSetup(on, (q) => { asked.push(q); return own(q.fill_check === true ? { masked: MASKED, count: 1 } : {}) })
-  for (const text of [RAW.replace(':', ' '), '/maisecrets stauts ' + RAW.slice(19)]) {
+  for (const text of ['/maisecrets stauts ' + RAW.slice(19)]) {
     seen.filled.length = 0
     asked.length = 0
     const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
@@ -717,7 +755,7 @@ test('a command with a value goes into the box masked, and with no check nothing
     expect(asked.filter(q => q.fill_check === true).map(q => q.prompt)).toEqual([RAW])
   }
   // claude -p: the line names the masked form
-  const p = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind: 'sdk' } })
+  const p = await $.prompt.submit({ text: '/maisecrets stauts ' + RAW.slice(19), wait: false, origin: { kind: 'sdk' } })
   expect(p.drop).toBe(`maisecrets: send ${MASKED} with the colon to run it. Nothing was sent.`)
   // no answer (a failed start, a refused one, an exit code), an answer that is no command or one with a line break:
   // nothing is sent, and the box is emptied, because the engine puts the dropped text (maybe with a value) back
@@ -728,7 +766,7 @@ test('a command with a value goes into the box masked, and with no check nothing
     for (const kind of ['composer', 'bridge']) {
       seen.filled.length = 0
       seen.downstream = 0
-      const r = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind } })
+      const r = await $.prompt.submit({ text: '/maisecrets stauts ' + RAW.slice(19), wait: false, origin: { kind } })
       expect(r.drop).toBe('maisecrets could not check the text, so it removed it from the input box. Type it again.')
       await settleFill()
       expect(seen.filled).toEqual([''])
@@ -736,7 +774,7 @@ test('a command with a value goes into the box masked, and with no check nothing
     }
     // claude -p has no box: nothing to empty, and the line says that nothing was sent
     seen.filled.length = 0
-    const s = await $.prompt.submit({ text: RAW.replace(':', ' '), wait: false, origin: { kind: 'sdk' } })
+    const s = await $.prompt.submit({ text: '/maisecrets stauts ' + RAW.slice(19), wait: false, origin: { kind: 'sdk' } })
     expect(s.drop).toBe('maisecrets could not check this command. Nothing was sent; type it again with the colon.')
     await settleFill()
     expect(seen.filled).toEqual([])
@@ -816,7 +854,7 @@ test('a command the person typed runs without a model turn: the prompt is droppe
   async ($, on) => {
     const st = runSetup(on, { answer: LIST })
     const r = await $.prompt.submit({ text: '/maisecrets:list', wait: false, origin: { kind: 'composer' } })
-    expect(r.drop).toBe('maisecrets: /maisecrets:list runs without the AI; its output opens in a panel.')
+    expect(r.drop).toBe('maisecrets: /maisecrets list runs without the AI; its output opens in a panel.')
     expect(r.text).toBeUndefined()
     expect(st.downstream).toBe(0)                  // nothing reaches the model
     // the prompt hook's own check first, with the person's origin: the same call as for the command file
@@ -896,7 +934,7 @@ test('the login: the status line waits for the consent and clears; the end is a 
   const r = await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
   // the hook returns while the login still waits: the box is free at once
   expect(Date.now() - t0).toBeLessThan(1000)
-  expect(r.drop).toBe('maisecrets: /maisecrets:sref login opens your browser; the status line shows the wait.')
+  expect(r.drop).toBe('maisecrets: /maisecrets sref login opens your browser; the status line shows the wait.')
   expect(await until(() => st.spawns.length === 1)).toBe(true)
   expect(st.spawns[0].argv).toEqual(['python3', 'hooks/dispatch.py', 'sref', '--args-stdin'])
   expect(st.spawns[0].input).toBe('login team-gw')
@@ -917,11 +955,179 @@ test('a failed login says why in the CLI\'s own words', async ($, on) => {
   expect(st.toasts).toEqual(['maisecrets: the login to gw.example did not complete: the consent was refused'])
 })
 
+// #91: a login of a proposed claude.ai connector (the plan names it in `pair`): after the login succeeded, the mod
+// asks the connector for its proof of a fresh nonce and hands the answer to Python, which binds only on a match
+const LOGIN_PAIR = { run: { ...LOGIN.run, pair: 'team-gw' } }
+const BOUND = 'maisecrets: the claude.ai connector team-gw is bound to gw.example: it proved that it reaches that ' +
+  'gateway with your account.'
+function pairSetup(on, opts: any = {}) {
+  const asked: any[] = []
+  const st = runSetup(on, { answer: (q) => q.action === 'pair_due' ? (opts.dueFails ? null : { due: opts.due ?? true })
+    : q.action === 'pair_cancel' ? { cancelled: true }
+    : q.action === 'pair' ? { bound: true, note: BOUND } : (opts.plan ?? LOGIN_PAIR), code: opts.code,
+  chunks: ['maisecrets: logged in to gw.example. The claude.ai connector team-gw is bound only when it proves it.\n'] })
+  const relayed: any[] = []
+  on('tool.call', ($, e) => {
+    relayed.push(e)
+    // a tool whose result echoes the nonce (opts.echo)
+    return { result: opts.echo ? 'seen ' + opts.echo.nonce : 'done' }
+  })
+  on('mcp.call', async ($, e) => {
+    asked.push(e)
+    if (opts.connectorFails) return { value: null }
+    const nonce = e.args?.nonce
+    // the AI carries the nonce into another tool call while the connector's call runs (the relay of #91)
+    if (opts.relay) opts.answers.push(await opts.outer.tool.call({ tool: opts.relay, input: { note: 'use ' + nonce },
+      tool_use_id: opts.id ?? 'toolu_01abc' } as any))
+    if (opts.echo) {
+      opts.echo.nonce = nonce
+      opts.answers.push(await opts.outer.tool.call({ tool: 'Bash', input: { command: 'ls' } } as any))
+    }
+    if (opts.prompt) await opts.outer.prompt.submit({ text: 'look: ' + nonce, wait: false, origin: { kind: 'hook' } })
+    return { value: { content: [{ type: 'text', text: JSON.stringify({ resource: 'https://gw.example/mcp',
+      proof: 'p'.repeat(43), nonce }) }] } }
+  })
+  return { st, asked, relayed }
+}
+const questions = (st, action) => st.checks.filter(c => c.argv[2] === 'mod-settings')
+  .map(c => JSON.parse(c.init.stdin)).filter(q => q.action === action)
+
+test('after a login of a proposed connector succeeded, the mod asks the connector to prove it with a fresh nonce',
+  async ($, on) => {
+    const { st, asked } = pairSetup(on)
+    await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+    expect(await until(() => st.toasts.includes(BOUND))).toBe(true)
+    expect(questions(st, 'pair_due')).toEqual([{ action: 'pair_due', key: 'team-gw' }])
+    expect(asked.length).toBe(1)
+    expect([asked[0].server, asked[0].tool]).toEqual(['claude_ai_team-gw', 'sensitive_references_resource'])
+    expect(Object.keys(asked[0].args)).toEqual(['nonce'])              // the nonce alone goes to the connector
+    const nonce = asked[0].args.nonce
+    expect(nonce).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    const pair = questions(st, 'pair')
+    expect(pair.length).toBe(1)
+    expect(pair[0].key).toBe('team-gw')
+    expect(pair[0].nonce).toBe(nonce)
+    expect(JSON.parse(pair[0].answer).nonce).toBe(nonce)               // the connector's own answer, as it came
+    // the pairing waits up to 20 s for Python (a discovery and one request to the gateway)
+    const run = st.checks.find(c => c.argv[2] === 'mod-settings' && JSON.parse(c.init.stdin).action === 'pair')
+    expect(run.init.timeoutMs).toBe(20000)
+    expect(st.logs).toContain(BOUND)
+    expect(st.toasts.indexOf('maisecrets: logged in at team-gw')).toBeLessThan(st.toasts.indexOf(BOUND))
+    // a second login makes a new nonce
+    await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+    expect(await until(() => asked.length === 2)).toBe(true)
+    expect(asked[1].args.nonce).not.toBe(nonce)
+    expect(st.downstream).toBe(0)
+  })
+
+async function asksNothing($, on, opts) {
+  const { st, asked } = pairSetup(on, opts)
+  await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.toasts.length > 0)).toBe(true)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(asked.length).toBe(0)
+  expect(questions(st, 'pair').length).toBe(0)
+  expect(st.toasts.includes(BOUND)).toBe(false)
+  expect(questions(st, 'pair_due').length).toBe(opts.due === false ? 1 : 0)
+}
+
+test('a failed login asks the connector nothing', async ($, on) => asksNothing($, on, { code: 1 }))
+
+test('a plan without a connector asks the connector nothing', async ($, on) => asksNothing($, on, { plan: LOGIN }))
+
+test('no proposal that waits for a proof asks the connector nothing', async ($, on) =>
+  asksNothing($, on, { due: false }))
+
+test('a connector that gives no answer binds nothing, and the unused login mark goes', async ($, on) => {
+  const { st, asked } = pairSetup(on, { connectorFails: true })
+  await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.toasts.some(t => t.includes('was not bound')))).toBe(true)
+  expect(asked.length).toBe(1)
+  expect(questions(st, 'pair').length).toBe(0)
+  expect(questions(st, 'pair_cancel')).toEqual([{ action: 'pair_cancel', key: 'team-gw' }])
+  expect(st.toasts).toContain('maisecrets: the claude.ai connector team-gw was not bound: the connector did not ' +
+    'answer. To try again, send /maisecrets:sref login team-gw.')
+})
+
+const TAINTED = 'maisecrets: the claude.ai connector team-gw was not bound: another tool call, a tool result or a ' +
+  'prompt carried the nonce of this pairing, which only the connector may get. To try again, send ' +
+  '/maisecrets:sref login team-gw.'
+
+async function relayTaints($, on, opts) {
+  const answers: any[] = []
+  const { st, asked, relayed } = pairSetup(on, { ...opts, outer: $, answers })
+  await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.toasts.some(t => t.includes('was not bound')))).toBe(true)
+  expect(asked.length).toBe(1)
+  expect(questions(st, 'pair').length).toBe(0)                    // the answer never reaches Python
+  expect(questions(st, 'pair_cancel')).toEqual([{ action: 'pair_cancel', key: 'team-gw' }])
+  expect(st.toasts).toContain(TAINTED)
+  return { answers, relayed }
+}
+
+test('the nonce in a call of another connector while the pairing runs binds nothing, and the login mark goes',
+  async ($, on) => {
+    const { answers, relayed } = await relayTaints($, on,
+      { relay: 'mcp__claude_ai_Real_GW__sensitive_references_resource' })
+    // the call that carries the nonce never runs
+    expect(answers[0].deny).toMatch(/carried the nonce of a running pairing/)
+    expect(relayed.length).toBe(0)
+  })
+
+test('the nonce in a command while the pairing runs binds nothing, and the command never runs', async ($, on) => {
+  const { answers, relayed } = await relayTaints($, on, { relay: 'Bash' })
+  expect(answers[0].deny).toMatch(/carried the nonce of a running pairing/)
+  expect(relayed.length).toBe(0)
+})
+
+test('a call of the pairing tool under the name of the connector that the AI made is no own call', async ($, on) => {
+  const { answers } = await relayTaints($, on, { relay: 'mcp__claude_ai_team-gw__sensitive_references_resource' })
+  expect(answers[0].deny).toMatch(/carried the nonce of a running pairing/)
+})
+
+test('the mod\'s own pairing call passes its tool hook and binds', async ($, on) => {
+  const answers: any[] = []
+  const { st, relayed } = pairSetup(on, { relay: 'mcp__claude_ai_team-gw__sensitive_references_resource',
+    id: 'toolu_plugin_0123', outer: $, answers })
+  await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.toasts.includes(BOUND))).toBe(true)
+  expect(answers[0].deny).toBeUndefined()
+  expect(relayed.length).toBe(1)
+})
+
+test('the nonce in a tool result while the pairing runs binds nothing, and the login mark goes', async ($, on) => {
+  const { answers, relayed } = await relayTaints($, on, { echo: {} })
+  expect(relayed.length).toBe(1)                // the call ran; its result carried the nonce
+  expect(answers[0].deny).toBeUndefined()
+})
+
+test('the nonce in a prompt while the pairing runs binds nothing, and the login mark goes', async ($, on) => {
+  await relayTaints($, on, { prompt: true })
+})
+
+test('no answer from Python about the proof asks the connector nothing, and the unused login mark goes',
+  async ($, on) => {
+    const { st, asked } = pairSetup(on, { dueFails: true })
+    await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+    expect(await until(() => st.toasts.some(t => t.includes('was not bound')))).toBe(true)
+    expect(asked.length).toBe(0)
+    expect(questions(st, 'pair_cancel').length).toBe(1)
+  })
+
+test('a plan whose connector is not the server of the login asks nothing', async ($, on) => {
+  const { st, asked } = pairSetup(on, { plan: { run: { ...LOGIN.run, pair: 'other' } } })
+  await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.toasts.length > 0)).toBe(true)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(asked.length).toBe(0)
+  expect(questions(st, 'pair_due').length).toBe(0)
+})
+
 test('a start that fails reports it, clears the status line and frees the next login', async ($, on) => {
   const st = runSetup(on, { answer: LOGIN, spawnFails: true })
   await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
   expect(await until(() => st.toasts.length > 0)).toBe(true)
-  expect(st.toasts).toEqual(['maisecrets could not run /maisecrets:sref login. Send it again.'])
+  expect(st.toasts).toEqual(['maisecrets could not run /maisecrets sref login. Send it again.'])
   expect(st.statuses[st.statuses.length - 1]).toBeUndefined()
   await $.prompt.submit({ text: '/maisecrets:sref login team-gw', wait: false, origin: { kind: 'composer' } })
   expect(await until(() => st.spawns.length === 2)).toBe(true)
@@ -999,22 +1205,142 @@ test('a second login while one waits starts no second flow, also when both promp
   expect(await until(() => st.spawns.length === 2)).toBe(true)
 })
 
-test('the space form runs as the colon form', async ($, on) => {
+test('each entry form runs as the colon form', async ($, on) => {
   const st = runSetup(on, { answer: LIST })
-  const r = await $.prompt.submit({ text: '/maisecrets list', wait: false, origin: { kind: 'composer' } })
-  expect(r.drop).toBe('maisecrets: /maisecrets:list runs without the AI; its output opens in a panel.')
-  expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin).prompt).toBe('/maisecrets:list')
-  expect(await until(() => st.spawns.length === 1)).toBe(true)
+  for (const text of ['/maisecrets list', '/ms list', '/maisecrets:maisecrets list', '/maisecrets:ms list',
+    '  /MS List  ']) {
+    const n = st.spawns.length
+    st.checks.length = 0
+    const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBe('maisecrets: /maisecrets list runs without the AI; its output opens in a panel.')
+    expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin).prompt).toBe('/maisecrets:list')
+    expect(await until(() => st.spawns.length === n + 1 && st.ended === n + 1)).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  expect(st.downstream).toBe(0)
 })
 
-test('the space form with no answer from Python runs nothing and empties the box (offer of fix/ux-0918)',
-  async ($, on) => {
-    const st = runSetup(on, { answer: null })
-    const r = await $.prompt.submit({ text: '/maisecrets sref login', wait: false, origin: { kind: 'composer' } })
-    expect(r.drop).toBe('maisecrets could not check the text, so it removed it from the input box. Type it again.')
-    expect(st.spawns.length).toBe(0)
-    expect(st.downstream).toBe(0)
-  })
+// a /ms of the person's own is theirs: Python answers nothing when it is not the shortcut (prompt_commands.foreign_ms)
+test('the question for /ms NAME says that the person typed /ms, and its empty answer passes the prompt on', async ($, on) => {
+  const st = runSetup(on, { answer: (q) => (q.via_ms === true ? {} : LIST) })
+  const r = await $.prompt.submit({ text: '/ms list', wait: false, origin: { kind: 'composer' } })
+  expect(r.drop).toBeUndefined()
+  expect(st.downstream).toBe(1)
+  expect(st.spawns.length).toBe(0)
+  expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin).via_ms).toBe(true)
+  for (const text of ['/maisecrets:ms list', '/maisecrets list', '/msx list']) {
+    st.checks.length = 0
+    await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    const q = st.checks.find(c => c.argv[2] === 'mod-prompt')
+    if (q) expect(JSON.parse(q.init.stdin).via_ms).toBeUndefined()
+  }
+})
+
+test('the entry alone opens the panel as /maisecrets does; where none is placed the overview runs', async ($, on) => {
+  const PANEL = { run: { argv: ['entry'], view: 'panel' } }
+  // the panel's own questions (mod-settings) get rows; the prompt's question gets the plan
+  const st = runSetup(on, { answer: (q, e) => (e.argv[2] === 'mod-' + 'settings' ? { groups: [] } : PANEL),
+    placed: true })
+  for (const text of ['/ms', '/maisecrets:ms', '/maisecrets:maisecrets', '  /MS  ']) {
+    st.checks.length = 0
+    st.opens.length = 0
+    const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBe('maisecrets: the panel opens. Esc closes it.')
+    expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin).prompt).toBe('/maisecrets:maisecrets')
+    expect(await until(() => st.opens.some(o => o.id === 'maisecrets-settings'))).toBe(true)
+  }
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(st.spawns.length).toBe(0)
+  expect(st.fills.filter(f => f)).toEqual([])
+})
+
+test('where no panel is placed the entry alone runs the overview, and nothing goes into the box', async ($, on) => {
+  const st = runSetup(on, { answer: { run: { argv: ['entry'], view: 'panel' } }, placed: false,
+    chunks: ['maisecrets protects this session\nA blocked prompt waits: /maisecrets send sends it.\n'] })
+  await $.prompt.submit({ text: '/ms', wait: false, origin: { kind: 'composer' } })
+  expect(await until(() => st.spawns.length === 1)).toBe(true)
+  expect(st.spawns[0].argv).toEqual(['python3', 'hooks/dispatch.py', 'entry'])
+  expect(await until(() => st.logs.some(l => l.includes('A blocked prompt waits')))).toBe(true)
+  expect(st.fills.filter(f => f)).toEqual([])
+})
+
+test('a command that needs the model is dropped, and the entry command file runs it after the hook', async ($, on) => {
+  const answer = { now: { entry: 'status test' } as any }
+  const st = runSetup(on, { answer: () => answer.now })
+  const r = await $.prompt.submit({ text: '/maisecrets status test', wait: false, origin: { kind: 'composer' } })
+  expect(r.drop).toBe('maisecrets: /maisecrets status needs the AI; it runs now.')
+  expect(st.spawns.length).toBe(0)
+  expect(st.downstream).toBe(0)
+  // the entry starts after a wait, so it does not wait on the turn that this hook holds (the other wait empties the box)
+  expect(st.afters).toEqual([60, 60])
+  // words that name no command, a second line or no text start nothing: the prompt goes on as typed
+  for (const entry of ['bogus words', 'status\ntest', 12]) {
+    answer.now = { entry }
+    st.afters.length = 0
+    const p = await $.prompt.submit({ text: '/maisecrets status test', wait: false, origin: { kind: 'composer' } })
+    expect(p.drop).toBeUndefined()
+    expect(st.afters).toEqual([])
+  }
+})
+
+test('the space form with no answer from Python goes on as typed, and the hook decides it', async ($, on) => {
+  const st = runSetup(on, { answer: null })
+  const r = await $.prompt.submit({ text: '/maisecrets sref login', wait: false, origin: { kind: 'composer' } })
+  expect(r.drop).toBeUndefined()
+  expect(st.spawns.length).toBe(0)
+  expect(st.downstream).toBe(1)
+})
+
+test('a person types /maisecrets NAME or a hidden /maisecrets:NAME: the command runs at once, no fill', async ($, on) => {
+  const st = runSetup(on, { answer: LIST })
+  on('command.run', () => ({ text: 'engine' }))
+  for (const [command, args] of [['maisecrets', 'list'], ['maisecrets:list', ''], ['maisecrets:list', '  ']]) {
+    const n = st.spawns.length
+    st.checks.length = 0
+    const r = await $.command.run({ command, args, origin: { kind: 'composer' } } as any)
+    expect(r.text).toBe('/maisecrets list runs without the AI; its output opens in a panel.')
+    expect((r as any).isTextDisplayOnly).toBe(true)
+    expect(JSON.parse(st.checks.find(c => c.argv[2] === 'mod-prompt').init.stdin))
+      .toEqual({ prompt: '/maisecrets:list', session_id: 'sess-1', cwd: '/work', origin: 'command' })
+    expect(await until(() => st.spawns.length === n + 1 && st.ended === n + 1)).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  expect(st.fills).toEqual([])
+})
+
+// the engine stamps every local command run `composer`: the route tells Python so, and Python makes no change there
+// that only the person's own prompt may make (prompt_commands.COMMAND_ROUTE, C22)
+test('a command from the command.run route reaches Python as the command route, never as the person', async ($, on) => {
+  const HINT = 'maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. Nothing ' +
+    'was changed. Send it as a prompt: maisecrets: set ssh_consent on'
+  const st = runSetup(on, { answer: { drop: HINT } })
+  on('command.run', () => ({ text: 'engine' }))
+  for (const [command, args] of [['maisecrets', 'settings ssh_consent on'], ['maisecrets:settings', 'ssh_consent on'],
+    ['maisecrets:term', 'add Bertolt Q'], ['maisecrets:not-a-secret', 'SECRET_c1']]) {
+    st.checks.length = 0
+    const r = await $.command.run({ command, args, origin: { kind: 'composer' } } as any)
+    expect(r.text).toBe(HINT.replace(/^maisecrets: /, ''))
+    const asked = st.checks.filter(c => c.argv[2] === 'mod-prompt').map(c => JSON.parse(c.init.stdin))
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked.every(q => q.origin === 'command')).toBe(true)
+  }
+  expect(st.spawns.length).toBe(0)
+})
+
+test('a hidden command that no person typed goes on to the engine, and the mod asks nothing', async ($, on) => {
+  const st = runSetup(on, { answer: LIST })
+  on('command.run', () => ({ text: 'engine' }))
+  for (const kind of ['plugin', 'sdk', 'peer']) {
+    const r = await $.command.run({ command: 'maisecrets:list', args: '', origin: { kind } } as any)
+    expect(r.text).toBe('engine')
+  }
+  // a visible command (report, sref, the entry) goes on too: prompt.submit answers it
+  for (const command of ['maisecrets:report', 'maisecrets:sref', 'maisecrets:maisecrets', 'compact']) {
+    const r = await $.command.run({ command, args: '', origin: { kind: 'composer' } } as any)
+    expect(r.text).toBe('engine')
+  }
+  expect(st.checks.length).toBe(0)
+})
 
 test('the prompt hook\'s block (a value in the arguments) drops the command and nothing runs', async ($, on) => {
   const BLOCK = 'maisecrets kept a secret from the AI.'
@@ -1143,8 +1469,8 @@ test('a login that waits and a list keep their own panes, titles and lines', asy
   expect(await until(() => st.opens.some(o => o.id === paneOf('cmd:list')))).toBe(true)
   const login = st.opens.filter(o => o.id === paneOf('sref-login')).pop()
   const list = st.opens.filter(o => o.id === paneOf('cmd:list')).pop()
-  expect(login.title).toBe('maisecrets: /maisecrets:sref login')
-  expect(list.title).toBe('maisecrets: /maisecrets:list')
+  expect(login.title).toBe('maisecrets: /maisecrets sref login')
+  expect(list.title).toBe('maisecrets: /maisecrets list')
   const props = { title: 'maisecrets', isFocused: true, bodyColumns: 100, placement: 'dock',
     scroll: { offset: 0, bodyRows: 30 }, view: {} }
   const a = await $.ui.mount({ plugin: 'maisecrets', component: 'Pane', requestId: paneOf('sref-login'),

@@ -256,12 +256,12 @@ class Allow(_Work):
         self.assertEqual(set(first), {"systemMessage"}, "a line for the person; the model gets nothing of the hint")
         line = first["systemMessage"]
         self.assertEqual(line, settings.HINTS["read_pdf"]["claude"])
-        self.assertIn("/maisecrets:settings read_pdf convert", line)
+        self.assertIn("/maisecrets settings read_pdf convert", line)
         self.assertNotIn("hello.pdf", line, "nothing of the file is in the hint")
         self.assertEqual(second, {}, "once")
         img = self.post("PostToolUse_Read_png", file_path=self.png)
         self.assertEqual(img["systemMessage"], settings.HINTS["read_image"]["claude"], "the image has its own hint")
-        self.assertIn("/maisecrets:settings read_image ask", img["systemMessage"])
+        self.assertIn("/maisecrets settings read_image ask", img["systemMessage"])
         self.assertEqual(self.post("PostToolUse_Read_png", file_path=self.png), {}, "once for images too")
 
     def test_no_hint_when_decided_silenced_or_in_a_subagent(self):
@@ -1135,7 +1135,7 @@ class TypedSettings(_Work):
         text = settings.render(only="read_pdf")
         self.assertIn("PDFs the AI reads (read_pdf) · allow · (default)", text)
         self.assertIn("convert     send only its text", text)
-        self.assertIn("/maisecrets:settings read_pdf convert", text)
+        self.assertIn("/maisecrets settings read_pdf convert", text)
 
 
 # ------------------------------------------------- end to end, real hooks --

@@ -178,7 +178,7 @@ class TypedCommandTests(_Base):
     def test_a_term_command_without_add_or_remove_is_blocked_with_the_usage(self):
         out = _prompt(f"/maisecrets:term {NAME}")
         self.assertEqual(out["decision"], "block")
-        self.assertIn("/maisecrets:term add NAME", out["reason"])
+        self.assertIn("/maisecrets term add NAME", out["reason"])
         self.assertFalse(terms.PERSONAL.exists())
 
     def test_a_removal_in_a_tool_call_is_refused(self):
@@ -199,7 +199,7 @@ class GateReviewCommandTests(_Base):
     def test_a_full_name_also_adds_the_surname_with_any_ending(self):
         out = _prompt("/maisecrets:term add Jan Testowski")
         self.assertIn("Also added: 2 variant(s)", out["reason"])
-        self.assertIn("/maisecrets:term shows them", out["reason"])
+        self.assertIn("/maisecrets term shows them", out["reason"])
         self.assertIn("The first name alone stays visible", out["reason"])
         self.assertNotIn("testowsk", out["reason"].lower())
         self.assertIn("Jan Testowski | Testowski | Testowskis\n", terms.PERSONAL.read_text(encoding="utf-8"))
@@ -227,7 +227,7 @@ class GateReviewCommandTests(_Base):
             with self.subTest(typed=typed):
                 out = _prompt(typed)
                 self.assertEqual(out["decision"], "block")
-                self.assertIn("/maisecrets:term add NAME", out["reason"])
+                self.assertIn("/maisecrets term add NAME", out["reason"])
                 self.assertNoTerm(json.dumps(out), "the answer")
         self.assertFalse(terms.PERSONAL.exists(), "a near miss changes nothing")
         self.assertIsNone(terms.parse_command("maisecrets terms are a feature"))
@@ -390,7 +390,7 @@ class StoredValueTests(_Base):
         out = _prompt(f"try {self.VALUE} again")
         self.assertEqual(out["decision"], "block")
         sent = hooks.take_pending("S1")
-        self.assertNotIn(self.REST, sent.lower(), "/maisecrets:send would send the rest")
+        self.assertNotIn(self.REST, sent.lower(), "/maisecrets send would send the rest")
         self.assertRegex(sent, r"\Atry " + self.secret.pattern + r" again\Z")
         mod = hooks.rewrite_prompt({"prompt": f"try {self.VALUE} again", "session_id": "S1", "cwd": ""})
         self.assertRegex(mod["text"], r"\Atry " + self.secret.pattern + r" again\Z")
@@ -584,7 +584,7 @@ class LongestSpanTests(_Base):
         for token, head, tail in self.cases:
             with self.subTest(token=head):
                 self.assertEqual(_prompt(f"the new token is {token} ok")["decision"], "block")
-                self.assertWhole(hooks.take_pending("S1"), token, head, tail, "/maisecrets:send")
+                self.assertWhole(hooks.take_pending("S1"), token, head, tail, "/maisecrets send")
                 mod = hooks.rewrite_prompt({"prompt": f"the new token is {token} ok", "session_id": "S1", "cwd": ""})
                 self.assertWhole(mod["text"], token, head, tail, "the mod")
                 self.assertEqual(mod["count"], 1, "the notice counts the token once")
@@ -638,6 +638,27 @@ class ShapedTermTests(_Base):
                 self.assertNotIn("testowski", json.dumps(answer).lower())
 
 
+class TermInsideARuleValueTests(_Base):
+    """A listed name never cuts a value that a rule takes (registry: the terms run after the rules): the name is a
+    part of an address and of a token, and each value is masked whole, as one placeholder of the rule's type."""
+    NAME = "Testowski"
+    EMAIL = "zbigniew.testowski" + "@" + "firma-xyz.de"
+    TOKEN = "glpat-" + "Testowski0123456789x"
+
+    def setUp(self):
+        super().setUp()
+        _write_terms(f"PERSON_ZT  {self.NAME}\n")
+
+    def test_a_listed_name_inside_a_rule_value_does_not_cut_it(self):
+        out = _out(_bash(f"mail {self.EMAIL}, token {self.TOKEN}, and {self.NAME} alone."))
+        refs = re.findall(re.escape(OPEN) + r"([A-Z]+)_c\d+(?::[^" + CLOSE + r"]*)?" + re.escape(CLOSE), out)
+        self.assertEqual(sorted(refs), ["EMAIL", "NAME", "SECRET"], out)
+        for part in ("zbigniew", "firma-xyz", "glpat-", "0123456789x", "testowski", "Testowski"):
+            self.assertNotIn(part, out, "no part of a value stays in clear")
+        self.assertRegex(out, r"\Amail " + re.escape(OPEN) + r"EMAIL_c\d+[^, ]*, token " + re.escape(OPEN)
+                         + r"SECRET_c\d+" + re.escape(CLOSE) + r", and ", "each value is one placeholder")
+
+
 class MarkerHookTests(_Base):
     def test_a_marked_name_is_masked_in_its_prompt_and_in_later_output(self):
         out = _prompt(f"draft a letter to {{{{{NAME}}}}}; {NAME} asked for it")
@@ -645,7 +666,7 @@ class MarkerHookTests(_Base):
         self.assertNoTerm(json.dumps(out), "the prompt answer")
         sent = hooks.take_pending("S1")
         self.assertRegex(sent, r"\Adraft a letter to (" + REF_RE.pattern + r"); \1 asked for it\Z",
-                         "/maisecrets:send sends the name as its placeholder, without the braces")
+                         "/maisecrets send sends the name as its placeholder, without the braces")
         self.assertRegex(_out(_bash(f"Re: {NAME}")), r"\ARe: " + REF_RE.pattern + r"\Z")
         self.assertFalse(terms.PERSONAL.exists(), "a mark is not permanent: only term add writes terms.txt")
 

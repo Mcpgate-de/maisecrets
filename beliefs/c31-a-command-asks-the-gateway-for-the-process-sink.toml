@@ -1,0 +1,11 @@
+# c31-a-command-asks-the-gateway-for-the-process-sink: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-command-asks-the-gateway-for-the-process-sink"
+control = "C31"
+serves = ["M3.3"]
+statement = "The value of a Sensitive Reference in a Bash command is asked from the gateway for the sink process with the name of the command's program, so the gateway's rule for commands decides."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_the_value_reaches_the_command_and_the_gateway_learns_the_program"]
+
+[proof]
+file = "maisecrets/sref_hooks.py"
+find = '''    got = fetch(cfg, vault.backend, [key], session, ("process", program or "sh"))'''
+replace = '''    got = fetch(cfg, vault.backend, [key], session, ("local_file", program or "sh"))'''

@@ -218,7 +218,7 @@ class AlwaysBlockedTests(_Base):
     def test_a_check_saves_no_pending_prompt_and_copies_nothing(self):
         _prompt(f"ms:({GLPAT})")
         _prompt(f"ms:({UNSEEN})")
-        self.assertFalse(Path(HOME, "pending").exists(), "/maisecrets:send must have nothing of a check to send")
+        self.assertFalse(Path(HOME, "pending").exists(), "/maisecrets send must have nothing of a check to send")
         self.assertEqual(self.copied, [])
 
 
@@ -450,7 +450,7 @@ class StoreTests(_Base):
         self.assertNotIn("From now on", out["reason"], "the store keeps it for its lifetime, not for good")
         self.assertEqual(Vault().get("SECRET_c1", session="S1"), (UNSEEN, "ok"))
         meta = json.loads(Path(HOME, "index.json").read_text())["entries"]["SECRET_c1"]
-        self.assertEqual((meta["type"], meta["kind"]), ("SECRET", "manual"), "as /maisecrets:put stores it")
+        self.assertEqual((meta["type"], meta["kind"]), ("SECRET", "manual"), "as /maisecrets put stores it")
         self.assertEqual(_prompt(f"please use {UNSEEN} here")["decision"], "block")
         again = _prompt(f"ms:({UNSEEN})")
         self.assertIn("This value is already stored as " + OPEN + "SECRET_c1" + CLOSE, again["reason"])
@@ -464,7 +464,7 @@ class StoreTests(_Base):
     def test_ordinary_text_is_not_stored(self):
         # a check of ordinary words stored them, and every later prompt with them was blocked (live finding, 0.6.32)
         want = (check_value.NOT_CAUGHT + " It looks like ordinary text, so it was not stored. If it is a secret, store "
-                "it with /maisecrets:put.\n\n" + check_value.NOT_SENT)
+                "it with /maisecrets put.\n\n" + check_value.NOT_SENT)
         for text in ORDINARY_TEXTS:
             with self.subTest(text[:12]):
                 self.assertEqual(_prompt(f"ms:({text})")["reason"], want)
@@ -665,6 +665,15 @@ class VerdictModelTests(_Base):
         self.assertIn("It is a common word, so it is found again only with the label.", out)
         self.assertNotIn("now stored", out)
 
+    def test_a_label_word_after_another_value_is_not_shown_with_it(self):
+        # the two words in front of the value are the e-mail address's end and "password": the verdict names no label
+        # rather than a part of the address (verdict.label_before)
+        domain = MAIL.split("@")[1]
+        out = _prompt(f"ms:({MAIL} password {self.LABELLED})")["reason"].split("\n\n")[0]
+        self.assertIn("found by the label in front of it;", out)
+        self.assertNotIn(domain.split(".")[0], out)
+        self.assertNotIn(self.LABELLED, out)
+
     def test_several_hits_get_one_line_each_in_text_order(self):
         out = _prompt(f"ms:(password: {self.LABELLED} mail {MAIL})")["reason"].split("\n\n")[0]
         lines = out.split("\n")
@@ -685,6 +694,20 @@ class VerdictModelTests(_Base):
         out = _prompt(f"ms:({ALLOWED})")["reason"]
         self.assertIn("Your allow list lets it through: it allows this exact value.", out)
         self.assertIn(f"remove that line from {user_rules.ALLOW_FILE}.", out)
+
+
+class VerdictLabelTests(unittest.TestCase):
+    """The verdict names the label in front of a hit only when that label touches no hit (maisecrets/verdict.py):
+    the text before a value can be another value."""
+
+    def test_a_label_that_overlaps_a_hit_is_never_shown(self):
+        from maisecrets import verdict
+        token = "ghp_" + "Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0dF3gH6"
+        for text, hit in (("password: Zq8-pw", (0, 4)), (token + ": Zq8-pw", (0, len(token)))):
+            with self.subTest(text=text[:10]):
+                start = text.index("Zq8")
+                self.assertTrue(verdict.label_before(text, start, []), "the premise: a label stands in front")
+                self.assertEqual(verdict.label_before(text, start, [hit]), "")
 
 
 if __name__ == "__main__":

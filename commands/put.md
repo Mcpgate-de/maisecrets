@@ -1,6 +1,7 @@
 ---
 description: "Store the clipboard value and get a placeholder. The AI never sees it"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" put *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" put *)
+user-invocable: false
 ---
 
 The user has copied a secret to the clipboard. Run exactly this command and show the user its

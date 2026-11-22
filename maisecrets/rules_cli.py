@@ -61,12 +61,12 @@ def show() -> int:
     if value_files.present():
         from . import values as imports
         line = imports.summary_line()
-        print(f"\n{line[0].upper()}{line[1:]}; /maisecrets:list shows each import")
+        print(f"\n{line[0].upper()}{line[1:]}; /maisecrets list shows each import")
     from .notices import launcher
     from .user_rules import ALLOW_FILE
     print(f"\nAllow list ({ALLOW_FILE}): {len(values)} exact value(s), {len(ids)} rule id(s) switched off"
           + (f" ({', '.join(sorted(ids))})" if ids else ""))
-    print("\nAdd a folder: /maisecrets:settings rule_dirs add DIR (type it as your own prompt)\n"
+    print("\nAdd a folder: /maisecrets settings rule_dirs add DIR (type it as your own prompt)\n"
           f"Check a folder: {launcher()} rules check DIR")
     return 0
 
@@ -211,11 +211,11 @@ _README = """# Detection rules for maisecrets
 maisecrets reads the rules in `rules/` in addition to its own. To use them, clone this repository and type this as
 your own prompt in Claude Code, with the folder you cloned it to:
 
-    /maisecrets:settings rule_dirs add {path}
+    /maisecrets settings rule_dirs add {path}
 
 In Codex, send this alone as your prompt: `maisecrets: set rule_dirs add {path}`
 
-`/maisecrets:rules` then shows the folder and how many rules it loaded.
+`/maisecrets rules` then shows the folder and how many rules it loaded.
 
 - `rules/*.json`: rules in the gitleaks form (`id`, `regex`, `keywords`, `entropy`, `secretGroup`, `allowlists`).
 - `rules/*.prefixes`: one rule per line, `id  regex`; the whole match is the secret.

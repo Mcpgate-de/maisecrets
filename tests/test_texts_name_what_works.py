@@ -42,7 +42,7 @@ class SendCommandTests(unittest.TestCase):
         # the plugin ships no /ms: without /maisecrets:shortcut it is an unknown command
         for copied in (True, False):
             text = self._notice(copied)
-            self.assertIn("\n  /maisecrets:send   send the cleaned prompt now", text)
+            self.assertIn("\n  /maisecrets send   send the cleaned prompt now", text)
             self.assertNotIn("/ms ", text)
 
     def test_the_block_notice_names_ms_once_the_shortcut_is_installed(self):
@@ -50,10 +50,11 @@ class SendCommandTests(unittest.TestCase):
         commands.mkdir()
         Path(commands, "ms.md").write_text("!`bash ~/.maisecrets/bin/ms.sh`\n", encoding="utf-8")
         # the column width follows the paste key (⌘V on macOS, Ctrl+V elsewhere)
-        self.assertRegex(self._notice(True), r"\n  /ms +send the cleaned prompt now")
+        # /ms is the same as /maisecrets: /ms alone opens the panel, /ms send sends
+        self.assertRegex(self._notice(True), r"\n  /ms send +send the cleaned prompt now")
         # a command file of the person's own with that name is no maisecrets shortcut
         Path(commands, "ms.md").write_text("my own command\n", encoding="utf-8")
-        self.assertRegex(self._notice(True), r"\n  /maisecrets:send +send the cleaned prompt now")
+        self.assertRegex(self._notice(True), r"\n  /maisecrets send +send the cleaned prompt now")
 
     # the maintainer, 2026-11-16: the notice names /ms first, then the paste key, then the command for a wrong hit
     def _entries(self, *spec):
@@ -64,18 +65,18 @@ class SendCommandTests(unittest.TestCase):
 
     def test_with_the_clipboard_the_notice_is_ms_then_the_paste_key_then_the_wrong_hit(self):
         key = notices._paste_key()
-        width = max(len(key), len("/maisecrets:send")) + 3
+        width = max(len(key), len("/maisecrets send")) + 3
         self.assertEqual(self._lines(self._entries(("SECRET", 12, "gitlab-pat"))), [
             "maisecrets kept a secret from the AI.", "",
-            "  " + "/maisecrets:send".ljust(width) + "send the cleaned prompt now",
+            "  " + "/maisecrets send".ljust(width) + "send the cleaned prompt now",
             "  " + key.ljust(width) + "paste it to edit it first", "",
-            "A wrong hit? /maisecrets:" + "not-a-secret SECRET_c12"])
+            "A wrong hit? /maisecrets " + "not-a-secret SECRET_c12"])
 
     def test_without_the_clipboard_the_notice_shows_the_prompt_under_ms(self):
         lines = self._lines(self._entries(("EMAIL", 3, "email")), copied=False)
         self.assertEqual(lines[0], "maisecrets kept personal data from the AI.")
-        self.assertEqual(lines[2:5], ["  /maisecrets:send   send the cleaned prompt now", "", "    the cleaned prompt"])
-        self.assertEqual(lines[-1], "A wrong hit? /maisecrets:" + "not-a-secret EMAIL_c3")
+        self.assertEqual(lines[2:5], ["  /maisecrets send   send the cleaned prompt now", "", "    the cleaned prompt"])
+        self.assertEqual(lines[-1], "A wrong hit? /maisecrets " + "not-a-secret EMAIL_c3")
         self.assertFalse(any("paste" in x for x in lines))
 
     def test_the_wrong_hit_line_names_the_one_key_else_key_and_leaves_out_a_term(self):
@@ -108,16 +109,16 @@ class SendCommandTests(unittest.TestCase):
         one = self._entries(("SECRET", 12, "gitlab-pat"))
         self.assertEqual(self._lines(one, copied=False, report="a subagent's report"), [
             "maisecrets kept a secret in a subagent's report from the AI.", "",
-            "  /maisecrets:send   pass the report on with placeholders"])
+            "  /maisecrets send   pass the report on with placeholders"])
         self.assertEqual(self._lines(one, copied=False, report="a background command's notice")[-1],
-                         "  /maisecrets:send   pass the notice on with placeholders")
+                         "  /maisecrets send   pass the notice on with placeholders")
 
     def test_the_session_id_refusal_names_send(self):
         bash = hooks._pre_bash({}, {}, {"command": "CLAUDE_CODE_SESSION_ID=x true"})
         ps = hooks._pre_powershell({}, {"command": "$env:CLAUDE_CODE_SESSION_ID = 'x'"})
         for out in (bash, ps):
             reason = out["hookSpecificOutput"]["permissionDecisionReason"]
-            self.assertIn("/maisecrets:send sends the blocked prompt", reason)
+            self.assertIn("/maisecrets send sends the blocked prompt", reason)
             self.assertNotIn("/ms ", reason)
 
 
@@ -126,7 +127,7 @@ class CodexTests(unittest.TestCase):
         # Codex has no plugin slash commands; its form of a settings change is `maisecrets: set KEY VALUE`
         text = codex_vault.notice("probe-server")
         self.assertIn("send this alone as your prompt: maisecrets: set client_header off.", text)
-        self.assertNotIn("/maisecrets:settings", text)
+        self.assertNotIn("/maisecrets settings", text)
         self.assertIn("the AI still sees only placeholders", text)
 
 
@@ -144,8 +145,8 @@ class ListAndTermTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             cli._list_values()
         text = out.getvalue()
-        self.assertNotIn("/maisecrets:status shows how", text, "status says nothing about deleting everything")
-        self.assertIn("To delete one: /maisecrets:forget <placeholder>.", text)
+        self.assertNotIn("/maisecrets status shows how", text, "status says nothing about deleting everything")
+        self.assertIn("To delete one: /maisecrets forget <placeholder>.", text)
         launcher = str(Path(ROOT, "hooks", "run.cmd" if os.name == "nt" else "run.sh"))
         self.assertIn(f"run in a terminal: {launcher} wipe --yes", text)
 
@@ -154,7 +155,7 @@ class ListAndTermTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             terms_cli.show()
         tail = out.getvalue().rstrip("\n").split("\n\n")[-1]
-        self.assertTrue(tail.startswith("Add a term: type /maisecrets:term add"), tail)
+        self.assertTrue(tail.startswith("Add a term: type /maisecrets term add"), tail)
         self.assertNotIn("terms.suggested.txt (overwritten", out.getvalue())
 
 

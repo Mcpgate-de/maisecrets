@@ -1,0 +1,11 @@
+# c25-the-rules-command-prints-no-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c25-the-rules-command-prints-no-value"
+control = "C25"
+serves = ["M1.2"]
+statement = "maisecrets rules show and test print rule ids, places, types and lengths, never a value: their output goes to the model when the agent runs them."
+runner = ["tests/test_user_rules.py::RulesCommand::test_show_and_test_print_no_value"]
+
+[proof]
+file = "maisecrets/rules_cli.py"
+find = "(len {len(m.value)})\")"
+replace = "{m.value}\")"

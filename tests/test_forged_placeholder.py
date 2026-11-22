@@ -46,6 +46,20 @@ class ForgedPlaceholderTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertNotIn(value, answer("result: " + text + "\n"))
 
+    def test_a_reference_no_gateway_gave_this_session_hides_no_token_in_its_id(self):
+        # sref_hooks.trust: only a reference that a gateway gave this session keeps its id; a command that prints
+        # one itself, or a reference of another session, is text, and a token in its id is masked. The whole hook
+        # (_post_tool_guarded): post_tool alone does not note or trust references
+        for kind in ("secret", "x"):
+            with self.subTest(kind=kind):
+                payload = {"session_id": "S1", "tool_name": "Bash", "hook_event_name": "PostToolUse",
+                           "prompt_id": "p", "tool_input": {"command": "cat x"},
+                           "tool_response": {"stdout": "build: " + OPEN + "sref:" + kind + ":" + TOKEN + CLOSE
+                                             + " done\n", "stderr": ""}}
+                out = hooks._post_tool_guarded(payload)
+                self.assertTrue(out, "an empty answer shows the original output")
+                self.assertNotIn(TOKEN, json.dumps(out, ensure_ascii=False))
+
     def test_a_real_placeholder_is_no_hit(self):
         for text in (OPEN + key("EMAIL", 1) + CLOSE,
                      OPEN + key("EMAIL", 2) + ":ja" + DOT * 3 + "@" + DOT * 3 + ".de" + CLOSE,

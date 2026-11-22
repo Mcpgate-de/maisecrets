@@ -1,0 +1,12 @@
+# c31-each-pairing-gets-a-fresh-random-nonce: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-each-pairing-gets-a-fresh-random-nonce"
+control = "C31"
+serves = ["M3.3"]
+statement = "Each pairing sends the connector a fresh random nonce of 43 base64url characters, never a fixed one."
+runner = ["tests/mod.test.ts::after a login of a proposed connector succeeded, the mod asks the connector to prove it with a fresh nonce"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''  globalThis.crypto.getRandomValues(b)
+'''
+replace = ''''''

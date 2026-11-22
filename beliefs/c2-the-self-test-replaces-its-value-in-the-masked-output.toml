@@ -1,0 +1,11 @@
+# c2-the-self-test-replaces-its-value-in-the-masked-output: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-self-test-replaces-its-value-in-the-masked-output"
+control = "C2"
+serves = ["M1.2"]
+statement = "With a pending self-test value, the tool-result hook replaces that value in the output the redaction already masked, never in the raw output: every other value of the result stays masked as without a self-test."
+runner = ["tests/test_selftest.py::ToolPathTests::test_the_value_after_a_label_is_masked_as_without_a_self_test"]
+
+[proof]
+file = "maisecrets/selftest.py"
+find = '''        hso["updatedToolOutput"] = _replace(hso.get("updatedToolOutput", response), value, count)'''
+replace = '''        hso["updatedToolOutput"] = _replace(response, value, count)'''

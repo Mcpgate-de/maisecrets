@@ -435,7 +435,7 @@ class FollowPinTests(unittest.TestCase):
         pinned = ner_setup.SECRET_IMAGE.split("@")[0].rpartition(":")[2]
         cases = ((ner_setup.SECRET_IMAGE, CID, {}, f"image: {pinned}, the one this version pins"),
                  (OLD, CID, {}, f"image: v2.0.3584; this version pins {pinned}, and the next session start updates it"),
-                 (OLD, CID, {"auto_update": False}, "updates off: /maisecrets:ner updates on"),
+                 (OLD, CID, {"auto_update": False}, "updates off: /maisecrets ner updates on"),
                  (OLD, NEW_CID, {}, "the container was not set up by maisecrets, so it is not updated"),
                  ("mcpgate/ner:v2.0.9999", CID, {}, "an older one, so it stays"),
                  ("evil/ner", CID, {}, ""))

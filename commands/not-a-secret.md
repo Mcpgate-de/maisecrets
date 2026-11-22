@@ -2,6 +2,7 @@
 description: "Stop masking a value that is no secret. KEY is the name in the brackets, e.g. SECRET_c3"
 argument-hint: "KEY | undo KEY"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" list), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" list)
+user-invocable: false
 ---
 
 The maisecrets prompt hook answers `/maisecrets:not-a-secret KEY` and `/maisecrets:not-a-secret undo KEY` itself, before this command runs, and only when the person types it as their own prompt. Do not delete a value or change the allow list in another way, and do not write maisecrets files: if the user wants this, tell them the prompt to send (in Codex: `maisecrets: not a secret KEY`).

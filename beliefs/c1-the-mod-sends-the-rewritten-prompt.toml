@@ -1,0 +1,11 @@
+# c1-the-mod-sends-the-rewritten-prompt: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-the-mod-sends-the-rewritten-prompt"
+control = "C1"
+serves = ["M1.1"]
+statement = "The mod passes on the text of a well-formed answer of the plugin, so the model gets the prompt with placeholders."
+runner = ["tests/mod.test.ts::a well-formed answer replaces the prompt"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "      // a line for the person only; the rewrite does not depend on it\n    }\n    return next({ ...e, text: answer.text })"
+replace = "      // a line for the person only; the rewrite does not depend on it\n    }\n    return next(e)"

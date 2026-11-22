@@ -7,5 +7,5 @@ runner = ["tests/test_gates.py::GrantTests::test_audit_line_names_key_tool_and_c
 
 [proof]
 file = "maisecrets/vault.py"
-find = "                f.write(f\"{stamp}\\t{(session or '-')[:8]}\\t{key}\\t{tool}\\t{ctx}\\n\")\n"
+find = "                f.write(f\"{stamp}\\t{(session or '-')[:8]}\\t{key}\\t{tool}\\t{ctx}{gid}\\n\")\n"
 replace = "                pass\n"

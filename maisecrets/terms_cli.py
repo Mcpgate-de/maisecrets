@@ -18,7 +18,7 @@ from . import terms
 USAGE = ("maisecrets terms                   your term lists: counts, files, lines left out; never a term\n"
          "maisecrets terms suggest FILE      propose terms from a text or CSV file into the private file\n"
          "                                   terms.suggested.txt (overwritten; no name is printed)\n"
-         "Add a term: type /maisecrets:term add Jan Kowalski as your prompt, or mark it once as {{Jan Kowalski}}.")
+         "Add a term: type /maisecrets term add Jan Kowalski as your prompt, or mark it once as {{Jan Kowalski}}.")
 
 
 def show() -> int:
@@ -148,7 +148,7 @@ def suggest(args: list[str]) -> int:
     # never on the screen: an agent can run this in a pseudo-terminal and read what a terminal shows (codex review of
     # block 2). The proposal goes into the maisecrets folder (C8: the agent cannot read it), mode 0600
     body = (f"# {len(lines)} candidate(s) from {path.name}. Nothing was added. Copy the lines you want into "
-            f"{terms._shown_path()} (one name per line; Kowalsk* = any ending), or type /maisecrets:term add NAME.\n"
+            f"{terms._shown_path()} (one name per line; Kowalsk* = any ending), or type /maisecrets term add NAME.\n"
             + "".join(f"NAME_S{n}  {line}\n" for n, line in enumerate(lines, 1)))
     from .vault import atomic_write
     try:

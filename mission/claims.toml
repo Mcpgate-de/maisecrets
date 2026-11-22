@@ -208,7 +208,7 @@ mission = "M6"
 
 [[claim]]
 source = "PRIVACY.md"
-quote = "`/maisecrets:report` prints the issue text and a prefilled link"
+quote = "`/maisecrets report` prints the issue text and a prefilled link"
 kind = "promise"
 mission = "M6"
 

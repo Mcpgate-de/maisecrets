@@ -1,0 +1,155 @@
+# The program files of the plugin, each with the controls (C*) and invariants (I*) of docs/THREAT-MODEL.md that its code
+# carries, or `none` and the reason. The other direction of the mission layer: mission/M*.toml goes from a promise down
+# to the beliefs; this register goes from the code up. scripts/mission_coverage.py --strict is red on a program file
+# without an entry, an entry of a file that is gone, a declared control that no belief's proof in that file names, a
+# proof that breaks a line of a file whose entry does not declare the proof's control (an injection proof, whose replace
+# keeps the find text, breaks no line and is no such proof), and a file that the threat model names for a control that
+# is missing or not declared for it.
+#
+# A file carries a control when a line of it keeps a rule of that control's row: a wrong line breaks the rule. A file
+# that only routes, shows, measures or serves a command line with no such rule says `none`. The unit is the file, the
+# unit of a proof and of the threat model: a move of code to a new file (as the move of C31's core to sref_hooks.py
+# in 0.9.x) is red until the new file is declared and proven. Its limit: one proof per control and file is enough, so
+# a second rule of the same control in the same file can stay unproven; the beliefs of that control name the rules.
+#
+# Program files: maisecrets/**/*.py, hooks/*.py, hooks/*.sh, hooks/*.cmd, claude-mod/*.mjs,
+# skills/*/scripts/*.py (CODE in scripts/mission_touch.py). Data files (rules, word lists, hooks.json) and the
+# command texts (commands/*.md) are no program files; a belief names them directly.
+#
+# `none` is a judgement that --strict cannot read. It catches two signs of a wrong one: a `none` file that a belief's
+# mutation breaks (a belief of a control, an invariant or a label; an injection proof breaks no line), and a `none`
+# file that names a hook answer key (decision, permissionDecision, updatedInput, updatedToolOutput,
+# updatedMCPToolOutput, suppressOriginalPrompt, additionalContext, systemMessage, continue, stopReason, quoted or bare
+# before : or =) or a hook's exit 2. It reads the text only: a key built at run time escapes it.
+# A belief with serves = [] proves no control of its file.
+
+[file]
+"claude-mod/maisecrets-mod.mjs" = { controls = ["C1", "C31", "C32", "C33", "I5"] }
+"hooks/dispatch.py" = { controls = ["C1", "C2", "C13", "C22", "C27"] }
+"hooks/guard.py" = { controls = ["C13", "C33"] }
+"hooks/ms.sh" = { none = "the fixed path of the person's /ms shortcut: it runs `pending` (send the last blocked prompt) of the highest maisecrets version installed from any marketplace or synced folder; the prompt hook checks that prompt again" }
+"hooks/proxy_connect.py" = { controls = ["C18"] }
+"hooks/resolve.py" = { none = "the Windows (Git Bash) launcher of the one-time read of a value: it starts the CLI's resolve command, whose grant Vault.redeem checks (maisecrets/vault.py)" }
+# limit: run.cmd does not run on macOS or Linux; its C13 belief reads the file (each hook event's refusal, exit 0),
+# so it proves the text of the launcher, not what cmd.exe does with it. The Windows runner of the windows_macos job
+# starts run.cmd with a Python (.github/workflows/ci.yml); its branch without a Python runs on no machine of the CI.
+"hooks/run.cmd" = { controls = ["C13"] }
+"hooks/run.sh" = { controls = ["C13"] }
+"hooks/sandbox_probe.py" = { controls = ["C18"] }
+"maisecrets/__init__.py" = { none = "the package's version, read from the plugin manifest" }
+"maisecrets/agent_reports.py" = { controls = ["C19"] }
+"maisecrets/check_value.py" = { controls = ["C29"] }
+"maisecrets/checksums.py" = { none = "an old module name: the same module object as maisecrets/detection/checksums.py, whose entry declares its controls" }
+"maisecrets/cli.py" = { controls = ["C13", "C24", "C31"] }
+"maisecrets/codex_helper.py" = { controls = ["C27"] }
+"maisecrets/codex_trust.py" = { none = "reads Codex's hook trust for /maisecrets:status; it decides nothing and writes nothing" }
+"maisecrets/codex_vault.py" = { controls = ["C27"] }
+"maisecrets/consent_report.py" = { none = "a report the person runs over the ssh consent check (C21) of earlier sessions; it changes no setting, consent or decision" }
+"maisecrets/consent_store.py" = { controls = ["C21"] }
+"maisecrets/cowork.py" = { controls = ["C1", "C4"] }
+"maisecrets/debug_log.py" = { none = "appends the line its caller gives to the debug log of the harness; each caller writes no value" }
+"maisecrets/demo.py" = { controls = ["C22"] }
+"maisecrets/destinations.py" = { controls = ["C23"] }
+"maisecrets/detect.py" = { none = "an old module name: the same module object as maisecrets/detection/core.py; an I5 belief adds an import to it, which proves nothing about this file" }
+"maisecrets/detection/__init__.py" = { none = "the names of the library API; the code is in the modules it imports" }
+"maisecrets/detection/__main__.py" = { none = "starts contract.main for `python3 -m maisecrets.detection`" }
+"maisecrets/detection/business.py" = { controls = ["C1"] }
+"maisecrets/detection/card_shape.py" = { controls = ["C1"] }
+"maisecrets/detection/checksums.py" = { controls = ["C1"] }
+"maisecrets/detection/contract.py" = { none = "the JSON entry point of the library (docs/DETECTION.md) for other callers; no hook of the plugin runs it" }
+"maisecrets/detection/core.py" = { controls = ["C1", "C2", "C25", "C26", "I4"] }
+"maisecrets/detection/deadline.py" = { none = "a time budget that only a library caller sets (a gateway); a hook of the plugin scans without one" }
+"maisecrets/detection/encoded_mail.py" = { controls = ["C1"] }
+"maisecrets/detection/fields.py" = { controls = ["C1"] }
+"maisecrets/detection/holder_line.py" = { controls = ["C1"] }
+"maisecrets/detection/id_labels.py" = { controls = ["C1"] }
+"maisecrets/detection/key_values.py" = { controls = ["C1"] }
+"maisecrets/detection/keyword_tail.py" = { controls = ["C1"] }
+"maisecrets/detection/label_number.py" = { none = "Detector.label_names_a_number of the library API, for a caller that caps the numbers it scans (a gateway); no hook of the plugin asks it" }
+"maisecrets/detection/lazy_regex.py" = { none = "compiles a regex at its first use; the patterns and their effect belong to the modules that use it" }
+"maisecrets/detection/leaves.py" = { controls = ["C1"] }
+"maisecrets/detection/normalise.py" = { controls = ["C1", "C2"] }
+"maisecrets/detection/own_rules.py" = { controls = ["C1"] }
+"maisecrets/detection/personal.py" = { controls = ["C1"] }
+"maisecrets/detection/phone_forms.py" = { controls = ["C1"] }
+"maisecrets/detection/prefilter.py" = { controls = ["C1"] }
+"maisecrets/detection/public_values.py" = { controls = ["C1"] }
+"maisecrets/detection/regions.py" = { controls = ["C1"] }
+"maisecrets/detection/registry.py" = { controls = ["C1", "C26"] }
+"maisecrets/detection/remote.py" = { controls = ["C1", "C30"] }
+"maisecrets/detection/role_names.py" = { controls = ["C1"] }
+"maisecrets/detection/rule_filter.py" = { controls = ["C1"] }
+"maisecrets/detection/rulespec.py" = { none = "the data model of a rule's spec, loaded only for `maisecrets rules list`, the tests and the measurements; a hook reads registry.py alone" }
+"maisecrets/detection/secret_table.py" = { controls = ["C1"] }
+"maisecrets/detection/street_forms.py" = { controls = ["C1"] }
+"maisecrets/detection/text_index.py" = { controls = ["C1"] }
+"maisecrets/detection/user_forms.py" = { controls = ["C1"] }
+"maisecrets/detection/value_checks.py" = { controls = ["C1", "C2"] }
+"maisecrets/detection/vendored_patches.py" = { controls = ["C1"] }
+"maisecrets/detection/vocabulary.py" = { none = "the published type vocabulary (types.json) for callers and messages; no finding depends on it" }
+"maisecrets/detection/wordlists.py" = { controls = ["C1"] }
+"maisecrets/events.py" = { controls = ["C22"] }
+"maisecrets/exit_wrap.py" = { controls = ["C27"] }
+"maisecrets/file_reads.py" = { controls = ["C28"] }
+"maisecrets/forms.py" = { none = "rewrites the command forms and /clear in a text for the person (a hint, a command's output, the answer cowork.show_answer sends) to the form that works in each client (terminal, Cowork, Codex); it decides nothing, and the mask runs after it on the text it gives (cowork.py, C1)" }
+"maisecrets/guarded_paths.py" = { controls = ["C27", "I3"] }
+"maisecrets/home.py" = { controls = ["C15", "C16", "C33", "I1"] }
+"maisecrets/hooks.py" = { controls = ["C1", "C2", "C3", "C4", "C5", "C6", "C8", "C13", "C14", "C16", "C18", "C20", "C21", "C22", "C23", "C24", "C26", "C27", "C28", "C29", "C31", "C33", "I1", "I2", "I3", "I4", "I5"] }
+"maisecrets/hub.py" = { controls = ["C22"] }
+"maisecrets/incidents.py" = { controls = ["C24"] }
+"maisecrets/json_lines.py" = { controls = ["C3"] }
+"maisecrets/lazy_regex.py" = { none = "an old module name: the same module object as maisecrets/detection/lazy_regex.py" }
+"maisecrets/ner_gateway.py" = { controls = ["C30a"] }
+"maisecrets/ner_health.py" = { controls = ["C30a"] }
+"maisecrets/ner_metrics.py" = { controls = ["C30"] }
+"maisecrets/ner_secret.py" = { controls = ["C30"] }
+"maisecrets/ner_setup.py" = { controls = ["C22", "C30"] }
+"maisecrets/ner_view.py" = { none = "the lines of /maisecrets:ner; it shows the state that ner_setup.py and ner_health.py give" }
+"maisecrets/normalise.py" = { none = "an old module name: the same module object as maisecrets/detection/normalise.py" }
+"maisecrets/not_a_secret.py" = { controls = ["C22"] }
+"maisecrets/notices.py" = { none = "the words of a block notice for the person; what reaches the model is decided in hooks.py" }
+"maisecrets/older_versions.py" = { none = "names an older version that still runs in another session, at a session start and in /maisecrets:status; it decides nothing" }
+"maisecrets/personal.py" = { none = "an old module name: the same module object as maisecrets/detection/personal.py" }
+"maisecrets/pii_display.py" = { controls = ["C1"] }
+"maisecrets/placeholder.py" = { controls = ["C26", "C31"] }
+"maisecrets/prompt_commands.py" = { controls = ["C29"] }
+"maisecrets/prompt_values.py" = { controls = ["C22"] }
+"maisecrets/regions.py" = { none = "an old module name: the same module object as maisecrets/detection/regions.py" }
+"maisecrets/registry.py" = { none = "an old module name: the same module object as maisecrets/detection/registry.py" }
+"maisecrets/rehydration.py" = { controls = ["C16"] }
+"maisecrets/remote_layer.py" = { controls = ["C30", "C30a"] }
+"maisecrets/rule_filter.py" = { none = "an old module name: the same module object as maisecrets/detection/rule_filter.py" }
+"maisecrets/rules_cli.py" = { controls = ["C25"] }
+"maisecrets/rulespec.py" = { none = "an old module name: the same module object as maisecrets/detection/rulespec.py" }
+"maisecrets/selftest.py" = { controls = ["C1", "C2"] }
+"maisecrets/server_values.py" = { controls = ["C27", "C31"] }
+"maisecrets/session_end.py" = { controls = ["C27"] }
+"maisecrets/settings.py" = { controls = ["C22", "C25"] }
+"maisecrets/shell_commands.py" = { controls = ["C6", "C18", "C22", "C27", "C32", "I3"] }
+"maisecrets/show_values.py" = { controls = ["C32"] }
+"maisecrets/sources.py" = { controls = ["C26"] }
+"maisecrets/sref_client.py" = { controls = ["C31"] }
+"maisecrets/sref_hooks.py" = { controls = ["C31"] }
+"maisecrets/sref_notes.py" = { controls = ["C31"] }
+"maisecrets/ssh_approval.py" = { controls = ["C18"] }
+"maisecrets/ssh_consent.py" = { controls = ["C21"] }
+"maisecrets/status_verdict.py" = { none = "the lines of /maisecrets:status: each claims only what it checked; it decides nothing for a prompt or a call" }
+"maisecrets/term_files.py" = { controls = ["C26"] }
+"maisecrets/terms.py" = { controls = ["C26"] }
+"maisecrets/terms_cli.py" = { controls = ["C26"] }
+"maisecrets/tips.py" = { none = "the welcome and the tip of the day at a session start" }
+"maisecrets/tool_output.py" = { controls = ["C2", "C4", "C20", "C27", "I1"] }
+"maisecrets/tool_withhold.py" = { controls = ["C30a"] }
+"maisecrets/user_rules.py" = { controls = ["C25"] }
+"maisecrets/value_files.py" = { controls = ["C26"] }
+"maisecrets/values.py" = { controls = ["C26"] }
+"maisecrets/vault.py" = { controls = ["C1", "C2", "C4", "C7", "C9", "C10", "C11", "C12", "C22", "C30", "C31", "I5"] }
+"maisecrets/vault_refs.py" = { controls = ["C27", "C31"] }
+"maisecrets/verdict.py" = { controls = ["C29"] }
+"skills/secret-hygiene/scripts/_detector.py" = { none = "finds the detector for the skill scripts and runs it; what each script prints is the script's own rule (C17)" }
+"skills/secret-hygiene/scripts/_fast.py" = { none = "the fast tier of the session audit: it picks the lines the detector reads and prints nothing; what it can miss is named in its docstring, and --full reads every line" }
+"skills/secret-hygiene/scripts/audit_approvals.py" = { controls = ["C17"] }
+"skills/secret-hygiene/scripts/audit_transcripts.py" = { controls = ["C17"] }
+"skills/secret-hygiene/scripts/protection_status.py" = { controls = ["C17"] }
+"skills/secret-hygiene/scripts/redact_copy.py" = { controls = ["C17"] }
+"skills/secret-hygiene/scripts/scan_secrets.py" = { controls = ["C17", "I5"] }

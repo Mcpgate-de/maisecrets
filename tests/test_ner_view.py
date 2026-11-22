@@ -84,7 +84,7 @@ class ViewTests(unittest.TestCase):
         code, lines = self.render(None)
         self.assertEqual(code, 0)
         self.assertEqual(lines, ["names: off (the rules alone)",
-                                 "to turn it on: /maisecrets:ner local, url URL or gateway URL"])
+                                 "to turn it on: /maisecrets ner local, url URL or gateway URL"])
         self.assertEqual(self.render(None, client="codex")[1][1],
                          "to turn it on: maisecrets: ner local, url URL or gateway URL")
 
@@ -100,7 +100,7 @@ class ViewTests(unittest.TestCase):
             " ✓ login       has the name scope",
             " ✓ quota       58 of 60 requests this minute",
             " ✓ today       40 of 42 texts checked by the service, 2 rules alone", "",
-            "all details: /maisecrets:ner all"])
+            "all details: /maisecrets ner all"])
         self.assertTrue(all(len(x) <= 80 for x in lines))
 
     def test_a_gateway_without_the_name_scope_exits_4_and_names_the_login(self):
@@ -109,7 +109,7 @@ class ViewTests(unittest.TestCase):
         with a, b, c:
             code, lines = self.render(conf)
             self.assertEqual(code, 4)
-            self.assertIn(" ✗ login       lacks the name scope  →  /maisecrets:sref login team-gateway",
+            self.assertIn(" ✗ login       lacks the name scope  →  /maisecrets sref login team-gateway",
                           lines)
             self.assertIn("needs a login with the name scope", lines[0])
             code, lines = self.render(conf, client="codex")
@@ -157,7 +157,7 @@ class ViewTests(unittest.TestCase):
             code, lines = self.render(conf)
         self.assertEqual(code, 3)
         self.assertEqual(lines[0], "names: local 127.0.0.1:8765 · does not answer")
-        self.assertIn(" ✗ service     not running  →  /maisecrets:ner local (docker)", lines)
+        self.assertIn(" ✗ service     not running  →  /maisecrets ner local (docker)", lines)
 
     def test_a_url_shows_whether_it_is_reachable(self):
         conf = {"url": "http://10.0.0.5:8765/", "format": "hf", "allow_network": True}
@@ -182,7 +182,7 @@ class ViewTests(unittest.TestCase):
         i = lines.index("Details")
         self.assertTrue(lines[i + 1].startswith("names from a service: the gateway https://gw.example.com"))
         self.assertTrue(any(x.startswith("load: your quota this minute: 58 of 60") for x in lines[i:]))
-        self.assertNotIn("all details: /maisecrets:ner all", lines)
+        self.assertNotIn("all details: /maisecrets ner all", lines)
 
     def test_today_is_a_warn_only_for_a_notable_share(self):
         for counts, state in (({"gateway": 40, "rules": 9, "why:too_long": 9}, "ok"),       # under RULES_MIN
@@ -247,7 +247,7 @@ class ArgumentTests(unittest.TestCase):
     def test_an_unknown_server_name_after_gateway_is_answered(self):
         out = _prompt("/maisecrets:ner gateway no-such-server")
         self.assertEqual(out.get("decision"), "block")
-        self.assertIn('no MCP server named "no-such-server" (it has: other, team-gateway)', out["reason"])
+        self.assertIn("no MCP server of that name (it has: other, team-gateway)", out["reason"])
         self.assertFalse(_conf())
 
     def test_a_keyword_is_never_taken_as_a_server_name(self):

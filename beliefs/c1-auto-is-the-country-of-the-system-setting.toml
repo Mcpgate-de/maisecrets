@@ -1,0 +1,11 @@
+# c1-auto-is-the-country-of-the-system-setting: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-auto-is-the-country-of-the-system-setting"
+control = "C1"
+serves = ["M1.3"]
+statement = "The region auto takes the country of the system setting, so its regional rules run."
+runner = ["tests/test_regions.py::ResolveTests::test_auto_is_the_country_of_the_system_setting"]
+
+[proof]
+file = "maisecrets/detection/regions.py"
+find = "            if country in known:\n                regions.append(country)"
+replace = "            if country in known:\n                pass"

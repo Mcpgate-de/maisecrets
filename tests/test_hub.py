@@ -14,7 +14,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
-from maisecrets import events, hooks, hub, not_a_secret, selftest, settings  # noqa: E402
+from maisecrets import events, hooks, hub, not_a_secret, prompt_commands, selftest, settings  # noqa: E402
 from maisecrets.home import HOME  # noqa: E402
 from maisecrets.vault import CONFIG, Vault, load_config  # noqa: E402
 from _hygiene import CLAUDE  # noqa: E402
@@ -213,7 +213,7 @@ class NameServiceTests(unittest.TestCase):
             out = ask(action="ner_set", value="local")
             self.assertTrue(out.get("starting"))
         # no question first: the press is the person's choice, and the note says what happens and how to turn it off
-        self.assertIn("To turn it off: /maisecrets:ner off", out["note"])
+        self.assertIn("To turn it off: /maisecrets ner off", out["note"])
         (call,) = [c for c in popen.call_args_list if "maisecrets.cli" in c.args[0]]
         self.assertEqual(call.args[0][1:], ["-m", "maisecrets.cli", "ner", "start"])
         self._detached(call, os.name)
@@ -291,7 +291,7 @@ class StatusTests(unittest.TestCase):
         self.assertIn("protects this session", out["line"])
         self.assertNotIn("NOT protecting", out["line"])
         self.assertEqual(self._hooks_note(out),
-                         [{"name": "hooks", "fact": "not seen in this session yet", "next": "/maisecrets:status"}])
+                         [{"name": "hooks", "fact": "not seen in this session yet", "next": "/maisecrets status"}])
 
     def test_a_session_whose_hook_ran_has_no_note_on_the_hooks(self):
         hooks._run_log("session-start", {"session_id": "ran-once"}, "answer", "pass", 0)
@@ -354,13 +354,14 @@ class StatusTests(unittest.TestCase):
 
 class CommandNamesTests(unittest.TestCase):
     def test_the_mod_knows_each_command_of_the_plugin(self):
-        """`/maisecrets WORD` means `/maisecrets:WORD` for each command file, and for nothing else."""
+        """`/maisecrets WORD` means `/maisecrets:WORD` for each command file but the entry, and for nothing else."""
         import re
         mod = (ROOT / "claude-mod" / "maisecrets-mod.mjs").read_text(encoding="utf-8")
         listed = re.search(r"const COMMANDS = \[([^\]]*)\]", mod)
         self.assertIsNotNone(listed)
         self.assertEqual(sorted(re.findall(r"'([a-z-]+)'", listed.group(1))),
-                         sorted(f.stem for f in (ROOT / "commands").glob("*.md")))
+                         sorted(f.stem for f in (ROOT / "commands").glob("*.md")
+                                if f.stem not in prompt_commands.ENTRIES))
 
 # every action the panel sends, as a tool call would write it: none may run (C22)
 ACTIONS = [{"action": "set", "key": "rehydration", "value": "automatic"},

@@ -1,0 +1,11 @@
+# c29-the-verdict-never-shows-a-label-that-touches-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c29-the-verdict-never-shows-a-label-that-touches-a-hit"
+control = "C29"
+serves = ["M1.6"]
+statement = "The verdict of ms:(...) names the label in front of a hit only when that label touches no hit: the text in front of a value can be another value."
+runner = ["tests/test_check_value.py::VerdictLabelTests::test_a_label_that_overlaps_a_hit_is_never_shown", "tests/test_check_value.py::VerdictModelTests::test_a_label_word_after_another_value_is_not_shown_with_it"]
+
+[proof]
+file = "maisecrets/verdict.py"
+find = "    if any(s < b and a < e for s, e in spans):\n        return \"\""
+replace = "    if False:\n        return \"\""

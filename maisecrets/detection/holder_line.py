@@ -32,15 +32,17 @@ _HOLDER_LABEL_RE = re.compile(r"(?i)(?:kontoinhaber(?:in)?|account[ _-]?holder|c
 _RX: list = []
 
 
-def _above_bank_re():
+def _above_bank_re(anchored: bool = True):
     """Two to four name words alone on a line (a particle may stand between them, a comma may end the line), then the
-    bank block right below it (no blank line between). Windows line ends count."""
+    bank block right below it (no blank line between). Windows line ends count. anchored=False: the same without the
+    line start, for a match at the start of a record field's string."""
     if not _RX:
         from .personal import _NAME_PARTICLE, _NAME_STEM
-        _RX.append(re.compile(r"(?m)^[ \t]*(" + _NAME_STEM + r"(?:[ \t]+(?:" + _NAME_PARTICLE + r"[ \t]+){0,2}"
-                              + _NAME_STEM + r"){1,3}),?[ \t]*\r?\n"
-                              r"((?:" + _BANK_LINE + r"(?:\n|$)){1,8})"))
-    return _RX[0]
+        body = (r"[ \t]*(" + _NAME_STEM + r"(?:[ \t]+(?:" + _NAME_PARTICLE + r"[ \t]+){0,2}"
+                + _NAME_STEM + r"){1,3}),?[ \t]*\r?\n"
+                r"((?:" + _BANK_LINE + r"(?:\n|$)){1,8})")
+        _RX.extend((re.compile(r"(?m)^" + body), re.compile(r"(?m)" + body)))
+    return _RX[0 if anchored else 1]
 
 
 def company_follows(text: str, start: int, end: int) -> bool:
@@ -57,9 +59,16 @@ def names_above_bank(text: str) -> list:
     word alone is no name here: a brand reads the same. Two words of an unknown brand stay a limit, as after any
     name label."""
     from .personal import _name_ok, _reads_as_words
+    from .text_index import field_end, value_starts
     out = []
-    for m in _above_bank_re().finditer(text):
-        if not _ACCOUNT_LINE_RE.search(m.group(2)):
+    # in a record scan of findings_by_leaf a string stands after its label: its start is the line start that a scan of
+    # the string alone sees (#94). There a block ends inside its field: the next field's label is no line of it
+    starts = [m.start() for m in _above_bank_re().finditer(text)]
+    starts += [at for at in value_starts(text) if at and text[at - 1] != "\n"]
+    loose = _above_bank_re(anchored=False)
+    for at in sorted(starts):
+        m = loose.match(text, at, field_end(text, at))
+        if not m or not _ACCOUNT_LINE_RE.search(m.group(2)):
             continue
         v = m.group(1)
         if any(_HEADING_WORD_RE.fullmatch(w) for w in v.split()):

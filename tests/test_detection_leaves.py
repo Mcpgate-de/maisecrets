@@ -514,3 +514,43 @@ class NumbersTests(unittest.TestCase):
         loop.append(loop)
         with self.assertRaises(ValueError):
             L.findings_by_leaf(D, {"loop": loop}, layout="json", numbers=True)
+
+
+class NameAboveBankBlockInALeafTests(unittest.TestCase):
+    # #94: a Slack message that starts with the account holder's name, then the bank block. The record scan writes the
+    # string after its label, so the name stood at no line start; a scan of the text alone found it. Invented name
+    HOLDER = "Lotte Brandeis"
+    IBAN = "DE89" + "370400440532013000"
+
+    def kinds(self, obj) -> list:
+        return sorted((leaf.path, m.type, m.value) for leaf, m in L.findings_by_leaf(D, obj) if leaf is not None)
+
+    def test_a_name_on_the_first_line_of_a_string_above_a_bank_block_is_found(self):
+        for nl in ("\n", "\r\n"):
+            text = f"{self.HOLDER}{nl}Bank: Beispielbank{nl}IBAN: {self.IBAN}" + ("\r\n" if nl == "\r\n" else "")
+            alone = sorted((m.type, m.value) for m in D.findings(text, channel="tool"))
+            self.assertIn(("NAME", self.HOLDER), alone)
+            for obj, path in (({"text": text}, ("text",)), ({"messages": [{"text": text}]}, ("messages", 0, "text")),
+                              ({"user": "U1", "ts": "1.5", "text": text}, ("text",))):
+                with self.subTest(nl=repr(nl), obj=list(obj)):
+                    found = self.kinds(obj)
+                    self.assertIn((path, "NAME", self.HOLDER), found)
+                    self.assertIn((path, "IBAN", self.IBAN), found)
+
+    def test_a_string_at_a_line_start_gives_its_name_once(self):
+        from maisecrets.detection.holder_line import names_above_bank
+        from maisecrets.detection.text_index import record_fields
+        text = f"{self.HOLDER}\nBank: Beispielbank\nIBAN: {self.IBAN}\nnote: x"
+        end = text.index("\nnote")
+        with record_fields(text, [0, end + 1], [0, end + 7]):
+            self.assertEqual([(0, len(self.HOLDER))], names_above_bank(text))
+
+    def test_a_heading_or_a_block_in_the_next_field_gives_no_name(self):
+        heading = f"Bankverbindung\nBank: Beispielbank\nIBAN: {self.IBAN}"
+        self.assertEqual([], [f for f in self.kinds({"text": heading}) if f[1] == "NAME"])
+        # the bank block must stand in the same string: the next field's label is no line of it
+        for obj in ({"title": self.HOLDER, "iban": self.IBAN}, {"title": self.HOLDER + "\n", "iban": self.IBAN},
+                    {"title": self.HOLDER, "note": f"IBAN: {self.IBAN}"},
+                    {"text": "Hallo\n" + self.HOLDER, "iban": self.IBAN}):
+            with self.subTest(obj=list(obj)):
+                self.assertEqual([], [f for f in self.kinds(obj) if f[1] == "NAME"])

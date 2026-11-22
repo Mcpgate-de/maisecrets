@@ -1,0 +1,11 @@
+# c22-a-key-type-goes-on-the-allow-list-only-when-typed-twice: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-a-key-type-goes-on-the-allow-list-only-when-typed-twice"
+control = "C22"
+serves = ["M4.2"]
+statement = "A key type (a secret, a card, an IBAN, an official number) goes on the allow list only when the person types the command twice within the time."
+runner = ["tests/test_not_a_secret.py::NotASecretTests::test_a_key_type_needs_the_command_twice"]
+
+[proof]
+file = "maisecrets/not_a_secret.py"
+find = "    if needs_confirmation(type_) and not _confirmed(key, session):"
+replace = "    if False:"

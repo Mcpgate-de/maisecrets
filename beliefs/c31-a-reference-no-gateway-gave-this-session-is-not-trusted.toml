@@ -1,0 +1,11 @@
+# c31-a-reference-no-gateway-gave-this-session-is-not-trusted: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-reference-no-gateway-gave-this-session-is-not-trusted"
+control = "C31"
+serves = ["M1.2"]
+statement = "Only a Sensitive Reference that a gateway gave this session keeps its id in a tool result; a reference that a command printed itself is text, and a token in its id is masked."
+runner = ["tests/test_forged_placeholder.py::ForgedPlaceholderTests::test_a_reference_no_gateway_gave_this_session_hides_no_token_in_its_id"]
+
+[proof]
+file = "maisecrets/sref_hooks.py"
+find = '''    placeholder.TRUSTED.update(c for r, c, _a, _b in found if r in here)'''
+replace = '''    placeholder.TRUSTED.update(c for r, c, _a, _b in found)'''

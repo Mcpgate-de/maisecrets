@@ -1,0 +1,11 @@
+# c22-a-settings-command-that-carries-a-value-is-not-sent: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-a-settings-command-that-carries-a-value-is-not-sent"
+control = "C22"
+serves = ["M4.2"]
+statement = "A typed settings command that carries a value the rewrite would take out (a detected value, a marked name, a stored value) changes nothing and is not sent: it would run on with its arguments to the model."
+runner = ["tests/test_file_reads.py::TypedSettings::test_a_settings_command_with_a_value_changes_nothing_and_is_not_sent"]
+
+[proof]
+file = "maisecrets/prompt_values.py"
+find = "    if hits or terms.markers(prompt):\n        return True"
+replace = "    if False:\n        return True"

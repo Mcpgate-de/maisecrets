@@ -1,0 +1,11 @@
+# c1-a-prompt-the-self-test-does-not-own-goes-to-the-checks: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-prompt-the-self-test-does-not-own-goes-to-the-checks"
+control = "C1"
+serves = ["M1.1"]
+statement = "The self-test answers a prompt before the detector only when the prompt holds the pending test value; any other prompt, also one with a test value that is not pending, goes to the ordinary checks, so a secret next to it is blocked."
+runner = ["tests/test_selftest.py::PromptPathTests::test_a_secret_next_to_an_unknown_test_value_is_still_blocked"]
+
+[proof]
+file = "maisecrets/selftest.py"
+find = '''        return None                      # not the pending value: the ordinary checks decide'''
+replace = '''        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit"}}'''

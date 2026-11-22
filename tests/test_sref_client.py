@@ -137,6 +137,67 @@ class SrefClientTests(unittest.TestCase):
         self.assertEqual([(r["sink_type"], r["destination"], r["count"]) for r in self.srv.resolved],
                          [("local_file", "/tmp/invite.txt", 2), ("process", "curl", 1)])
 
+    def test_a_resolve_keeps_the_audit_id_of_the_gateway(self):
+        # RESOLVER-PROFILE 12.4 (SC-28): the id of the audit event the gateway wrote for this release
+        self.login()
+        ref = self.srv.mint("email", VALUE_MAIL)
+        got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+        self.assertEqual(got, {ref: VALUE_MAIL})
+        self.assertEqual(len(self.srv.audit_ids), 1)
+        self.assertEqual(got.audit_id, self.srv.audit_ids[0])
+        self.assertRegex(got.audit_id, r"\A[A-Za-z0-9_-]{22}\Z", "the gateway's form, token_urlsafe(16)")
+        self.srv.audit_id = "e" * 128                      # the longest id the profile allows
+        got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+        self.assertEqual(got.audit_id, "e" * 128)
+
+    def test_an_audit_id_that_holds_a_released_value_is_dropped(self):
+        # the audit never holds a value (C9): a gateway that sends a value as the id by mistake gets no id kept
+        self.login()
+        ref = self.srv.mint("token", "tok_" + "Rx7Qm2Vb4Np8")
+        self.srv.audit_id = "evt-" + "tok_" + "Rx7Qm2Vb4Np8"
+        got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+        self.assertEqual(got, {ref: "tok_" + "Rx7Qm2Vb4Np8"})
+        self.assertIsNone(got.audit_id)
+        # an empty released value is in every text: it drops no id
+        empty = self.srv.mint("token", "")
+        self.srv.audit_id = "evt-7"
+        got = S.resolve(self.cfg, self.backend, self.found, [empty], "process", "mail")
+        self.assertEqual(got.audit_id, "evt-7")
+
+    def test_a_refusal_carries_no_audit_id_and_refuses_as_before(self):
+        # every refusal of the gateway (409, 429, ...) comes without an audit_id; the client refuses as before
+        self.login()
+        good, gone = self.srv.mint("email", VALUE_MAIL), self.srv.mint("name", VALUE_NAME)
+        self.srv.revoke(gone)
+        with self.assertRaises(S.Refused) as cm:
+            S.resolve(self.cfg, self.backend, self.found, [good, gone], "local_file", "/tmp/a.txt")
+        self.assertIn("resolved none of the 2 references (1 revoked)", str(cm.exception))
+        self.srv.quota = 0
+        with self.assertRaises(S.Refused) as cm:
+            S.resolve(self.cfg, self.backend, self.found, [good], "process", "mail")
+        self.assertIn("daily limit", str(cm.exception))
+        self.assertEqual(self.srv.audit_ids, [], "no release, no audit event of the gateway")
+        self.assertEqual(self.srv.resolved, [])
+
+    def test_a_resolve_without_an_audit_id_still_gives_the_values(self):
+        # an older gateway sends no audit_id
+        self.login()
+        self.srv.audit_id = None
+        ref = self.srv.mint("email", VALUE_MAIL)
+        got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+        self.assertEqual(got, {ref: VALUE_MAIL})
+        self.assertIsNone(got.audit_id)
+
+    def test_an_audit_id_of_another_type_or_charset_or_length_is_ignored(self):
+        self.login()
+        ref = self.srv.mint("email", VALUE_MAIL)
+        for bad in (123, ["evt_1"], {"id": "evt_1"}, True, "", "e" * 129, "evt 1", "evt_1\n", "evt/1", "evt:1",
+                    "évt_1", "evt_1\t" + VALUE_MAIL):
+            self.srv.audit_id = bad
+            got = S.resolve(self.cfg, self.backend, self.found, [ref], "process", "mail")
+            self.assertEqual(got, {ref: VALUE_MAIL}, repr(bad))
+            self.assertIsNone(got.audit_id, repr(bad))
+
     def test_one_bad_reference_refuses_the_whole_batch_with_counts_only(self):
         self.login()
         good, gone = self.srv.mint("email", VALUE_MAIL), self.srv.mint("name", VALUE_NAME)
@@ -894,7 +955,7 @@ class SrefClientTests(unittest.TestCase):
         self.srv.withdraw()
         with self.assertRaises(S.Refused) as cm:
             S.resolve(self.cfg, self.backend, self.found, [ref], "local_file", "/tmp/a.txt")
-        self.assertIn("send /maisecrets:sref login again", str(cm.exception))
+        self.assertIn("send /maisecrets sref login again", str(cm.exception))
         self.assertFalse(S.logged_in(self.backend, self.found["origin"]), "a refused refresh token is not kept")
 
     def test_a_string_of_the_gateway_never_reaches_an_error_message(self):
@@ -1356,6 +1417,19 @@ class ProfileNameTests(unittest.TestCase):
             with self.subTest(block=block):
                 self.assertIn("does not resolve into a command", self.refusal(self.found(block)))
 
+    def test_a_pairing_endpoint_counts_only_on_the_gateway_s_own_origin(self):
+        good = self.found({"pairing_endpoint": self.ORIGIN + "/p"})
+        self.assertEqual((good["pairing"], good["pairing_invalid"]), (self.ORIGIN + "/p", False))
+        # a named endpoint that is not on the origin is no endpoint, and marks the record: nothing binds then
+        for named in ("https://other.example/p", 7, None, "http://" + self.ORIGIN[8:] + "/p"):
+            with self.subTest(named=named):
+                bad = self.found({"pairing_endpoint": named})
+                self.assertEqual((bad["pairing"], bad["pairing_invalid"]), (None, True))
+        absent = self.found({})
+        self.assertEqual((absent["pairing"], absent["pairing_invalid"]), (None, False))
+        with self.assertRaises(S.Refused):
+            S.pairing_proof({}, JsonFileBackend(), {"origin": self.ORIGIN, "pairing": None}, "n" * 43)
+
     def test_a_found_record_without_sink_types_reads_the_profile_names(self):
         self.assertNotIn("does not resolve into a command",
                          self.refusal({"origin": self.ORIGIN, "sinks": ["mcpgate-process-1"]}))
@@ -1426,7 +1500,7 @@ class StatusWithoutReferencesTests(unittest.TestCase):
                 self.assertEqual(code, 0, text)
                 self.assertIn("add it as an MCP server of your user configuration", text)
                 self.assertIn("claude.ai connector", text)
-                self.assertIn("/maisecrets:sref login", text)
+                self.assertIn("/maisecrets sref login", text)
 
     def test_a_server_that_does_not_answer_or_fails_the_discovery_exits_1(self):
         for name, answer in (("no connection", ConnectionRefusedError()), ("timeout", TimeoutError()),

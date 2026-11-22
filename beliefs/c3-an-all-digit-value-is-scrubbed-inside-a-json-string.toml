@@ -1,0 +1,11 @@
+# c3-an-all-digit-value-is-scrubbed-inside-a-json-string: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c3-an-all-digit-value-is-scrubbed-inside-a-json-string"
+control = "C3"
+serves = ["M2.1"]
+statement = "The transcript scrub masks a detected value that is only digits where it stands inside a JSON string, so a tax id does not stay in the transcript."
+runner = ["tests/test_invariant_transcript_scrub.py::ThroughTheHooksTests::test_the_hooks_scrub_one_value_of_each_type_in_every_record"]
+
+[proof]
+file = "maisecrets/json_lines.py"
+find = "                            buf[start + k:start + k + len(d)] = b\"*\" * len(d)"
+replace = "                            pass"

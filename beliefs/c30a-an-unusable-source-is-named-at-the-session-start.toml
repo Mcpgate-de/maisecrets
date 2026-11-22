@@ -1,0 +1,11 @@
+# c30a-an-unusable-source-is-named-at-the-session-start: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-an-unusable-source-is-named-at-the-session-start"
+control = "C30a"
+serves = ["M5.4"]
+statement = "A name source that cannot be used (a gateway login the gateway ended, a local container that does not answer) is named to the person at the session start, with its cause, once per session and cause."
+runner = ["tests/test_ner_health.py::StartTests::test_a_gateway_login_the_gateway_ended_is_named_at_the_start_once"]
+
+[proof]
+file = "maisecrets/ner_health.py"
+find = '''    return line(cause, _conf(cfg), codex) if claim(payload.get("session_id"), cause, _conf(cfg)) else None'''
+replace = '''    return None'''

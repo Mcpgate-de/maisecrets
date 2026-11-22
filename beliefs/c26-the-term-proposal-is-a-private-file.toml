@@ -1,0 +1,11 @@
+# c26-the-term-proposal-is-a-private-file: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-the-term-proposal-is-a-private-file"
+control = "C26"
+serves = ["M1.2"]
+statement = "maisecrets terms suggest prints no name and writes its proposal to a file that only the person can read (mode 0600)."
+runner = ["tests/test_terms_hooks.py::LeakTests::test_suggest_never_prints_a_name_and_writes_a_private_proposal"]
+
+[proof]
+file = "maisecrets/terms_cli.py"
+find = "            atomic_write(terms.SUGGESTED, body, mode=0o600)"
+replace = "            atomic_write(terms.SUGGESTED, body, mode=0o644)"

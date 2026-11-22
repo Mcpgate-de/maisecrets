@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import demo, detect, events, hooks, session_end, settings, status_verdict as sv  # noqa: E402
+from maisecrets import cowork, prompt_commands  # noqa: E402
 from maisecrets.placeholder import CLOSE, OPEN  # noqa: E402
 from maisecrets.vault import HOME, Vault, load_config  # noqa: E402
 from test_remote_detector import NAME  # noqa: E402
@@ -136,23 +137,26 @@ class _Base(unittest.TestCase):
 
 # ------------------------------------------------------------ `/maisecrets demo on`, with a space --
 class SpacedCommandTests(_Base):
-    """Without the mod (Codex, claude -p, a client without mods) the prompt hook sees `/maisecrets demo on` as text: it
-    keeps it from the AI and names the form that runs it. It changes nothing (prompt_commands.spaced_answer); with the
-    mod, the person's own prompt runs as the colon form (tests/mod.test.ts)."""
+    """In Claude Code `/maisecrets demo on` is the entry (prompt_commands.canonical): the prompt hook reads it as the
+    colon form. Codex has no slash commands: there it keeps the prompt from the AI and names its own form
+    (prompt_commands.spaced_answer)."""
 
-    def test_a_known_command_with_a_space_is_kept_from_the_ai_with_the_colon_form(self):
-        for typed, form in (("/maisecrets demo on", "/maisecrets:demo on"),
-                            ("  /maisecrets Status all ", "/maisecrets:status all"),
-                            ("/maisecrets not-a-secret SECRET_c1", "/maisecrets:not-a-secret SECRET_c1"),
-                            ("/maisecrets settings rehydration confirm", "/maisecrets:settings rehydration confirm")):
-            for source in ("user", None, "cron"):
-                out = _prompt(typed, source=source)
+    def test_each_entry_form_is_the_colon_form_for_the_prompt_hook(self):
+        # Claude Code: `/maisecrets demo on` is the entry (Cowork, the terminal's /maisecrets and /ms), and the hook
+        # answers it exactly as `/maisecrets:demo on`: only the person's own prompt switches it
+        for typed in ("/maisecrets demo on", "/ms demo on", "/maisecrets:maisecrets demo on", "/maisecrets:ms Demo on",
+                      "  /maisecrets demo on "):
+            with self.subTest(typed):
+                demo._write({})
+                out = _prompt(typed, source="user")
                 self.assertEqual(out["decision"], "block", typed)
-                self.assertEqual(out["reason"], f"maisecrets: send {form} with the colon to run it. This prompt was "
-                                                "not sent to the AI.")
-                self.assertTrue(out["hookSpecificOutput"]["suppressOriginalPrompt"])
-        self.assertFalse(demo.active(SESSION), "the space form switches nothing")
-        self.assertEqual(load_config().get("rehydration", "automatic"), "automatic", "and changes no setting")
+                self.assertTrue(demo.active(SESSION), typed)
+                demo._write({})
+                _prompt(typed, source="cron")
+                self.assertFalse(demo.active(SESSION), "a prompt the person did not type switches nothing")
+        demo._write({})
+        out = _prompt("/maisecrets settings rehydration confirm", source="user")
+        self.assertEqual(load_config().get("rehydration"), "confirm", out)
 
     def test_codex_gets_its_own_form(self):
         out = _prompt("/maisecrets demo on", source=None, client=CODEX)
@@ -475,7 +479,8 @@ class ExceptionTests(_Base):
         with self.subTest("a term"):
             self.assertFalse(_is_demo(_prompt("/maisecrets:term add Quentin Demoquist")))
         with self.subTest("not-a-secret"):
-            self.assertIn("there is no stored value NAME_c99", _prompt("/maisecrets:not-a-secret NAME_c99")["reason"])
+            self.assertIn("there is no stored value with this key",
+                          _prompt("/maisecrets:not-a-secret NAME_c99")["reason"])
         for cmd in ("/maisecrets:status", "/maisecrets:status all", "/maisecrets:list", "/maisecrets:audit 5",
                     "/maisecrets:forget SECRET_c3", "/maisecrets:guard status", "/maisecrets:report last",
                     "maisecrets: status all"):
@@ -506,7 +511,7 @@ class ExceptionTests(_Base):
                 self.assertTrue(_is_demo(out), out)
 
     def test_every_command_has_its_forms_or_is_left_out_on_purpose(self):
-        names = {p.stem for p in (ROOT / "commands").glob("*.md")}
+        names = {p.stem for p in (ROOT / "commands").glob("*.md")} - set(prompt_commands.ENTRIES)
         self.assertEqual(names - set(demo.FORMS), set(demo.NOT_PASSED))
 
     def test_an_image_alone_is_blocked_too(self):
@@ -547,7 +552,7 @@ class DamagedStateTests(_Base):
              "a time of zero": json.dumps({SESSION: 0}), "a negative time": json.dumps({SESSION: -5.0}),
              "NaN": '{"' + SESSION + '": NaN}', "Infinity": '{"' + SESSION + '": Infinity}',
              "-Infinity": '{"' + SESSION + '": -Infinity}', "a huge number that is inf": '{"' + SESSION + '": 1e999}'}
-    ANSWER = "Demo mode: the demo state cannot be read, so nothing was sent. /maisecrets:demo off resets it."
+    ANSWER = "Demo mode: the demo state cannot be read, so nothing was sent. /maisecrets demo off resets it."
     RESET = ("Demo mode: its state could not be read, so it was reset. A session with demo lines stays in the demo "
              "until /clear; a session that had only switched it on is out of it.")
 
@@ -860,6 +865,129 @@ class NightFindingsTests(_Base):
         self.assertIn("Tips and hints is off", out["reason"])
         out = _prompt("/maisecrets:settings tips on", session="S-not-in-demo")
         self.assertNotIn("decision", out, "out of the demo the command runs on as before")
+
+
+# ------------------------------------------------------------ the demo in Cowork --
+class CoworkDemoTests(_Base):
+    """Cowork (measured 2026-11-21) shows no dropped or blocked prompt, draws no row under a prompt and has no /clear:
+    the demo answer itself shows the confirmation, a command's output and what the AI would have got, and names a new
+    task as the way out."""
+
+    def setUp(self):
+        super().setUp()
+        env = mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"})
+        env.start()
+        self.addCleanup(env.stop)
+        _hygiene.patch(self, hooks, "_scrub_transcript_later", lambda *a, **k: None)
+
+    def test_demo_on_shows_its_confirmation_in_the_demo_answer_and_the_row_enters_once(self):
+        session = UUID.format(40)
+        out = _mod("maisecrets: demo on", session)
+        self.assertTrue(demo.active(session))
+        self.assertEqual(out["text"], demo.COWORK_ROW)
+        self.assertTrue(out["demo"])
+        self.assertIn("Demo mode is on", out["show"])
+        self.assertNotIn("/clear", out["show"])
+        self.assertTrue(out["show"].endswith(demo.DEMO_LINE_COWORK))
+        self.assertNotIn("decision", _prompt(demo.COWORK_ROW, session=session), "the row enters, with its pass")
+        self.assertTrue(_is_demo(_prompt(demo.COWORK_ROW, session=session)), "once")
+
+    def test_a_prompt_in_the_demo_shows_what_the_ai_would_have_got_without_a_value(self):
+        session = UUID.format(41)
+        self.on(session=session)
+        out = _mod(PROMPT, session)
+        self.assertIn("What the AI would have got:", out["show"])
+        self.assertIn(_ph("SECRET_c1"), out["show"])
+        self.assertIn("masked: 1 secret", out["show"])
+        self.assertNotIn(TOKEN, out["show"])
+        self.assertNotIn(MAIL, out["show"])
+        self.assertTrue(out["show"].endswith(demo.DEMO_LINE_COWORK))
+
+    def test_an_own_command_in_the_demo_shows_its_output_in_the_demo_answer(self):
+        session = UUID.format(42)
+        self.on(session=session)
+        out = _mod("maisecrets: list", session)
+        self.assertEqual(out["text"], demo.COWORK_ROW)
+        self.assertIn("Nothing is stored.", out["show"])
+        self.assertNotIn("drop", out)
+
+    def test_the_cowork_demo_answer_keeps_the_session_in_the_demo_only_as_the_mods_answer(self):
+        text = demo.cowork_show("hi " + _ph("SECRET_c1"), "masked: 1 secret")
+        made = {"type": "assistant", "answeredWithoutRequest": True,
+                "message": {"id": "msg_hook_7", "content": [{"type": "text", "text": text}]}}
+        user = {"type": "user", "message": {"role": "user", "content": "hi"}}
+        self.assertTrue(demo.active(SESSION, _transcript(self.tmp(), user, made)))
+        model = {"type": "assistant", "message": {"id": "msg_01AbC", "content": [{"type": "text", "text": text}]}}
+        _reset()
+        self.assertFalse(demo.active(SESSION, _transcript(self.tmp(), user, model)), "the model cannot make one")
+
+    def test_a_typed_value_that_an_output_echoes_shows_masked_in_the_demo_answer(self):
+        # the demo answer stays in the transcript: an output that repeats a typed word shows it masked (cowork_own),
+        # for the sref run (prompt_commands._cowork_sref) and for an answer of the prompt hook (mod_command)
+        import shutil
+        import tempfile
+        session = UUID.format(43)
+        self.on(session=session)
+        cfg = tempfile.mkdtemp(prefix="ms-demo-cfg-")
+        self.addCleanup(shutil.rmtree, cfg, True)
+        import subprocess
+        # the sref answer never repeats a typed name (cli.cmd_sref), so its run here is an output that repeats a value
+        # as a gateway's answer could
+        echo = subprocess.CompletedProcess([], 0, stdout=f"maisecrets: the gateway answered for {TOKEN}\n", stderr="")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            for prompt, said, run in ((f"maisecrets: sref status {TOKEN}", "the gateway answered for", echo),
+                                      (f"maisecrets: ner url https://{TOKEN}.example", "names from a service", None)):
+                with self.subTest(prompt), mock.patch("subprocess.run", return_value=run) as ran:
+                    out = _mod(prompt, session)
+                    self.assertEqual(ran.called, run is not None)
+                    self.assertIn(said, out["show"])
+                    self.assertNotIn(TOKEN, out["show"])
+                    self.assertTrue(out["show"].endswith(demo.DEMO_LINE_COWORK))
+
+    def test_the_mask_of_an_output_is_no_demo_prompt_of_its_own(self):
+        # the person's own command passes a damaged demo state (gate); the mask of its output must not meet the demo's
+        # own step, which drops every other text there, or the output would never show (demo._INSIDE)
+        session = UUID.format(46)
+        demo.STATE.write_text("not json", encoding="utf-8")
+        self.assertTrue(demo.damaged())
+        out = _mod("maisecrets: list", session)
+        self.assertIn("Nothing is stored.", out["show"])
+        self.assertNotIn(cowork.OUTPUT_UNCHECKED, out["show"])
+
+    def test_an_output_that_cannot_be_checked_is_not_shown(self):
+        out = demo.cowork_own({"session_id": "no valid id"}, f"maisecrets: done with {TOKEN}")
+        self.assertNotIn(TOKEN, out["show"])
+        self.assertTrue(out["show"].startswith(cowork.OUTPUT_UNCHECKED), out["show"])
+
+    def test_an_output_with_a_mention_and_a_value_is_not_shown(self):
+        # the rewrite leaves a text with an @mention to the prompt hook ({}), and no prompt hook reads a demo answer:
+        # the check of the rules and the store keeps the value out (cowork.masked_output)
+        payload = {"session_id": UUID.format(47), "cwd": ""}
+        self.assertEqual(cowork.masked_output(payload, f"see @x and {TOKEN}"), cowork.OUTPUT_UNCHECKED)
+        self.assertEqual(cowork.masked_output(payload, "see @x and nothing else"), "see @x and nothing else")
+
+    def test_an_error_in_the_mask_of_an_output_shows_nothing_of_it(self):
+        from maisecrets.vault import LockTimeout
+        for exc in (LockTimeout("busy"), OSError("gone"), ValueError("broken")):
+            with self.subTest(type(exc).__name__), mock.patch.object(cowork, "_masked_request", side_effect=exc):
+                self.assertEqual(cowork.masked_output({"session_id": UUID.format(48)}, f"x {TOKEN}"),
+                                 cowork.OUTPUT_UNCHECKED)
+
+    def test_a_sref_form_the_demo_does_not_run_starts_nothing_in_a_cowork_demo(self):
+        session = UUID.format(44)
+        self.on(session=session)
+        with mock.patch("subprocess.run", side_effect=AssertionError("a network command ran in the demo")):
+            for prompt in ("maisecrets: sref logout gw", "maisecrets: sref login gw"):
+                with self.subTest(prompt):
+                    out = _mod(prompt, session)
+                    self.assertIn("did not run in the demo", out["show"])
+
+    def test_the_cowork_texts_name_a_new_task_for_clear(self):
+        from maisecrets import forms
+        self.assertEqual(forms.cowork(demo.DEMO_LINE), demo.DEMO_LINE_COWORK)
+        for text in (demo.ON, demo.OFF, demo.NEEDS_THE_AI):
+            self.assertNotIn("/clear", forms.cowork(text))
+        self.assertIn("until a new task;", forms.cowork("stays in the demo until /clear; a session"))
 
 
 if __name__ == "__main__":

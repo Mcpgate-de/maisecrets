@@ -259,7 +259,7 @@ class IncidentLineTests(unittest.TestCase):
             "tool_class": "-", "client": "claude", "days": [today], "count": 3, "plugin_version": "0.9.12"}}}))
         state, text = st(sv.incidents_verdict())
         self.assertEqual(state, "warn")
-        self.assertIn("/maisecrets:report incident", text)
+        self.assertIn("/maisecrets report incident", text)
         self.assertIn("3 in 30 days", text)
         self.assertIn("3 times maisecrets refused a call", text)
 
@@ -366,7 +366,7 @@ class CheckLineTests(_Tmp):
         c = check("warn", "self-test", "not run", "/maisecrets:status test")
         self.assertTrue(sv.check_lines([c], "codex")[0].endswith("\u2192  maisecrets: status test"))
         self.assertTrue(sv.check_lines([c], "claude")[0].endswith("\u2192  /maisecrets:status test"))
-        self.assertEqual(sv.form("status all", None), "/maisecrets:status all (Codex: maisecrets: status all)")
+        self.assertEqual(sv.form("status all", None), "/maisecrets status all (Codex: maisecrets: status all)")
         self.assertEqual(sv.form("status all", "codex"), "maisecrets: status all")
 
 
@@ -397,7 +397,7 @@ class StatusOutputTests(unittest.TestCase):
             self.assertEqual("\u2192" in line, mark in ("!", "\u2717"), line)
         self.assertEqual(out[8], "")
         self.assertRegex(out[9], r"^names: .+ \u00b7 rules: \d+ \u00b7 regions?: .+ \u00b7 \d+ label languages?$")
-        self.assertTrue(out[10].startswith("all details: /maisecrets:status all"))
+        self.assertTrue(out[10].startswith("all details: /maisecrets status all"))
         self.assertEqual(len(out), 11, "the default shows no details")
         self.assertNotIn("Details", out)
 

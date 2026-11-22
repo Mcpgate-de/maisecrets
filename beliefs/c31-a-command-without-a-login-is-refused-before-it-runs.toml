@@ -1,0 +1,11 @@
+# c31-a-command-without-a-login-is-refused-before-it-runs: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-command-without-a-login-is-refused-before-it-runs"
+control = "C31"
+serves = ["M3.3"]
+statement = "A Bash command with a Sensitive Reference of this session is refused before it runs when this computer has no login to the gateway that sent it, and the reason names the login step."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_without_a_login_the_command_does_not_run_and_names_the_login"]
+
+[proof]
+file = "maisecrets/sref_hooks.py"
+find = '''        elif not sref_client.logged_in(backend, origin):'''
+replace = '''        elif False:'''

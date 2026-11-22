@@ -1,0 +1,12 @@
+# c31-the-nonce-in-a-prompt-taints-the-pairing: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-the-nonce-in-a-prompt-taints-the-pairing"
+control = "C31"
+serves = ["M3.3"]
+statement = "While a pairing runs, its nonce in any prompt taints it: nothing binds, and the login mark goes."
+runner = ["tests/mod.test.ts::the nonce in a prompt while the pairing runs binds nothing, and the login mark goes"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''    if (pairings.size > 0) try { notePairingUse(String(e?.text ?? ''), null) } catch { /* the pairing goes on */ }
+'''
+replace = ''''''

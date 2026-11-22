@@ -605,6 +605,19 @@ class RemoteDetectorTests(unittest.TestCase):
         r = self.run_with(Service("hf", answer=over))
         self.assertEqual(r.findings, self.base)
         self.assertEqual((r.remote.state, r.remote.added), ("ok", 0))
+        # a span of letters only over a finding: a span with a digit is no person anyway (#93), so the number above
+        # alone no longer shows the overlap rule
+        text = "Write to mara.feld" + "@" + "nordwerk.internal today."
+        base = self.det.findings(text, channel="tool")
+        mail = next(m for m in base if m.type == "EMAIL")
+
+        def over_mail(t):
+            return [{"entity_group": "PER", "start": mail.start - 3, "end": mail.start + 4, "score": 0.9}]
+        svc = Service("hf", answer=over_mail)
+        self.addCleanup(svc.close)
+        r = self.det.findings_with(text, channel="tool", remote=rm.RemoteDetector(svc.url, format=svc.fmt))
+        self.assertEqual(r.findings, base)
+        self.assertEqual((r.remote.state, r.remote.added), ("ok", 0))
 
     def test_a_slow_service_leaves_the_rules_result_and_says_timeout(self):
         t = time.monotonic()

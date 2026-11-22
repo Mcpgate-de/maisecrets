@@ -247,7 +247,7 @@ class SessionStart(unittest.TestCase):
         # the setting by its title, the route in words: the raw key and route said nothing to the person
         self.assertEqual(line, "maisecrets: since the last session start, 2 protections were loosened: the setting "
                                "Stored values in tool calls (your prompt), stored value SECRET_c3 deleted (a terminal "
-                               "command). If you did not do this, check /maisecrets:settings and /maisecrets:list.")
+                               "command). If you did not do this, check /maisecrets settings and /maisecrets list.")
         self.assertIsNone(events.weakenings_since_last_start(), "shown once")
         events.record_weakening("forget", "SECRET_c4", "slash command")
         self.assertIn("1 protection was loosened: stored value SECRET_c4 deleted (a slash command).",

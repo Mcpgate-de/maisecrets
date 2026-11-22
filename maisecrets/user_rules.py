@@ -12,7 +12,7 @@ instead (a team repository
 keeps its rules there), and maisecrets/terms.py reads `*.terms` there (a team term list with a floor). Nothing else
 is read: no code, no allow list, no symbolic link, no git metadata.
 A folder is data that a hook reads in every call, so each rule passes checks at load; a rule that fails one is
-QUARANTINED: it is left out, and /maisecrets:rules, the status and events.log name it with its reason. A refused rule
+QUARANTINED: it is left out, and /maisecrets rules, the status and events.log name it with its reason. A refused rule
 is named by its place (`rule 3`, `line 7`), never by a text of its own: a refused line can be a pasted value. A broken
 rule file or folder never stops a hook and never costs the rules of another folder. A broken machine policy still
 does (home.load_config).
@@ -1199,7 +1199,7 @@ def session_note() -> str | None:
         for q in left_out[:20]],
         outcome="quarantined: " + "; ".join(sorted({q.reason for q in left_out}))[:300])
     return (f"{len(left_out)} rule(s) of your own were left out because they fail a check; "
-            "/maisecrets:rules says which and why.")
+            "/maisecrets rules says which and why.")
 
 
 _WHY = {"missing": "is missing", "refused: the folder cannot be read": "cannot be read",

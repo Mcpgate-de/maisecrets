@@ -1,0 +1,11 @@
+# c1-a-number-written-as-a-card-is-a-hit-without-a-card-word: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-number-written-as-a-card-is-a-hit-without-a-card-word"
+control = "C1"
+serves = ["M1.3"]
+statement = "In a tool result, a number in the groups of a card and with the prefix and the length of a card network is a card without a card word."
+runner = ["tests/test_rules_from_the_fork_0624.py::CardWithoutWordTests::test_a_card_number_without_a_card_word_is_masked_in_a_tool_result"]
+
+[proof]
+file = "maisecrets/detection/card_shape.py"
+find = "    return bool((_CARD_GROUPS.fullmatch(v) or v.isdigit()) and _CARD_ISSUERS.fullmatch(re.sub(r\"\\D\", \"\", v)))"
+replace = "    return False"

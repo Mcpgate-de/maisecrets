@@ -49,7 +49,7 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
    `UserPromptSubmit` hook
    detects it, stores it in a local vault, blocks the prompt, and keeps the
    rewritten prompt with a placeholder such as `⟦SECRET_c1⟧` or
-   `⟦EMAIL_c1:ma•••@•••.de⟧`. Type `/maisecrets:send` to send it as is,
+   `⟦EMAIL_c1:ma•••@•••.de⟧`. Type `/maisecrets send` to send it as is,
    or paste it from the clipboard where one exists. The value never reached
    the model. Measured: zero API requests for a blocked prompt.
    **On Claude Code 2.1.287 and later (in the desktop app's Code tab from
@@ -118,7 +118,7 @@ push and, with `--real`, against the real model. `docs/TESTING.md` has the
 record. GitHub is a read-only mirror of the primary repository; issues and
 pull requests are welcome there.
 
-### What `/maisecrets:status` says
+### What `/maisecrets status` says
 
 The command fits on one screen. The head line says whether this session is
 protected: `🔒` when no check failed, `⚠️ … is NOT protecting this session`
@@ -126,7 +126,7 @@ when one did. Outside a client session (a terminal) no session can be judged,
 so the head line makes no claim. One line follows per check: `✓` ok, `!` warn,
 `✗` FAIL, `–` does not apply. A warn or FAIL line names the next command after
 `→`. In Codex the commands are typed: `maisecrets: status all`. Each fact
-claims only what the check saw. `/maisecrets:status all` prints the longer
+claims only what the check saw. `/maisecrets status all` prints the longer
 facts of each check and the details that support needs.
 
 **hooks.** The tool-call hook of this session must have run in the last 2
@@ -155,10 +155,10 @@ to `config.json` in the maisecrets folder; it takes effect on the next call.
 **incidents.** These are faults of maisecrets itself in the last 30 days. A
 fail-closed incident means maisecrets refused a call it could not check: safe,
 but it stopped work. A best-effort incident means a side step failed (a cleanup
-or a record). Act when they repeat or stop your work; `/maisecrets:report
+or a record). Act when they repeat or stop your work; `/maisecrets report
 incident` shows them and makes a report.
 
-**self-test.** `/maisecrets:status test` proves both protection paths in the
+**self-test.** `/maisecrets status test` proves both protection paths in the
 real client. The tool-result hook must mask a test value in the output of the
 command, and the prompt hook must stop it when you send it. A pass counts for
 this version, in this session or for 4 hours. If the AI wrote the test value
@@ -214,12 +214,12 @@ rules, the regions and the number of label languages.
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
 - Sends and fetches: no telemetry. The plugin downloads nothing, except the image of the optional local name
-  service, which follows the plugin at a session start (`/maisecrets:ner updates off` keeps it). The other
+  service, which follows the plugin at a session start (`/maisecrets ner updates off` keeps it). The other
   connections start from a command you run or a call that needs a value, and nothing else in the plugin opens one:
   - a Write, Edit or Bash call with a token that one of your own MCP servers
     sent: one metadata request and one resolve request to that server's own
     origin, over https, with this computer's key for that server ("Vault
-    references"); `/maisecrets:status` makes the same request with no token;
+    references"); `/maisecrets status` makes the same request with no token;
   - the ssh route of your own ssh command inside the Claude Code sandbox
     (`hooks/proxy_connect.py`, the `ProxyCommand` of that ssh call): one
     CONNECT through Claude Code's local sandbox proxy (localhost only) to the
@@ -230,7 +230,7 @@ rules, the regions and the number of label languages.
     8.8.8.8:53 and 9.9.9.9:443 (the sandbox must refuse them) and one CONNECT with
     a wrong login to the local sandbox proxy. It sends no data, and it runs only
     when `SANDBOX_RUNTIME=1` and a local sandbox proxy are set;
-  - `/maisecrets:report`: it prints the issue text and a prefilled link to
+  - `/maisecrets report`: it prints the issue text and a prefilled link to
     `report_url` (the address carries the issue text, the plugin version, your
     platform and a rule name, never a value). It opens no browser and runs no
     program: the connection starts when you open the link.
@@ -580,7 +580,7 @@ Four sources, one scanner (`maisecrets/detection/core.py`):
   too, and so is a word the person gives in a prompt after a label, also when a tool result held
   it first. Only a value stored new from a tool result gets the mark; a value stored before 0.6.17
   has no mark and stays looked for. So a word that 0.6.16 stored from a file (field report) blocks
-  prompts until it expires or `/maisecrets:forget` deletes it. A quiet English word that an older
+  prompts until it expires or `/maisecrets forget` deletes it. A quiet English word that an older
   version stored is marked weak at the next session start.
   Limit, a trade for no blocked prompt: a password that is a word, or a random value of small
   letters that reads like one (about 3 in 100 of 8 letters, 1 in 200 of 12), and that a file or a
@@ -589,19 +589,19 @@ Four sources, one scanner (`maisecrets/detection/core.py`):
   Limit of the word list: only English words count as words that are masked only where they were
   found. A common word of another language (`Wartungsfenster`), a name, a project term or an
   invented word that a label rule takes in a tool result is masked in every later tool result of
-  every session until it expires or `/maisecrets:forget` deletes it. The word list makes this rare
+  every session until it expires or `/maisecrets forget` deletes it. The word list makes this rare
   for English prose; it cannot remove it. A random value that reads like a word and is split into
   two words of the list or a word with an ending counts as a word too (measured: 369 of 190,508
   random values of 8 to 14 letters, 0.19 %); it is masked where it was found and not hunted in
   other texts. A word that a tool result stored and the person then gives as a password (with
-  `/maisecrets:put` or after a label in a prompt) is hunted everywhere again. Since 0.8.2 a
+  `/maisecrets put` or after a label in a prompt) is hunted everywhere again. Since 0.8.2 a
   further place where the same tool result holds such a word without a label stays text, as for
   `fallback` since 0.6.38; before, the hunt masked it there too.
   Since 0.9.7 the same holds for a hit of a name or shape rule that is an English or developer word
   (a product name such as `Claude`, a JSON key such as `confidential`): it is masked where it was
   found and not hunted in other texts, also when this session used its placeholder in a command
   (#23). An entry that an older version stored is checked once at the next session start. A value
-  stored with `/maisecrets:put`, a term and an imported value stay hunted.
+  stored with `/maisecrets put`, a term and an imported value stay hunted.
 - A key after a label that names a secret, in a form the keyword rules do not read (0.6.16):
   `<clientSecret>…</clientSecret>`, `<AccessToken>…</AccessToken>`, a short value
   (`label-secret-literal`, 8 characters and more); and a quoted key of 12 characters and more

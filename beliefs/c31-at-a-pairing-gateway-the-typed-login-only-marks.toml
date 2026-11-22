@@ -1,0 +1,13 @@
+# c31-at-a-pairing-gateway-the-typed-login-only-marks: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-at-a-pairing-gateway-the-typed-login-only-marks"
+control = "C31"
+serves = ["M3.3"]
+statement = "At a gateway that names a pairing endpoint, the person's typed login for a proposed connector binds nothing by itself; it only lets the connector's proof follow."
+runner = ["tests/test_sref_hooks.py::SrefBashTests::test_with_a_pairing_endpoint_the_login_only_marks_and_the_connector_s_own_proof_binds"]
+
+[proof]
+file = "maisecrets/cli.py"
+find = '''        if f.get("pairing"):
+'''
+replace = '''        if False:
+'''

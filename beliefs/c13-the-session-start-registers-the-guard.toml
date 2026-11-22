@@ -1,0 +1,11 @@
+# c13-the-session-start-registers-the-guard: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-the-session-start-registers-the-guard"
+control = "C13"
+serves = ["M5.2"]
+statement = "The session start of a synced install registers the guard for the plugin's events and matchers when its entries are missing or differ."
+runner = ["tests/test_guard.py::SyncedInstallTests::test_the_session_start_of_a_synced_copy_places_and_registers_the_guard_once"]
+
+[proof]
+file = "maisecrets/cli.py"
+find = "    if {e: v for e, v in ours.items() if v} != wanted:"
+replace = "    if False:"

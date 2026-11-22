@@ -1,0 +1,11 @@
+# c30-the-load-token-cannot-send-a-text: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30-the-load-token-cannot-send-a-text"
+control = "C30"
+serves = ["M6.4"]
+statement = "maisecrets reads the load of a name container (/metrics) with a token derived from the container's secret with another key than the token of a text, so the load request carries no token the service takes for a text; the service, not maisecrets, refuses a text with the load token."
+runner = ["tests/test_ner_metrics.py::LoadLineTests::test_a_container_with_a_secret_gets_the_metrics_bearer_not_the_text_bearer"]
+
+[proof]
+file = "maisecrets/ner_metrics.py"
+find = '''    return hmac.new(secret.encode("utf-8"), b"metrics", hashlib.sha256).hexdigest()'''
+replace = '''    return hmac.new(secret.encode("utf-8"), b"bearer", hashlib.sha256).hexdigest()'''

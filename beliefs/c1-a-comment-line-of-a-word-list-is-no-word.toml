@@ -1,0 +1,11 @@
+# c1-a-comment-line-of-a-word-list-is-no-word: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-comment-line-of-a-word-list-is-no-word"
+control = "C1"
+serves = ["M1.3"]
+statement = "The loader of the word lists reads each entry and leaves out the comment lines, so a comment never becomes a word that changes a finding."
+runner = ["tests/test_word_lists.py::WordListFileTests::test_the_loader_reads_the_entries_and_skips_comments"]
+
+[proof]
+file = "maisecrets/detection/wordlists.py"
+find = "    return frozenset(x.strip() for x in text.splitlines() if x.strip() and not x.lstrip().startswith(\"#\"))"
+replace = "    return frozenset(x.strip() for x in text.splitlines() if x.strip())"

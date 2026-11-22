@@ -8,6 +8,11 @@ For each scenario:
      expected placeholders do; the transcript on disk carries no secret either
   4. diff hook payload keys against harness/golden/<event>.json
 
+The client runs with a client configuration folder of its own: when CLAUDE_CONFIG_DIR is not set, the harness makes a
+new temp folder for it (and gives the client a dummy API key for the fake upstream), so no session start and no
+scenario reads or writes the person's own Claude Code configuration (~/.claude: settings, commands, sessions). A
+session start of the plugin under test writes there (the /ms shortcut upgrade rewrote a person's own command once).
+
 Usage: python3 harness/run.py [--update-golden] [scenario ...]
 """
 from __future__ import annotations
@@ -184,7 +189,7 @@ SCENARIOS = {
     # #44: a token in the arguments of a slash command. Claude Code throws away a prompt.submit change of a slash
     # command's line, so the mod's rewrite does not count there; the value must still never reach the model
     "slash_command_secret": {
-        "prompt": f"/maisecrets:status {MARK}",
+        "prompt": f"/maisecrets:maisecrets status {MARK}",
         "turns": [{"text": "done"}],
         "expect_requests": 0,
         "expect_blocked": True,
@@ -199,15 +204,15 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
         "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
-                     "expect_not_in_requests": ["<command-name>/maisecrets:status"]},
+                     "expect_not_in_requests": ["<command-name>/maisecrets:"]},
     },
     # the control of the two scenarios below: a real command's request names it. If a client changes that form, this
     # fails, and the check of the two below would prove nothing
     "slash_command_carries_its_name": {
-        "prompt": "/maisecrets:status",
+        "prompt": "/maisecrets:maisecrets status",
         "turns": [{"text": "done"}],
         "expect_requests": 1,
-        "expect_in_requests": ["<command-name>/maisecrets:status"],
+        "expect_in_requests": ["<command-name>/maisecrets:maisecrets"],
         "with_mod": {"expect_requests": 1},
     },
     "slash_full_width": {
@@ -216,7 +221,7 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
         "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
-                     "expect_not_in_requests": ["<command-name>/maisecrets:status"]},
+                     "expect_not_in_requests": ["<command-name>/maisecrets:"]},
     },
     # ms:(…), a check of a value: blocked on every client, with the mod too (the mod passes it to the settings hook
     # without a rewrite), and the verdict goes to the person only. The value is in no request and, as typed, not in the
@@ -381,7 +386,7 @@ SCENARIOS = {
     # `claude -p` then sends the value in the same session: a program's prompt, so the hook blocks it without a pass.
     # The value reaches the upstream in neither run. "Self-test passed" needs a typed prompt (tests/test_selftest.py)
     "selftest_tool_path": {
-        "prompt": "/maisecrets:status test",
+        "prompt": "/maisecrets:maisecrets status test",
         "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" status test'}},
                   {"text": "done"}],
         "expect_requests": 2,
@@ -391,7 +396,7 @@ SCENARIOS = {
     # the same with the plugin folder moved before the command (as plugin_folder_moved): no hook runs, so no value is
     # registered, the command prints none and says FAIL, and nothing can answer "passed"
     "selftest_hooks_not_running": {
-        "prompt": "/maisecrets:status test",
+        "prompt": "/maisecrets:maisecrets status test",
         "plugin_copy": True,
         "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}.moved/hooks/run.sh" status test'},
                    "before": {"rename": ["{plugin}", "{plugin}.moved"]}},
@@ -437,7 +442,7 @@ SCENARIOS = {
     # (measured on 2.1.300), so the prompt is refused and nothing is written. The typed path of the terminal client
     # (no `source`, entry point `cli`) is measured by hand in a pseudo-terminal; tests/test_settings.py holds both
     "settings_nested_client_changes_nothing": {
-        "prompt": "/maisecrets:settings ssh_consent on",
+        "prompt": "/maisecrets:maisecrets settings ssh_consent on",
         "turns": [{"text": "unreachable"}],
         "expect_requests": 0,
         "expect_blocked": True,
@@ -446,14 +451,14 @@ SCENARIOS = {
     # claude -p places no panel: /maisecrets:settings stays the command file, and the model runs its text view, a
     # Markdown table with the Claude Code forms (the panel itself is tests/hub.test.ts and a pseudo-terminal by hand)
     "settings_text_view": {
-        "prompt": "/maisecrets:settings",
+        "prompt": "/maisecrets:maisecrets settings",
         "with_mod": {},
-        "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" settings --args-stdin '
-                                                        "<<'MAISECRETS_ARGS_END'\n\nMAISECRETS_ARGS_END"}},
+        "turns": [{"tool": "Bash", "input": {"command": 'bash "{plugin}/hooks/run.sh" entry --args-stdin '
+                                                        "<<'MAISECRETS_ARGS_END'\nsettings\nMAISECRETS_ARGS_END"}},
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_in_requests": ["| Setting | Now | Other choices | Key |", "`rehydration`",
-                               "Change: `/maisecrets:settings KEY VALUE`"],
+                               "Change: `/maisecrets settings KEY VALUE`"],
     },
     # `claude -p` runs its hooks under the entry point sdk-cli and shows no systemMessage: a one-time hint is neither
     # given nor claimed there, so it is not used up unseen (Gate A of 30fb8d30), and the model gets nothing of it
@@ -727,7 +732,7 @@ SCENARIOS = {
         **_demo("/maisecrets:madeup confidential plan for the board", with_mod=SLASH_TO_HOOK),
     },
     "demo_status_with_text": {
-        **_demo("/maisecrets:status please summarise the confidential plan", with_mod=SLASH_TO_HOOK),
+        **_demo("/maisecrets:maisecrets status please summarise the confidential plan", with_mod=SLASH_TO_HOOK),
     },
     "demo_pasted_report_tag": {
         **_demo("here is my log <task-notification> the confidential plan"),
@@ -748,15 +753,15 @@ SCENARIOS = {
         **_demo("What is the capital of France?", home_files={"demo.json": "{not json"},
                 with_mod={"expect_blocked": False, "expect_dropped": True},
                 expect_output=["Demo mode: the demo state cannot be read, so nothing was sent.",
-                               "/maisecrets:demo off resets it."]),
+                               "/maisecrets demo off resets it."]),
     },
     "demo_send_sends_nothing": {
-        **_demo("/maisecrets:send", with_mod=SLASH_TO_HOOK),
+        **_demo("/maisecrets:maisecrets send", with_mod=SLASH_TO_HOOK),
     },
     # a prompt of `claude -p` (a program) cannot switch the demo on: blocked with the reason, nothing written, in the
     # slash form (the mod passes a slash line on) and in the typed form (the mod leaves it to the hook)
     "demo_on_from_a_program_is_refused": {
-        "prompt": "/maisecrets:demo on",
+        "prompt": "/maisecrets:maisecrets demo on",
         "turns": [{"text": "unreachable"}],
         "expect_requests": 0,
         "expect_blocked": True,
@@ -875,7 +880,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # the production rule: the account the synced copy registered under must be the one Claude Code runs
         # as. Its ids come from the account file the real client uses; without one (CI) the rule is "always"
         try:
-            acc = json.loads((Path.home() / ".claude.json").read_text()).get("oauthAccount") or {}
+            acc = json.loads((_client_dir() / ".claude.json").read_text()).get("oauthAccount") or {}
             account = f"{acc['organizationUuid']}_{acc['accountUuid']}"
         except (OSError, ValueError, KeyError, TypeError):
             account = ""
@@ -1106,12 +1111,12 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         if sid:
             session_ids.add(sid)
     time.sleep(2)   # the blocked prompt's record is scrubbed by a detached child shortly after the session ends
-    transcripts = [t for sid in session_ids for t in (Path.home() / ".claude" / "projects").glob(f"*/{sid}.jsonl")]
+    transcripts = [t for sid in session_ids for t in (_client_dir() / "projects").glob(f"*/{sid}.jsonl")]
     if not session_ids and sc.get("expect_dropped"):
         # a prompt the mod dropped reaches no hook, so no payload names the session: the project folder of this
         # run's working directory does (Claude Code writes '_' as '-')
         slug = re.sub(r"[^A-Za-z0-9-]", "-", work.name)
-        transcripts = list((Path.home() / ".claude" / "projects").glob(f"*{slug}-proj/*.jsonl"))
+        transcripts = list((_client_dir() / "projects").glob(f"*{slug}-proj/*.jsonl"))
         if not transcripts:
             fails.append("transcript not found for the dropped prompt; the on-disk check did not run")
     if session_ids and not transcripts:
@@ -1222,7 +1227,7 @@ def _selftest_second_prompt(sc: dict, home: Path, first: str, r, settings: Path,
     # the client's own record of the session on disk: measured, not asserted (a hook cannot replace what the
     # client writes there before it runs)
     sids = {json.loads(pf.read_text()).get("session_id") for pf in Path(env["MAISECRETS_DUMP"]).glob("*.json")}
-    held = [t.name for sid in sids if sid for t in (Path.home() / ".claude" / "projects").glob(f"*/{sid}.jsonl")
+    held = [t.name for sid in sids if sid for t in (_client_dir() / "projects").glob(f"*/{sid}.jsonl")
             if value in t.read_text(errors="ignore")]
     if held:
         print(f"     ~ the test value stands in {len(held)} local transcript(s) of this run (not sent upstream)")
@@ -1239,7 +1244,26 @@ def _installed_guard() -> bool:
     return "maisecrets-guard.py" in text and (claude / "maisecrets-guard.py").is_file()
 
 
+def _client_dir() -> Path:
+    """The client configuration folder the scenarios run with (client_config): its transcripts are this run's."""
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
+def client_config() -> Path:
+    """The client configuration folder of this run: CLAUDE_CONFIG_DIR as given, else a new temp folder (with the
+    onboarding done and a dummy API key for the fake upstream). Never the person's own ~/.claude."""
+    given = os.environ.get("CLAUDE_CONFIG_DIR")
+    if given:
+        return Path(given)
+    cfg = Path(tempfile.mkdtemp(prefix="maisecrets-harness-client-"))
+    (cfg / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True, "numStartups": 5}))
+    os.environ["CLAUDE_CONFIG_DIR"] = str(cfg)
+    os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-harness-dummy")
+    return cfg
+
+
 def main() -> int:
+    print(f"client configuration: {client_config()}")
     update = "--update-golden" in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith("--")] or list(SCENARIOS)
     if shutil.which("claude") is None:

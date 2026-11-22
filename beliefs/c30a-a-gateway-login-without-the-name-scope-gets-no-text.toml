@@ -1,0 +1,11 @@
+# c30a-a-gateway-login-without-the-name-scope-gets-no-text: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-a-gateway-login-without-the-name-scope-gets-no-text"
+control = "C30a"
+serves = ["M6.4"]
+statement = "A gateway source of names gets text only with a login that holds the name scope; without it the reason names the login step and nothing is sent."
+runner = ["tests/test_ner_gateway.py::GatewaySourceTests::test_a_login_without_the_name_scope_gives_the_reason_and_sends_nothing"]
+
+[proof]
+file = "maisecrets/ner_gateway.py"
+find = "    if found[\"ner\"][\"scope\"] not in str(rec.get(\"scope\") or \"\").split():"
+replace = "    if False:"
