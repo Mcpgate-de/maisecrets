@@ -7,7 +7,7 @@ versions.json in the maisecrets home holds, per plugin version, three times: `fi
 version), `start` (its last session start) and `refresh` (its last gateway renewal). No value, no session id, no
 session text. It is written at a session start and after a gateway renewal (mark_run), never on a prompt or a tool call.
 
-The session start and /maisecrets:status of the newest version read it. An older version that started a session or
+The session start and /maisecrets status of the newest version read it. An older version that started a session or
 renewed a login after the newest version's first start, within WINDOW, may still be open somewhere: the marker
 cannot see a session end. A version before this
 module writes no marker; its trace is its lines in events.log, each of which names the version that wrote it (one per
@@ -191,7 +191,7 @@ def start(now: float | None = None) -> str | None:
 
 
 def status(now: float | None = None) -> tuple | None:
-    """For /maisecrets:status: (version, the warning) whenever it holds; it marks nothing."""
+    """For /maisecrets status: (version, the warning) whenever it holds; it marks nothing."""
     try:
         now = time.time() if now is None else now
         found = finding(_read(), now)

@@ -2,6 +2,7 @@
 description: "Delete stored values by key. Type it yourself, e.g. SECRET_c3"
 argument-hint: "KEY [KEY ...] | import:ID"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" forget:*), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" forget:*)
+user-invocable: false
 ---
 
 The user wants to delete these stored values: $ARGUMENTS

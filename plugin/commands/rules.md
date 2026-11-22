@@ -1,6 +1,7 @@
 ---
 description: "Show your own detection rules and what each loaded"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" rules), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" rules)
+user-invocable: false
 ---
 
 Run exactly this command and show the user its output as is, then stop:

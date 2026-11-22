@@ -11,7 +11,7 @@ HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "post-tool-failure", "ses
 
 
 def _marker(code: str) -> None:
-    """An incident marker for /maisecrets:report incident (docs/DIAGNOSTICS.md, section 3): one empty folder made with
+    """An incident marker for /maisecrets report incident (docs/DIAGNOSTICS.md, section 3): one empty folder made with
     one mkdir in a home that exists and is no link, after the answer, waited for at most 0.3 s. Never raises."""
     import threading
 
@@ -184,7 +184,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
                                           "wipe", "repair", "scan", "get", "shortcut", "forget", "guard",
                                           "settings", "consent-report", "rules", "terms", "values", "ner",
-                                          "sref"):
+                                          "sref", "entry"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -267,7 +267,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             # a count only: this text can reach the model, and a folder name can say who or what it is about. The
             # person's own settings card names the folders (codex verification of block 4)
             _clean_note = (f"maisecrets: {len(_links)} clean folder(s) are a link or lie under one, so nothing in "
-                           "them counts as clean. /maisecrets:settings clean_dirs shows which, and the real folder "
+                           "them counts as clean. /maisecrets settings clean_dirs shows which, and the real folder "
                            "to add.")
         file_reads.prune_sessions()
     except Exception:  # noqa: BLE001 - the note never stops a session start; without it no folder is clean
@@ -320,8 +320,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             screen = False
 
     def _not_protected() -> bool:
-        """The fast part of the /maisecrets:status verdict: the store gives no answer, or Codex does not trust the
-        hooks. Both mean NOT protected. The self-test and the hook log are /maisecrets:status's (and the panel's)."""
+        """The fast part of the /maisecrets status verdict: the store gives no answer, or Codex does not trust the
+        hooks. Both mean NOT protected. The self-test and the hook log are /maisecrets status's (and the panel's)."""
         try:
             from pathlib import Path  # noqa: E402
             from maisecrets import status_verdict as sv  # noqa: E402
@@ -349,7 +349,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     from maisecrets.tips import NOT_PROTECTED, TEST_STORE  # noqa: E402
     _unprotected = _not_protected()
     if _unprotected:
-        lines.insert(0, NOT_PROTECTED.format(cmd="maisecrets: status" if codex else "/maisecrets:status"))
+        lines.insert(0, NOT_PROTECTED.format(cmd="maisecrets: status" if codex else "/maisecrets status"))
     if v.backend.test_mode:
         lines.append(TEST_STORE)
     # a name source that is set and cannot be used: first, with the cause and the step (ner_health), once per cause
@@ -386,7 +386,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         out["systemMessage"] = (_sep(out) +
                                 f"{len(quieted)} stored word(s) are program code, not secrets "
                                 f"({', '.join(quieted)}): maisecrets no longer masks them in other texts. "
-                                "/maisecrets:forget deletes them.")
+                                "/maisecrets forget deletes them.")
     if cfg.get("config_warning"):
         out["systemMessage"] = (_sep(out) + f"\u26a0\ufe0f maisecrets: {cfg['config_warning']}."
                                 + (" Until it is fixed, no stored value goes into a tool call."
@@ -504,6 +504,16 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         _run_log("session" + "-start", payload, "answer", "pass", 0)
     except Exception:  # noqa: BLE001 - a log row never stops a session start
         pass
+    if not codex:
+        try:
+            # a /ms of 0.9.21 and before only sent the blocked prompt: it becomes the entry (/ms status)
+            from maisecrets.cli import upgrade_shortcuts  # noqa: E402
+            upgrade_shortcuts()
+        except Exception:  # noqa: BLE001 - an upgrade never stops a session start
+            pass
+    if isinstance(out.get("systemMessage"), str):
+        from maisecrets import forms  # noqa: E402
+        out["systemMessage"] = forms.for_this_client(out["systemMessage"])   # Cowork: a hook's command as text
     print(json.dumps(out))
     sys.exit(0)
 sys.exit(main(["hook", sys.argv[1] if len(sys.argv) == 2 else ""]))

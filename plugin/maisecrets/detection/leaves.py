@@ -434,9 +434,12 @@ def _scan_segments(detector, segments: list, channel: str, kwargs: dict) -> list
                                                                        if k != "deadline"})
     read: list = []
     for text, placed, starts in segments:
-        # a negative context counts only inside its field (text_index.py); the rules of the response (prefilter.py)
+        # a negative context counts only inside its field (text_index.py), a string's start counts as a line start
+        # (#94); the rules of the response (prefilter.py)
+        values = [at for _leaf, at in placed]
+        rules_cm = with_response_rules(text, order) if order else contextlib.nullcontext()
         try:
-            with record_fields(text, starts), (with_response_rules(text, order) if order else contextlib.nullcontext()):
+            with record_fields(text, starts, values), rules_cm:
                 found = detector.findings(text, channel=channel, **kwargs)
         except ScanIncomplete as e:
             # past the deadline: the segments before, and this one's findings so far, placed in their strings; the

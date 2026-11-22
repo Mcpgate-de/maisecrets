@@ -59,6 +59,27 @@ CHANNEL = {source: "both" for source in BANDS}
 VENDORED = frozenset({"detect-secrets", "betterleaks", "presidio"})   # synced from upstream by scripts/sync_*.py
 OWN_SPECIAL = {"fallback": "fallback", "user": "user", "terms": "term", "imports": "import"}
 
+
+def in_phase_order(**groups) -> tuple:
+    """The groups of a scan (rules, personal, user, terms, imports: lists of rules and passes) in the order of PHASES.
+    detect.scan runs them in this order, so the table is the order a scan claims spans in, not only what `maisecrets
+    rules list` shows: the terms run after every rule, and a listed name never cuts a value that a rule takes."""
+    return tuple(x for key in sorted(groups, key=lambda k: PHASES[k]) for x in groups[key])
+
+
+def runs_after_personal(rule) -> bool:
+    """A rule of your own: its phase (PHASES["user"]) puts it after the personal-data step. A rule list that a caller
+    built has no phase; its rules of your own have the id prefix `user:`."""
+    return rule.phase == PHASES["user"] if rule.phase else rule.id.startswith("user:")
+
+
+def scan_order(every, personal, terms, imports) -> tuple:
+    """The rules of a list in scan order (core._in_scan_order): the built-in ones, then the personal-data step and
+    the cleaned copy (`personal`), then the rules of your own, then the terms, then the imported values."""
+    return in_phase_order(rules=[r for r in every if not runs_after_personal(r)], personal=[personal],
+                          user=[r for r in every if runs_after_personal(r)], terms=[terms], imports=[imports])
+
+
 # a label rule finds a value by its label alone; a keyword rule is a label rule with no `=` or `:` of its own. Until
 # the registry these were id prefixes (detect.LABEL_RULES, detect.KEYWORD_RULES), and a stored kind still is one
 LABEL_PREFIXES = ("ds-keyword", "label-", "generic-api-key", "url-query-secret", "auth-scheme")
@@ -85,10 +106,11 @@ FILTERS = {
     # JSON inside a string: the value must be escaped too. A constant's name (PROD-DB-PASS_7) and a time or a ratio
     # (0:default) after the label are no value (from a fork, danszymkowiak/maisecrets f2c9ee2, Apache-2.0)
     "ds-keyword-colon": ("escaped-label-quote", "constant-name", "time-or-ratio", "test-result", "word-after-secret",
-                         "number-list"),
-    "ds-keyword-colon-quotes-required": ("escaped-label-quote", "constant-name", "time-or-ratio", "test-result"),
-    "ds-keyword-equal-signs": ("constant-name",),
-    "generic-api-key": ("word-path", "derived-label"),
+                         "number-list", "census-count"),
+    "ds-keyword-colon-quotes-required": ("escaped-label-quote", "constant-name", "time-or-ratio", "test-result",
+                                         "census-count"),
+    "ds-keyword-equal-signs": ("constant-name", "census-count"),
+    "generic-api-key": ("word-path", "derived-label", "census-count"),   # token bound=1234 unbound=5 (#96)
     "url-query-secret": ("template-value",),                    # ?token={...}
     "auth-scheme": ("words-not-token",),                        # Bearer and words joined by - or _
     "ds-basic-auth": ("user-equals-password",),

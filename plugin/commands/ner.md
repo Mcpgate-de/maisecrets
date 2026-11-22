@@ -2,6 +2,7 @@
 description: "Setup: mask names with a named-entity service"
 argument-hint: "[local | url URL | gateway NAME | off | all]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" ner *), Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" ner), Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" sref login *), Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" sref login), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" ner *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" ner), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" sref login *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" sref login)
+user-invocable: false
 ---
 
 The maisecrets prompt hook has already made the change the user typed (`$ARGUMENTS`), if there was one, and it answers an argument it does not know itself. Do not change the setting in another way, and do not write maisecrets files.

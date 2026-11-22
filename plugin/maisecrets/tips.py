@@ -8,13 +8,13 @@ from .vault import HOME, load_config
 
 TIPS = [
     "Tip: write password: before a value, and maisecrets stores it.",
-    "Tip: /maisecrets:put stores the value in your clipboard.",
+    "Tip: /maisecrets put stores the value in your clipboard.",
     "Tip: /maisecrets opens your settings, stored values and the name service.",
-    "Tip: /maisecrets:list uses shows where stored values went.",
-    "Tip: /maisecrets:report sends a false alarm to the maintainers, without the value.",
-    "Tip: /maisecrets:term add NAME masks a word of your own.",
-    "Tip: /maisecrets:shortcut adds /ms for /maisecrets:send.",
-    'Tip: rules for the tokens of your own services: /maisecrets:rules (README "Rules of your own").',
+    "Tip: /maisecrets list uses shows where stored values went.",
+    "Tip: /maisecrets report sends a false alarm to the maintainers, without the value.",
+    "Tip: /maisecrets term add NAME masks a word of your own.",
+    "Tip: /maisecrets shortcut adds /ms, a short /maisecrets: /ms status, /ms send.",
+    'Tip: rules for the tokens of your own services: /maisecrets rules (README "Rules of your own").',
     "Tip: secrets that leaked before stay valid until you rotate them: /maisecrets:secret-hygiene.",
 ]
 # Codex has no slash commands for plugins: its tips name only what works there
@@ -24,7 +24,7 @@ TIPS_CODEX = [
     'Tip: rules for the tokens of your own services: maisecrets: set rule_dirs add DIR (README "Rules of your own").',
     "Tip: secrets that leaked before stay valid until you rotate them: ask for the secret-hygiene skill.",
 ]
-SHORTCUT = "/maisecrets:shortcut"
+SHORTCUT = "/maisecrets shortcut"
 
 
 def tip_of_the_day(codex: bool = False) -> str | None:
@@ -64,8 +64,8 @@ def welcome_lines(codex: bool = False, lock: bool = False) -> list[str]:
                 "Try it: maisecrets: demo on (alone as your prompt, in a new session) \u00b7 Check: maisecrets: status",
                 "Names too: maisecrets: ner local \u00b7 Old leaks: ask for the secret-hygiene skill"]
     return [first + (" \U0001F512 marks such a value." if lock else ""),
-            "Try it: /maisecrets:demo on in a new session \u00b7 Check: /maisecrets:status",
-            "Names too: /maisecrets:ner local \u00b7 Old leaks: /maisecrets:secret-hygiene"]
+            "Try it: /maisecrets demo on in a new session \u00b7 Check: /maisecrets status",
+            "Names too: /maisecrets ner local \u00b7 Old leaks: /maisecrets:secret-hygiene"]
 
 
 NOT_PROTECTED = "\u26a0\ufe0f maisecrets is NOT protecting this session \u2192 {cmd}"
