@@ -156,5 +156,50 @@ class StoredNameCaseTests(unittest.TestCase):
         self.assertIsNone(json.loads(INDEX.read_text())["entries"]["NAME_c1"].get("fold"))
 
 
+class TrustedReferenceTests(unittest.TestCase):
+    """Live probe 2026-11-22: a wrong mask stored the id of a gateway reference, and the exact replacement later cut
+    that id out of a correct reference of a trusted gateway. The whole-reference mask of 56b6259a stored the whole
+    reference as a value, which would mask the same reference after the pairing."""
+
+    RID = "Xq7mR2vKd9TfLw4H" + "bN8cPz3sT6yUa1eQ"
+    setUp = WeakEntryTests.setUp
+    bash = WeakEntryTests.bash
+
+    def trusted_text(self):
+        from maisecrets import placeholder
+        ref = "\u27e6sref:ip:" + self.RID + "\u27e7"
+        placeholder.TRUSTED.add(ref)
+        self.addCleanup(placeholder.TRUSTED.clear)
+        # the display part splits the id off as a token of its own: the form that the live probe cut
+        shown = ref[:-1] + ":le\u2022\u2022\u2022\u27e7"
+        return f"from: {ref} cc: {shown} subject: hi", ref
+
+    def test_a_value_this_session_resolved_never_cuts_a_trusted_reference(self):
+        from maisecrets.tool_output import _exact_redact
+        text, ref = self.trusted_text()
+        # an id, the whole reference, and a value under 4 characters that equals the kind
+        for value in (self.RID, ref, "ip"):
+            with self.subTest(value=value):
+                self.assertEqual(_exact_redact(text, Vault(), "s1", {"n": 0}, [], [(value, "<V>")], []), text)
+        # the same value outside the reference is still replaced
+        self.assertEqual(_exact_redact(f"{text} id {self.RID}", Vault(), "s1", {"n": 0}, [], [(self.RID, "<V>")], []),
+                         f"{text} id <V>")
+
+    def test_a_stored_value_never_cuts_a_trusted_reference(self):
+        from maisecrets.tool_output import _exact_redact
+        text, ref = self.trusted_text()
+        e = Vault().put(self.RID, "SECRET", "ds-keyword-colon", session="s1")     # the wrong mask of an id
+        self.assertEqual(_exact_redact(text, Vault(), "s2", {"n": 0}, [], [], []), text)
+        self.assertEqual(_exact_redact(f"id {self.RID}", Vault(), "s2", {"n": 0}, [], [], []), f"id {e.ref}")
+
+    def test_a_whole_reference_is_masked_where_it_was_found_and_never_hunted(self):
+        ref = "\u27e6sref:email:" + self.RID + "\u27e7"
+        e = Vault().put(ref, "SECRET", "ds-keyword-colon", session="s1")
+        self.assertTrue(e.weak)
+        self.assertNotIn(e.fingerprint, Vault().live_fingerprints())
+        out = self.bash(f"later: {ref}\n", session="s2")
+        self.assertNotIn(e.ref, json.dumps(out))
+
+
 if __name__ == "__main__":
     unittest.main()

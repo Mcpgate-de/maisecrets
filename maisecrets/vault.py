@@ -252,6 +252,10 @@ def is_weak(kind: str, value: str, tool: bool = False) -> bool:
     from .registry import is_label
     if value.strip().lower() == OWN_NAME:
         return True    # the plugin's own name, even a chosen one (#53)
+    if "\u27e6sref:" in value:
+        # a gateway reference masked whole (placeholder.whole_references): masked where it was found, never hunted, so
+        # the same reference from a gateway that is bound later stays whole (live probe, 2026-11-22)
+        return True
     if kind.startswith("remote:"):
         return True    # a model's finding (remote_layer.py): masked where it was found, never hunted
     if not is_label(kind):
