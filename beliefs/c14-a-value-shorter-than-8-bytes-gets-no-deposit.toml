@@ -1,0 +1,11 @@
+# c14-a-value-shorter-than-8-bytes-gets-no-deposit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-value-shorter-than-8-bytes-gets-no-deposit"
+control = "C14"
+serves = ["M3.8"]
+statement = '''D15: a value of fewer than 8 or more than 4096 bytes gets no deposit, with a refusal that names its length.'''
+runner = ["tests/test_deposit.py::DepositHookTests::test_a_value_shorter_than_8_bytes_gets_no_deposit"]
+
+[proof]
+file = "maisecrets/deposit.py"
+find = '''        if not MIN_BYTES <= len(value.encode("utf-8")) <= MAX_BYTES:'''
+replace = '''        if False:'''
