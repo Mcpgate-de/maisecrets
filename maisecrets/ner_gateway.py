@@ -1,9 +1,9 @@
-"""The gateway of /maisecrets:sref login as the source of names for tool results (#33, ai-gateway #1819).
+"""The gateway of /maisecrets sref login as the source of names for tool results (#33, ai-gateway #1819).
 
-/maisecrets:ner gateway URL sets the source: `remote_detector` gets {"gateway": <origin>, "url": <origin>,
+/maisecrets ner gateway URL sets the source: `remote_detector` gets {"gateway": <origin>, "url": <origin>,
 "allow_network": true}. At each tool result, from_config() asks here for the gateway's name endpoint (its protected
 resource metadata names `ner_endpoint`, `ner_scope` and `ner_max_chars`; kept for an hour in ner-gateway.json, never
-a token; /maisecrets:sref uses an older record of the same MCP URL when the gateway does not answer) and for an
+a token; /maisecrets sref uses an older record of the same MCP URL when the gateway does not answer) and for an
 access token of the login (sref_client, refreshed under its lock). The login must hold the name scope: a login asks
 for it only while this source is set (sref_client.discover), so the person logs in once more after the switch. A
 typed prompt goes to this source too, as to any source that is set (C30a: remote_layer.prompt_names); the rules'
@@ -130,7 +130,7 @@ def _int(v):
 
 
 def status_line(doc) -> str:
-    """One line for /maisecrets:ner from the status document."""
+    """One line for /maisecrets ner from the status document."""
     if not isinstance(doc, dict):
         return "load: no load data"
     parts = []
@@ -188,10 +188,10 @@ def detector(cfg: dict, conf: dict, make, deadline: float | None = None) -> tupl
     if not rec.get("refresh"):
         from .ner_health import ended_cause
         LAST["cause"] = ended_cause(origin)
-        return None, f"maisecrets is not logged in at {origin}; the person runs /maisecrets:sref login"
+        return None, f"maisecrets is not logged in at {origin}; the person runs /maisecrets sref login"
     if found["ner"]["scope"] not in str(rec.get("scope") or "").split():
         LAST["cause"] = "no_scope"
-        return None, "the login lacks the name scope; the person runs /maisecrets:sref login once more"
+        return None, "the login lacks the name scope; the person runs /maisecrets sref login once more"
     try:
         token = sref_client._access(cfg, backend, found, deadline)
     except sref_client.Refused as exc:

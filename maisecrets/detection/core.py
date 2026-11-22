@@ -2290,6 +2290,16 @@ _CONSTANT_NAME_RE = _LazyRx(r"(?:[A-Z]*[AEIOUY][A-Z]*|DB)(?:[-_](?:[A-Z]*[AEIOUY
 _TIME_OR_RATIO_RE = _LazyRx(r"\d+:[a-z]+")
 # a number and then `,name:number` fields: a log of timings after a field name such as secret_shape_scan (#92)
 _NUMBER_LIST_RE = _LazyRx(r"\d+(?:\.\d+)?(?:,[A-Za-z_][\w.-]*:\d+(?:\.\d+)?)+")
+# a census of records: `'token': 'bound=1234 unbound=5 ready=no'`. The value is a lower-case word=digits, a quoted one
+# holds only word=value fields, and the next field on the line is another word=digits: a count, not a value (#96)
+_CENSUS_VALUE_RE = _LazyRx(r"[a-z][a-z_]{0,30}=\d{1,12}(?:[ \t]+[a-z][a-z_]{0,30}=\w{1,20})*")
+_CENSUS_PAIR_RE = _LazyRx(r"[a-z][a-z_]{0,30}=\d{1,12}[ \t]+[a-z][a-z_]{0,30}=\d{1,12}(?![\w.=-])")
+def _census_count(text: str, secret: str, end: int) -> bool:
+    value = secret.strip("\"'`")
+    return bool(_CENSUS_VALUE_RE.fullmatch(value)
+                and _CENSUS_PAIR_RE.match(value + text[end:_line_end(text, end)]))
+
+
 _SECRET_WORD_LABEL_RE = _LazyRx(r"(?i)(?<![\w.-])secret(?:s|os?|as?)?:")
 # an article or a possessive, and at most one more word, right before the label: "Le secret:", "Notre grand secret:",
 # "The secret:", "El secreto:". It starts the line or follows the end of a sentence; after `INFO `, `# ` or `| ` it is a
@@ -2855,6 +2865,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue   # 0:default after `secret:`
             if "number-list" in filters and _NUMBER_LIST_RE.fullmatch(secret.strip("\"'`")):
                 continue   # a list of timings after a field name such as secret_shape_scan, not one value
+            if "census-count" in filters and _census_count(text, secret, end):
+                continue   # token bound=1234 unbound=5: the count of a family in a census, not a token
             if "word-after-secret" in filters and _word_after_secret(text, m.start(1), secret, end):
                 continue   # a sentence: an article, secret, a colon and one ordinary word (#26)
             if ("test-result" in filters and _TEST_NAME_RE.fullmatch(secret.strip("\"'`"))
@@ -3038,20 +3050,14 @@ _TERMS = object()                # the place of _term_hits: registry phase "term
 _IMPORTS = object()              # the place of _import_hits: registry phase "imports", after the terms
 
 
-def _runs_after_personal(rule: Rule) -> bool:
-    """A rule of your own: its phase (registry.PHASES["user"]) puts it after the personal-data step. A rule list that a
-    caller built has no phase; its rules of your own have the id prefix `user:`."""
-    return rule.phase == _registry.PHASES["user"] if rule.phase else rule.id.startswith("user:")
+_runs_after_personal = _registry.runs_after_personal
 
 
 def _in_scan_order(every: list) -> tuple:
-    """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
-    rules of your own (ids with `user:`), then the terms, then the imported values. Kept per list, so a scan pays for
-    it once."""
+    """The rules of a list in scan order (registry.scan_order), kept per list: a scan pays for it once."""
     d = _det()
     if d._order[0] is not every:
-        d._order = (every, tuple(r for r in every if not _runs_after_personal(r)) + (_PERSONAL,)
-                    + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS, _IMPORTS))
+        d._order = (every, _registry.scan_order(every, _PERSONAL, _TERMS, _IMPORTS))
     return d._order[1]
 
 

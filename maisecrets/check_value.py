@@ -51,10 +51,10 @@ A_PLACEHOLDER_LINE = ("maisecrets: this is a maisecrets placeholder, not a value
                       "brackets.")
 # past tense: a value the check stores is masked after the check, and "would NOT have caught" said the opposite
 NOT_CAUGHT = "⚠ maisecrets did not catch this value."
-ORDINARY = "It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets:put."
+ORDINARY = "It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets put."
 TEST_VALUE = ("It looks like a test value: only words such as super, secret, geheim or test, and digits. Code and "
               "tests are full of such values, so maisecrets does not mask them, also after a label such as "
-              "password:. It was not stored. If it is a real secret, store it with /maisecrets:put.")
+              "password:. It was not stored. If it is a real secret, store it with /maisecrets put.")
 
 
 def exact(prompt) -> bool:
@@ -238,7 +238,7 @@ def stored_text(ref: str, alone: bool, in_text: bool, ttl: str = "1 day") -> str
                           "alone on a line or after \"password:\" or \"=\". Inside a sentence it is not found, "
                           "because it has spaces.")
     return not_caught(f"It is now stored ({ref}), but maisecrets does not find it again in a prompt. Please report "
-                      "this with /maisecrets:report bug (the report holds no value).")
+                      "this with /maisecrets report bug (the report holds no value).")
 
 
 # the signs around a word of a sentence or of code: `5!`, `(room)` and `"name",` carry no sign of a password
@@ -311,7 +311,7 @@ def looks_like_a_credential(value: str) -> bool:
     each word holds a letter and a digit or a sign (the signs around a word of a sentence do not count), no word is
     code (a quote, a bracket, `=`, a flag) or a hex id, and the words joined pass _credential_word. Plain prose
     (`correct horse battery staple`, `Call me at 5!`) and a command line are never stored by a check;
-    /maisecrets:put stores such a value on purpose."""
+    /maisecrets put stores such a value on purpose."""
     words = value.split()
     if not words:
         return False

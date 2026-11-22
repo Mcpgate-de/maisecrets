@@ -78,6 +78,8 @@ Words that the name service (NER) takes for a person when they stand alone.
 
 | File | Effect | What it holds |
 |---|---|---|
+| `name-service/acronyms.txt` | less | technical acronyms after an initial in a list label: G. PII, B. MCP. Never a surname. |
+| `name-service/greeting-address-words.txt` | less | words that address a group after a greeting: a span of only greetings and these words is no person (Hallo zusammen). |
 | `name-service/greetings.txt` | less | greetings and salutations that are no person alone. |
 | `name-service/hook-events.txt` | less | the hook events of Claude Code and Codex: a tool name after PostToolUse: is no person. |
 | `name-service/never-a-name.txt` | less | words that are never a name in any language: no person alone, and never stored. |

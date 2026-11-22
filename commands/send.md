@@ -1,6 +1,7 @@
 ---
 description: "Send the last blocked prompt with placeholders"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" pending)
+user-invocable: false
 ---
 
 !`bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" pending`

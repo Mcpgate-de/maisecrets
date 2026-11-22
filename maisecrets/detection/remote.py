@@ -499,6 +499,15 @@ PRODUCT_WORDS = _words("name-service/product-words")
 # alone as a name from the reference service for "Hallo Ihr Lieben," (#41). Lieben is also a rare surname: alone,
 # without a given name, it is dropped; a full name with it stays
 GREETING_WORDS = _words("name-service/greetings")
+# the words that address a group after a greeting ("Hallo Ihr Lieben", "Hallo zusammen"): the service returned the
+# whole phrase as one person (#95). Only a span of greetings and these words is dropped; "Ihr" alone and a span with
+# one other word ("Hallo Anke") stay. Du, Sie, Ihr and Alle are parts of real names (du Bois): never alone here
+GREETING_ADDRESS_WORDS = _words("name-service/greeting-address-words")
+# an initial and one to three technical acronyms of ACRONYMS ("G. PII", "B. MCP"): a list label or a table cell, not
+# a person (#93). Only words of the list: an all-caps surname of 2 to 4 letters after an initial ("J. LEE", "T. KOCH")
+# is a name on a form or a label (Gate B)
+ACRONYMS = _words("name-service/acronyms")
+_INITIAL_AND_ACRONYMS_RE = re.compile(r"[A-Z]\.((?:[ \t]+[A-Z]{2,4}){1,3})")
 # the words of buttons and links that the model takes for a person when two of them stand next to "and" or "or"
 # before a noun ("the Allow and Deny buttons": scores of 0.91 to 0.999 on int8 and fp32, reported in #41). A score
 # threshold does not tell them from a real one-word name, which scored down to 0.40 there. Never a word that is also
@@ -597,12 +606,37 @@ def is_product_name(span: str) -> bool:
 
 def is_no_person(span: str) -> bool:
     """Whether a NAME span is no person: a product name (is_product_name), a word of GREETING_WORDS, of
-    UI_LABEL_WORDS, of RUNNER_WORDS or of NEVER_A_NAME alone, a hook label (is_hook_label) or a path of folder names
-    (is_path_words). Public since 0.9.8: a caller that applies the spans itself drops these, the same rule as the
-    remote path here (#41)."""
+    UI_LABEL_WORDS, of RUNNER_WORDS or of NEVER_A_NAME alone, a hook label (is_hook_label), a path of folder names
+    (is_path_words), a span with a digit, an initial and acronyms, or a greeting phrase (is_greeting_phrase). Public
+    since 0.9.8: a caller that applies the spans itself drops these, the same rule as the remote path here (#41)."""
     word = span.strip().lower()
     return (is_product_name(span) or word in GREETING_WORDS or word in UI_LABEL_WORDS
-            or word in RUNNER_WORDS or word in NEVER_A_NAME or is_hook_label(span) or is_path_words(span))
+            or word in RUNNER_WORDS or word in NEVER_A_NAME or is_hook_label(span) or is_path_words(span)
+            or _has_digit(span) or _is_initial_and_acronyms(span) or is_greeting_phrase(span))
+
+
+def _has_digit(span: str) -> bool:
+    """A code with a digit and no word of three letters or a capital and a small letter ("Li2") is no person ("D8",
+    "(D8)", a decision label; #93). A
+    name with a digit next to it stays: the span is widened to whole words, so "Schmidt2" or "Schmidt¹" (a footnote)
+    holds the name (Gate B)."""
+    return any(c.isdigit() for c in span) and not _WORD_OF_3_RE.search(span)
+
+
+_WORD_OF_3_RE = re.compile(r"[^\W\d_]{3}|[A-Z][a-z]")
+
+
+def _is_initial_and_acronyms(span: str) -> bool:
+    m = _INITIAL_AND_ACRONYMS_RE.fullmatch(span.strip())
+    return m is not None and all(w.lower() in ACRONYMS for w in m.group(1).split())
+
+
+def is_greeting_phrase(span: str) -> bool:
+    """Whether every word of a NAME span is a greeting or a word that addresses a group, and one is a greeting
+    ("Hallo Ihr Lieben", "Liebe alle"). A comma or a mark after a word does not count. Public since 0.9.22 (#95)."""
+    words = [w.strip(",.!?:;") for w in span.lower().split()]
+    return (any(w in GREETING_WORDS for w in words)
+            and all(w in GREETING_WORDS or w in GREETING_ADDRESS_WORDS for w in words))
 
 
 def is_hook_label(span: str) -> bool:

@@ -1,9 +1,9 @@
-"""/maisecrets:ner: one source of names for tool results (setting `remote_detector`, maisecrets/remote_layer.py).
+"""/maisecrets ner: one source of names for tool results (setting `remote_detector`, maisecrets/remote_layer.py).
 
-    /maisecrets:ner local          the service on this computer, http://127.0.0.1:8765/ (`on` is the same)
-    /maisecrets:ner url URL        a service of the team on a private network
-    /maisecrets:ner off            the rules alone
-    /maisecrets:ner                which source is set, and whether it answers
+    /maisecrets ner local          the service on this computer, http://127.0.0.1:8765/ (`on` is the same)
+    /maisecrets ner url URL        a service of the team on a private network
+    /maisecrets ner off            the rules alone
+    /maisecrets ner                which source is set, and whether it answers
 
 Codex: `maisecrets: ner local` (or url URL, off) alone as the prompt. The change is a setting, so only a prompt the
 person typed makes it (settings.py), with the limits of C22 (docs/THREAT-MODEL.md); a tool call that carries the
@@ -48,10 +48,11 @@ _NER_RE = re.compile(r"\A\s*(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:(off|loca
                      r"fallback\s+(?:(off)|url\s+(\S+))|updates\s+(on|off)|"
                      r"unavailable\s+(rules|withhold))\s*\Z", re.I)
 # the same sentence anywhere in a tool call (settings.IN_A_COMMAND_RE)
-IN_A_COMMAND = (r"(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?:off|local|on|url|gateway|fallback|updates|"
+from .forms import SLASH as _SLASH  # noqa: E402 - each slash form of a command (the entry forms too)
+IN_A_COMMAND = (r"(?:" + _SLASH + r"ner|maisecrets:\s*ner)\s+(?:off|local|on|url|gateway|fallback|updates|"
                 r"unavailable)\b|"
                 # a server name alone: one word that ends the quoted prompt or the command
-                r"(?:/maisecrets:ner|maisecrets:\s*ner)\s+(?!all\b)[\w.-]+(?=\s*(?:[\"'`]|\Z))")
+                r"(?:" + _SLASH + r"ner|maisecrets:\s*ner)\s+(?!all\b)[\w.-]+(?=\s*(?:[\"'`]|\Z))")
 
 
 # an argument the hook does not know: the slash form with any text, the Codex form with one word only (a sentence that
@@ -70,7 +71,7 @@ def parse(prompt) -> str | None:
     """`off`, `local`, `url:<URL>`, `gateway:<URL or server name>`, `fallback:off`, `fallback:url:<URL>`, `updates:on`,
     `updates:off`, `unavailable:<choice>` when the whole prompt is a change of the setting,
     `other:<text>` for an argument the command does not know (a server name, or an answer with the valid forms), else
-    None (no argument, `all`, or no /maisecrets:ner prompt)."""
+    None (no argument, `all`, or no /maisecrets ner prompt)."""
     m = _NER_RE.match(prompt) if isinstance(prompt, str) else None
     if not m:
         other = _OTHER_RE.match(prompt) if isinstance(prompt, str) else None
@@ -165,12 +166,12 @@ def updated(current, word: str) -> dict:
     return new
 
 
-FORMS = ("local", "url URL", "gateway URL", "gateway NAME (a server of /maisecrets:sref)", "off", "all",
+FORMS = ("local", "url URL", "gateway URL", "gateway NAME (a server of /maisecrets sref)", "off", "all",
          "unavailable rules|withhold", "updates on|off", "fallback url URL|off")
 
 
 def _servers() -> dict:
-    """name -> URL of the MCP servers of the person's configuration (the list of /maisecrets:sref), or {}."""
+    """name -> URL of the MCP servers of the person's configuration (the list of /maisecrets sref), or {}."""
     from . import vault_refs
     try:
         servers = vault_refs.user_servers()
@@ -185,16 +186,12 @@ _MISSING = {"gateway": ("a server name or URL", "NAME"), "url": ("the address of
             "fallback": ("url URL or off", "url URL")}
 
 
-def _quoted(text: str) -> str:
-    return '"' + "".join(c if c.isprintable() else "?" for c in text)[:60] + '"'
-
-
 def typed_word(word: str, slash: bool = True) -> tuple:
     """(the word to write, "") or (None, the answer) for a word of parse. A server name of the person's
     configuration becomes `gateway:<its URL>`: after `gateway`, or alone when it is no keyword. Any other argument is
     answered with the valid forms, and nothing changes."""
-    cmd = "/maisecrets:ner" if slash else "maisecrets: ner"
-    sref = "/maisecrets:sref" if slash else "maisecrets: sref"
+    cmd = "/maisecrets ner" if slash else "maisecrets: ner"
+    sref = "/maisecrets sref" if slash else "maisecrets: sref"
     if word.startswith("gateway:") and "://" not in word:
         name = word[len("gateway:"):]
         url = _servers().get(name)
@@ -202,7 +199,8 @@ def typed_word(word: str, slash: bool = True) -> tuple:
             return "gateway:" + str(url), ""
         names = sorted(n for n in _servers() if re.fullmatch(r"[\w.-]{1,64}", n))[:10]
         have = f" (it has: {', '.join(names)})" if names else ""
-        return None, (f"maisecrets: your configuration has no MCP server named {_quoted(name)}{have}; {sref} lists "
+        # never the typed name: only the names of the configuration are named
+        return None, (f"maisecrets: your configuration has no MCP server of that name{have}; {sref} lists "
                       f"them, and {cmd} gateway URL takes an address. Nothing was changed.")
     if word.startswith("other:"):
         text = word[len("other:"):]
@@ -218,8 +216,8 @@ def typed_word(word: str, slash: bool = True) -> tuple:
             url = _servers().get(text)
             if url:
                 return "gateway:" + str(url), ""
-        forms = ", ".join(f.replace("/maisecrets:sref", sref) for f in FORMS)
-        return None, (f"maisecrets: the command does not know {_quoted(text)}. {cmd} takes: {forms}; without an "
+        forms = ", ".join(f.replace("/maisecrets sref", sref) for f in FORMS)
+        return None, (f"maisecrets: the command does not know this argument. {cmd} takes: {forms}; without an "
                       "argument it shows the source. Nothing was changed.")
     return word, ""
 
@@ -268,19 +266,19 @@ def unavailable_line(conf) -> str:
     """One line: what a tool result gets while the service gives no answer."""
     if isinstance(conf, dict) and conf.get("unavailable") == "withhold":
         return ("While the name service gives no answer, maisecrets withholds the tool result from the AI, and your "
-                "screen names the reason. /maisecrets:ner unavailable rules lets the rules alone mask it.")
+                "screen names the reason. /maisecrets ner unavailable rules lets the rules alone mask it.")
     return ("While the name service gives no answer, the rules alone mask a tool result, and your screen shows "
-            "'names not checked' with the reason. /maisecrets:ner unavailable withhold keeps such a result from "
+            "'names not checked' with the reason. /maisecrets ner unavailable withhold keeps such a result from "
             "the AI.")
 
 
 def updates_line(conf) -> str:
     """One line: whether the image of the local service follows the plugin."""
     if isinstance(conf, dict) and conf.get("auto_update") is False:
-        return ("The image of the local service stays as it is (updates off). /maisecrets:ner updates on lets it "
+        return ("The image of the local service stays as it is (updates off). /maisecrets ner updates on lets it "
                 "follow the plugin again.")
     return ("The image of the local service follows the plugin: a session start gives it the image this version "
-            "pins. /maisecrets:ner updates off keeps it as it is.")
+            "pins. /maisecrets ner updates off keeps it as it is.")
 
 
 def _tag(image: str) -> str:
@@ -313,16 +311,16 @@ def image_state(conf, tool: str) -> tuple:
 
 
 def image_line(conf, tool: str, state: tuple | None = None) -> str:
-    """One line for /maisecrets:ner all: the image of the container `ner` against the one this version pins."""
+    """One line for /maisecrets ner all: the image of the container `ner` against the one this version pins."""
     kind, have, pinned = state if state is not None else image_state(conf, tool)
     return {
         "": "",
         "pinned": f"image: {pinned}, the one this version pins",
         "newer": f"image: {have}; this version pins {pinned}, an older one, so it stays",
         "not_ours": (f"image: {have}; this version pins {pinned}, but the container was not set up by maisecrets, so "
-                     f"it is not updated. To change that: {os.path.basename(tool)} rm -f ner, then /maisecrets:ner "
+                     f"it is not updated. To change that: {os.path.basename(tool)} rm -f ner, then /maisecrets ner "
                      "again."),
-        "updates_off": f"image: {have}; this version pins {pinned} (updates off: /maisecrets:ner updates on)",
+        "updates_off": f"image: {have}; this version pins {pinned} (updates off: /maisecrets ner updates on)",
         "failed": (f"image: {have}; a container of {pinned} did not start, so the old one runs on. maisecrets tries "
                    "again in a day."),
         "behind": f"image: {have}; this version pins {pinned}, and the next session start updates it",
@@ -360,7 +358,7 @@ def _address_refused(url: str, allow_network: bool, timeout: float) -> str:
         return "its name resolves to another computer, and allow_network is not set"
     if parts.scheme.lower() == "http" and not all(remote._private(a) for a in addrs):
         return ("plain http to an address that is not private is not used; use https or a private address "
-                "(/maisecrets:ner url URL)")
+                "(/maisecrets ner url URL)")
     return ""
 
 
@@ -621,7 +619,7 @@ def follow_pin(tool: str, conf=None) -> str:
     the old one runs (a failed pull changes nothing), stop the old one and rename it to ner-prev, run a new one with
     the same secret, and only when the new one proves the secret is the old one removed with its image. Otherwise the
     new one goes, ner-prev is renamed back and started, and this pin waits BACK_OFF_S. The setting
-    `"auto_update": false` (/maisecrets:ner updates off) keeps the image. A container started by hand, or one with
+    `"auto_update": false` (/maisecrets ner updates off) keeps the image. A container started by hand, or one with
     another image, is never replaced. Gives what it did, for the tests and the probes."""
     from . import ner_secret
     from .home import LockTimeout, _Lock
@@ -697,7 +695,7 @@ def start_local(cfg: dict) -> tuple[int, list]:
             return _start_local(cfg, tool)
     except LockTimeout:
         return 1, ["maisecrets is updating the image of the local service right now (a download can take a few "
-                   "minutes). Run /maisecrets:ner again in a minute."]
+                   "minutes). Run /maisecrets ner again in a minute."]
 
 
 # the person's typed choice `ner local` starts the service at once, in the background, by the start of
@@ -705,9 +703,9 @@ def start_local(cfg: dict) -> tuple[int, list]:
 # session never starts a download (the session start only starts a container that exists, follow_pin)
 TYPED_ROUTES = ("typed prompt", "slash command", "settings pane")
 START_NOTE = ("maisecrets: I am loading the name service mcpgate/ner (about 690 MB, 1 to 2 GB on disk) and starting "
-              "it on 127.0.0.1:8765 only. That takes a few minutes. To turn it off: /maisecrets:ner off (a download "
+              "it on 127.0.0.1:8765 only. That takes a few minutes. To turn it off: /maisecrets ner off (a download "
               "that runs ends by itself first).")
-STILL_RUNS = ("The start of the name service still runs and ends by itself; send /maisecrets:ner off again after "
+STILL_RUNS = ("The start of the name service still runs and ends by itself; send /maisecrets ner off again after "
               "it.")
 START_LOG = "ner-start.log"
 # the test suite sets it (tests/_isolate.py): a test that types `ner local` never starts a real container (docker may
@@ -775,7 +773,7 @@ def _start_local(cfg: dict, tool: str) -> tuple[int, list]:
         if ner_secret.secret_of(backend, ep) and ner_secret.container_of(ep) == cid:
             return 0, ["started: the container ner that maisecrets set up; it proves its secret before each text."]
         return 0, ["started: the container ner, which was not set up by maisecrets, so it is not checked. To have it "
-                   f"checked: {os.path.basename(tool)} rm -f ner, then /maisecrets:ner again."]
+                   f"checked: {os.path.basename(tool)} rm -f ner, then /maisecrets ner again."]
     secret = ner_secret.new_secret()
     rc, cid, err = _run_container(tool, secret, SECRET_IMAGE)
     if rc != 0:
@@ -791,16 +789,16 @@ def _start_local(cfg: dict, tool: str) -> tuple[int, list]:
 
 
 def report(conf, wait: float = 0.0, facts: dict | None = None) -> tuple[int, list]:
-    """(exit code, lines) for /maisecrets:ner all: the source, whether it answers (waiting up to `wait` seconds), and
+    """(exit code, lines) for /maisecrets ner all: the source, whether it answers (waiting up to `wait` seconds), and
     for the local source that does not answer the command that starts it. The exit code is 0 when the source answers
     or is off, 3 when the local service needs a start, 4 when the gateway source needs a login with the name scope
-    (commands/ner.md runs it after the person's /maisecrets:ner gateway URL), 1 otherwise. `facts` gets what was
+    (commands/ner.md runs it after the person's /maisecrets ner gateway URL), 1 otherwise. `facts` gets what was
     checked, for the short view (ner_view.py)."""
     facts = facts if facts is not None else {}
     lines = [describe(conf)]
     url = conf.get("url") if isinstance(conf, dict) else None
     if not url:
-        lines.append("To turn it on: /maisecrets:ner local (the service on this computer), url URL (a service of your "
+        lines.append("To turn it on: /maisecrets ner local (the service on this computer), url URL (a service of your "
                      "team) or gateway URL (the gateway of your login), as your own prompt.")
         return 0, lines
     lines.append(scope(conf))
@@ -826,18 +824,18 @@ def report(conf, wait: float = 0.0, facts: dict | None = None) -> tuple[int, lis
         elif not ner_secret.secret_of(make_backend_for(conf), ep):
             facts["proof"] = "lost"
             lines.append("the secret maisecrets kept for the container cannot be read, so the container gets no text. "
-                         "Remove it (docker rm -f ner) and run /maisecrets:ner again.")
+                         "Remove it (docker rm -f ner) and run /maisecrets ner again.")
             return 1, lines
         elif not _info(conf).get("client_secret"):
             # an image before the secret check: it gets no text, and the fault is the image, not an impostor
             facts["proof"] = "old"
             lines.append(f"the container cannot prove its secret: its image is older than {FIRST_SECRET_IMAGE}. "
-                         "Remove it (docker rm -f ner) and run /maisecrets:ner again; until then it gets no text.")
+                         "Remove it (docker rm -f ner) and run /maisecrets ner again; until then it gets no text.")
             return 1, lines
         elif not _proves(conf):
             facts["proof"] = "impostor"
             lines.append("the service on 127.0.0.1:8765 is not the container that maisecrets started: it cannot prove "
-                         "the secret, so it gets no text. Stop it, and run /maisecrets:ner again.")
+                         "the secret, so it gets no text. Stop it, and run /maisecrets ner again.")
             return 1, lines
         else:
             facts["proof"] = "ok"
@@ -878,11 +876,11 @@ def report(conf, wait: float = 0.0, facts: dict | None = None) -> tuple[int, lis
             return 1, lines
         if tool:
             # exit code 3: only the person's typed `ner local` starts it (commands/ner.md)
-            lines.append(f"start: /maisecrets:ner local (with {os.path.basename(tool)})")
+            lines.append(f"start: /maisecrets ner local (with {os.path.basename(tool)})")
             return 3, lines
         lines.append("Neither docker nor podman is installed. Install one of them (Docker Desktop, OrbStack, Podman), "
-                     f"then run: {START}. Or use a service of your team: /maisecrets:ner url URL. Or turn it off: "
-                     "/maisecrets:ner off.")
+                     f"then run: {START}. Or use a service of your team: /maisecrets ner url URL. Or turn it off: "
+                     "/maisecrets ner off.")
     elif not remote.is_local(str(url)):
         lines.append("Check the address with the team that runs the service.")
     return 1, lines
@@ -939,7 +937,7 @@ SENT_NOTE = ("The text of each tool result and of each prompt you type goes to {
              "rules and your stored values replaced by filler.")
 LOCAL_NOTE = "It checks each tool result and each prompt you type, on this computer."
 PROMPTS_NOTE = ("maisecrets: the name service you set now checks your prompts too (the findings of the rules "
-                "and your stored values replaced). /maisecrets:ner shows it.")
+                "and your stored values replaced). /maisecrets ner shows it.")
 PROMPTS_NOTE_MARK = "ner-prompts-note"
 
 
@@ -967,12 +965,12 @@ def prompts_note(conf, home=None) -> str | None:
 
 # --------------------------------------------------------- the down note --
 # a line for the person (the hook's systemMessage), once per session; the model gets nothing of it
-DOWN_NOTE = ("maisecrets: the name service of /maisecrets:ner gave no result ({why}), so the rules alone masked this "
+DOWN_NOTE = ("maisecrets: the name service of /maisecrets ner gave no result ({why}), so the rules alone masked this "
              "tool result; names that only the service finds stand in it as they are.")
 NOT_OURS_NOTE = ("maisecrets: the service on 127.0.0.1:8765 is not the container maisecrets started, so no text went "
-                 "to it and the rules alone masked this tool result. /maisecrets:ner starts the right container.")
+                 "to it and the rules alone masked this tool result. /maisecrets ner starts the right container.")
 FALLBACK_NOTE = ("maisecrets: the name service of this computer did not answer, so the fallback set with "
-                 "/maisecrets:ner checked this tool result. Tool results of this session go there while the local one "
+                 "/maisecrets ner checked this tool result. Tool results of this session go there while the local one "
                  "is down; your prompts never do.")
 # Codex has no slash commands for plugins: the same notes with the prompt form, sent alone as the person's prompt
 DOWN_NOTE_CODEX = ("maisecrets: the name service gave no result ({why}), so the rules alone masked this tool result; "

@@ -57,7 +57,7 @@ def describe_backend(backend) -> str:
 
 def intro_line(backend, names: bool = True, codex: bool = False) -> str:
     """The first session start, for a person: what maisecrets does and where values stay. The
-    paths, the backend switch and the file names are in /maisecrets:status (UX review,
+    paths, the backend switch and the file names are in /maisecrets status (UX review,
     2026-09-27: JSON and file paths at the first start told a non-developer to change a setting
     their IT owns)."""
     where = {
@@ -73,7 +73,7 @@ def intro_line(backend, names: bool = True, codex: bool = False) -> str:
             "Text without a placeholder the AI reads as it is."
             + ("" if names else " It finds a name only after a label or on your term list. \U0001F4A1 To find names "
                "too, turn on NER" + (" (a local model, needs Docker; README, \"Names from a service\")." if codex else
-                                     ": /maisecrets:ner local (a local model, needs Docker).")))
+                                     ": /maisecrets ner local (a local model, needs Docker).")))
 
 
 FP_KEY_ENTRY = "_maisecrets_fpkey"   # backend key that holds the fingerprint key (32 random bytes, hex)
@@ -120,7 +120,7 @@ class Entry:
     def from_meta(cls, meta: dict) -> "Entry":
         """An Entry from an index record, ignoring fields this version does not know. expire wrote
         `purged_at` into the index while Entry had no such field, so every read of an expired
-        entry raised TypeError: /maisecrets:status and list failed, and a value pasted again after
+        entry raised TypeError: /maisecrets status and list failed, and a value pasted again after
         it expired blocked the prompt (field report, 2026-09-27). A record written by a newer
         version must not break an older one either."""
         names = {f.name for f in fields(cls)}
@@ -1389,9 +1389,11 @@ class Vault:
                     "(max_resolves_per_hour))"]
         return []
 
-    def _record(self, key: str, session: str | None, tool: str, context: str) -> bool:
+    def _record(self, key: str, session: str | None, tool: str, context: str, audit_id: str | None = None) -> bool:
         """One audit line per resolve. False when the line could not be written: the README
-        promises the line, so a resolve without it does not happen (review, 2026-09-26)."""
+        promises the line, so a resolve without it does not happen (review, 2026-09-26). audit_id: the gateway's
+        audit id of a Sensitive Reference's release, a sixth field only with the charset of
+        sref_client.AUDIT_ID_RE."""
         now = time.time()
         self._index.setdefault("resolves", []).append({"ts": now, "session": session, "key": key})
         try:
@@ -1405,7 +1407,11 @@ class Vault:
                     from .sref_client import SREF_RE
                     context = SREF_RE.sub(lambda m: f"⟦sref:{m.group('kind')}:{m.group('id')[:4]}…⟧", context)
                 ctx = context.replace("\n", " ").replace("\t", " ")[:160]
-                f.write(f"{stamp}\t{(session or '-')[:8]}\t{key}\t{tool}\t{ctx}\n")
+                gid = ""
+                if audit_id is not None:
+                    from .sref_client import AUDIT_ID_RE
+                    gid = f"\t{audit_id}" if isinstance(audit_id, str) and AUDIT_ID_RE.fullmatch(audit_id) else ""
+                f.write(f"{stamp}\t{(session or '-')[:8]}\t{key}\t{tool}\t{ctx}{gid}\n")
             self._rotate_audit(path)
             return True
         except OSError:
@@ -1424,14 +1430,16 @@ class Vault:
             pass
 
     @_mutating
-    def record_server(self, keys: list[str], session: str | None, tool: str, context: str) -> str:
+    def record_server(self, keys: list[str], session: str | None, tool: str, context: str,
+                      audit_ids: dict | None = None) -> str:
         """Values a server gave (vault_refs.py), named `KEY@host`: the limiter for all of them together, then one
-        audit line each. They have no entry, so the session rule of the store does not apply; vault_refs does it."""
+        audit line each. They have no entry, so the session rule of the store does not apply; vault_refs does it.
+        audit_ids: `KEY@host` -> the gateway's audit id of its release (Sensitive References), written in its line."""
         failed = self._limit_all(keys, session)
         if failed:
             return failed[0]
         for key in dict.fromkeys(keys):
-            if not self._record(key, session, tool, context):
+            if not self._record(key, session, tool, context, (audit_ids or {}).get(key)):
                 return "audit log not writable"
         self._save_index()
         return "ok"

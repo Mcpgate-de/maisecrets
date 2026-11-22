@@ -1,4 +1,4 @@
-"""Whether the name source of /maisecrets:ner can be used, said to the person once, with the cause and the step.
+"""Whether the name source of /maisecrets ner can be used, said to the person once, with the cause and the step.
 
 A source that is set and cannot be asked leaves the names of tool results to the rules. Before 0.9.16 the person saw
 a grey line under each such result ("names not checked: the name service cannot be asked"), the same words for every
@@ -7,7 +7,7 @@ cause; a gateway login that the gateway had ended went on like that for hours (f
 - the session start checks the source cheaply (the gateway: a login in the store, no network; a url or the local
   container: an answer within a second) and names a source that cannot be used in its first line;
 - a tool result names it once per session, when the state first turns bad, and again only when the cause changes;
-- /maisecrets:status and the panel show a `names` note (a warn: secrets are still protected).
+- /maisecrets status and the panel show a `names` note (a warn: secrets are still protected).
 
 What the AI is told at each unchecked result does not change (remote_layer.unchecked_context).
 """
@@ -21,18 +21,18 @@ from .home import HOME
 
 # cause -> (fact, step). {name}: the MCP server of the gateway in the person's configuration
 CAUSES = {
-    "login_ended": ("the gateway ended the login", "/maisecrets:sref login {name}"),
-    "renewal_uncertain": ("the last renewal did not finish; log in again", "/maisecrets:sref login {name}"),
-    "no_login": ("not logged in at the gateway", "/maisecrets:sref login {name}"),
-    "no_scope": ("the login lacks the name scope", "/maisecrets:sref login {name}"),
-    "no_ner": ("the gateway offers no name detection", "/maisecrets:ner"),
-    "local_down": ("the local container is not running", "/maisecrets:ner local"),
-    "not_ours": ("the local service is not the container maisecrets started", "/maisecrets:ner local"),
-    "no_answer": ("the name service does not answer", "/maisecrets:ner"),
-    "slow": ("the name service answers too slowly", "/maisecrets:ner"),
-    "busy": ("the gateway's name service is busy", "/maisecrets:ner"),
-    "rate_limited": ("the gateway's limit per minute was reached", "/maisecrets:ner"),
-    "other": ("the name service cannot be used", "/maisecrets:ner"),
+    "login_ended": ("the gateway ended the login", "/maisecrets sref login {name}"),
+    "renewal_uncertain": ("the last renewal did not finish; log in again", "/maisecrets sref login {name}"),
+    "no_login": ("not logged in at the gateway", "/maisecrets sref login {name}"),
+    "no_scope": ("the login lacks the name scope", "/maisecrets sref login {name}"),
+    "no_ner": ("the gateway offers no name detection", "/maisecrets ner"),
+    "local_down": ("the local container is not running", "/maisecrets ner local"),
+    "not_ours": ("the local service is not the container maisecrets started", "/maisecrets ner local"),
+    "no_answer": ("the name service does not answer", "/maisecrets ner"),
+    "slow": ("the name service answers too slowly", "/maisecrets ner"),
+    "busy": ("the gateway's name service is busy", "/maisecrets ner"),
+    "rate_limited": ("the gateway's limit per minute was reached", "/maisecrets ner"),
+    "other": ("the name service cannot be used", "/maisecrets ner"),
 }
 STATE = HOME / "ner-state.json"          # the last cause of this computer, for the status; gone when names work
 _WARNED = HOME / "ner-warned.json"       # session digest -> the cause the person last heard of
@@ -89,7 +89,8 @@ def fact_and_step(cause: str, conf: dict, codex: bool = False) -> tuple:
     fact, step = CAUSES.get(cause, CAUSES["other"])
     step = step.format(name=server_name(conf) if "{name}" in step else "").strip()
     if codex:
-        step = step.replace("/maisecrets:", "maisecrets: ")
+        from .forms import codex as _codex
+        step = _codex(step)
     return fact, step
 
 
@@ -317,7 +318,7 @@ def result_line(cfg: dict, payload: dict, reason: str, codex: bool = False) -> s
 
 
 def verdict(cfg: dict, backend=None):
-    """The `names` check of /maisecrets:status and the panel: None without a source; a warn with the cause and the
+    """The `names` check of /maisecrets status and the panel: None without a source; a warn with the cause and the
     step when the source cannot be used; ok otherwise. Never a FAIL: the secrets are still protected."""
     from .status_verdict import Check
     conf = _conf(cfg)
