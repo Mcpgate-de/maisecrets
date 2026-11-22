@@ -424,7 +424,7 @@ class SrefServer:
             """deposit_any_field: a listed tool, and a placeholder whose type prefix the gateway lists"""
             ph = v.get("placeholder")
             return body.get("tool") in free.get("tools", ()) and isinstance(ph, str) \
-                and D.class_of(ph[1:-1].split(":", 1)[0]) in free.get("types", ())
+                and (free.get("all_types") is True or D.class_of(ph[1:-1].split(":", 1)[0]) in free.get("types", ()))
         if not all(any(v.get("path") in t["paths"] for t in targets) or personal(v) for v in values):
             return 403, {"error": "not_a_target"}
         got = []

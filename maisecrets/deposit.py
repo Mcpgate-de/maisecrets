@@ -288,7 +288,9 @@ def any_field(raw: object) -> dict | None:
         acts = {}
     actions = {t: sorted(set(names)) for t, names in acts.items()
                if isinstance(names, list) and len(names) <= MAX_TARGETS and all(isinstance(a, str) for a in names)}
-    return {"types": sorted(ANY_FIELD_TYPES.intersection(types)), "tools": sorted(set(tools)), "actions": actions}
+    # all_types: only the JSON boolean true lets every class through (a string "true", 1 or null keeps the 9 types)
+    return {"types": sorted(ANY_FIELD_TYPES.intersection(types)), "tools": sorted(set(tools)), "actions": actions,
+            "all_types": raw.get("all_types") is True}
 
 
 ACTION_LINE = "this action of the connector does not take a stored value; it was not sent"
@@ -308,21 +310,25 @@ def class_of(key: object) -> str | None:
     return m.group(1) if m else None
 
 
-def any_field_class(vault, placeholder: str) -> str | None:
+def any_field_class(vault, placeholder: str, every: bool = False) -> str | None:
     """The class of a placeholder for deposit_any_field: the type of its vault entry, never text the model wrote. None
-    (strict) when the entry is missing, purged or weak (a word, the plugin's own name, a model's finding), comes from an own rule,
-    a term, an import or a model, was marked strict by a later own rule or import, or when its stored type differs from
-    the prefix of the key."""
+    (strict) when the entry is missing, purged or weak (a word, the plugin's own name, a model's finding), or when its
+    stored type differs from the prefix of the key. Without `every` (the gateway's all_types) also None for an own
+    rule, a term, an import, a model's finding and an entry with the strict mark of a later own rule or import."""
     key = key_of(placeholder)
     meta = vault._index.get("entries", {}).get(key) if key else None
     if not isinstance(meta, dict) or meta.get("purged") or meta.get("weak"):
         return None
+    kind = meta.get("type")
+    if not isinstance(kind, str) or kind != class_of(key):
+        return None
+    if every:
+        return kind
     if meta.get("strict"):
         return None
     if str(meta.get("kind", "")).startswith(STRICT_KINDS):
         return None
-    kind = meta.get("type")
-    return kind if isinstance(kind, str) and kind == class_of(key) else None
+    return kind
 
 
 def _in_a_key(node: object) -> bool:
@@ -572,13 +578,15 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
     free = dep.get("deposit_any_field") or {}
     listed_tool = name in free.get("tools", ())
     free_tool = listed_tool and listed_action(free, name, tool_input)
+    every = free.get("all_types") is True                  # every class, on a listed tool and action only
     if not places or not (targets or listed_tool):
         raise Refused(f"{host} takes no deposit for this call of {name}")
     loose = set()                      # the keys that stand outside a target's paths, by their class
     for pointer, segs, _a, _b, ph in places:
         if any(_path_matches(p, segs) for t in targets for p in t["paths"]):
             continue
-        if listed_tool and any_field_class(vault, ph) in free.get("types", ()):
+        cls = any_field_class(vault, ph, every)
+        if listed_tool and cls is not None and (every or cls in free.get("types", ())):
             if not free_tool:          # an action that actions[name] does not list: refused before any deposit
                 raise Refused(ACTION_LINE)
             loose.add(key_of(ph))

@@ -588,7 +588,7 @@ class AnyFieldShapeTests(unittest.TestCase):
         wide = ["EMAIL", "SECRET", "CARD", "ID_NUMBER", "FUTURE_TYPE", "PHONE"]
         got = D.fields(self.block({"types": wide, "tools": ["b", ANY_TOOL]}), self.ORIGIN)
         self.assertEqual(got["deposit_any_field"], {"types": ["EMAIL", "PHONE"], "tools": ["b", ANY_TOOL],
-                                                    "actions": {}})
+                                                    "actions": {}, "all_types": False})
         self.assertEqual(D.fields(got, self.ORIGIN), got, "a kept copy passes the same check")
 
     def test_missing_or_malformed_actions_allow_no_action(self):
@@ -650,8 +650,11 @@ class AnyFieldShapeTests(unittest.TestCase):
 class AnyFieldTests(_Base):
     """Section 6.1.5 with deposit_any_field: a personal placeholder in any string value of a listed tool's call."""
 
-    def free(self, types: list | None = None, tools: list | None = None, actions: object = "default") -> None:
+    def free(self, types: list | None = None, tools: list | None = None, actions: object = "default",
+             all_types: object = "absent") -> None:
         free = {"types": types or sorted(D.ANY_FIELD_TYPES), "tools": tools or [ANY_TOOL]}
+        if all_types != "absent":
+            free["all_types"] = all_types
         if actions == "default":
             actions = {t: ["create_issue", "create_webhook"] for t in free["tools"]}
         if actions is not None:
@@ -727,6 +730,62 @@ class AnyFieldTests(_Base):
         self.bind()
         self.assert_action_refused(self.pre({**self.issue(self.put(MAIL, "EMAIL", "email")),
                                              "action": ["create_issue"]}))
+
+    def test_all_types_lets_every_class_go_on_a_listed_action(self):
+        self.free(all_types=True)
+        self.bind()
+        own = self.put("own." + MAIL, "EMAIL", "user:my-mails")
+        hso = self.pre(self.issue("key " + self.ref + " owner " + own))
+        self.assertRegex(hso["updatedInput"]["params"]["description"],
+                         r"^key msdep1_[A-Za-z0-9_-]{65} owner msdep1_[A-Za-z0-9_-]{65}$")
+        self.assertEqual(sorted(v["value"] for v in self.srv.deposit_requests[0]["values"]),
+                         sorted([VALUE, "own." + MAIL]))
+
+    def test_all_types_other_than_true_keeps_a_secret_strict(self):
+        self.bind()
+        for at in ("absent", "true", False, 1, None):
+            with self.subTest(all_types=at):
+                self.free(all_types=at)
+                cache = HOME / "sref" / "deposit-metadata.json"
+                if cache.exists():
+                    cache.unlink()
+                self.assert_refused(self.pre(self.issue(self.ref), call="t-" + str(at)),
+                                    "takes no deposit at /params/description")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_all_types_keeps_the_tool_list(self):
+        self.free(tools=["slack_write_actions"], all_types=True)
+        self.bind()
+        self.assert_refused(self.pre(self.issue(self.ref)), "takes no deposit for this call")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_all_types_keeps_the_action_list(self):
+        self.free(all_types=True)
+        self.bind()
+        self.assert_action_refused(self.pre({**self.issue(self.ref), "action": "close_issue"}))
+
+    def test_all_types_keeps_a_weak_entry_strict(self):
+        self.free(all_types=True)
+        self.bind()
+        ref = self.put("weak." + MAIL, "EMAIL", "email")
+        self.change(ref, weak=True)
+        self.assert_refused(self.pre(self.issue(ref)), "takes no deposit at /params/description")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_all_types_keeps_a_value_with_a_gateway_reference_strict(self):
+        self.free(all_types=True)
+        self.bind()
+        ref = self.put(OPEN + "sref:gw:anyfield-synthetic-reference" + CLOSE, "NAME", "name")
+        self.assert_refused(self.pre(self.issue(ref)), "holds a reference of a gateway")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_all_types_keeps_the_type_check(self):
+        self.free(all_types=True)
+        self.bind()
+        ref = self.put(VALUE + "-other", "SECRET")
+        self.change(ref, type="EMAIL")
+        self.assert_refused(self.pre(self.issue(ref)), "takes no deposit at /params/description")
+        self.assertNotIn("deposit 127.0.0.1", self.audit(), "no value left the computer")
 
     def test_without_the_field_a_personal_value_stays_strict(self):
         self.bind()

@@ -348,14 +348,18 @@ second gateway implements it, decision D12). The client side is `maisecrets/depo
   hour (`sref/deposit-metadata.json` in the maisecrets home, no value). The sref login asks for `deposit_scope` when
   the gateway names usable fields; an older login is refused before any value leaves, with a hint to log in again.
 - **Any field.** The metadata can name `deposit_any_field`:
-  `{"types": [...], "tools": [...], "actions": {"<tool>": ["<action>", ...]}}`. A placeholder whose class is in the
+  `{"types": [...], "tools": [...], "actions": {"<tool>": ["<action>", ...]}, "all_types": true}` (`all_types`
+  optional). A placeholder whose class is in the
   intersection of maisecrets' own personal types (`deposit.ANY_FIELD_TYPES`: ADDRESS, BIRTH_DATE, EMAIL, IBAN, IP,
   IPV6, NAME, PHONE, USERNAME) and the gateway's `types` may stand in any string value of a call of a tool in `tools`
   (the name after the exact prefix of the bound connector) whose `action` argument is a string that `actions[tool]`
   lists. Without `actions`, with `actions` that is no object, without an entry for the tool, with an entry that is
   no list of strings, or without a string `action`, no personal value goes outside a target's paths. A listed tool
   with an unlisted action is refused before the deposit, with the line "this action of the connector does not take
-  a stored value; it was not sent". A field of a wrong shape is ignored, and the targets still apply. Each
+  a stored value; it was not sent". When `all_types` is the JSON boolean true (no other value), every class passes
+  on a listed tool and action, also SECRET, CARD, ID_NUMBER and the strict cases of the next bullet; a weak entry,
+  a value that holds a gateway reference, a vault type that differs from the key, an object key, an unlisted tool or
+  action and malformed `actions` stay out. A field of a wrong shape is ignored, and the targets still apply. Each
   placeholder of a call passes the target rule or this rule, or the call is refused. The request is unchanged.
 - **The class.** The class is the type of the vault entry. It must equal the type before the last `_c<digits>` of
   the key (`deposit.class_of`; a type has 1 to 32 characters of A-Z, 0-9 and `_`). These stay strict: an own rule,

@@ -7,5 +7,5 @@ runner = ["tests/test_deposit.py::AnyFieldShapeTests::test_the_gateway_can_narro
 
 [proof]
 file = "maisecrets/deposit.py"
-find = '''    return {"types": sorted(ANY_FIELD_TYPES.intersection(types)), "tools": sorted(set(tools)), "actions": actions}'''
-replace = '''    return {"types": sorted(set(types)), "tools": sorted(set(tools)), "actions": actions}'''
+find = '''    return {"types": sorted(ANY_FIELD_TYPES.intersection(types)), "tools": sorted(set(tools)), "actions": actions,'''
+replace = '''    return {"types": sorted(set(types)), "tools": sorted(set(tools)), "actions": actions,'''

@@ -178,6 +178,11 @@ a to-do.
   type makes it read the metadata again from the gateway. An added tool or action in the copy passes that check.
   The AI cannot write the maisecrets home folder (C14), and the gateway checks each call again and refuses an action
   that it does not list (`binding_mismatch`); a process of your own user can change the copy (A3).
+- **With `all_types`, a secret can come back through Anthropic's proxy (open point).** When your gateway sets
+  `all_types` to true, every stored value, a secret, a card number and an ID number too, goes as a deposit into
+  any text field of a listed action, such as the text of a ticket. A later read of that ticket through the
+  connector returns the value through the proxy, and the gateway's result scrub finds only known secret formats.
+  maisecrets has no answer for this read-back yet.
 - **Detection can take a secret for a personal value.** If maisecrets types a secret as a phone number or a
   name, the gateway's `deposit_any_field` lets that value go into any text field of a listed tool. A later read
   of that field through the connector passes Anthropic's proxy, and only the gateway's own result scrub masks it.
