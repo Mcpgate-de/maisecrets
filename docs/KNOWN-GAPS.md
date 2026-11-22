@@ -144,9 +144,16 @@ a to-do.
   reference from an earlier run is foreign there.
 - **A claude.ai connector gets no stored value, and its results pass Anthropic first.** The call of a
   claude.ai connector (`mcp__claude_ai_…`, in Claude Code and in Cowork) goes through Anthropic's connector
-  proxy, where TLS ends. So maisecrets refuses a call of such a tool that would carry a stored value; use the
-  gateway's own references through the connector, or add the server directly (`claude mcp add`). The result of
+  proxy, where TLS ends. So maisecrets refuses a call of such a tool that would carry a stored value; add the
+  server directly (`claude mcp add`), or, if the connector is your gateway, use its own references. The result of
   a connector passes the proxy before maisecrets masks it: there only the gateway's own scrubber protects it.
+  In Cowork every MCP server outside your own config counts as a connector, and in a remote session a server
+  of the source `dynamic` does. A server of a plugin or an agent named `claude.ai X` is refused too.
+- **Codex has connectors too, and maisecrets does not detect them.** Codex's `codex_apps` server (ChatGPT app
+  connectors behind OpenAI's apps gateway) relays a call like a claude.ai connector. Codex sends no server source,
+  so maisecrets cannot tell such a call from a direct server, and it puts the stored value in.
+- **A value resolved into a Bash command can reach a connector through that command.** The connector rule reads
+  only the MCP call itself. A command that sends the value on is the destination the person allowed (C16).
 - **A reference in a prompt is admitted as typed by a human**, also when the
   prompt was built from an issue body or a log in a headless run.
 - **A slow rule of your own on Windows can outrun the hook's time limit**
