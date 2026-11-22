@@ -173,6 +173,18 @@ repeats it on each pipeline.
 - **Windows** (not measured): the file is `%USERPROFILE%\.codex\config.toml`, and the helper would run under
   `cmd.exe /C`. Codex vault references are off on Windows in this version.
 
+## Claude Code: which MCP server a tool call goes to
+
+The hook payload of an `mcp__*` tool (PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest) carries
+`mcp_server: {name, source}`. In the schema of Claude Code 2.1.330 `source` is an open set (`sdk`, `plugin`,
+`user`, `project`, `local`, `dynamic`, `managed`, `enterprise`, `claudeai`, `agent`), the config scope of the
+server. A claude.ai connector is a server of type `claudeai-proxy` with the scope `claudeai`, or `dynamic` where
+no plugin brought it; its name is its display name (`claude.ai Slack`), so its tools are `mcp__claude_ai_Slack__…`.
+Its calls go through Anthropic's connector proxy, not from the client to the server. maisecrets therefore puts no
+stored value into such a call (THREAT-MODEL C14, #99): the source `claudeai` names a connector, and so does the
+prefix `mcp__claude_ai_` with any source that is no scope of the client's own config. Read from the binary and its
+hook schema, and used by the tests of the connector binding (C31); the Cowork payload's source is not measured.
+
 ## Sessions, subagents and headless runs
 
 A reference resolves in the session that created it or admitted it. A Claude

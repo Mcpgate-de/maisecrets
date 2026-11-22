@@ -142,6 +142,11 @@ a to-do.
   WebFetch or a subagent prompt they stay text. A subagent shares its parent's session; a
   headless run (`codex exec`, `claude -p`) is a session of its own, so a
   reference from an earlier run is foreign there.
+- **A claude.ai connector gets no stored value, and its results pass Anthropic first.** The call of a
+  claude.ai connector (`mcp__claude_ai_…`, in Claude Code and in Cowork) goes through Anthropic's connector
+  proxy, where TLS ends. So maisecrets refuses a call of such a tool that would carry a stored value; use the
+  gateway's own references through the connector, or add the server directly (`claude mcp add`). The result of
+  a connector passes the proxy before maisecrets masks it: there only the gateway's own scrubber protects it.
 - **A reference in a prompt is admitted as typed by a human**, also when the
   prompt was built from an issue body or a log in a headless run.
 - **A slow rule of your own on Windows can outrun the hook's time limit**
