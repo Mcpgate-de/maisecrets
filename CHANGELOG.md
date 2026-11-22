@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- A command that changes maisecrets (a term, not-a-secret, the demo, a setting or the name service) is the text you type, such as `maisecrets: term add NAME`. Typed as `/maisecrets NAME` in the terminal, it changes nothing, and maisecrets puts that text into your empty input box for your Enter.
+- A command that changes maisecrets (a term, not-a-secret, the demo, a setting or the name service) is the text you type, such as `maisecrets: term add NAME`. Typed as `/maisecrets NAME` in the terminal, it changes nothing, and maisecrets names the text for you to type.
 
 ## [0.9.22] - 2026-11-22
 

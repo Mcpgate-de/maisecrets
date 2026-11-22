@@ -1688,9 +1688,7 @@ async function runOwn($, own, kind, runnable, ownCmd, fill, viaMs = false) {
   }
   if (ownAnswer !== null && typeof ownAnswer.drop === 'string') {
     if (fill) fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
-    // the command route's text form for the person's Enter: runTyped puts it into an empty box
-    const offer = kind === COMMAND_ROUTE && OFFER.test(ownAnswer.offer ?? '') ? ownAnswer.offer : null
-    return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE), ...(offer !== null ? { offer } : {}) }
+    return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE) }
   }
   return { answer: ownAnswer }
 }
@@ -1720,20 +1718,7 @@ const ownText = (line) => ({ text: String(line).replace(/^maisecrets: /, ''), is
 // `composer`, so it is no proof that the person typed it. Python makes no change there that only the person's own
 // prompt may make (C22): it names the prompt to send, which goes through prompt.submit and the prompt hook
 const COMMAND_ROUTE = 'command'
-// the text form of a change only the person's own prompt may make (prompt_commands._command_route, its values
-// masked): one line. The person's Enter on it goes through prompt.submit and the prompt hook as their own prompt
-const OFFER = /^maisecrets: [a-z][^\r\n]{0,500}$/
-const OFFER_NOTE = ' It is in your input box: press Enter to make the change.'
-// the offer goes only into an empty box at the terminal (origin composer), and is never sent
-async function offerToBox($, offer, origin) {
-  if (origin !== 'composer') return false
-  try {
-    if (!(await boxEmpty($))) return false
-    const done = await $.prompt.fill({ text: offer, mode: 'append' })
-    return done?.isFilled === true
-  } catch { return false }
-}
-async function runTyped($, own, origin) {
+async function runTyped($, own) {
   const kind = COMMAND_ROUTE
   if (DEMO_CMD.test(own)) {
     try { demo.delete(await $.session.id()) } catch { /* the step asks */ }
@@ -1755,9 +1740,7 @@ async function runTyped($, own, origin) {
   }
   let done = null
   try { done = await runOwn($, own, kind, RUN_CMD.test(own), true, false) } catch { done = null }
-  if (typeof done?.drop !== 'string') return ownText(OWN_FAILED)
-  if (typeof done.offer === 'string' && await offerToBox($, done.offer, origin)) return ownText(done.drop + OFFER_NOTE)
-  return ownText(done.drop)
+  return ownText(typeof done?.drop === 'string' ? done.drop : OWN_FAILED)
 }
 
 // the panel's send button (a blocked prompt waits): the person's press runs /maisecrets send as the typed command
@@ -1850,7 +1833,7 @@ function registerSettingsPane(on) {
     const spaced = `/maisecrets ${e?.args ?? ''}`
     const typed = meantCommand(spaced)
     // `/maisecrets status`, typed by the person: it runs now, as its colon form (no second Enter)
-    if (typed && RUN_ORIGINS.has(e?.origin?.kind)) return await runTyped($, typed, e.origin.kind)
+    if (typed && RUN_ORIGINS.has(e?.origin?.kind)) return await runTyped($, typed)
     const meant = typed ?? nearCommand(spaced)
     if (meant) {
       const a = await checkFill($, meant, e?.origin?.kind)
@@ -1877,7 +1860,7 @@ export function register(on) {
     const name = typeof e?.command === 'string' && e.command.startsWith('maisecrets:') ? e.command.slice(11) : ''
     if (!HIDDEN.includes(name) || !RUN_ORIGINS.has(e?.origin?.kind)) return next(e)
     const args = typeof e.args === 'string' ? e.args.trim() : ''
-    return await runTyped($, `/maisecrets:${name}${args ? ' ' + args : ''}`, e.origin.kind)
+    return await runTyped($, `/maisecrets:${name}${args ? ' ' + args : ''}`)
   })
   registerDemo(on)
   // the values on the person's screen (the part above): one hooks module per plugin, so it registers from here

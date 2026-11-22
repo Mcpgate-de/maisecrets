@@ -115,10 +115,8 @@ Not yet: Gemini CLI, Cursor, Copilot CLI, OpenCode. Why: [docs/CLIENTS.md](docs/
 
 ## Everyday commands
 
-In Claude Code (`/ms NAME` is the same; `/maisecrets:NAME` needs the mod; Codex forms: [docs/USING.md](docs/USING.md)).
-A command that changes maisecrets (a term, not-a-secret, the demo, a setting or the name service) is the text you type,
-such as `maisecrets: term add NAME`; typed as `/maisecrets NAME`, it changes nothing and maisecrets puts that text into
-your empty input box for your Enter.
+In Claude Code (`/ms NAME` is the same; `/maisecrets:NAME` needs the mod; a change is the text you type; Codex:
+[docs/USING.md](docs/USING.md)):
 
 - `/maisecrets status`: does it protect this session? One short line per check; `/maisecrets status all` adds the details.
 - `ms:(your value)`: would this value be caught? Nothing is sent. [More](docs/USING.md#check-a-value-first-ms).
@@ -127,7 +125,7 @@ your empty input box for your Enter.
   [More](docs/USING.md#try-it-with-real-data-the-demo-mode).
 - `/maisecrets`: one panel in Claude Code for your settings, stored values and the name service, with no model turn. [More](docs/USING.md#the-maisecrets-panel-claude-code).
 - `/maisecrets settings`: the choices you make. [More](docs/USING.md#options).
-- `/maisecrets list`: the stored values in masked form, never a secret. [More](docs/USING.md#vault).
+- `/maisecrets list`: the stored values, masked, never a secret. [More](docs/USING.md#vault).
 - `maisecrets: not a secret KEY`: a wrong hit; never mask this exact value again.
   [More](docs/USING.md#reporting-a-wrong-detection).
 - `/maisecrets:secret-hygiene`: the secrets that leaked before you installed maisecrets.
