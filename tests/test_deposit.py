@@ -538,7 +538,9 @@ class DepositHookTests(_Base):
 
     def test_a_refusal_that_comes_as_a_failed_call_gets_its_line_too(self):
         # live probe 2026-11-22: the refusal has isError, so Claude Code 2.1.330 sends PostToolUseFailure, whose
-        # answer cannot replace the output (#97278): the line goes to the model as additional context
+        # answer cannot replace the output (#97278): the line goes to the model as additional context. The error of an
+        # MCP isError result in the 2.1.330 bundle: the text of its blocks joined by "\n" (McpToolCallError message),
+        # then trimmed, no prefix. The JSON of one block is not that form; it stays read for another client
         self.bind()
         hso = self.pre(call="t12")
         self.assertTrue(hso["updatedInput"])
@@ -550,7 +552,8 @@ class DepositHookTests(_Base):
                 self.assertIn("the deposit for " + self.ref + " expired before the call ran",
                               out["hookSpecificOutput"]["additionalContext"])
         # a call that carried no deposit, and a refusal next to other text, keep the failure path as it was
-        for call, error in (("t13", "deposit_refused: expired"), ("t12", "deposit_refused: expired; echo: x")):
+        for call, error in (("t13", "deposit_refused: expired"), ("t12", "deposit_refused: expired; echo: x"),
+                            ("t12", "deposit_refused: expired\necho: x")):     # two blocks, as 2.1.330 joins them
             with self.subTest(call=call, error=error):
                 out = hooks.post_tool_failure({"tool_name": TOOL, "tool_use_id": call, "session_id": "s1",
                                                "mcp_server": SERVER, "tool_input": {}, "error": error, **CLAUDE})
