@@ -224,6 +224,32 @@ class CommandRouteTests(_HookBase):
         self.assertFalse(events.take_typed_forget(KEY, [SESSION]))
         self.assertFalse(events.take_typed_login("gw", [SESSION]))
 
+    def test_the_text_form_goes_into_the_box_for_the_persons_enter(self):
+        # outside Cowork too: `/maisecrets NAME` reaches only command.run, so the slash form would be refused again
+        for prompt, form in (("/maisecrets:term add " + NAME, "maisecrets: term add " + NAME),
+                             ("/maisecrets:settings ssh_consent on", "maisecrets: set ssh_consent on"),
+                             ("/maisecrets:settings max_keys_per_session abc",
+                              "maisecrets: set max_keys_per_session abc"),
+                             ("/maisecrets:ner Team_GW", "maisecrets: ner Team_GW"),
+                             ("/maisecrets:demo on", "maisecrets: demo on")):
+            with self.subTest(prompt):
+                out = self.route(prompt)
+                self.assertEqual(out.get("offer"), form, out)
+                self.assertTrue(out["drop"].endswith("Send it as a prompt: " + form), out)
+        # the person's Enter on the offered form makes the change (the mod sends it as composer, not the route)
+        self.assertIn("on your list now", self.mod("maisecrets: term add " + NAME).get("drop", ""))
+        # forget KEY counts as typed only in its slash form; sref starts from its own command file: no offer
+        for prompt in ("/maisecrets:forget " + KEY, "/maisecrets:sref login gw"):
+            with self.subTest(prompt):
+                self.assertNotIn("offer", self.route(prompt))
+
+    def test_a_value_in_the_offered_text_form_is_masked(self):
+        token = "glpat-" + "ROUTExxxx1234567890abcd"         # split: the repository scan stays clean
+        out = self.route("/maisecrets:term add " + token)
+        self.assertNotIn(token, json.dumps(out))
+        self.assertTrue(out["offer"].startswith("maisecrets: term add \u27e6SECRET_c"), out)
+        self.assertTrue(out["drop"].endswith(out["offer"]), out)
+
     def test_any_other_command_runs_and_counts_as_no_typed_prompt(self):
         self.assertEqual(self.route("/maisecrets:list"), {"run": {"argv": ["list", "--args-stdin"], "stdin": ""}})
         self.assertEqual(self.route("/maisecrets:status test"), {"entry": "status test"})

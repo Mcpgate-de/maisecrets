@@ -1327,6 +1327,47 @@ test('a command from the command.run route reaches Python as the command route, 
   expect(st.spawns.length).toBe(0)
 })
 
+// `/maisecrets term add X` reaches only command.run, which Python refuses: the text form goes into the person's empty
+// box, and their Enter sends it through prompt.submit and the prompt hook as their own prompt
+test('a refused change from the command.run route puts its text form into an empty box, never sends it',
+  async ($, on) => {
+    const FORM = 'maisecrets: term add Bertolt Q'
+    const HINT = 'maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. ' +
+      'Nothing was changed. Send it as a prompt: ' + FORM
+    let box = ''
+    const st = runSetup(on, { answer: { drop: HINT, offer: FORM } })
+    on('prompt.read', () => ({ value: { text: box, cursor: box.length } }))
+    on('command.run', () => ({ text: 'engine' }))
+    for (const [command, args] of [['maisecrets', 'term add Bertolt Q'], ['maisecrets:term', 'add Bertolt Q']]) {
+      st.fills.length = 0
+      const r = await $.command.run({ command, args, origin: { kind: 'composer' } } as any)
+      expect(r.text).toBe(HINT.replace(/^maisecrets: /, '') + ' It is in your input box: press Enter to make the change.')
+      expect(st.fills).toEqual([FORM])
+    }
+    // a box with text keeps it, and Remote Control (bridge) has no box at the terminal: the answer only names the form
+    for (const [text, kind] of [['half a sentence', 'composer'], ['', 'bridge']]) {
+      box = text
+      st.fills.length = 0
+      const r = await $.command.run({ command: 'maisecrets', args: 'term add Bertolt Q', origin: { kind } } as any)
+      expect(r.text).toBe(HINT.replace(/^maisecrets: /, ''))
+      expect(st.fills).toEqual([])
+    }
+    expect(st.spawns.length).toBe(0)
+    expect(st.downstream).toBe(0)
+  })
+
+test('an offer that is no one-line text form never goes into the box', async ($, on) => {
+  const HINT = 'maisecrets: this command changes what maisecrets does. Nothing was changed.'
+  let offer: any = null
+  const st = runSetup(on, { answer: () => ({ drop: HINT, offer }) })
+  on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+  for (offer of ['/maisecrets:term add Bertolt Q', 'maisecrets: term add a\nb', 'term add Bertolt Q', 7]) {
+    const r = await $.command.run({ command: 'maisecrets', args: 'term add Bertolt Q', origin: { kind: 'composer' } } as any)
+    expect(r.text).toBe(HINT.replace(/^maisecrets: /, ''))
+    expect(st.fills).toEqual([])
+  }
+})
+
 test('a hidden command that no person typed goes on to the engine, and the mod asks nothing', async ($, on) => {
   const st = runSetup(on, { answer: LIST })
   on('command.run', () => ({ text: 'engine' }))

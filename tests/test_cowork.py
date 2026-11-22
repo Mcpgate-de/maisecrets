@@ -258,7 +258,11 @@ class SessionStartTests(unittest.TestCase):
     def test_outside_cowork_the_model_names_the_entry_and_reads_no_cowork_line(self):
         context = self.start({"CLAUDE_CODE_ENTRYPOINT": "cli"})
         self.assertIn(hooks.COMMANDS_CLAUDE, context)
-        self.assertIn("/maisecrets term add NAME", context)
+        # a command that only shows is the entry; a change is the text the person types: `/maisecrets term add NAME`
+        # reaches only the mod's command.run there, which refuses it (prompt_commands._command_route)
+        self.assertIn("/maisecrets status", context)
+        self.assertIn("maisecrets: term add NAME", context)
+        self.assertNotIn("/maisecrets term add", context)
         self.assertNotIn("Cowork", context)
         self.assertNotRegex(context, r"/maisecrets:[a-z]")
 

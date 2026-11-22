@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A command that changes maisecrets (a term, not-a-secret, the demo, a setting or the name service) is the text you type, such as `maisecrets: term add NAME`. Typed as `/maisecrets NAME` in the terminal, it changes nothing, and maisecrets puts that text into your empty input box for your Enter.
+
 ## [0.9.22] - 2026-11-22
 
 - Every command is `/maisecrets NAME` now (`/ms NAME` too, and `/ms` alone opens the panel as `/maisecrets` does; a blocked prompt is sent with `/maisecrets send`), in the terminal and in Cowork; the menus show only the entry and /maisecrets:report and /maisecrets:sref. The older form `/maisecrets:NAME` still runs where Claude Code loads the mod (2.1.287 and later); without the mod the client refuses it, so type the entry `/maisecrets:maisecrets NAME` there.

@@ -529,8 +529,11 @@ def primer(cfg: dict | None = None, client: str = "claude") -> str:
 
 # how the model names a maisecrets command to the person: the single commands are hidden since 0.9.22, and Cowork knows
 # only the entry. A command that maisecrets answers itself (forms._TYPED) shows its answer in Cowork only as text
-COMMANDS_CLAUDE = ("When you name a maisecrets command to the user, write the entry /maisecrets NAME ARGS, for example "
-                   "/maisecrets status or /maisecrets term add NAME.")
+COMMANDS_CLAUDE = ("When you name a maisecrets command to the user, write a command that only shows as "
+                   "/maisecrets NAME, for example /maisecrets status. Write a command that changes maisecrets (term "
+                   "add or remove, not-a-secret, demo, a settings or ner change) as the text the user types: "
+                   "maisecrets: term add NAME, maisecrets: not a secret KEY, maisecrets: demo on, maisecrets: set "
+                   "KEY VALUE, maisecrets: ner local.")
 COMMANDS_CODEX = ("When you name a maisecrets command to the user, write the prompt maisecrets: NAME ARGS, for example "
                   "maisecrets: status.")
 COMMANDS_COWORK = ("When you name a maisecrets command to the user, write /maisecrets NAME, for example /maisecrets "
