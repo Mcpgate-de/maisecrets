@@ -25,7 +25,7 @@ from typing import Any
 
 from . import check_value, detect, incidents, demo, not_a_secret, rehydration, term_files, value_files
 from .lazy_regex import LazyRx as _LazyRx
-from .placeholder import KEY_RE, find_refs
+from .placeholder import KEY_RE, find_refs, whole_references as _whole_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
 # parts of this module, moved so that no file is over the size limit of the plugin directory: hooks.<name> stays the
@@ -2638,7 +2638,7 @@ def post_tool(payload: dict) -> dict:
             hidden["n"] += gone
             hidden_runs.extend(runs)
         found = layer.matches(s, scan_tool) if layer is not None else scan_tool(s)
-        matches = [m for m in found if swap or not detect.is_fixture(m, s, path)]
+        matches = _whole_refs(s, [m for m in found if swap or not detect.is_fixture(m, s, path)])
         if not matches and not _has_live(cfg):
             return s
         if vault is None:
