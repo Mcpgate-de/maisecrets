@@ -806,7 +806,7 @@ class AnyFieldTests(_Base):
         self.free()
         self.bind()
         ref = self.put(OPEN + "sref:gw:anyfield-synthetic-reference" + CLOSE, "NAME", "name")
-        self.change(ref, weak=False)                    # an entry stored before the weak mark of the reference
+        self.change(ref, weak=False)                    # the normal state: a stored reference is not weak (!639)
         self.assert_refused(self.pre(self.issue(ref)), "holds a reference of a gateway")
         self.assertEqual(self.srv.deposit_requests, [])
 

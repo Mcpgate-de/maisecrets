@@ -310,7 +310,7 @@ def class_of(key: object) -> str | None:
 
 def any_field_class(vault, placeholder: str) -> str | None:
     """The class of a placeholder for deposit_any_field: the type of its vault entry, never text the model wrote. None
-    (strict) when the entry is missing, purged or weak (a masked gateway reference, a word), comes from an own rule,
+    (strict) when the entry is missing, purged or weak (a word, the plugin's own name, a model's finding), comes from an own rule,
     a term, an import or a model, was marked strict by a later own rule or import, or when its stored type differs from
     the prefix of the key."""
     key = key_of(placeholder)
@@ -624,7 +624,7 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
         if not MIN_BYTES <= len(value.encode("utf-8")) <= MAX_BYTES:          # the value changed since
             raise Refused(f"⟦{k}⟧ has {len(value.encode('utf-8'))} bytes, and a deposit takes "
                           f"{MIN_BYTES} to {MAX_BYTES}")
-        if k in loose and "\u27e6sref:" in value:                        # a gateway reference stays strict
+        if k in loose and "\u27e6sref:" in value:     # the only guard of a gateway reference (not weak since !639)
             raise Refused(f"⟦{k}⟧ holds a reference of a gateway, and such a value goes only to a target's path")
         values[k] = value
     stop = hooks._unnoted(cfg, hooks._note_destinations(cfg, payload, tool, tool_input, keys), keys,
