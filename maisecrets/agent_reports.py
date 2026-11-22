@@ -334,7 +334,7 @@ def _report_rest(payload: dict, prompt: str) -> str | None:
             a, b = _result_span(body)
             # the header of a flagged report is Claude Code's text, not the subagent's: both scans read it
             a += _header_end(body[a:b]) or 0
-            ids.append(_notification_tag(body, "task-id") or "")
+            ids.append((_notification_tag(body, "task-id") or "", _notification_tag(body, "output-file") or ""))
         else:
             span = _command_span(body, transcript)
             if span is None:
@@ -349,11 +349,13 @@ def _report_rest(payload: dict, prompt: str) -> str | None:
 
 def _without_ids(text: str, ids: list, transcript: str) -> str:
     """The text outside the results without the task id of each proven report, in its tag and at the end of its output
-    file, when the id names a subagent of this session (_subagent_by_task_id). The client makes the id; a value that a
-    rule or the store found in it blocked the report, and Cowork shows no block, so the report was lost (#31)."""
+    file, when the proof binds the id: the output file (resolved) is this session's subagents/agent-<id>.jsonl, or this
+    transcript launched the agent of that id (_launched_task). The client makes the id; a value that a rule or the store
+    found in it blocked the report, and Cowork shows no block, so the report was lost (#31)."""
     subagents = os.path.realpath(transcript[: -len(".jsonl")]) + os.sep + "subagents" + os.sep
-    for tid in ids:
-        if not tid or _subagent_by_task_id(f"<task-id>{tid}</task-id>", subagents) is None:
+    for tid, out in ids:
+        real = os.path.realpath(out) if out else ""
+        if real != subagents + f"agent-{tid}.jsonl" and not _launched_task(transcript, tid):
             continue
         text = text.replace(f"<task-id>{tid}</task-id>", "<task-id></task-id>")
         text = re.sub(rf"(?<=[/\\\\])((?:agent-)?){re.escape(tid)}(\.output|\.jsonl)</output-file>",

@@ -11,11 +11,12 @@ a to-do.
 - **The ids in the result of an Agent or Task call are not masked (#31).**
   Claude Code writes the agent id, the task id and the output file into that
   result, and it shows the AI the pointer it makes from the result that the
-  hook returns. maisecrets keeps these three fields as they are, also when a
-  rule, the name service or a stored value finds them: a placeholder there
-  stopped the AI from continuing the agent and blocked its report. Only an id
-  of the client's shape is kept; the task text and the report are masked. The
-  output file names the project folder, which the AI knows already. In the
+  hook returns. maisecrets keeps the ids and the name of the output file as
+  they are, also when a rule, the name service or a stored value finds them: a
+  placeholder there stopped the AI from continuing the agent and blocked its
+  report. Only an id of the client's shape is kept, and of a SendMessage result
+  only its resumedAgentId. The folder of the output file, the task text and the
+  report are masked as usual. In the
   cloud runtime (Cowork, Claude Code on the web) this is not measured: there a
   blocked report shows no notice, so a report that maisecrets blocks for
   another reason is still lost without a word.

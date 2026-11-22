@@ -442,6 +442,14 @@ class AgentReportTests(unittest.TestCase):
             "</task-id>\n", f"</task-id>\n<tool-use-id>{TOOL_USE}</tool-use-id>\n", 1)
         self.assertEqual(self.prompt(report), {})
 
+    def test_a_stored_task_id_passes_when_the_proven_output_file_names_it(self):
+        # no launch record names the id: the output file that the report proved itself by binds it
+        sub = self.by_task_id(launched="")
+        self.store(self.TASK)
+        report = self.s.notification(self.answer, output=sub).replace("<task-id>a1</task-id>",
+                                                                      f"<task-id>{self.TASK}</task-id>")
+        self.assertEqual(self.prompt(report), {})
+
     def test_a_rule_that_finds_the_task_id_does_not_block_the_report(self):
         # a rule of the person's own or the name service can find the id in its tag and in the output file's name
         from types import SimpleNamespace
@@ -453,6 +461,18 @@ class AgentReportTests(unittest.TestCase):
         # the control: the same rule on an id that names no subagent of this session
         self.assertBlocked(self.prompt(self.s.notification(self.answer).replace(
             "<task-id>a1</task-id>", f"<task-id>{self.TASK}x</task-id>")))
+
+    def test_a_stored_task_id_of_another_subagent_than_the_proven_one_is_blocked(self):
+        # the report proves itself by agent-a1.jsonl; its task id names another subagent file of this session, which
+        # this transcript never launched (Opus review of !641)
+        stored = "b9e8d7c6b5a4f3e2"
+        (self.s.output.parent / f"agent-{stored}.jsonl").write_text(self.s.output.read_text(encoding="utf-8"),
+                                                                    encoding="utf-8")
+        self.store(stored)
+        out = self.prompt(self.s.notification(self.answer).replace("<task-id>a1</task-id>",
+                                                                   f"<task-id>{stored}</task-id>"))
+        self.assertBlocked(out)
+        self.assertNotIn(stored, json.dumps(out))
 
     def test_a_stored_value_as_a_task_id_that_names_no_subagent_is_blocked(self):
         # the report proves itself by its tool use id and its output file, but its task id names no subagent

@@ -87,6 +87,28 @@ class AgentPointerTests(unittest.TestCase):
         self.assertEqual(seen["agentId"], AID)
         self.assertNotIn(VALUE, json.dumps(seen))
 
+    def test_sendmessage_keeps_only_its_resumed_agent_id(self):
+        self.store(AID)
+        seen = self.post({"success": True, "message": f"sent, token {VALUE}", "resumedAgentId": AID, "agentId": AID},
+                         tool="SendMessage")
+        self.assertEqual(seen["resumedAgentId"], AID)
+        self.assertNotEqual(seen["agentId"], AID, "only resumedAgentId of a SendMessage result is the client's id")
+        self.assertNotIn(VALUE, json.dumps(seen))
+
+    def test_the_folder_of_the_output_file_is_masked_and_its_name_is_kept(self):
+        from maisecrets import terms
+        name = "Quarz" + "feldmann"
+        self.assertTrue(terms.add_typed(name)[0])
+        self.addCleanup(lambda: terms.PERSONAL.unlink(missing_ok=True))
+        self.store(AID)
+        hidden = "\U000E0041\U000E0042\U000E0043\U000E0044"      # Unicode tag characters: they spell ABCD unseen
+        out = f"/private/tmp/claude-501/-Users-{name}-proj/4afa{hidden}3163/tasks/{AID}.output"
+        seen = self.post(pointer(outputFile=out))["outputFile"]
+        self.assertTrue(seen.endswith(f"/tasks/{AID}.output"), seen)
+        self.assertNotIn(name, seen)
+        self.assertNotIn("\U000E0041", seen)
+        self.assertEqual(self.post(pointer(outputFile=out))["agentId"], AID)
+
     def test_a_value_in_an_id_field_of_another_shape_or_tool_is_still_masked(self):
         self.store(AID)
         # an id with a space is no id of the client; an output file that does not end with the id is no pointer
