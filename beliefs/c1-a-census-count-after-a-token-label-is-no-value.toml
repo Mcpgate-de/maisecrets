@@ -1,11 +1,31 @@
-# c1-a-census-count-after-a-token-label-is-no-value: the test owns the rule; this file names it and the mutation that must turn it red.
+# c1-a-census-count-after-a-token-label-is-no-value: an invariant belief. Each mutation must turn at least one owning test red, and each owning test must be red under at least one mutation.
 belief = "c1-a-census-count-after-a-token-label-is-no-value"
+kind = "invariant"
 control = "C1"
 serves = ["M1.3"]
-statement = "After a label such as token, a lower-case word=digits with another word=digits as the next field on the line (a census of records such as bound=1234 unbound=5) is no value for generic-api-key and the colon and equal-sign keyword rules; a labelled random value stays a hit, also a digit-only one and a word=<random> one (#96)."
-runner = ["tests/test_census_count.py::CensusCountTests::test_a_census_count_after_the_word_token_is_no_secret"]
+statement = "After a label such as token, one whole census entry (a quoted string that holds bound=<n> unbound=<n> plain=<n> other=<n> ready=yes|no in this order and nothing else) is no value for generic-api-key and the colon and equal-sign keyword rules (#96); any other word=digits list stays a hit, such as session: sid=<digits> expires=3600, a census with an extra or a missing field, or an unquoted census tail after password: (#101). A labelled random value stays a hit, also a digit-only one and a word=<random> one."
+runner = ["tests/test_census_count.py::CensusCountTests::test_a_census_count_after_the_word_token_is_no_secret", "tests/test_census_count.py::CensusCountTests::test_a_count_list_that_is_no_whole_census_entry_stays_a_hit", "tests/test_census_count.py::CensusEntryShapeTests::test_a_span_past_the_entry_is_a_value", "tests/test_census_count.py::CensusEntryShapeTests::test_the_closing_quote_must_match_the_opening_one"]
 
-[proof]
+[[proof]]
+path = "the census entry is a value again"
 file = "maisecrets/detection/core.py"
-find = '''            if "census-count" in filters and _census_count(text, secret, end):'''
+find = '''            if "census-count" in filters and _census_count(text, start, end):'''
 replace = '''            if False:'''
+
+[[proof]]
+path = "the entry need not end at its closing quote"
+file = "maisecrets/detection/core.py"
+find = '''    return bool(m and text.startswith(quote, m.end()) and end <= m.end())'''
+replace = '''    return bool(m)'''
+
+[[proof]]
+path = "the rule's span may reach past the entry"
+file = "maisecrets/detection/core.py"
+find = '''    return bool(m and text.startswith(quote, m.end()) and end <= m.end())'''
+replace = '''    return bool(m and text.startswith(quote, m.end()))'''
+
+[[proof]]
+path = "the value need not stand in quotes"
+file = "maisecrets/detection/core.py"
+find = '''if quote in ("'", '"', "\\'", '\\"') else None'''
+replace = '''if True else None'''

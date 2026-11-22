@@ -1,0 +1,11 @@
+# c1-the-command-route-names-no-value-to-copy: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-the-command-route-names-no-value-to-copy"
+control = "C1"
+serves = ["M1.1"]
+statement = "The form that the command.run route names for a refused change carries no value and no placeholder: from the first word that holds one, the refusal names only the type (`maisecrets: term add NAME`) and tells the person to type the words. A copied placeholder would store its own text, not the value."
+runner = ["tests/test_entry.py::CommandRouteTests::test_a_value_or_placeholder_is_no_argument_to_copy"]
+
+[proof]
+file = "maisecrets/prompt_commands.py"
+find = '''    if masked is not None and not masked["count"] and not REF_RE.search(text):'''
+replace = '''    if masked is not None:'''

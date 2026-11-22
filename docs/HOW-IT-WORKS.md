@@ -176,6 +176,15 @@ version) show it. An old session that finds nothing and only renews a login is
 not seen. The session start says the same once a day. Restart the sessions
 that started before the time it names.
 
+**settings and names in Cowork.** Cowork runs each task in a new VM, and the
+settings and the stored values live in that VM. So in Cowork a `settings` note
+says that they hold for this task only. While no name source is set, a `names`
+note says that names are off in this task: a name service on your computer is
+not reachable from Cowork, and a gateway name service is not available in
+Cowork yet. Its step, `maisecrets: term add NAME`, masks a word of your own.
+Each of these notes has a second line with the reason. Outside Cowork they do
+not show.
+
 **The line of facts.** It names the source of names (off, a local service with
 its answer time, a gateway, or one that does not answer), the number of
 rules, the regions and the number of label languages.

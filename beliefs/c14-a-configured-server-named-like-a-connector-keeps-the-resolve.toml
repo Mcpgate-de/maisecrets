@@ -1,0 +1,15 @@
+# c14-a-configured-server-named-like-a-connector-keeps-the-resolve: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-configured-server-named-like-a-connector-keeps-the-resolve"
+control = "C14"
+serves = ["M3.8"]
+statement = "A server of the person's own config (source user, project, local, managed or enterprise) keeps the resolve of a stored value, also when its name makes the tool name mcp__claude_ai_…."
+runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_directly_configured_server_keeps_the_resolve"]
+
+[proof]
+file = "maisecrets/connector_proxy.py"
+find = '''
+    if source in _CONFIG_SOURCES:
+        return False
+'''
+replace = '''
+'''

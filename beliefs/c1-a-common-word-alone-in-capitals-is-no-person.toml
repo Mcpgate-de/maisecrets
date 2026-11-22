@@ -1,0 +1,11 @@
+# c1-a-common-word-alone-in-capitals-is-no-person: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-common-word-alone-in-capitals-is-no-person"
+control = "C1"
+serves = ["M1.3"]
+statement = "remote.is_no_person drops a NAME span that is one word of CAPS_WORDS alone in capitals (\"NEUTRAL\", \"WARNING\"); the same word in title case or next to another word keeps the service's answer."
+runner = ["tests/test_name_spans_that_are_no_person.py::SpanRuleTests::test_a_common_word_alone_in_capitals_is_no_person"]
+
+[proof]
+file = "maisecrets/detection/remote.py"
+find = '''    return word.isupper() and (word.lower() in ACRONYMS or word.lower() in CAPS_WORDS)'''
+replace = '''    return word.isupper() and word.lower() in ACRONYMS'''

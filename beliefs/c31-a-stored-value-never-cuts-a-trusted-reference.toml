@@ -1,0 +1,11 @@
+# c31-a-stored-value-never-cuts-a-trusted-reference: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-stored-value-never-cuts-a-trusted-reference"
+control = "C31"
+serves = ["M3.3"]
+statement = "The exact replacement of a stored value (tool_output._replace_outside_references) skips each place that touches the bracket, the kind or the id of a reference a gateway gave this session: a wrong mask that once stored such an id no longer breaks the reference."
+runner = ["tests/test_weak_entries.py::TrustedReferenceTests::test_a_stored_value_never_cuts_a_trusted_reference"]
+
+[proof]
+file = "maisecrets/tool_output.py"
+find = '''        if _overlaps(i, i + len(raw), guarded):'''
+replace = '''        if False:'''

@@ -8,6 +8,18 @@ was measured or documented. The controls and where each one ends are in [THREAT-
 What the plugin does not protect. Each item is a limit of the mechanism, not
 a to-do.
 
+- **The ids in the result of an Agent or Task call are not masked (#31).**
+  Claude Code writes the agent id, the task id and the output file into that
+  result, and it shows the AI the pointer it makes from the result that the
+  hook returns. maisecrets keeps the ids and the name of the output file as
+  they are, also when a rule, the name service or a stored value finds them: a
+  placeholder there stopped the AI from continuing the agent and blocked its
+  report. Only an id of the client's shape is kept, and of a SendMessage result
+  only its resumedAgentId. The folder of the output file, the task text and the
+  report are masked as usual. In the
+  cloud runtime (Cowork, Claude Code on the web) this is not measured: there a
+  blocked report shows no notice, so a report that maisecrets blocks for
+  another reason is still lost without a word.
 - **The output of a command that fails reaches the model as it is (Claude
   Code).** Claude Code reports a failed call through another hook event,
   whose answer cannot replace the output. A value that a failing command
@@ -18,8 +30,15 @@ a to-do.
   redacted as usual. maisecrets then stores the value (a repeat is redacted),
   cleans the transcript on disk, tells the AI not to use it, and shows you a
   line about it. See the threat model, "What is knowingly not defended".
-- **No hook, no protection.** Claude Chat, ChatGPT Chat, the web and the
+- **No hook, no protection.** Claude Chat, ChatGPT Chat, the claude.ai chat on the web and the
   mobile apps run no plugin hooks. Cowork does, Claude Code does, Codex does.
+- **In Cowork and in a cloud session, the prompt you type reaches Anthropic in clear text before maisecrets
+  sees it.** The desktop app or the browser sends the text to Anthropic's session service, which passes it to
+  Claude Code in the cloud VM. Anthropic stores the session transcript; whether it keeps your original text is not
+  measured. maisecrets runs in that VM: it keeps the value from the model, not from
+  Anthropic's servers. The same holds for a prompt that you type on another device in Remote Control. In Claude
+  Code on your own computer the hook rewrites the prompt before it leaves the computer. See the threat model,
+  "Network paths".
 - **The note "Its hooks on session.compact, http.fetch{origin=engine} do not
   run here" on the plugin page (`/plugin`) concerns only the demo.** Claude
   Code shows it where an organization manages Claude Code (managed settings,
@@ -68,6 +87,8 @@ a to-do.
   Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
+  An `@` before slashes alone, as in the sed expression `s/=.*@/x/`, names no
+  file and is no mention.
 - **A name without a label is not detected, unless it is on a term list** (Terms). Regex only, by design: "Emma Johansson" alone looks like any two
   capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
   in a tool result (0.6.21); in a typed prompt the rules detect no name (a name service you set checks it in
@@ -142,6 +163,75 @@ a to-do.
   WebFetch or a subagent prompt they stay text. A subagent shares its parent's session; a
   headless run (`codex exec`, `claude -p`) is a session of its own, so a
   reference from an earlier run is foreign there.
+- **A claude.ai connector gets no stored value, and its results pass Anthropic first.** The call of a
+  claude.ai connector (in Claude Code `mcp__claude_ai_<connector>__<tool>`; in Cowork `mcp__<display name>__<tool>`,
+  without `claude_ai_`) goes through Anthropic's connector proxy, where TLS ends. So maisecrets refuses a call of
+  such a tool that would carry a stored value; add the server directly (`claude mcp add`), or, if the connector is
+  your gateway, use its own references. The one exception is a deposit (`docs/PROTOCOL.md` section 6): for a
+  connector that is bound to your gateway by a pairing proof, and a call that the gateway names as a deposit
+  target, maisecrets sends the value to the gateway over its own connection, and the call carries a one-time
+  handle. When the gateway also names `deposit_any_field`, a name, an e-mail address, a phone number, a postal
+  address, a birth date, an IBAN, an IP address or a user name can go in this way into any text field of a tool that
+  the gateway lists, and only in the actions that the gateway lists for that tool. Today these are the GitLab and
+  Jira actions that create an issue, add a comment and update an issue; the gateway adds more actions one by one.
+  maisecrets refuses every other action before the value leaves, with the line that this action of the connector
+  does not take a stored value and that it was not sent. A secret, a card number, an ID number, a value of your own rule or of your term list, and every
+  other type go only to a deposit target. The result of a connector passes the proxy before maisecrets masks it: there only the gateway's own
+  scrubber protects it. In Cowork every MCP server outside your own config counts as a connector, and in a remote
+  session a server of the source `dynamic` does. A server of a plugin or an agent named `claude.ai X` is refused
+  too.
+- **Your own rule makes a stored personal value strict only when it finds that value.** maisecrets keeps the first
+  kind that stored a value. If a built-in rule stored an e-mail address and your own rule or an import matches the
+  same value later, maisecrets marks the entry strict at that match; the address then goes only to a deposit
+  target. Until your rule sees the value again (for example, a rule that you add after the value was stored), the
+  entry can still go into any text field of a listed action.
+- **A changed copy of the gateway's metadata on your computer.** maisecrets keeps the gateway's metadata for at
+  most an hour in its home folder, with a MAC made with the binding key in the store. A copy that a process changed
+  without that key, for example with `all_types` switched on, fails the MAC, and maisecrets reads the metadata again
+  from the gateway. A process of your own user that reads the store key can still sign a changed copy (A3). Then an
+  added type still fails the check against maisecrets' own list, but an added tool, action or `all_types` passes.
+  The AI cannot write the maisecrets home folder (C14), and the gateway checks each call again and refuses an action
+  that it does not list (`binding_mismatch`).
+- **A declined call leaves the value at your gateway for up to 300 s (accepted risk).** A deposit sends the value to
+  your gateway in PreToolUse, before the question comes: the question and the handles are one answer, and no hook
+  runs between your answer and the call. When you decline (rehydration `confirm`, Claude Code's auto mode, or a
+  permission rule of your own), the deposit stays unused at your own gateway, bound to that call and usable once,
+  until it expires (at most 300 s). No third party gets it.
+- **A prompt injection can put a stored value into a public issue (known risk).** With rehydration `automatic`, a
+  listed action takes a deposit without a question from maisecrets, as every MCP call takes a value in 0.9.22. A
+  text that the AI reads can make it write a stored value into an issue or a comment, and with `all_types` a
+  secret too. This is a design decision: a value in a ticket must not work worse than in 0.9.22. Set rehydration
+  to `confirm` if you want to answer each call; the value then waits unused at your gateway until you answer.
+- **With `all_types`, a secret can come back through Anthropic's proxy (open point).** When your gateway sets
+  `all_types` to true, every stored value, a secret, a card number and an ID number too, goes as a deposit into
+  any text field of a listed action, such as the text of a ticket. A later read of that ticket through the
+  connector returns the value through the proxy, and the gateway's result scrub finds only known secret formats.
+  maisecrets has no answer for this read-back yet.
+- **Detection can take a secret for a personal value.** If maisecrets types a secret as a phone number or a
+  name, the gateway's `deposit_any_field` lets that value go into any text field of a listed tool. A later read
+  of that field through the connector passes Anthropic's proxy, and only the gateway's own result scrub masks it.
+- **The gateway checks a listed action again at call time.** maisecrets refuses an action that `actions` does not
+  list. The gateway also checks each call: an action takes a personal value only when it sends a JSON body (POST,
+  PUT or PATCH) and every hook that it runs is on the gateway's audited list, and no handle may stand in a field that
+  goes into a URL (such as a project or an issue key of a lookup). Examples that do not take one: an action that
+  encodes its body (a Gmail send), a dispatcher. For such a call the gateway answers `binding_mismatch` before it
+  uses the deposit, so the value is not sent upstream; the deposit expires unused. The AI gets one line that says so.
+- **The deposit does not work in Cowork.** maisecrets finds the binding of a connector by the tool-name prefix
+  `mcp__claude_ai_<connector>__`. Cowork drops `claude_ai_` from the tool names (measured 2026-11-22), and the
+  sref login has no way into the VM yet. So in Cowork (and in the desktop app's local agent session) a connector
+  call with a stored value stays refused.
+- **A gateway's refusal of a deposit reaches the AI as raw text, next to its line.** When the gateway refuses a
+  call that carried a deposit handle, its tool result is `deposit_refused: <code>` with `isError: true`. Claude
+  Code 2.1.330 reports such a call as failed (PostToolUseFailure, seen in the live probe of 2026-11-22), and that
+  answer cannot replace the output (anthropics/claude-code#97278). So the AI sees the code itself, which holds no
+  value and no handle, and maisecrets adds its one line as context. The `error` field that maisecrets reads is
+  the text of the result's blocks, joined by a line break and trimmed, with no prefix. That form is read from the
+  2.1.330 bundle; it is not measured against a live payload of a refusal.
+- **Codex has connectors too, and maisecrets does not detect them.** Codex's `codex_apps` server (ChatGPT app
+  connectors behind OpenAI's apps gateway) relays a call like a claude.ai connector. Codex sends no server source,
+  so maisecrets cannot tell such a call from a direct server, and it puts the stored value in.
+- **A value resolved into a Bash command can reach a connector through that command.** The connector rule reads
+  only the MCP call itself. A command that sends the value on is the destination the person allowed (C16).
 - **A reference in a prompt is admitted as typed by a human**, also when the
   prompt was built from an issue body or a log in a headless run.
 - **A slow rule of your own on Windows can outrun the hook's time limit**

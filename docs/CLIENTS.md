@@ -173,6 +173,28 @@ repeats it on each pipeline.
 - **Windows** (not measured): the file is `%USERPROFILE%\.codex\config.toml`, and the helper would run under
   `cmd.exe /C`. Codex vault references are off on Windows in this version.
 
+## Claude Code: which MCP server a tool call goes to
+
+The hook payload of an `mcp__*` tool (PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest) carries
+`mcp_server: {name, source}`. In the schema of Claude Code 2.1.330 `source` is an open set (`sdk`, `plugin`,
+`user`, `project`, `local`, `dynamic`, `managed`, `enterprise`, `claudeai`, `agent`), the config scope of the
+server. A claude.ai connector is a server of type `claudeai-proxy` with the scope `claudeai`, or `dynamic` where
+no plugin brought it; its name is its display name (`claude.ai Slack`), so its tools are `mcp__claude_ai_Slack__…`.
+Its calls go through Anthropic's connector proxy, not from the client to the server. maisecrets therefore puts no
+stored value into such a call (THREAT-MODEL C14, #99): the source `claudeai` names a connector, and so does the
+prefix `mcp__claude_ai_` with any source that is no scope of the client's own config. Read from the binary and its
+hook schema, and used by the tests of the connector binding (C31). In Cowork a connector can arrive as an `sdk`
+server (`capabilities.experimental["anthropic/claudeAiConnector"]`) with a tool name the host chooses, and the
+Cowork payload's source is not measured: there every source that is no own-config scope counts as a connector.
+For this refusal the entry points are `remote_cowork` (measured in the Cowork VM, 2026-11-21),
+`remote_cowork_trigger` (Claude Code's own list of Cowork cloud entry points) and `local-agent` (the desktop
+app's local agent session, app.asar 6.28899.6, which may run on the computer itself). `cowork.active()`, which
+changes the texts and turns names off, knows only the first two. In a remote session (`CLAUDE_CODE_REMOTE`) a
+connector can have the source `dynamic` and no prefix, so that source counts there too. A server named `claude.ai X` from a plugin,
+agent or dynamic source is refused as well, an over-refusal. Codex sends no `mcp_server`; its `codex_apps`
+connectors (behind OpenAI's apps gateway) relay a call the same way, and maisecrets does not detect them
+(KNOWN-GAPS).
+
 ## Sessions, subagents and headless runs
 
 A reference resolves in the session that created it or admitted it. A Claude

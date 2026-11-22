@@ -1,0 +1,11 @@
+# c30-in-cowork-a-bare-server-name-sets-no-gateway: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30-in-cowork-a-bare-server-name-sets-no-gateway"
+control = "C30"
+serves = ["M6.4"]
+statement = "In Cowork a typed server name without the word gateway (`ner NAME`), which resolves to a gateway, changes nothing and gets the same fixed line as `ner gateway NAME`; in Cowork the server list holds claude.ai connectors, not the MCP servers of the VM's configuration."
+runner = ["tests/test_cowork.py::NerGatewayTests::test_in_cowork_a_bare_server_name_that_resolves_to_a_gateway_changes_nothing"]
+
+[proof]
+file = "maisecrets/ner_setup.py"
+find = '''    if isinstance(out[0], str) and out[0].startswith("gateway:") and cowork.active():'''
+replace = '''    if False:'''

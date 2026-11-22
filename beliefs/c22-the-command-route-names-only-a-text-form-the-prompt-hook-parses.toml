@@ -1,0 +1,11 @@
+# c22-the-command-route-names-only-a-text-form-the-prompt-hook-parses: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-the-command-route-names-only-a-text-form-the-prompt-hook-parses"
+control = "C22"
+serves = ["M4.2"]
+statement = "The command.run route names the text form of a refused change only when the prompt hook counts that exact text as the person's change (person_only); a form it does not parse, such as `maisecrets: ner local --model x`, would change nothing, so the refusal names the slash form `/maisecrets:maisecrets NAME ARGS`."
+runner = ["tests/test_entry.py::CommandRouteTests::test_a_text_form_the_prompt_hook_does_not_parse_keeps_the_slash_form"]
+
+[proof]
+file = "maisecrets/prompt_commands.py"
+find = '''        if typed.startswith("maisecrets: ") and not person_only(typed):'''
+replace = '''        if False:'''

@@ -144,9 +144,9 @@ class WindowsRefusalNamesTheFileRouteTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         context = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
         if os.name == "nt":
-            self.assertEqual(context, hooks.PRIMER_WINDOWS)
+            self.assertTrue(context.startswith(hooks.PRIMER_WINDOWS), context)
         else:
-            self.assertEqual(context, hooks.PRIMER)
+            self.assertTrue(context.startswith(hooks.PRIMER), context)
 
 
 def _hook_entry(payload: dict, env: dict | None = None) -> dict:

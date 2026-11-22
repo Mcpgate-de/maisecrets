@@ -293,9 +293,9 @@ class SrefBashTests(unittest.TestCase):
     def test_the_login_offer_comes_once_per_session_after_the_hint_and_never_with_a_login(self):
         self.assertIsNone(sref_hooks.login_offer("s1"))          # no reference yet: no offer
         self.gateway_result("s1")
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
         # asking records nothing: only a fill that happened (login_offered) ends the offer
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
         self.assertEqual(hub.mod_answer({"action": "login_offered", "session_id": "s1",
                                          "fill": "/maisecrets:sref login gw"}), {"recorded": True})
         self.assertIsNone(sref_hooks.login_offer("s1"))          # once per session and gateway
@@ -306,6 +306,20 @@ class SrefBashTests(unittest.TestCase):
         self.assertIsNone(sref_hooks.login_offer("s2"))          # logged in meanwhile
         self.assertEqual(self.srv.resolved, [])
         self.assertEqual(hub.mod_answer({"action": "login_offer", "session_id": "s3"}), {"fill": None})
+
+    def test_each_login_fill_is_one_the_mod_puts_into_the_box(self):
+        # live probe 2026-11-22: Python gave the spaced form, the mod's LOGIN_FILL took only the colon form, and the
+        # box stayed empty after the turn
+        import re
+        src = (ROOT / "claude-mod" / "maisecrets-mod.mjs").read_text(encoding="utf-8")
+        mod_fill = re.compile(re.search(r"const LOGIN_FILL = /(.+)/\n", src).group(1))
+        self.gateway_result("s1")
+        offer = sref_hooks.login_offer("s1")
+        self.assertRegex(offer, mod_fill)
+        self.assertTrue(sref_hooks.login_offered("s1", offer))     # the record of the fill takes the same form
+        self.connector_result(session="s5")
+        fill = sref_hooks.connector_answer("s5", "claude_ai_Team_GW", self.answer())["fill"]
+        self.assertRegex(fill, mod_fill)
 
     def test_a_text_with_sref_in_it_or_a_reference_the_model_sent_gives_no_hint_and_no_offer(self):
         out = hooks._post_tool_guarded({"tool_name": "mcp__gw__notes", "session_id": "s1", **CLAUDE,
@@ -328,7 +342,7 @@ class SrefBashTests(unittest.TestCase):
         cfg["mcpServers"]["g\u00e4tew\u00e4y"] = {"type": "http", "url": url.replace("/mcp", "/third/mcp")}
         (self.profile / ".claude.json").write_text(json.dumps(cfg))
         self.gateway_result("s1")                                 # sent by gw, the same origin as aa-other
-        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets sref login gw")
+        self.assertEqual(sref_hooks.login_offer("s1"), "/maisecrets:sref login gw")
         hooks._post_tool_guarded({"tool_name": "mcp__g\u00e4tew\u00e4y__read", "session_id": "s2", **CLAUDE,
                                   "mcp_server": {"name": "g\u00e4tew\u00e4y", "source": "user"}, "tool_input": {},
                                   "tool_response": {"content": [{"type": "text", "text": "author: " + self.shown}]}})
@@ -353,7 +367,7 @@ class SrefBashTests(unittest.TestCase):
         self.connector_result()                                        # before the binding: nothing is noted
         self.assertEqual(self.bash(f"printf %s {self.shown}")["hookSpecificOutput"]["permissionDecision"], "deny")
         out = sref_hooks.connector_answer("s1", "claude_ai_Team_GW", self.answer())
-        self.assertEqual(out["fill"], "/maisecrets sref login Team_GW")
+        self.assertEqual(out["fill"], "/maisecrets:sref login Team_GW")
         self.assertIn("your claude.ai connector Team_GW names 127.0.0.1", out["note"])
         self.assertEqual(vault_refs.connectors(), {})                  # a proposal only
         self.assertEqual(vault_refs.connectors(pending=True), {"Team_GW": self.srv.url + "/mcp"})
@@ -699,9 +713,15 @@ class SrefBashTests(unittest.TestCase):
             cli.cmd_sref(["status"])
         self.assertIn("Team_GW (127.0.0.1): a claude.ai connector that names this gateway; not bound", out.getvalue())
         self.assertNotIn("Team_GW (127.0.0.1): logged in", out.getvalue())
+        # live probe 2026-11-22: the next line said that no connector had named its gateway yet
+        self.assertNotIn("has named its gateway yet", out.getvalue())
+        self.assertIn("no MCP server of your user configuration offers Sensitive References.", out.getvalue())
         later = vault_refs.time.time() + vault_refs.PROPOSAL_TTL + 5
         with mock.patch.object(vault_refs.time, "time", lambda: later):
             self.assertEqual(vault_refs.connectors(pending=True), {})
+            with mock.patch("sys.stdout", new_callable=__import__("io").StringIO) as out:
+                cli.cmd_sref(["status"])
+        self.assertIn("no claude.ai connector has named its gateway yet", out.getvalue())
 
     def test_the_ai_cannot_run_the_sref_command(self):
         # a login it started could bind a connector; and only the person logs in (review of the connector source)
@@ -1140,6 +1160,46 @@ class PutServerTokensTests(unittest.TestCase):
         out, rest, put = hooks._put_server_tokens(text, [b], [(a, "<REF>")])
         self.assertEqual((out, put), (text, []))
         self.assertEqual([(m.start, m.end) for m in rest], [(3, 3 + len("AlexandraBern"))])
+
+class UnboundReferenceIsMaskedWholeTests(unittest.TestCase):
+    """Field case 2026-11-22: a claude.ai connector that was not bound yet showed `api_key: <a reference>`. The rule
+    after the label took the id and the closing bracket for a secret, and the model saw the reference cut: its opening
+    part, a placeholder, and no closing bracket. An untrusted id stays masked (a server can wrap a secret in a
+    reference), but as the whole reference, with its brackets."""
+
+    RID = "Qm7Rv2Kd9TfLw4HbN8cPz3sT6yUa1eQo"     # 32 characters, the shape of a gateway's reference id
+
+    def post(self, text: str) -> str:
+        hooks._live_cache.clear()
+        out = hooks._post_tool_guarded({
+            "tool_name": "mcp__claude_ai_phase6_ai-gateway__gitlab_read_actions", "session_id": "s-unbound", **CLAUDE,
+            "mcp_server": {"name": "claude.ai phase6 ai-gateway", "source": "claudeai"},
+            "tool_input": {"action": "get_issue_details"}, "tool_response": [{"type": "text", "text": text}]})
+        shown = (out.get("hookSpecificOutput") or {}).get("updatedToolOutput")
+        return shown[0]["text"] if shown else text
+
+    def test_an_unbound_reference_after_a_label_is_masked_whole(self):
+        ref = "\u27e6sref:secret:" + self.RID + "\u27e7"
+        shown = self.post(f"title: deploy\napi_key: {ref}\nend")
+        self.assertNotIn(self.RID, shown, "the id of an untrusted reference stays masked")
+        self.assertNotIn("sref:", shown, "no part of the reference is left: the mask took it whole")
+        self.assertRegex(shown, "^title: deploy\napi_key: \u27e6SECRET_c\\d+\u27e7\nend$")
+        self.assertEqual(shown.count("\u27e6"), shown.count("\u27e7"), "no bracket is left open")
+
+    def test_two_hits_in_one_reference_are_one_value_and_a_trusted_one_stays(self):
+        from maisecrets import placeholder
+        from maisecrets.detection.core import Match
+        ref = "\u27e6sref:secret:" + self.RID + ":ke\u2022\u2022\u2022\u27e7"
+        text = "token: " + ref + " end"
+        a = text.index(self.RID)
+        hits = [Match("x", "SECRET", text[a:a + 10], a, a + 10),
+                Match("y", "SECRET", text[a + 12:a + 20], a + 12, a + 20)]
+        out = placeholder.whole_references(text, hits)
+        self.assertEqual([(m.start, m.end, m.value) for m in out], [(7, 7 + len(ref), ref)])
+        self.addCleanup(placeholder.TRUSTED.clear)
+        placeholder.TRUSTED.add("\u27e6sref:secret:" + self.RID + "\u27e7")
+        self.assertEqual(placeholder.whole_references(text, hits), hits, "a reference a gateway gave is not widened")
+
 
 if __name__ == "__main__":
     unittest.main()

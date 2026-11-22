@@ -205,7 +205,7 @@ mod, `/maisecrets settings` shows the text view below.
 
 ### Your own commands in Claude Code
 
-Every command is the entry `/maisecrets NAME`, for example `/maisecrets status test`; `/ms NAME` is the same, and in the terminal so are `/maisecrets:maisecrets NAME` and `/maisecrets:ms NAME`. The / menu shows only the entry and `/maisecrets:report` and `/maisecrets:sref`, which only you start. The older form `/maisecrets:NAME` still runs where the client loads the mod (Claude Code 2.1.287 and later); without the mod the client answers that only Claude can run it, so type the entry there. A command that changes what maisecrets does (a setting, a term, not-a-secret, the demo, a forget) counts only from your own prompt: typed as `/maisecrets NAME` in the terminal, maisecrets names the prompt that makes the change. In Cowork, which shows no answer to such a command typed with a slash, send its text form, for example `maisecrets: term add NAME`.
+Every command is the entry `/maisecrets NAME`, for example `/maisecrets status test`; `/ms NAME` is the same, and in the terminal so are `/maisecrets:maisecrets NAME` and `/maisecrets:ms NAME`. The / menu shows only the entry and `/maisecrets:report` and `/maisecrets:sref`, which only you start. The older form `/maisecrets:NAME` still runs where the client loads the mod (Claude Code 2.1.287 and later); without the mod the client answers that only Claude can run it, so type the entry there. A command that changes what maisecrets does (a setting, the name service, a term, not-a-secret, the demo) counts only from your own prompt, so send its text form, for example `maisecrets: term add NAME` or `maisecrets: set KEY VALUE`. Typed as `/maisecrets NAME` in the terminal, it changes nothing: maisecrets names the text form, and you type it. If the command holds a value, maisecrets names the form without it, and you type the words yourself. A forget is `/maisecrets:maisecrets forget KEY`. A login or a logout typed as `/maisecrets sref login NAME` or `/maisecrets sref logout` goes into your input box as `/maisecrets:sref login NAME` (only when the box is empty): press Enter to run it. The browser still asks for your consent at the gateway. In Cowork, which shows no answer to a command typed with a slash, the text form shows its answer too.
 
 With the mod (the terminal and the desktop app), maisecrets answers your own
 commands itself. Nothing goes to the AI, and the answer is one line under
@@ -237,7 +237,8 @@ the command file: a value in the arguments blocks it, and a settings or `ner`
 change is made there. Then the mod runs the maisecrets command itself, in the
 background, and the input box is free at once. The output opens in a panel
 (Esc closes it); where no panel can open, it stands above the prompt. The
-output holds no value, and it never goes to the AI.
+answer of `forget KEY` is a confirmation, so it always stands above the prompt.
+The output holds no value, and it never goes to the AI.
 
 - `/maisecrets sref` shows each gateway and its login, with a button `log in: NAME`
   for each one that needs a login: a press starts it, as the typed command does.
@@ -741,7 +742,9 @@ typed while a tool runs; the settings hook sees the placeholder; on 2.1.274 the
 mod does not load and the hook blocks. Seen live in the desktop app's Code tab
 with Claude Code 2.1.288: the prompt is rewritten and the model gets the
 placeholder; your own message bubble there shows the text as you typed it, which
-is the app's local display. Cowork (measured 2026-11-21) rewrites too, but it shows
+is the app's local display. Cowork (measured 2026-11-21) rewrites too (it keeps the value
+from the model; your text reaches Anthropic before the rewrite, see
+[KNOWN-GAPS.md](KNOWN-GAPS.md)), but it shows
 no lock and no panel, and it knows the commands by their short name: `/status`,
 `/list`, `/sref login NAME`. Mods are a rollout switch of the client:
 where they are off (a saved switch, some third-party setups), the hook blocks.

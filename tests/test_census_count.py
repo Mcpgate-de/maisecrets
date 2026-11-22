@@ -1,10 +1,11 @@
-"""A census count after the word token is no secret (#96).
+"""A whole census entry after the word token is no secret (#96, #101).
 
-A log line that counts records per family, such as `{'token': 'bound=1234 unbound=567 ready=no'}`, put the label
-`token` before the value `bound=1234`. generic-api-key takes `=` into its value, so the count read as an API key; the
-keyword rules took `bound=7 unbound=0` after `'token': '` and `bound=7` after `token:` or `token=`. A lower-case
-word=digits, with another word=digits as the next field on the line, is a count. A random value after the label stays
-a hit (its span may hold more of the line), also a digit-only one and a word=<random> one.
+A log line that counts records per family, such as `{'token': 'bound=1234 unbound=567 plain=0 other=0 ready=no'}`,
+put the label `token` before the value `bound=1234`. generic-api-key takes `=` into its value, so the count read as an
+API key; the keyword rules took the same span. Only a whole census entry is a count: the quoted value holds
+`bound=<n> unbound=<n> plain=<n> other=<n> ready=yes|no` and nothing else, in this order. 0.9.22 skipped any lower-case
+word=digits with another word=digits after it, so `session: sid=<digits> expires=3600` gave no finding (#101). A
+random value, a count list that is no whole census entry and a census-like tail without quotes stay a hit.
 """
 from __future__ import annotations
 
@@ -19,13 +20,17 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import detect  # noqa: E402
 from maisecrets.detection import Active, Detector, Host, NO_REFERENCES, NO_SOURCES  # noqa: E402
+from maisecrets.detection import core  # noqa: E402
 
 TOKEN = "to" + "ken"
+BOUND = "bo" + "und="
 RANDOM = "Zq8" + "Lr2Wv5Tn9Kc4Hx7Bm3Pd6Fs1Jy0Ag5"
+DIGITS = "8301" + "7462" + "5519"          # a made-up numeric session id
+TAIL = " unbound=5 plain=0 other=0 ready=no"
 
 
 def family(name: str, bound: int, unbound: int, ready: str) -> str:
-    return "'%s': 'bound=%d unbound=%d plain=0 other=0 ready=%s'" % (name, bound, unbound, ready)
+    return "'%s': '%s%d unbound=%d plain=0 other=0 ready=%s'" % (name, BOUND, bound, unbound, ready)
 
 
 def census(bound: int) -> str:
@@ -39,20 +44,31 @@ def secret_hits(text: str, channel: str) -> list:
 
 class CensusCountTests(unittest.TestCase):
     NO_VALUE = [census(n) for n in (7, 21, 1234, 12345, 998877, 123456789012)] + [
-        '{"' + TOKEN + '": "bound=4321 unbound=8 plain=0 other=0 ready=no"}',
-        "'" + TOKEN + "': 'bound=7 unbound=0'",                       # the whole quoted string after the label
-        TOKEN + ": bound=4321 unbound=0 ready=yes",
-        TOKEN + ":bound=7 unbound=0",
-        TOKEN + "=bound=7 unbound=12 ready=yes",
-        "families: session bound=21 unbound=0; " + TOKEN + " bound=4321 unbound=2",
+        '{"' + TOKEN + '": "' + BOUND + '4321 unbound=8 plain=0 other=0 ready=no"}',
+        '{\\"' + TOKEN + '\\": \\"' + BOUND + '4321 unbound=8 plain=0 other=0 ready=yes\\"}',   # JSON in a string
+        "{'mcp_" + TOKEN + "_index': '" + BOUND + "48291" + TAIL + "'}",
     ]
     VALUE = [
         (TOKEN + "=" + RANDOM, RANDOM),
         (TOKEN + ": " + RANDOM, RANDOM),
         ("'" + TOKEN + "': '" + RANDOM + "'", RANDOM),
-        ("'" + TOKEN + "': 'bound=" + RANDOM + " unbound=0'", "bound=" + RANDOM),   # a word=<random> value
-        (TOKEN + "=48291375 expires=3600", "48291375"),                              # a digit-only token
-        (TOKEN + ": bound=4321 " + RANDOM, "bound=4321"),                            # no count after it
+        ("'" + TOKEN + "': '" + BOUND + RANDOM + " unbound=0'", BOUND + RANDOM),   # a word=<random> value
+        (TOKEN + "=48291375 expires=3600", "48291375"),                            # a digit-only token
+        (TOKEN + ": " + BOUND + "4321 " + RANDOM, BOUND + "4321"),                 # no count after it
+    ]
+    # #101: a word=<digits> value with another word=<digits> after it, but no whole census entry
+    NO_CENSUS = [
+        "GET /api session: sid=" + DIGITS + " expires=3600",
+        "refresh " + TOKEN + "=" + BOUND + DIGITS + " ttl=3600",                    # two numeric fields
+        TOKEN + ": otp=" + DIGITS + " attempt=1",
+        "'" + TOKEN + "': '" + BOUND + DIGITS + TAIL + " extra=1'",                 # a census with an extra field
+        "'" + TOKEN + "': '" + BOUND + DIGITS + " unbound=5 plain=0 other=0'",      # a census without ready=
+        "'" + TOKEN + "': '" + BOUND + DIGITS + " unbound=5 other=0 plain=0 ready=no'",   # keys in another order
+        "'" + TOKEN + "': '" + BOUND + DIGITS + " unbound=5 plain=0 other=0 ready=maybe'",
+        "'" + TOKEN + "': 'sid=" + DIGITS + TAIL + "'",                             # another first key
+        "password: " + BOUND + DIGITS + TAIL,                                       # no quotes around it
+        "password: " + BOUND + DIGITS + TAIL + " user=7",
+        "'" + TOKEN + "': '" + BOUND + DIGITS + TAIL + '"',                         # the quotes do not match
     ]
 
     def test_a_census_count_after_the_word_token_is_no_secret(self):
@@ -73,6 +89,40 @@ class CensusCountTests(unittest.TestCase):
             for channel in ("prompt", "tool"):
                 with self.subTest(text=text, channel=channel):
                     self.assertTrue(any(value in v for _, v in secret_hits(text, channel)), text)
+
+    def test_a_count_list_that_is_no_whole_census_entry_stays_a_hit(self):
+        for text in self.NO_CENSUS:
+            for channel in ("prompt", "tool"):
+                with self.subTest(text=text, channel=channel):
+                    self.assertTrue(any(DIGITS in v for _, v in secret_hits(text, channel)), text)
+
+
+class CensusEntryShapeTests(unittest.TestCase):
+    """The check itself, for spans that no rule gives today: the value ends inside the entry and its quotes close."""
+    ENTRY = BOUND + "998877" + TAIL
+
+    def check(self, before: str, entry: str, after: str, end_in_entry: int) -> bool:
+        text = before + entry + after
+        return core._census_count(text, len(before), len(before) + end_in_entry)
+
+    def test_a_whole_entry_in_matching_quotes_is_a_count(self):
+        for before, after in (("{'" + TOKEN + "': '", "'}"), ('{"' + TOKEN + '": "', '"}'),
+                              ('{\\"' + TOKEN + '\\": \\"', '\\"}'), ("{\\'" + TOKEN + "\\': \\'", "\\'}")):
+            with self.subTest(before=before):
+                self.assertTrue(self.check(before, self.ENTRY, after, len(BOUND) + 6))
+                self.assertTrue(self.check(before, self.ENTRY, after, len(self.ENTRY)))
+
+    def test_a_span_past_the_entry_is_a_value(self):
+        self.assertFalse(self.check("'", self.ENTRY, "'", len(self.ENTRY) + 1))
+
+    def test_the_closing_quote_must_match_the_opening_one(self):
+        self.assertFalse(self.check('\\"', self.ENTRY, '"', len(BOUND) + 6))
+        self.assertFalse(self.check("'", self.ENTRY, '"', len(BOUND) + 6))
+        self.assertFalse(self.check("", self.ENTRY, "'", len(BOUND) + 6))
+
+    def test_only_ascii_digits_are_a_count(self):
+        entry = BOUND + "٩٨٧" + TAIL
+        self.assertFalse(self.check("'", entry, "'", len(BOUND) + 3))
 
 
 if __name__ == "__main__":
