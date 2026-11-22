@@ -455,8 +455,9 @@ def person_only(prompt: str) -> bool:
 
 def _command_route(payload: dict) -> dict:
     """The mod's answer for a command its command.run hook got. A change only the person may make is not made: the
-    answer names the prompt that makes it. Any other command takes the person's path, with a source that is not the
-    person's, so the prompt hook counts nothing of it as typed."""
+    answer names the prompt that makes it, and the person types it: the stamp `composer` is no proof that the person
+    typed this command, so nothing here fills the input box. Any other command takes the person's path, with a source
+    that is not the person's, so the prompt hook counts nothing of it as typed."""
     prompt = payload.get("prompt")
     if not isinstance(prompt, str):
         return {"drop": "maisecrets: this command did not run."}
@@ -464,16 +465,45 @@ def _command_route(payload: dict) -> dict:
         from . import forms
         m = _SLASH_FORM_RE.match(prompt)
         words = f"{m.group('name').lower()} {m.group('args') or ''}".strip() if m else ""
+        name = words.split()[:1]
         # sref keeps its slash form here: its text form runs only in Cowork (_cowork_sref)
-        typed = f"/maisecrets {words}" if words.split()[:1] == ["sref"] else forms.cowork(f"/maisecrets {words}")
+        typed = f"/maisecrets {words}" if name == ["sref"] else forms.cowork(f"/maisecrets {words}")
+        if typed.startswith("/") and name in (["ner"], ["settings"]):
+            # a ner or settings change has a text form that the prompt hook counts as typed (settings.parse_prompt)
+            typed = "maisecrets: " + ("set " + words[len("settings"):].strip() if name == ["settings"] else words)
+        if typed.startswith("maisecrets: ") and not person_only(typed):
+            # a form the prompt hook does not parse (`ner local --model x`) would change nothing: the slash form below
+            typed = f"/maisecrets {words}"
         if typed.startswith("/"):
-            # a plugin command the menu shows: the person's Enter goes through the prompt hook
+            # a plugin command the menu shows: the person's Enter goes through the prompt hook. Not the plain entry
+            # `/maisecrets NAME`: with the mod it is the mod's own command, which reaches only command.run, never
+            # prompt.submit or the prompt hook (claude-mod/maisecrets-mod.mjs runTyped, measured on 2.1.330), and
+            # comes back here to be refused again. forget KEY has no text form that counts as typed
+            # (events.note_typed_forget reads the slash form only); sref and report start from their own command file
             typed = f"/maisecrets:{words}" if words.split()[:1] in (["sref"], ["report"]) else \
                 f"/maisecrets:maisecrets {words}"
         return {"drop": "maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. "
-                        f"Nothing was changed. Send it as a prompt: {typed}"}
+                        f"Nothing was changed. Send it as a prompt: {_without_values(typed, payload)}"}
     out = mod_command({**payload, "origin": "composer", "source": _ROUTE_SOURCE})
     return out if out is not None else {"drop": "maisecrets: this command did not run."}
+
+
+def _without_values(form: str, payload: dict) -> str:
+    """The form the refusal names, with no value and no placeholder for the person to copy: a copied placeholder would
+    store its own text, not the value. From the first word that holds one, the person types the words."""
+    from .placeholder import REF_RE
+    masked = _masked_for_the_box(form, payload.get("session_id"), "masked in a command the mod refused")
+    text = masked["masked"] if masked is not None else form
+    if masked is not None and not masked["count"] and not REF_RE.search(text):
+        return text
+    kept = []
+    for word in text.split(" "):
+        ref = REF_RE.search(word)
+        if ref or masked is None and len(kept) >= 2:
+            kept.append(ref.group("type") or ref.group("ltype") if ref else "ARGS")
+            break
+        kept.append(word)
+    return " ".join(kept) + " (type the words yourself)"
 
 
 def _entry_words(prompt: str, typed) -> str | None:
@@ -512,13 +542,20 @@ def fill_check(payload: dict) -> dict:
     that carries one, so the box never gets a value back (Gate A of !591). It runs no command and reads no command
     words. {"masked": text, "count": n}; {} when the text is no maisecrets command or the session id has no valid shape,
     and the mod then fills nothing."""
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.startswith("/maisecrets:"):
+        return {}
+    return _masked_for_the_box(prompt, payload.get("session_id")) or {}
+
+
+def _masked_for_the_box(prompt, session, outcome="masked in a command the mod put into the box") -> dict | None:
+    """{"masked": text, "count": n} for one line the mod puts into the input box or a refusal names, each value taken
+    out, stored and masked as the prompt hook does; None for more than one line or a session id with no valid shape."""
     from . import events
     from . import hooks as h
-    prompt = payload.get("prompt")
-    session = payload.get("session_id")
-    if (not isinstance(prompt, str) or not prompt.startswith("/maisecrets:") or "\n" in prompt or "\r" in prompt
+    if (not isinstance(prompt, str) or "\n" in prompt or "\r" in prompt
             or not isinstance(session, str) or not h._SESSION_ID_RE.fullmatch(session)):
-        return {}
+        return None
     cfg = h.load_config()
     matches = h._prompt_hits(prompt)
     if not matches and not h._has_live(cfg):
@@ -528,5 +565,5 @@ def fill_check(payload: dict) -> dict:
     if count:
         if cfg.get("scrub_transcript", True):
             h._scrub_transcript_later("", values, [], session=session)    # the record of the typed prompt
-        events.record("UserPromptSubmit", "claude", entries, outcome="masked in a command the mod put into the box")
+        events.record("UserPromptSubmit", "claude", entries, outcome=outcome)
     return {"masked": rewritten, "count": count}

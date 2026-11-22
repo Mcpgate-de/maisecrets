@@ -443,7 +443,8 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
   `ACRONYMS` ("G. PII"; "J. LEE" stays), and a greeting phrase (`remote.is_greeting_phrase`: every word a greeting
   or a word of `GREETING_ADDRESS_WORDS`, one a greeting: "Hallo Ihr Lieben", "Liebe alle"). On 334,158 gold name
   spans (Nemotron test, Gretel, Mendeley, Privy, DialogPII dev and val) the digit rule drops 3 person spans (Nemotron
-  2, Gretel 1) and 498 spans of Gretel's broad `name` label; the other two rules drop none.
+  2, Gretel 1) and 498 spans of Gretel's broad `name` label; the other two rules drop none. Since 0.9.23 a word of
+  `ACRONYMS` alone is no person either ("NER", "MCP"): the service took "NER" alone for a name.
 - **A word that is a name somewhere is freed only by its context in the text.** "Code", "Bash", "Edit" and "Home"
   are also surnames or given names. `remote.is_no_person_in(text, start, end)` frees them only in these contexts:
   - a product tail right after a product word, with only spaces between (`is_product_tail`: "Code" in "Claude

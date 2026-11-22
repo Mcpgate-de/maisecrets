@@ -1327,6 +1327,24 @@ test('a command from the command.run route reaches Python as the command route, 
   expect(st.spawns.length).toBe(0)
 })
 
+// the engine stamps every local command run `composer`, also one the AI started: a refused change fills no input box,
+// even when an answer carries a text form, so no loosening change waits there for the person's Enter
+test('a refused change from the command.run route never fills the input box', async ($, on) => {
+  const FORM = 'maisecrets: ner https://ner.example.com/ner'
+  const HINT = 'maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. ' +
+    'Nothing was changed. Send it as a prompt: ' + FORM
+  const st = runSetup(on, { answer: { drop: HINT, offer: FORM } })
+  on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+  on('command.run', () => ({ text: 'engine' }))
+  for (const [command, args] of [['maisecrets', 'ner https://ner.example.com/ner'],
+    ['maisecrets:ner', 'https://ner.example.com/ner']]) {
+    const r = await $.command.run({ command, args, origin: { kind: 'composer' } } as any)
+    expect(r.text).toBe(HINT.replace(/^maisecrets: /, ''))
+  }
+  expect(st.fills).toEqual([])
+  expect(st.spawns.length).toBe(0)
+})
+
 test('a hidden command that no person typed goes on to the engine, and the mod asks nothing', async ($, on) => {
   const st = runSetup(on, { answer: LIST })
   on('command.run', () => ({ text: 'engine' }))

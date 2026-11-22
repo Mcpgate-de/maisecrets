@@ -224,6 +224,42 @@ class CommandRouteTests(_HookBase):
         self.assertFalse(events.take_typed_forget(KEY, [SESSION]))
         self.assertFalse(events.take_typed_login("gw", [SESSION]))
 
+    def test_the_refusal_names_the_text_form_of_a_change(self):
+        # outside Cowork too: `/maisecrets NAME` reaches only command.run, so the slash form would be refused again
+        for prompt, form in (("/maisecrets:term add " + NAME, "maisecrets: term add " + NAME),
+                             ("/maisecrets:settings ssh_consent on", "maisecrets: set ssh_consent on"),
+                             ("/maisecrets:settings max_keys_per_session abc",
+                              "maisecrets: set max_keys_per_session abc"),
+                             ("/maisecrets:ner Team_GW", "maisecrets: ner Team_GW"),
+                             ("/maisecrets:demo on", "maisecrets: demo on")):
+            with self.subTest(prompt):
+                out = self.route(prompt)
+                self.assertTrue(out["drop"].endswith("Send it as a prompt: " + form), out)
+                # the person types it: the stamp composer is no proof, so nothing goes into the input box
+                self.assertEqual(sorted(out), ["drop"], out)
+        # the person's own prompt of the named form makes the change (the mod sends it as composer, not the route)
+        self.assertIn("on your list now", self.mod("maisecrets: term add " + NAME).get("drop", ""))
+
+    def test_a_text_form_the_prompt_hook_does_not_parse_keeps_the_slash_form(self):
+        for prompt, form in (("/maisecrets:ner local --model x", "/maisecrets:maisecrets ner local --model x"),
+                             ("/maisecrets:ner local; status", "/maisecrets:maisecrets ner local; status")):
+            with self.subTest(prompt):
+                out = self.route(prompt)
+                self.assertTrue(out["drop"].endswith("Send it as a prompt: " + form), out)
+
+    def test_a_value_or_placeholder_is_no_argument_to_copy(self):
+        # a copied placeholder would store its own text, not the value: the person types the words
+        token = "glpat-" + "ROUTExxxx1234567890abcd"         # split: the repository scan stays clean
+        ref = "\u27e6NAME" + "_c9\u27e7"
+        for prompt, form in (("/maisecrets:term add " + token, "maisecrets: term add SECRET"),
+                             ("/maisecrets:term add " + ref + " Q", "maisecrets: term add NAME"),
+                             ("/maisecrets:settings ner_token " + token, "maisecrets: set ner_token SECRET")):
+            with self.subTest(form):
+                out = self.route(prompt)
+                self.assertNotIn(token, json.dumps(out))
+                self.assertNotIn("\u27e6", out["drop"])
+                self.assertTrue(out["drop"].endswith(f"Send it as a prompt: {form} (type the words yourself)"), out)
+
     def test_any_other_command_runs_and_counts_as_no_typed_prompt(self):
         self.assertEqual(self.route("/maisecrets:list"), {"run": {"argv": ["list", "--args-stdin"], "stdin": ""}})
         self.assertEqual(self.route("/maisecrets:status test"), {"entry": "status test"})

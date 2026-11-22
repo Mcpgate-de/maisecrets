@@ -235,6 +235,103 @@ class HookAnswerTests(unittest.TestCase):
                 self.assertEqual(cowork.show_answer(payload, "maisecrets: done")["text"], cowork.UNCHECKED)
 
 
+class SessionStartTests(unittest.TestCase):
+    """What the model reads at the session start: in Cowork that names are not masked there and why, and the forms of
+    a command that Cowork knows; never a hidden single command such as /maisecrets:term."""
+
+    def start(self, env: dict) -> str:
+        r = _dispatch("session-start", env=env, stdin=json.dumps({"session_id": SESSION, "source": "startup"}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def test_in_cowork_the_model_reads_that_names_are_not_masked_and_why(self):
+        context = self.start(COWORK)
+        self.assertIn("maisecrets masks no names in this Cowork task: a name service on the user's computer is not "
+                      "reachable from Cowork, and a gateway name service is not available in Cowork yet.", context)
+
+    def test_in_cowork_the_model_names_the_entry_and_the_text_form(self):
+        context = self.start(COWORK)
+        self.assertIn(hooks.COMMANDS_COWORK, context)
+        self.assertIn("maisecrets: term add NAME", context)
+        self.assertNotRegex(context, r"/maisecrets:[a-z]")
+
+    def test_outside_cowork_the_model_names_the_entry_and_reads_no_cowork_line(self):
+        context = self.start({"CLAUDE_CODE_ENTRYPOINT": "cli"})
+        self.assertIn(hooks.COMMANDS_CLAUDE, context)
+        # a command that only shows is the entry; a change is the text the person types: `/maisecrets term add NAME`
+        # reaches only the mod's command.run there, which refuses it (prompt_commands._command_route)
+        self.assertIn("/maisecrets status", context)
+        self.assertIn("maisecrets: term add NAME", context)
+        self.assertNotIn("/maisecrets term add", context)
+        self.assertNotIn("Cowork", context)
+        self.assertNotRegex(context, r"/maisecrets:[a-z]")
+
+    def test_in_cowork_a_name_source_that_is_set_gets_no_names_line(self):
+        cfg = {"remote_detector": {"url": "https://ner.example.com/ner", "format": "hf"}}
+        with mock.patch.dict(os.environ, COWORK):
+            self.assertNotIn("masks no names", hooks.session_context(cfg, "claude"))
+            self.assertIn("masks no names", hooks.session_context({}, "claude"))
+
+    def test_codex_names_its_prompt_form(self):
+        with mock.patch.dict(os.environ, COWORK):
+            context = hooks.session_context({}, "codex")
+        self.assertIn(hooks.COMMANDS_CODEX, context)
+        self.assertNotIn("Cowork", context)
+
+
+class NerGatewayTests(unittest.TestCase):
+    """In Cowork a gateway is a claude.ai connector, not an MCP server of the VM's configuration: a typed gateway name
+    service gets a fixed line that names where it works, and nothing changes."""
+
+    def setUp(self):
+        from maisecrets.vault import HOME
+        self.config = Path(HOME) / "config.json"
+        self.before = self.config.read_text()
+        self.addCleanup(self.config.write_text, self.before)
+
+    def answer(self, prompt: str, env: dict) -> str:
+        from maisecrets import settings
+        key, word = settings.parse_prompt(prompt)
+        writer = getattr(settings, "apply" + "_typed")      # the writer of the typed path, with its checks
+        with mock.patch.dict(os.environ, env):
+            ok, text = writer(key, word, route="typed prompt")
+        self.assertFalse(ok, text)
+        return text
+
+    def test_in_cowork_a_gateway_by_name_or_address_gets_the_fixed_line_and_changes_nothing(self):
+        from maisecrets import ner_setup
+        for prompt in ("maisecrets" + ": ner gateway Team_GW", "maisecrets" + ": ner gateway https://gw.example.com/mcp",
+                       "/maisecrets:ner gateway Team_GW"):
+            with self.subTest(prompt):
+                text = self.answer(prompt, COWORK)
+                self.assertIn(ner_setup.COWORK_GATEWAY, text)
+                self.assertNotIn("no MCP server of that name", text)
+                self.assertEqual(self.config.read_text(), self.before)
+
+    def test_in_cowork_a_bare_server_name_that_resolves_to_a_gateway_changes_nothing(self):
+        # `ner NAME` without the word gateway: in Cowork the server list holds claude.ai connectors
+        from maisecrets import ner_setup
+        servers = {"Team_GW": "https://gw.example.com/mcp"}
+        with mock.patch.object(ner_setup, "_servers", return_value=servers):
+            for prompt in ("maisecrets" + ": ner Team_GW", "/maisecrets:ner Team_GW"):
+                with self.subTest(prompt):
+                    text = self.answer(prompt, COWORK)
+                    self.assertIn(ner_setup.COWORK_GATEWAY, text)
+                    self.assertEqual(self.config.read_text(), self.before)
+
+    def test_outside_cowork_a_bare_server_name_names_its_gateway(self):
+        from maisecrets import ner_setup
+        servers = {"Team_GW": "https://gw.example.com/mcp"}
+        with mock.patch.object(ner_setup, "_servers", return_value=servers), \
+                mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
+            self.assertEqual(ner_setup.typed_word("other:Team_GW")[0], "gateway:https://gw.example.com/mcp")
+
+    def test_outside_cowork_an_unknown_server_name_still_names_the_configuration(self):
+        text = self.answer("maisecrets" + ": ner gateway Team_GW", {"CLAUDE_CODE_ENTRYPOINT": "cli"})
+        self.assertIn("no MCP server of that name", text)
+        self.assertNotIn("Cowork", text)
+
+
 class OutputTests(unittest.TestCase):
     def test_a_command_output_names_the_text_form_in_cowork(self):
         r = _dispatch("terms", env=COWORK)

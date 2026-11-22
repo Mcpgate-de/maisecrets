@@ -1,0 +1,11 @@
+# c30-in-cowork-a-gateway-name-service-is-not-set: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30-in-cowork-a-gateway-name-service-is-not-set"
+control = "C30"
+serves = ["M6.4"]
+statement = "In Cowork a typed gateway name service (a server name or a URL) changes nothing and gets a fixed line that names where it works (Claude Code in the terminal or the desktop app's Code tab), never the answer about the MCP servers of the VM's configuration; outside Cowork the answer is as before."
+runner = ["tests/test_cowork.py::NerGatewayTests::test_in_cowork_a_gateway_by_name_or_address_gets_the_fixed_line_and_changes_nothing"]
+
+[proof]
+file = "maisecrets/ner_setup.py"
+find = '''    if word.startswith("gateway:") and cowork.active():'''
+replace = '''    if False:'''

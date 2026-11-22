@@ -1,0 +1,11 @@
+# c22-the-command-route-names-the-text-form-of-a-change: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-the-command-route-names-the-text-form-of-a-change"
+control = "C22"
+serves = ["M4.2"]
+statement = "When the mod's command.run route refuses a change that only the person's own prompt may make, Python names the text form `maisecrets: NAME ARGS` (also for a ner or settings change that has no fixed text form) for the person to type, and fills no input box: the stamp composer is no proof that the person typed the command. forget KEY and sref keep their slash form."
+runner = ["tests/test_entry.py::CommandRouteTests::test_the_refusal_names_the_text_form_of_a_change"]
+
+[proof]
+file = "maisecrets/prompt_commands.py"
+find = '''        if typed.startswith("/") and name in (["ner"], ["settings"]):'''
+replace = '''        if False:'''

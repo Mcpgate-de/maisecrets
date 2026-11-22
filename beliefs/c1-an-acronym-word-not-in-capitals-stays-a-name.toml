@@ -1,0 +1,11 @@
+# c1-an-acronym-word-not-in-capitals-stays-a-name: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-acronym-word-not-in-capitals-stays-a-name"
+control = "C1"
+serves = ["M1.3"]
+statement = "remote.is_no_person drops a word of ACRONYMS alone only in capitals: \"Ner\", \"ner\" and \"Api\" are given names and stay names."
+runner = ["tests/test_name_spans_that_are_no_person.py::SpanRuleTests::test_an_acronym_word_not_in_capitals_stays_a_name"]
+
+[proof]
+file = "maisecrets/detection/remote.py"
+find = '''    return word.isupper() and word.lower() in ACRONYMS'''
+replace = '''    return word.lower() in ACRONYMS'''

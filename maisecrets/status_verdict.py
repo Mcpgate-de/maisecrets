@@ -35,6 +35,7 @@ class Check(NamedTuple):
     fact: str                   # short: what was checked
     next: Optional[str]         # the next command, for warn and FAIL
     detail: Optional[str]       # the longer fact, for `status all`
+    note: Optional[str] = None  # a line under the fact in the short status: why, when the fact alone does not say it
 
 
 def reload_next(client: str | None) -> str:
@@ -392,6 +393,7 @@ def report(root: Path, claude_dir: Path | None = None, codex_home: Path | None =
     names = names_verdict()
     if names:
         checks.append(names)
+    checks += cowork_notes()
     dm = demo_verdict(sessions)
     if dm:
         checks.append(dm)
@@ -420,6 +422,28 @@ def names_verdict() -> Check | None:
         return ner_health.verdict(load_config())
     except Exception:  # noqa: BLE001 - a note that cannot be read is no check
         return None
+
+
+def cowork_notes() -> list:
+    """In Cowork, the notes of a task: the settings hold for this task only (a new task starts a new VM), and, while no
+    name source is set, names are off with the reason (cowork.names_off). Outside Cowork none."""
+    from . import cowork
+    if not cowork.active():
+        return []
+    notes = [Check("warn", "settings", "this task only", None,
+                   "Cowork keeps the settings and the stored values in the VM of this task; a new task starts with "
+                   "the defaults", "a new Cowork task starts with the defaults")]
+    try:
+        from .home import load_config
+        off = cowork.names_off(load_config())
+    except Exception:  # noqa: BLE001 - a note that cannot be read is no check
+        off = False
+    if off:
+        why = cowork.NAMES_WHY[:1].upper() + cowork.NAMES_WHY[1:] + "."
+        notes.append(Check("warn", "names", "off in this task", "/maisecrets term add NAME",
+                           f"names are off in this Cowork task: {cowork.NAMES_WHY}. /maisecrets term add NAME masks "
+                           "a word of your own.", why + " The step masks a word of your own."))
+    return notes
 
 
 def demo_verdict(sessions) -> Check | None:
@@ -472,6 +496,10 @@ def check_lines(checks: list, client: str | None = None) -> list[str]:
         if c.next and c.state in ("warn", "FAIL"):
             line = f" {MARK.get(c.state, '?')} {c.name:<{NAME_COL}} {c.fact:<{FACT_COL}}  \u2192  {c.next}"
         out.append(line)
+        if c.note:
+            import textwrap
+            indent = " " * (NAME_COL + 4)
+            out += textwrap.wrap(c.note, WIDTH, initial_indent=indent, subsequent_indent=indent)
     return out
 
 

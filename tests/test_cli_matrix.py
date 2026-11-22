@@ -1095,14 +1095,14 @@ class SessionStartTests(unittest.TestCase):
         self.assertEqual(out["systemMessage"], "\n".join(tips.welcome_lines(False, lock=True)))
         self.assertTrue(out["systemMessage"].splitlines()[0].endswith(SCREEN))
         self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "SessionStart",
-                                                     "additionalContext": hooks.primer()})
+                                                     "additionalContext": hooks.session_context()})
         self.assertEqual((sb.home / ".announced").read_text().strip(), "EncryptedFileBackend")
         self.assertFalse((sb.user_home / ".claude" / "commands").exists(), "the start installs nothing")
         second = _start(self, sb, CLAUDECODE="1")
         self.assertEqual(second["systemMessage"], tips.TIPS[0])
         third = _start(self, sb, CLAUDECODE="1")
         self.assertNotIn("systemMessage", third, "a start with nothing to say says nothing")
-        self.assertEqual(third["hookSpecificOutput"]["additionalContext"], hooks.primer(),
+        self.assertEqual(third["hookSpecificOutput"]["additionalContext"], hooks.session_context(),
                          "the model's instructions stay at every start")
     def test_the_tip_comes_from_the_pool_of_the_client(self):
         from maisecrets import tips
@@ -1407,7 +1407,7 @@ def run_pair(state: str, event: str, client: str) -> list[str]:
             if damaged:
                 if " repair in a terminal" not in msg:
                     problems.append(f"{cell}: the message does not name repair: {msg!r}")
-            elif hso != {"hookEventName": "SessionStart", "additionalContext": hooks_primer()}:
+            elif hso != {"hookEventName": "SessionStart", "additionalContext": hooks_primer(client)}:
                 problems.append(f"{cell}: no primer: {hso!r}")
             elif (client == "codex") == ("/maisecrets:" in msg):
                 problems.append(f"{cell}: a slash command is {'named to Codex' if client == 'codex' else 'missing'}")
@@ -1452,9 +1452,9 @@ def run_pair(state: str, event: str, client: str) -> list[str]:
         sb.remove()
 
 
-def hooks_primer() -> str:
+def hooks_primer(client: str = "claude") -> str:
     from maisecrets import hooks
-    return hooks.primer()
+    return hooks.session_context(None, client)
 
 
 class ClientStateEventTests(unittest.TestCase):

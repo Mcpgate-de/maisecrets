@@ -527,6 +527,37 @@ def primer(cfg: dict | None = None, client: str = "claude") -> str:
     return PRIMER_WINDOWS
 
 
+# how the model names a maisecrets command to the person: the single commands are hidden since 0.9.22, and Cowork knows
+# only the entry. A command that maisecrets answers itself (forms._TYPED) shows its answer in Cowork only as text
+COMMANDS_CLAUDE = ("When you name a maisecrets command to the user, write a command that only shows as "
+                   "/maisecrets NAME, for example /maisecrets status. Write a command that changes maisecrets (term "
+                   "add or remove, not-a-secret, demo, a settings or ner change) as the text the user types: "
+                   "maisecrets: term add NAME, maisecrets: not a secret KEY, maisecrets: demo on, maisecrets: set "
+                   "KEY VALUE, maisecrets: ner local.")
+COMMANDS_CODEX = ("When you name a maisecrets command to the user, write the prompt maisecrets: NAME ARGS, for example "
+                  "maisecrets: status.")
+COMMANDS_COWORK = ("When you name a maisecrets command to the user, write /maisecrets NAME, for example /maisecrets "
+                   "status. Write a command that maisecrets answers itself (term add or remove, not-a-secret, demo, a "
+                   "settings change, a ner change, sref, report incident) as text: maisecrets: NAME ARGS, for example "
+                   "maisecrets: term add NAME.")
+# the model must not tell the person that names are masked where no name source runs (cowork.names_off)
+NAMES_OFF_COWORK = "maisecrets masks no names in this Cowork task: {why}."
+
+
+def session_context(cfg: dict | None = None, client: str = "claude") -> str:
+    """What the model reads at the session start: the primer, the form of a command for the person, and in Cowork,
+    while no name source is set, that names are not masked there and why (cowork.names_off)."""
+    from . import cowork
+    if client == "codex":
+        return primer(cfg, client) + " " + COMMANDS_CODEX
+    if not cowork.active():
+        return primer(cfg, client) + " " + COMMANDS_CLAUDE
+    text = primer(cfg, client) + " " + COMMANDS_COWORK
+    if cowork.names_off(cfg):
+        text += " " + NAMES_OFF_COWORK.format(why=cowork.NAMES_WHY.replace("your computer", "the user's computer"))
+    return text
+
+
 # --------------------------------------------------------- UserPromptSubmit --
 def agent_report(payload: dict, prompt: str) -> bool:
     """True when the prompt is nothing but proven reports of this session's subagents, and no value is outside their
