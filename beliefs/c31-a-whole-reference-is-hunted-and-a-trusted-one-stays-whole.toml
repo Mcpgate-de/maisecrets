@@ -1,0 +1,19 @@
+# c31-a-whole-reference-is-hunted-and-a-trusted-one-stays-whole: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-whole-reference-is-hunted-and-a-trusted-one-stays-whole"
+control = "C31"
+serves = ["M3.3"]
+statement = "A stored value that holds a gateway reference (placeholder.whole_references masks a reference of a gateway that is not bound yet) is not weak: a later text with the same reference and no label masks it, so a secret a server put into the id does not reach the model; a reference a gateway gave this session stays whole, also next to a stored value."
+runner = ["tests/test_weak_entries.py::TrustedReferenceTests::test_a_whole_reference_is_hunted_and_a_trusted_one_stays_whole"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = '''
+    if kind.startswith("remote:"):
+        return True    # a model's finding (remote_layer.py): masked where it was found, never hunted
+'''
+replace = '''
+    if "⟦sref:" in value:
+        return True
+    if kind.startswith("remote:"):
+        return True    # a model's finding (remote_layer.py): masked where it was found, never hunted
+'''

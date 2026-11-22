@@ -66,8 +66,8 @@ from .server_values import _all_refs, _elsewhere_reason, _server_fetch, _server_
 from .sref_hooks import canonical as _sref_canonical, note as _sref_note, precheck as _sref_precheck, \
     program_of as _program_of, refs as _sref_refs, never_reason as _sref_never_reason
 
-# a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
-AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
+# a Windows path carries a drive letter and backslashes: @C:\Users\x\.env; slashes alone are no file (s/=.*@/x/)
+AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?!/+(?![\w./~\\:-]))(?P<path>[\w./~\\:-]+)")
 
 
 # ---------------------------------------------------------------- helpers --
@@ -2997,9 +2997,12 @@ def post_tool_failure(payload: dict) -> dict:
     printed reaches the model as it is. What is left to do: store each value, so a later output, file or command
     that repeats it is redacted exactly; clean the transcript on disk; tell the model not to use the values and the
     person what happened. Measured over one user's transcripts: 14 such outputs with a hit in 105,241 Bash calls."""
+    from .deposit import post_tool_failure as deposit_line
     error = payload.get("error")
     if not isinstance(error, str) or not error or client_of(payload) == "codex":
         return {}
+    if line := deposit_line(payload):
+        return line
     cfg = load_config()
     session = payload.get("session_id")
     matches = detect.findings(error, channel="tool")

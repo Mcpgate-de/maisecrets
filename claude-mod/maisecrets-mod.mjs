@@ -1643,6 +1643,12 @@ function startOwn($, run, flight, title, entry = running.get(flight)) {
     }
     out.lines = lines
     out.done = true
+    if (run.view === 'lines') {
+      // a confirmation (forget): its lines above the prompt, no panel for them
+      const said = lines.filter(l => l.trim()).slice(0, 20)
+      try { for (const l of said) $.ui.log(l) } catch { toast($, said.join(' ') || `maisecrets: ${title} ended.`) }
+      return
+    }
     if (run.long) {
       const said = result.code === 0 && server ? `maisecrets: logged in at ${server}` : last ||
         `maisecrets: the login did not complete (exit ${result.code}).`
@@ -1702,7 +1708,7 @@ async function runOwn($, own, kind, runnable, ownCmd, fill, viaMs = false) {
   }
   if (ownAnswer !== null && typeof ownAnswer.drop === 'string') {
     if (fill) fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
-    return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE) }
+    return { drop: showOwn($, ownAnswer.drop, OWN_ABOVE), box: ownAnswer.box }
   }
   return { answer: ownAnswer }
 }
@@ -1732,6 +1738,17 @@ const ownText = (line) => ({ text: String(line).replace(/^maisecrets: /, ''), is
 // `composer`, so it is no proof that the person typed it. Python makes no change there that only the person's own
 // prompt may make (C22): it names the prompt to send, which goes through prompt.submit and the prompt hook
 const COMMAND_ROUTE = 'command'
+// the refused commands of this route that may wait in an empty input box (prompt_commands._BOX_SREF_RE): a logout,
+// and a login, which opens the browser for the person's consent and binds a connector only with its proof, as the
+// login offer (LOGIN_FILL). The person's Enter sends it as their own prompt; every other change is only named
+const SREF_BOX = /^\/maisecrets:sref log(?:in|out)(?: [A-Za-z0-9_.-]{1,64})?$/
+async function boxed($, text) {
+  if (typeof text !== 'string' || !SREF_BOX.test(text)) return false
+  try {
+    if (!(await boxEmpty($))) return false
+    return (await $.prompt.fill({ text, mode: 'append' }))?.isFilled === true
+  } catch { return false }
+}
 async function runTyped($, own) {
   const kind = COMMAND_ROUTE
   if (DEMO_CMD.test(own)) {
@@ -1754,6 +1771,7 @@ async function runTyped($, own) {
   }
   let done = null
   try { done = await runOwn($, own, kind, RUN_CMD.test(own), true, false) } catch { done = null }
+  if (typeof done?.drop === 'string' && await boxed($, done.box)) return ownText(filledNote(done.box))
   return ownText(typeof done?.drop === 'string' ? done.drop : OWN_FAILED)
 }
 
@@ -1783,7 +1801,8 @@ async function loginFromPane($, id, name) {
 const startedLine = (run, title) => run.long
   ? `maisecrets: ${title} opens your browser; the status line shows the wait.`
   : run.view === 'panel' ? 'maisecrets: the panel opens. Esc closes it.'
-    : `maisecrets: ${title} runs without the AI; its output opens in a panel.`
+    : run.view === 'lines' ? `maisecrets: ${title} runs without the AI; its answer shows above the prompt.`
+      : `maisecrets: ${title} runs without the AI; its output opens in a panel.`
 
 function registerSettingsPane(on) {
   on('ui.render', { component: 'Pane', requestId: SETTINGS_PANE }, async ($, e) => drawSettings($, e))

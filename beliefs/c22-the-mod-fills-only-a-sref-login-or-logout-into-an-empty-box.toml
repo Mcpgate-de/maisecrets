@@ -1,0 +1,11 @@
+# c22-the-mod-fills-only-a-sref-login-or-logout-into-an-empty-box: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-the-mod-fills-only-a-sref-login-or-logout-into-an-empty-box"
+control = "C22"
+serves = ["M4.2"]
+statement = "The mod puts a command that its command.run route refused into the input box only when it is /maisecrets:sref login or logout with at most a server name, and only into an empty box; any other form an answer names stays a line."
+runner = ["tests/mod.test.ts::a refused sref login or logout from the command.run route waits in an empty input box"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''const SREF_BOX = /^\/maisecrets:sref log(?:in|out)(?: [A-Za-z0-9_.-]{1,64})?$/'''
+replace = '''const SREF_BOX = /^\/maisecrets:/'''

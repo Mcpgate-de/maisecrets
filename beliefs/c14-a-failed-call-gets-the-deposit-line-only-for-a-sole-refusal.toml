@@ -1,0 +1,12 @@
+# c14-a-failed-call-gets-the-deposit-line-only-for-a-sole-refusal: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-failed-call-gets-the-deposit-line-only-for-a-sole-refusal"
+control = "C14"
+serves = ["M3.8"]
+statement = "A refused deposit that Claude Code reports as a failed call (PostToolUseFailure) gets the one line of section 6.5 as additional context only when the whole error is the gateway's refusal of a call that carried handles; an error with any other text keeps the failure path, which stores and names its values."
+runner = ["tests/test_deposit.py::DepositHookTests::test_a_refusal_that_comes_as_a_failed_call_gets_its_line_too"]
+
+[proof]
+file = "maisecrets/deposit.py"
+find = '''    code = _sole_block(error) or _sole_refusal(parsed)'''
+replace = '''    found = _REFUSED_RE.search(error)
+    code = found.group(1) if found else None'''

@@ -241,7 +241,7 @@ class RunPlanTests(_Base):
                                            "server": "team-gw"},
         "/maisecrets:ner all": {"argv": ["ner", "all"]},
         "/maisecrets:ner": {"argv": ["ner"], "view": "ner", "starting": False},
-        "/maisecrets:forget " + KEY: {"argv": ["forget", "--args-stdin"], "stdin": KEY},
+        "/maisecrets:forget " + KEY: {"argv": ["forget", "--args-stdin"], "stdin": KEY, "view": "lines"},
     }
 
     def test_each_command_gets_the_entry_of_its_command_file(self):

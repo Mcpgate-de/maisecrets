@@ -1,0 +1,13 @@
+# c31-a-value-this-session-resolved-never-cuts-a-trusted-reference: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-value-this-session-resolved-never-cuts-a-trusted-reference"
+control = "C31"
+serves = ["M3.3"]
+statement = "tool_output._exact_redact replaces a value this session resolved (its forms, a full name in any case) nowhere in the bracket, the kind or the id of a reference a gateway gave this session; outside it the value is still replaced."
+runner = ["tests/test_weak_entries.py::TrustedReferenceTests::test_a_value_this_session_resolved_never_cuts_a_trusted_reference"]
+
+[proof]
+file = "maisecrets/tool_output.py"
+find = '''    guarded = _trusted_reference_spans(out)
+    for value, ref in resolved or []:'''
+replace = '''    guarded = []
+    for value, ref in resolved or []:'''

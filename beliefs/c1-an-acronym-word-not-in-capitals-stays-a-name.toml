@@ -7,5 +7,5 @@ runner = ["tests/test_name_spans_that_are_no_person.py::SpanRuleTests::test_an_a
 
 [proof]
 file = "maisecrets/detection/remote.py"
-find = '''    return word.isupper() and word.lower() in ACRONYMS'''
-replace = '''    return word.lower() in ACRONYMS'''
+find = '''    return word.isupper() and (word.lower() in ACRONYMS or word.lower() in CAPS_WORDS)'''
+replace = '''    return word.lower() in ACRONYMS or word.lower() in CAPS_WORDS'''

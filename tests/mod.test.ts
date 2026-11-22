@@ -871,6 +871,17 @@ test('a command the person typed runs without a model turn: the prompt is droppe
     await ui.unmount()
   })
 
+// live probe 2026-11-22: a forget opened a panel only to say that it deleted the key
+test('the confirmation of a forget stands above the prompt and opens no pane', async ($, on) => {
+  const FORGET = { run: { argv: ['forget', '--args-stdin'], stdin: 'SECRET_c9', view: 'lines' } }
+  const st = runSetup(on, { answer: FORGET, chunks: ['Deleted SECRET_c9. A placeholder for it no longer works anywhere.\n'] })
+  const r = await $.prompt.submit({ text: '/maisecrets:forget SECRET_c9', wait: false, origin: { kind: 'composer' } })
+  expect(r.drop).toBe('maisecrets: /maisecrets forget runs without the AI; its answer shows above the prompt.')
+  expect(await until(() => st.ended === 1)).toBe(true)
+  expect(await until(() => st.logs.some(l => l.startsWith('Deleted SECRET_c9.')))).toBe(true)
+  expect(st.opens.filter(o => String(o.id).startsWith('maisecrets-out-'))).toEqual([])
+})
+
 test('the output of /maisecrets:sref has a login button per server; a press starts that login', async ($, on) => {
   const STATUS = { run: { argv: ['sref', '--args-stdin'], stdin: '' } }
   const st = runSetup(on, {
@@ -1342,6 +1353,38 @@ test('a refused change from the command.run route never fills the input box', as
     expect(r.text).toBe(HINT.replace(/^maisecrets: /, ''))
   }
   expect(st.fills).toEqual([])
+  expect(st.spawns.length).toBe(0)
+})
+
+// live probe 2026-11-22: `/maisecrets sref login` and `logout` typed were refused. Python names a login or a logout as
+// a form for the box (prompt_commands._BOX_SREF_RE): it waits in an empty box for the person's Enter, as the login offer
+test('a refused sref login or logout from the command.run route waits in an empty input box', async ($, on) => {
+  const HINT = 'maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. ' +
+    'Nothing was changed. Send it as a prompt: '
+  let box = ''
+  let form = '/maisecrets:sref login gw'
+  const st = runSetup(on, { answer: () => ({ drop: HINT + form, box: form }) })
+  on('prompt.read', () => ({ value: { text: box, cursor: 0 } }))
+  on('command.run', () => ({ text: 'engine' }))
+  let r = await $.command.run({ command: 'maisecrets', args: 'sref login gw', origin: { kind: 'composer' } } as any)
+  expect(st.fills).toEqual([form])
+  expect(r.text).toBe('I put /maisecrets:sref login gw into the input box. Press Enter to run it, or clear the box.')
+  form = '/maisecrets:sref logout'
+  r = await $.command.run({ command: 'maisecrets', args: 'sref logout', origin: { kind: 'composer' } } as any)
+  expect(st.fills).toEqual(['/maisecrets:sref login gw', form])
+  // the person's own text stays: the command is only named
+  box = 'my draft'
+  r = await $.command.run({ command: 'maisecrets', args: 'sref logout', origin: { kind: 'composer' } } as any)
+  expect(r.text).toBe((HINT + form).replace(/^maisecrets: /, ''))
+  // any other form that an answer names for the box never goes there
+  box = ''
+  for (const other of ['maisecrets: ner https://ner.example.com/ner', '/maisecrets:maisecrets forget SECRET_c1',
+    '/maisecrets:sref login gw; status']) {
+    form = other
+    r = await $.command.run({ command: 'maisecrets', args: 'sref login gw', origin: { kind: 'composer' } } as any)
+    expect(r.text).toBe((HINT + other).replace(/^maisecrets: /, ''))
+  }
+  expect(st.fills.length).toBe(2)
   expect(st.spawns.length).toBe(0)
 })
 

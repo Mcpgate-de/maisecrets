@@ -296,9 +296,10 @@ def _cowork_sref(payload: dict, prompt: str) -> dict | None:
 def run_plan(prompt) -> dict | None:
     """What the mod runs for a slash command the person typed, in place of its command file: {"argv": the CLI words
     after hooks/dispatch.py (fixed words only), "stdin": the typed arguments for --args-stdin, "long": a run of up to
-    two minutes (the login), "server": the server a login names, "view": "ner" for the panel's name-service view,
-    "fill": the output goes into the prompt box (/maisecrets:send), "markdown": the output is Markdown, "pair": the
-    proposed claude.ai connector whose pairing proof the mod asks for after a login that succeeded}. None keeps
+    two minutes (the login), "server": the server a login names, "view": "ner" for the panel's name-service view or
+    "lines" for an answer above the prompt with no panel (forget), "fill": the output goes into the prompt box
+    (/maisecrets:send), "markdown": the output is Markdown, "pair": the proposed claude.ai connector whose pairing
+    proof the mod asks for after a login that succeeded}. None keeps
     the command file: a form that needs the model or its tool hooks, such as `status test`, whose value only the
     PreToolUse hook makes and whose proof is the tool output path."""
     m = _SLASH_FORM_RE.match(prompt) if isinstance(prompt, str) else None
@@ -336,6 +337,9 @@ def run_plan(prompt) -> dict | None:
                 plan["pair"] = words[1]
     if name == "settings":
         plan["markdown"] = True
+    if name == "forget":
+        # a confirmation of one line per key: it stands above the prompt, no panel opens for it (live probe 2026-11-22)
+        plan["view"] = "lines"
     return plan
 
 
@@ -435,6 +439,8 @@ def mod_command(payload: dict) -> dict | None:
 COMMAND_ROUTE = "command"
 # the source this module gives the prompt hook for that route: not the person's (settings.TYPED_SOURCES)
 _ROUTE_SOURCE = "mod-command-run"
+# the refused commands of that route that may wait in an empty input box (_command_route): the mod's SREF_BOX
+_BOX_SREF_RE = LazyRx(r"/maisecrets:sref log(?:in|out)(?: [A-Za-z0-9_.-]{1,64})?")
 
 
 def person_only(prompt: str) -> bool:
@@ -482,8 +488,17 @@ def _command_route(payload: dict) -> dict:
             # (events.note_typed_forget reads the slash form only); sref and report start from their own command file
             typed = f"/maisecrets:{words}" if words.split()[:1] in (["sref"], ["report"]) else \
                 f"/maisecrets:maisecrets {words}"
-        return {"drop": "maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. "
-                        f"Nothing was changed. Send it as a prompt: {_without_values(typed, payload)}"}
+        named = _without_values(typed, payload)
+        out = {"drop": "maisecrets: this command changes what maisecrets does, so it counts only as your own prompt. "
+                       f"Nothing was changed. Send it as a prompt: {named}"}
+        if named == typed and _BOX_SREF_RE.fullmatch(typed):
+            # a login or a logout may wait in an empty input box for the person's Enter: a logout loosens nothing,
+            # and a login opens the browser, where the person gives the consent, and binds a claude.ai connector
+            # only with its pairing proof: the same as the login offer at the end of a turn (sref_hooks.LOGIN_FILL).
+            # A setting, a term, not-a-secret, the demo, the name service and a forget (it ends the search for a
+            # value) are named only: an AI that starts a hidden command could put them there (review of !633)
+            out["box"] = typed
+        return out
     out = mod_command({**payload, "origin": "composer", "source": _ROUTE_SOURCE})
     return out if out is not None else {"drop": "maisecrets: this command did not run."}
 

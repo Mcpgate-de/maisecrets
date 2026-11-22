@@ -52,6 +52,17 @@ class SpanRuleTests(unittest.TestCase):
                 self.assertTrue(rm.is_no_person(span))
                 self.assertTrue(rm.is_no_person_in(f"the {span} service", 4, 4 + len(span)))
 
+    def test_a_common_word_alone_in_capitals_is_no_person(self):
+        # "NEUTRAL" was masked as a person name (live probe, 2026-11-22)
+        for span in ("NEUTRAL", " NEUTRAL ", "WARNING", "TODO"):
+            with self.subTest(span=span):
+                self.assertTrue(rm.is_no_person(span))
+                self.assertTrue(rm.is_no_person_in(f"the {span} label", 4, 4 + len(span)))
+        # in title case, or next to another word, the service's answer stands
+        for span in ("Neutral", "NEUTRAL WEBER"):
+            with self.subTest(span=span):
+                self.assertFalse(rm.is_no_person(span))
+
     def test_an_acronym_word_not_in_capitals_stays_a_name(self):
         # "Ner" and "Api" are given names: only the capitals make the word an acronym
         for span in ("Ner", "ner", "Api", " Mcp "):

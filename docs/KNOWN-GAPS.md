@@ -75,6 +75,8 @@ a to-do.
   Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
+  An `@` before slashes alone, as in the sed expression `s/=.*@/x/`, names no
+  file and is no mention.
 - **A name without a label is not detected, unless it is on a term list** (Terms). Regex only, by design: "Emma Johansson" alone looks like any two
   capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
   in a tool result (0.6.21); in a typed prompt the rules detect no name (a name service you set checks it in
@@ -164,11 +166,13 @@ a to-do.
   `mcp__claude_ai_<connector>__`. Cowork drops `claude_ai_` from the tool names (measured 2026-11-22), and the
   sref login has no way into the VM yet. So in Cowork (and in the desktop app's local agent session) a connector
   call with a stored value stays refused.
-- **A gateway's refusal of a deposit may reach the AI as raw text.** When the gateway refuses a call that
-  carried a deposit handle, its tool result is `deposit_refused: <code>` with `isError: true`, and maisecrets
-  turns it into one line in PostToolUse. Not measured: whether Claude Code gives such a result to PostToolUse or
-  to PostToolUseFailure, which cannot replace an output (anthropics/claude-code#97278). In the second case the AI
-  sees the code itself, which holds no value and no handle.
+- **A gateway's refusal of a deposit reaches the AI as raw text, next to its line.** When the gateway refuses a
+  call that carried a deposit handle, its tool result is `deposit_refused: <code>` with `isError: true`. Claude
+  Code 2.1.330 reports such a call as failed (PostToolUseFailure, seen in the live probe of 2026-11-22), and that
+  answer cannot replace the output (anthropics/claude-code#97278). So the AI sees the code itself, which holds no
+  value and no handle, and maisecrets adds its one line as context. The `error` field that maisecrets reads is
+  the text of the result's blocks, joined by a line break and trimmed, with no prefix. That form is read from the
+  2.1.330 bundle; it is not measured against a live payload of a refusal.
 - **Codex has connectors too, and maisecrets does not detect them.** Codex's `codex_apps` server (ChatGPT app
   connectors behind OpenAI's apps gateway) relays a call like a claude.ai connector. Codex sends no server source,
   so maisecrets cannot tell such a call from a direct server, and it puts the stored value in.

@@ -177,6 +177,17 @@ class CodexReviewTests(unittest.TestCase):
     def test_a_comma_ends_a_phone_number(self):
         self.assertIn(("PHONE", "+4915112345678"), found("row,+4915112345678,123"))
 
+    def test_an_iso_date_after_a_plus_is_no_phone(self):
+        # live probe 2026-11-22: the added line of a diff, "+2026-11-22", was masked as a phone number
+        for text in ("+" + "2026-11-22", "+" + "2026-11-22 14:30 release", "+" + "2026-11-22T10:00:00Z",
+                     "+" + "1999-01-31: note"):
+            with self.subTest(text=text):
+                self.assertEqual([t for t, _v in found(text) if t == "PHONE"], [])
+        # a number with a plus still is one, also one whose groups look like a year
+        for text in ("call +49 30 " + "9182 7364", "row,+49-2026-" + "4471-22,x"):
+            with self.subTest(text=text):
+                self.assertIn("PHONE", [t for t, _v in found(text)])
+
     def test_a_capitalised_test_folder_and_a_tests_file_are_test_code(self):
         for path in ("/repo/Tests/AuthTests.cs", "src/Auth/LoginTest.java", "Tests/Login.swift"):
             with self.subTest(path=path):

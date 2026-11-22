@@ -310,16 +310,20 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
     # _derived_forms is for the encoded forms and the fingerprint search below; a 6-character password
     # stored with `put` came back to the model in plain text (external review, 2026-09-28)
     spans: list = []
+    # the kind and the id of a reference a gateway gave this session are never cut: a value this session resolved
+    # that a wrong mask once took from such an id broke the reference at each later read (live probe, 2026-11-22)
+    guarded = _trusted_reference_spans(out)
     for value, ref in resolved or []:
         for form in _resolved_forms(value):
             at = out.find(form)
             while at >= 0:
-                spans.append((at, at + len(form), ref, form))
+                if not _overlaps(at, at + len(form), guarded):
+                    spans.append((at, at + len(form), ref, form))
                 at = out.find(form, at + 1)
         if _a_full_name(value, ref):
             # a name of two words or more in any case, as whole words: `joachim demo` is the stored Joachim Demo (#39)
             for m in re.finditer(r"(?<!\w)" + re.escape(value) + r"(?!\w)", out, re.IGNORECASE):
-                if m.group(0) != value:
+                if m.group(0) != value and not _overlaps(m.start(), m.end(), guarded):
                     spans.append((m.start(), m.end(), ref, m.group(0)))
     # all places in the text as it came, joined where they overlap: one replaced first cut a value that overlaps it,
     # and its rest stayed in clear (Codex review, round 6). A joined place gets the references of its outer values
@@ -346,7 +350,11 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             # under 4 characters only where no letter or digit stands next to it: a plain substring replace
             # of `a` broke every word of the output (Codex review, 2026-09-28)
             pattern = re.compile(r"(?<![^\W_])" + re.escape(value) + r"(?![^\W_])")   # any letter or digit
-            out, n = pattern.subn(lambda _m: ref, out)
+            here = _trusted_reference_spans(out)
+            hits = [m for m in pattern.finditer(out) if not _overlaps(m.start(), m.end(), here)]
+            for m in reversed(hits):
+                out = out[:m.start()] + ref + out[m.end():]
+            n = len(hits)
             if n:
                 hit["n"] += n
                 if values is not None and value not in values:
@@ -393,18 +401,29 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
     return out
 
 
-def _replace_outside_references(text: str, raw: str, ref: str) -> tuple[str, int]:
-    """text with each raw replaced by ref, except where raw starts in the kind or the id of a gateway's reference: a
-    value that a rule once took from such an id (0.9.1) broke the reference again at each later read (2026-11-08)."""
+def _trusted_reference_spans(text: str) -> list:
+    """(start, end) of the bracket, the kind and the id of each reference a gateway gave this session
+    (placeholder.trusted). Its display part is not in it: a forged reference can fill that with a value."""
+    if "\u27e6sref:" not in text:
+        return []
     from .placeholder import _rx, trusted
-    guarded = [(m.start(), m.end("id")) for m in _rx("sref").finditer(text) if trusted(m)] if "\u27e6sref:" in text \
-        else []
+    return [(m.start(), m.end("id")) for m in _rx("sref").finditer(text) if trusted(m)]
+
+
+def _overlaps(start: int, end: int, spans: list) -> bool:
+    return any(start < b and a < end for a, b in spans)
+
+
+def _replace_outside_references(text: str, raw: str, ref: str) -> tuple[str, int]:
+    """text with each raw replaced by ref, except where raw touches the kind or the id of a gateway's reference: a
+    value that a rule once took from such an id (0.9.1) broke the reference again at each later read (2026-11-08)."""
+    guarded = _trusted_reference_spans(text)
     parts, at, n = [], 0, 0
     while True:
         i = text.find(raw, at)
         if i < 0:
             break
-        if any(a <= i < b for a, b in guarded):
+        if _overlaps(i, i + len(raw), guarded):
             parts.append(text[at:i + 1])
             at = i + 1
             continue

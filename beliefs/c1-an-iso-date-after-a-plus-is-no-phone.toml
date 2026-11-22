@@ -1,0 +1,12 @@
+# c1-an-iso-date-after-a-plus-is-no-phone: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-iso-date-after-a-plus-is-no-phone"
+control = "C1"
+serves = ["M1.3"]
+statement = "The own rule phone takes no ISO date of 1900 to 2099 right after the plus (the added line of a diff, +2026-11-22); a number with a plus whose groups look like a year is still a phone."
+runner = ["tests/test_leak_direction.py::CodexReviewTests::test_an_iso_date_after_a_plus_is_no_phone"]
+
+[proof]
+file = "maisecrets/detection/own_rules.py"
+find = '''              r"(?!(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?!\d))"
+'''
+replace = ""
