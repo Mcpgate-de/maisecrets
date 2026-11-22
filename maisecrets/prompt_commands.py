@@ -296,9 +296,10 @@ def _cowork_sref(payload: dict, prompt: str) -> dict | None:
 def run_plan(prompt) -> dict | None:
     """What the mod runs for a slash command the person typed, in place of its command file: {"argv": the CLI words
     after hooks/dispatch.py (fixed words only), "stdin": the typed arguments for --args-stdin, "long": a run of up to
-    two minutes (the login), "server": the server a login names, "view": "ner" for the panel's name-service view,
-    "fill": the output goes into the prompt box (/maisecrets:send), "markdown": the output is Markdown, "pair": the
-    proposed claude.ai connector whose pairing proof the mod asks for after a login that succeeded}. None keeps
+    two minutes (the login), "server": the server a login names, "view": "ner" for the panel's name-service view or
+    "lines" for an answer above the prompt with no panel (forget), "fill": the output goes into the prompt box
+    (/maisecrets:send), "markdown": the output is Markdown, "pair": the proposed claude.ai connector whose pairing
+    proof the mod asks for after a login that succeeded}. None keeps
     the command file: a form that needs the model or its tool hooks, such as `status test`, whose value only the
     PreToolUse hook makes and whose proof is the tool output path."""
     m = _SLASH_FORM_RE.match(prompt) if isinstance(prompt, str) else None
@@ -336,6 +337,9 @@ def run_plan(prompt) -> dict | None:
                 plan["pair"] = words[1]
     if name == "settings":
         plan["markdown"] = True
+    if name == "forget":
+        # a confirmation of one line per key: it stands above the prompt, no panel opens for it (live probe 2026-11-22)
+        plan["view"] = "lines"
     return plan
 
 

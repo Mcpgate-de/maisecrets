@@ -1643,6 +1643,12 @@ function startOwn($, run, flight, title, entry = running.get(flight)) {
     }
     out.lines = lines
     out.done = true
+    if (run.view === 'lines') {
+      // a confirmation (forget): its lines above the prompt, no panel for them
+      const said = lines.filter(l => l.trim()).slice(0, 20)
+      try { for (const l of said) $.ui.log(l) } catch { toast($, said.join(' ') || `maisecrets: ${title} ended.`) }
+      return
+    }
     if (run.long) {
       const said = result.code === 0 && server ? `maisecrets: logged in at ${server}` : last ||
         `maisecrets: the login did not complete (exit ${result.code}).`
@@ -1783,7 +1789,8 @@ async function loginFromPane($, id, name) {
 const startedLine = (run, title) => run.long
   ? `maisecrets: ${title} opens your browser; the status line shows the wait.`
   : run.view === 'panel' ? 'maisecrets: the panel opens. Esc closes it.'
-    : `maisecrets: ${title} runs without the AI; its output opens in a panel.`
+    : run.view === 'lines' ? `maisecrets: ${title} runs without the AI; its answer shows above the prompt.`
+      : `maisecrets: ${title} runs without the AI; its output opens in a panel.`
 
 function registerSettingsPane(on) {
   on('ui.render', { component: 'Pane', requestId: SETTINGS_PANE }, async ($, e) => drawSettings($, e))

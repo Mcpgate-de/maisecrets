@@ -871,6 +871,17 @@ test('a command the person typed runs without a model turn: the prompt is droppe
     await ui.unmount()
   })
 
+// live probe 2026-11-22: a forget opened a panel only to say that it deleted the key
+test('the confirmation of a forget stands above the prompt and opens no pane', async ($, on) => {
+  const FORGET = { run: { argv: ['forget', '--args-stdin'], stdin: 'SECRET_c9', view: 'lines' } }
+  const st = runSetup(on, { answer: FORGET, chunks: ['Deleted SECRET_c9. A placeholder for it no longer works anywhere.\n'] })
+  const r = await $.prompt.submit({ text: '/maisecrets:forget SECRET_c9', wait: false, origin: { kind: 'composer' } })
+  expect(r.drop).toBe('maisecrets: /maisecrets forget runs without the AI; its answer shows above the prompt.')
+  expect(await until(() => st.ended === 1)).toBe(true)
+  expect(await until(() => st.logs.some(l => l.startsWith('Deleted SECRET_c9.')))).toBe(true)
+  expect(st.opens.filter(o => String(o.id).startsWith('maisecrets-out-'))).toEqual([])
+})
+
 test('the output of /maisecrets:sref has a login button per server; a press starts that login', async ($, on) => {
   const STATUS = { run: { argv: ['sref', '--args-stdin'], stdin: '' } }
   const st = runSetup(on, {
