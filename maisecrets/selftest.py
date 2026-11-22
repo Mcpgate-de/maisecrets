@@ -1,4 +1,4 @@
-"""The self-test of the two protection paths in the real client: `/maisecrets:status test` (Codex: the prompt
+"""The self-test of the two protection paths in the real client: `/maisecrets status test` (Codex: the prompt
 `maisecrets: status test`).
 
 1. The PreToolUse hook sees a tool call whose command is `run.sh status test` and registers a fresh test value
@@ -157,7 +157,7 @@ def command_text(now: float | None = None) -> str:
                 "session, so the tool-call hook did not run for it (or the command ran outside the client). No value "
                 "is printed.\n"
                 "Next: in Claude Code run /reload-plugins or start a new session; in Codex trust the maisecrets "
-                "hooks in /hooks. Then run /maisecrets:status test (Codex: send maisecrets: status test) again.")
+                "hooks in /hooks. Then run /maisecrets status test (Codex: send maisecrets: status test) again.")
     return (f"maisecrets self-test, step 1 of 2. The test value: {p['value']}\n"
             f"The AI must read {PLACEHOLDER} in place of the value. If the AI reads a value that starts with "
             f"{PREFIX}, the tool-result hook did not run and the self-test FAILED: run /reload-plugins or start a "
@@ -165,7 +165,7 @@ def command_text(now: float | None = None) -> str:
             "Step 2, for the person: type or paste the test value alone as your next prompt in this session. "
             "maisecrets shows the value to you above this output. The prompt hook must then answer "
             "\"Self-test passed\".\n"
-            f"The value is no secret and works for {TTL // 60} minutes. /maisecrets:status shows the result.")
+            f"The value is no secret and works for {TTL // 60} minutes. /maisecrets status shows the result.")
 
 
 # --- PostToolUse: hide the value in what the model reads -------------------------------------------------------
@@ -300,7 +300,7 @@ def prompt_answer(payload: dict, codex: bool) -> dict | None:
     from .settings import came_from, typed_by_the_person
     if str(payload.get("session_id") or "") != p.get("session"):
         return _block("maisecrets: this prompt holds the self-test value of another session, so the self-test does "
-                      "not count it. This prompt was not sent. Run /maisecrets:status test in this session.", codex)
+                      "not count it. This prompt was not sent. Run /maisecrets status test in this session.", codex)
     if not typed_by_the_person(payload) or "<task-notification>" in prompt:
         return _block(f"maisecrets: this prompt holds the self-test value, but it came from {came_from(payload)}, not "
                       "from you, so the self-test does not count it. This prompt was not sent.", codex)
@@ -313,13 +313,13 @@ def prompt_answer(payload: dict, codex: bool) -> dict | None:
         pass
     if res.get("leak"):
         reason = ("Self-test FAILED: the prompt hook stopped this prompt, but the AI wrote the test value into a tool "
-                  "call before, so it had the value. Run /maisecrets:status.")
+                  "call before, so it had the value. Run /maisecrets status.")
     elif res.get("tool"):
         reason = "Self-test passed: the prompt hook ran, and the model did not get the value."
     else:
         reason = ("Self-test, prompt path passed: the prompt hook ran, and the model did not get the value in this "
                   "prompt. The tool-result hook did not record the value, so the AI may have read it in the output "
-                  "of the command: run /maisecrets:status.")
+                  "of the command: run /maisecrets status.")
     if " ".join(prompt.replace(p["value"], " ").split()):
         reason += " The rest of this prompt was not sent either; send it again on its own."
     return _block(reason, codex)
@@ -343,7 +343,7 @@ def _scrub(payload: dict, value: str, prompt: str) -> None:
 
 def verdict(now: float | None = None, sessions: list | None = None, version: str | None = None,
             client: str | None = None):
-    """The self-test line of /maisecrets:status (a status_verdict.Check). `ok` only for a pass of this version, in
+    """The self-test line of /maisecrets status (a status_verdict.Check). `ok` only for a pass of this version, in
     this session or within the last 4 hours."""
     from .status_verdict import Check, ago, reload_next
     now = time.time() if now is None else now
@@ -351,7 +351,7 @@ def verdict(now: float | None = None, sessions: list | None = None, version: str
     state = load()
     res = _result(state)
     tool, prompt, leak = _num(res.get("tool")), _num(res.get("prompt")), _num(res.get("leak"))
-    test = "/maisecrets:status test"
+    test = "/maisecrets status test"
     if leak:
         return Check("FAIL", "self-test", "the AI saw the value", "a new session",
                      f"the AI wrote the test value into a tool call {ago(now - leak)}, so it had the value; start a "

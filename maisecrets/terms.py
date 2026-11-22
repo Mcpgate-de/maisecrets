@@ -11,7 +11,7 @@ The sources, read once per hook process:
   alternative is a silent leak of exactly the names the person listed.
 - `*.terms` in each folder of `rule_dirs` (a team list). An agent can write a shared checkout, so a team entry has a
   floor (3 characters, not a word of rules/term_stoplist.txt), and a line that fails is QUARANTINED: left out and
-  named in /maisecrets:rules, never fatal.
+  named in /maisecrets rules, never fatal.
 - the names the person marked in a typed prompt as `{{Jan Kowalski}}`: in `terms.marked.json` until the lifetime of a
   NAME value ends.
 
@@ -851,7 +851,7 @@ def _marked_entity(text: str) -> Entity:
 
 
 def load(cfg: dict | None = None, strict: bool = True) -> Loaded:
-    """Every source. Strict (the hooks): a bad terms.txt raises TermsError. Not strict (status, /maisecrets:rules):
+    """Every source. Strict (the hooks): a bad terms.txt raises TermsError. Not strict (status, /maisecrets rules):
     the error is in `error`, and the other sources still load."""
     if cfg is None:
         from .user_rules import _config
@@ -1046,7 +1046,7 @@ _NEAR_RE = re.compile(r"\A\s*/?maisecrets(?::\s*|\s+)terms?\s+(?:add|remove)\b(.
 
 def parse_command(prompt) -> tuple[str, str] | None:
     """("add"|"remove", words), ("usage", text) for any other text after the command, or None. A bare
-    /maisecrets:term or `/maisecrets:term list` is None: the slash command shows the lists."""
+    /maisecrets term or `/maisecrets term list` is None: the slash command shows the lists."""
     if not isinstance(prompt, str):
         return None
     m = _COMMAND_RE.match(prompt)
@@ -1062,8 +1062,8 @@ def parse_command(prompt) -> tuple[str, str] | None:
     return "usage", rest      # the text goes to the transcript scrub: it may be a name
 
 
-USAGE = ("maisecrets: send /maisecrets:term add NAME (for example /maisecrets:term add Jan Kowalski | Kowalsk*) or "
-         "/maisecrets:term remove NAME as your own prompt; in Codex: maisecrets: term add NAME. /maisecrets:term "
+USAGE = ("maisecrets: send /maisecrets term add NAME (for example /maisecrets term add Jan Kowalski | Kowalsk*) or "
+         "/maisecrets term remove NAME as your own prompt; in Codex: maisecrets: term add NAME. /maisecrets term "
          "alone shows your lists. This prompt was not sent to the AI.")
 
 
@@ -1135,7 +1135,7 @@ def _add_typed(words: str, floor: bool = False) -> tuple[bool, str, list]:
                 "result.")
     if surnames:
         note += (f" Also added: {len(surnames)} variant(s), the last name alone and its genitive, so \"Herr Surname\" "
-                 "and \"Surname, First name\" are masked too; /maisecrets:term shows them. Masked as well: the joined "
+                 "and \"Surname, First name\" are masked too; /maisecrets term shows them. Masked as well: the joined "
                  "forms first.last, first-last and first_last. The first name alone stays visible; to mask it, add "
                  "it as a term of its own.")
     return True, (f"maisecrets: the term is on your list now as {label} (line {line} of {_shown_path()}). From now "
@@ -1241,7 +1241,7 @@ def session_note() -> str | None:
         parts.append(f"the team term lists changed: {team} term(s) in {len(loaded.files)} file(s)"
                      + (f" (before: {was})" if isinstance(was, int) else "")
                      + (f", {len(loaded.refused)} line(s) left out" if loaded.refused else "")
-                     + "; /maisecrets:term shows them.")
+                     + "; /maisecrets term shows them.")
     try:
         from .home import atomic_write
         atomic_write(STATE_FILE, json.dumps({"digest": digest[:16], "team": team}))
@@ -1264,7 +1264,7 @@ def summary(loaded: Loaded | None = None) -> str:
 
 # ------------------------------------------------------------ the typed command --
 def command_answer(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
-    """The answer to /maisecrets:term add|remove (Codex: maisecrets: term add …): always a block, because the prompt
+    """The answer to /maisecrets term add|remove (Codex: maisecrets: term add …): always a block, because the prompt
     carries the name. Only the person's typed prompt changes the list (as a setting, C22); the name is masked in the
     transcript, and the answer names a label and a line, never the name."""
     # the prompt hook's helpers, read at call time (a test patches them on hooks)

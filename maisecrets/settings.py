@@ -1,7 +1,7 @@
 """The settings a person sees and changes, and the hint that names one at the moment it matters.
 
 A setting changes only from a prompt the person typed, which the UserPromptSubmit hook reads
-(`/maisecrets:settings KEY VALUE`, or `maisecrets: set KEY VALUE` alone as the prompt): a tool call of
+(`/maisecrets settings KEY VALUE`, or `maisecrets: set KEY VALUE` alone as the prompt): a tool call of
 the model never writes one, also not a stricter value (a prompt injection could set it for good). The
 CLI only shows them. A key the user wrote is a decision; a missing key is "not decided" and reads the
 default. A hint goes to the model once, when the case it is about first happens.
@@ -72,13 +72,13 @@ MEANING = {
     "clean_dirs": "Folders of clean PDFs and images: a file that was there before the session is allowed.",
     "rule_dirs": "Folders with detection rules of your own or of your team, read with ~/.maisecrets/rules.d.",
     "value_files": "Files of values from your own tools (JSON lines), imported at session start when they change. "
-                   "An import only adds; your prompt /maisecrets:forget import:ID removes one.",
+                   "An import only adds; your prompt /maisecrets forget import:ID removes one.",
     "remote_detector": "A named-entity service that adds names in tool results after the rules. Off unless you "
-                       "choose a source: /maisecrets:ner local, url URL or off.",
+                       "choose a source: /maisecrets ner local, url URL or off.",
     "ttl_seconds": "How long a stored value lives.",
     "renew_on_use": "A use of a value extends its life.",
     "tips": "A short tip at session start, and a hint when a setting first matters.",
-    "shortcut": "The first session start names /maisecrets:shortcut once.",
+    "shortcut": "The first session start names /maisecrets shortcut once.",
     "guard": "A synced install registers the guard outside its folder.",
     "pass_agent_reports": "A subagent's report or a background command's notice is not blocked.",
     "gateway_servers": "MCP servers that resolve placeholders themselves.",
@@ -142,11 +142,12 @@ _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|mais
 # the same sentence anywhere in a tool call: a nested client (`codex exec 'maisecrets: set …'`, `claude -p`) would
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
 # sentence or a name built at run time is not seen
-IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z0-9-]+|"
+from .forms import SLASH as _SLASH  # noqa: E402 - each slash form of a command (the entry forms too)
+IN_A_COMMAND_RE = re.compile(r"(?:" + _SLASH + r"settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z0-9-]+|"
                              r"maisecrets:\s*ssh\s+(?:autonomous|ask)\s|"
                              r"maisecrets:\s*reset\s+hints|\b(?:apply_typed|grant_typed|grant_by_code)\b", re.I)
 # a term removal makes detection weaker: only the person types it (terms.py)
-IN_A_COMMAND_RE = re.compile(IN_A_COMMAND_RE.pattern + r"|(?:/maisecrets:term|maisecrets:\s*term)\s+remove\s|"
+IN_A_COMMAND_RE = re.compile(IN_A_COMMAND_RE.pattern + r"|(?:" + _SLASH + r"term|maisecrets:\s*term)\s+remove\s|"
                              r"\bterm_remove_typed\b", re.I)
 # the source of names (ner_setup.py): a tool call must not send the text of tool results somewhere new
 IN_A_COMMAND_RE = re.compile(IN_A_COMMAND_RE.pattern + "|" + ner_setup.IN_A_COMMAND, re.I)
@@ -191,7 +192,7 @@ def peer_sender(prompt) -> str | None:
 
 def typed_by_the_person(payload: dict) -> bool:
     """The prompt counts as typed by the person: a `source` the person has, no program started the client, no other
-    session sent it, and no subagent (came_from names it; codex review of /maisecrets:ner)."""
+    session sent it, and no subagent (came_from names it; codex review of /maisecrets ner)."""
     return (payload.get("source") in TYPED_SOURCES and nested_program(payload) is None
             and peer_sender(payload.get("prompt")) is None and not payload.get("agent_id"))
 
@@ -319,7 +320,12 @@ def _row(key: str, cfg: dict) -> str:
         other = "off" if value else "on"
     else:
         other = ""
-    return f"| {_cell(LABEL.get(key, TITLE.get(key, key)))} | {now} | {other} | `{key}` |"
+    label = LABEL.get(key, TITLE.get(key, key))
+    if key == "show_values":
+        from . import cowork
+        if cowork.active():
+            label += " (Cowork draws no lock yet)"      # its drawing bridge is off (CLAUDE.md watch list)
+    return f"| {_cell(label)} | {now} | {other} | `{key}` |"
 
 
 def render_table(show_all: bool = False, cfg: dict | None = None, codex: bool = False) -> str:
@@ -330,11 +336,11 @@ def render_table(show_all: bool = False, cfg: dict | None = None, codex: bool = 
         lines.append(f"| **{title}** | | | |")
         lines += [_row(k, cfg) for k in keys]
     lines.append("")
-    cmd = "maisecrets: set" if codex else "/maisecrets:settings"
+    cmd = "maisecrets: set" if codex else "/maisecrets settings"
     tail = (f"Undo: `{cmd} KEY default`" if show_all
-            else "More: `" + ("maisecrets: settings all" if codex else "/maisecrets:settings all") + "`")
+            else "More: `" + ("maisecrets: settings all" if codex else "/maisecrets settings all") + "`")
     lines.append(f"Change: `{cmd} KEY VALUE` · Details: `" + ("maisecrets: settings KEY" if codex
-                 else "/maisecrets:settings KEY") + "` · " + tail)
+                 else "/maisecrets settings KEY") + "` · " + tail)
     if any(_mark(k, cfg) for k in TITLE):
         lines.append("✎ = you changed it · ⚙ = set by your admin")
     if cfg.get("config_warning"):
@@ -371,39 +377,39 @@ def _card(key: str, cfg: dict) -> list[str]:
         from . import destinations
         n, total, multi = destinations.summary()
         lines.append(f"    Seen so far: {n} secret(s), {total} destination(s), {multi} with more than one. "
-                     "/maisecrets:list shows them.")
+                     "/maisecrets list shows them.")
         asks, secrets, days = destinations.would_have_asked()
         if days:
             # from the record, not from the questions: a record from observe counts as if protect had been on
             lines.append(f"    protect would have asked about {asks} time(s) in the last {days} day(s), for {secrets} "
                          "secret(s): an estimate from the record, which holds no declined call.")
         if value == "observe":
-            lines.append("    Ask before a new host: /maisecrets:settings secret_destinations protect")
+            lines.append("    Ask before a new host: /maisecrets settings secret_destinations protect")
         if value == "off":
-            lines.append("    Turn on: /maisecrets:settings secret_destinations observe")
+            lines.append("    Turn on: /maisecrets settings secret_destinations observe")
     elif key == "ssh_autonomous_hosts":
-        lines.append("    Add: /maisecrets:settings ssh_autonomous_hosts add HOST   (as the ssh call writes it, "
+        lines.append("    Add: /maisecrets settings ssh_autonomous_hosts add HOST   (as the ssh call writes it, "
                      "user@host:port)")
         if value:
-            lines.append(f"    Remove: /maisecrets:settings ssh_autonomous_hosts remove {value[0]}")
+            lines.append(f"    Remove: /maisecrets settings ssh_autonomous_hosts remove {value[0]}")
         if not cfg.get("ssh_consent"):
             lines.append("    It matters only while SSH consent is on.")
     elif key == "rule_dirs":
-        lines.append("    Add: /maisecrets:settings rule_dirs add DIR   (a full path or ~/…; "
-                     "/maisecrets:rules shows what each folder loaded)")
+        lines.append("    Add: /maisecrets settings rule_dirs add DIR   (a full path or ~/…; "
+                     "/maisecrets rules shows what each folder loaded)")
         if value:
-            lines.append(f"    Remove: /maisecrets:settings rule_dirs remove {value[0]}")
+            lines.append(f"    Remove: /maisecrets settings rule_dirs remove {value[0]}")
         if cfg.get("policy_rule_dirs"):
             lines.append(f"    From the machine policy, always read: {', '.join(cfg['policy_rule_dirs'])}")
     elif key == "value_files":
-        lines.append("    Add: /maisecrets:settings value_files add FILE   (a full path or ~/…)")
+        lines.append("    Add: /maisecrets settings value_files add FILE   (a full path or ~/…)")
         if value:
-            lines.append(f"    Remove: /maisecrets:settings value_files remove {value[0]}   (its import stays; "
-                         "/maisecrets:forget import:ID removes that)")
+            lines.append(f"    Remove: /maisecrets settings value_files remove {value[0]}   (its import stays; "
+                         "/maisecrets forget import:ID removes that)")
     elif key == "clean_dirs":
-        lines.append("    Add: /maisecrets:settings clean_dirs add DIR   (a full path or ~/…)")
+        lines.append("    Add: /maisecrets settings clean_dirs add DIR   (a full path or ~/…)")
         if value:
-            lines.append(f"    Remove: /maisecrets:settings clean_dirs remove {value[0]}")
+            lines.append(f"    Remove: /maisecrets settings clean_dirs remove {value[0]}")
         from .file_reads import link_roots
         for d in link_roots(cfg):
             # named here, in the person's own view; the session start gives only a count
@@ -412,25 +418,25 @@ def _card(key: str, cfg: dict) -> list[str]:
     elif key == "ttl_seconds":
         word = ttl_word(value)
         lines.append("    1h · 24h (default) · 7d. A card number stays 1 h.")
-        lines.append(f"    Change: /maisecrets:settings ttl_seconds {'7d' if word != '7d' else '24h'}")
+        lines.append(f"    Change: /maisecrets settings ttl_seconds {'7d' if word != '7d' else '24h'}")
     elif key == "regions":
         lines.append(f"    auto (the country of this computer) or a code: {', '.join(region_codes())}")
-        lines.append("    Change: /maisecrets:settings regions de   (one country; the pane takes several)")
+        lines.append("    Change: /maisecrets settings regions de   (one country; the pane takes several)")
     elif key in ("read_pdf", "read_image"):
         suggest = "convert" if key == "read_pdf" else "ask"
-        lines.append(f"    Change: /maisecrets:settings {key} {suggest if value != suggest else 'allow'}")
+        lines.append(f"    Change: /maisecrets settings {key} {suggest if value != suggest else 'allow'}")
         if key == "read_pdf" and value == "convert":
             from .file_reads import INSTALL, pdftotext
             if not pdftotext():
                 lines.append(f"    pdftotext is not installed, so every PDF is refused until it is. {INSTALL}.")
     elif key in _BOOL_KEYS:
-        lines.append(f"    Turn {'off' if value else 'on'}: /maisecrets:settings {key} {'off' if value else 'on'}")
+        lines.append(f"    Turn {'off' if value else 'on'}: /maisecrets settings {key} {'off' if value else 'on'}")
     elif key in _CHOICES:
         other = next(m for m in _CHOICES[key] if m != value) if value in _CHOICES[key] else _CHOICES[key][0]
-        lines.append(f"    Change: /maisecrets:settings {key} {other}")
+        lines.append(f"    Change: /maisecrets settings {key} {other}")
     elif key in _INT_KEYS:
         n = value if isinstance(value, int) and not isinstance(value, bool) else DEFAULT_CONFIG[key]
-        lines.append(f"    Raise: /maisecrets:settings {key} {min(n * 2, _INT_KEYS[key][1])}   (any whole number "
+        lines.append(f"    Raise: /maisecrets settings {key} {min(n * 2, _INT_KEYS[key][1])}   (any whole number "
                      f"from {_INT_KEYS[key][0]})")
     else:
         lines.append(f"    Change it in {str(CONFIG).replace(str(Path.home()), '~', 1)}.")
@@ -444,7 +450,7 @@ def _hint_lines() -> list[str]:
         seen = given.get(feature)
         when = f"shown {seen.get('given')}" if _given_this_revision(feature, given) else "not shown yet"
         lines.append(f"  {TITLE.get(feature) or HINTS[feature]['title']} · {when}")
-    lines.append("  Reset: /maisecrets:settings hints reset")
+    lines.append("  Reset: /maisecrets settings hints reset")
     return lines
 
 
@@ -454,8 +460,8 @@ def render(show_all: bool = False, cfg: dict | None = None, only: str | None = N
     if only not in TITLE:
         return render_table(show_all, cfg, codex)
     lines = ["maisecrets settings", ""] + _card(only, cfg)
-    undo = f"maisecrets: set {only} default" if codex else f"/maisecrets:settings {only} default"
-    lines += ["", f"Undo: {undo}    All settings: " + ("maisecrets: settings" if codex else "/maisecrets:settings")]
+    undo = f"maisecrets: set {only} default" if codex else f"/maisecrets settings {only} default"
+    lines += ["", f"Undo: {undo}    All settings: " + ("maisecrets: settings" if codex else "/maisecrets settings")]
     if cfg.get("config_warning"):
         lines.append(f"WARNING: {cfg['config_warning']}")
     return "\n".join(lines)
@@ -602,23 +608,24 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
     if key not in _BOOL_KEYS and key not in _CHOICES and key not in _INT_KEYS and not hosts_change and not ner_change \
             and key != "regions":
         if key == "remote_detector":
-            return False, ("maisecrets: send /maisecrets:ner local (or url URL, or off), or in Codex: "
+            return False, ("maisecrets: send /maisecrets ner local (or url URL, or off), or in Codex: "
                            "maisecrets: ner local.")
         if key == "ssh_autonomous_hosts":
-            return False, ("maisecrets: send /maisecrets:settings ssh_autonomous_hosts add HOST (or remove HOST), "
+            return False, ("maisecrets: send /maisecrets settings ssh_autonomous_hosts add HOST (or remove HOST), "
                            "or in Codex: maisecrets: ssh autonomous HOST (or ask HOST).")
         if key == "rule_dirs":
-            return False, ("maisecrets: send /maisecrets:settings rule_dirs add DIR (or remove DIR), "
+            return False, ("maisecrets: send /maisecrets settings rule_dirs add DIR (or remove DIR), "
                            "or in Codex: maisecrets: set rule_dirs add DIR.")
         if key == "clean_dirs":
-            return False, ("maisecrets: send /maisecrets:settings clean_dirs add DIR (or remove DIR), "
+            return False, ("maisecrets: send /maisecrets settings clean_dirs add DIR (or remove DIR), "
                            "or in Codex: maisecrets: set clean_dirs add DIR.")
         if key == "value_files":
-            return False, ("maisecrets: send /maisecrets:settings value_files add FILE (or remove FILE), "
+            return False, ("maisecrets: send /maisecrets settings value_files add FILE (or remove FILE), "
                            "or in Codex: maisecrets: set value_files add FILE.")
         if key in MEANING:
             return False, f"maisecrets: {key} is not changed by a prompt; edit {CONFIG} by hand."
-        return False, f"maisecrets: {key} is no setting this command changes. /maisecrets:settings --all lists them."
+        # never the typed word: only a key of the settings is named
+        return False, "maisecrets: this is no setting this command changes. /maisecrets settings --all lists them."
     if word != "default" and not hosts_change and not ner_change and key != "regions":
         if key in _BOOL_KEYS and word not in _BOOL_WORDS:
             return False, f"maisecrets: {key} takes on, off or default."
@@ -640,7 +647,7 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
             return False, answer
         word = "ner:" + resolved
     if ner_change and word.startswith("ner:fallback:url:") and not (cfg.get("remote_detector") or {}).get("url"):
-        return False, ("maisecrets: a fallback needs a source first: send /maisecrets:ner on, then the fallback. "
+        return False, ("maisecrets: a fallback needs a source first: send /maisecrets ner on, then the fallback. "
                        "Nothing was changed.")
     if ner_change and word.startswith(("ner:url:", "ner:fallback:url:")):
         word_url = word.split("url:", 1)[1]
@@ -661,7 +668,7 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
         if why:
             return False, f"maisecrets: the address is not used ({why}). Nothing was changed."
         note = (" " + ner_setup.SENT_NOTE.format(where="this gateway")
-                + " Log in once more with /maisecrets:sref login: it asks for the name scope.")
+                + " Log in once more with /maisecrets sref login: it asks for the name scope.")
     if key == "read_pdf" and word == "convert":
         from .file_reads import INSTALL, pdftotext
         if not pdftotext():
@@ -696,7 +703,7 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
             from .user_rules import rule_folder, _rule_files
             if not _rule_files(rule_folder(expand(word[4:]))):
                 note = (" It holds no *.json or *.prefixes file, neither at its top nor in rules/, so it adds no rule"
-                        " yet; /maisecrets:rules shows what each folder loads.")
+                        " yet; /maisecrets rules shows what each folder loads.")
     # a symlinked config.json (dotfiles) keeps its link: the new file replaces the target
     target = CONFIG.resolve() if CONFIG.is_symlink() else CONFIG
     try:
@@ -796,7 +803,7 @@ HINTS = {
     "ssh_consent": {
         "revision": 2,
         "claude": ("maisecrets: the AI just ran an ssh command that changes a host. "
-                   "/maisecrets:settings ssh_consent on asks you before each one; off keeps it as it is."),
+                   "/maisecrets settings ssh_consent on asks you before each one; off keeps it as it is."),
         "codex": ("maisecrets: the AI just ran an ssh command that changes a host. "
                   "Send `maisecrets: set ssh_consent on` alone as your prompt to be asked before each one; "
                   "off keeps it as it is."),
@@ -806,7 +813,7 @@ HINTS = {
 HINTS["secret_destinations"] = {
     "revision": 1,
     "claude": ("maisecrets: a stored secret just went to a host it was not used with before; maisecrets only notes "
-               "this. /maisecrets:list shows where each secret went; /maisecrets:settings secret_destinations protect "
+               "this. /maisecrets list shows where each secret went; /maisecrets settings secret_destinations protect "
                "asks you before a new host."),
     "codex": ("maisecrets: a stored secret just went to a host it was not used with before; maisecrets only notes "
               "this. Send `maisecrets: set secret_destinations protect` alone as your prompt to be asked before a new "
@@ -819,7 +826,7 @@ for _key, _noun, _first, _does, _rest in (
     HINTS[_key] = {
         "revision": 1,
         "claude": (f"maisecrets: {_noun} go to the AI as they are; maisecrets cannot mask inside them. "
-                   f"/maisecrets:settings {_key} {_first} {_does}; {_rest}."),
+                   f"/maisecrets settings {_key} {_first} {_does}; {_rest}."),
         "codex": (f"maisecrets: {_noun} go to the AI as they are; maisecrets cannot mask inside them. "
                   f"`maisecrets: set {_key} {_first}`, alone as your prompt, {_does}; {_rest}."),
     }

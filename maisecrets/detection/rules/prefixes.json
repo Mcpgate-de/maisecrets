@@ -1534,5 +1534,9 @@
  {
   "id": "cal-api-key",
   "regex": "cal_(?:(?<![A-Za-z0-9_-]cal_)|(?<=\\\\[nrt]cal_))(?:live_|test_)?[0-9a-f]{32}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "daytona-api-key",
+  "regex": "dtn_(?:(?<![A-Za-z0-9_-]dtn_)|(?<=\\\\[nrt]dtn_))[0-9a-f]{64}(?![A-Za-z0-9_-])"
  }
 ]

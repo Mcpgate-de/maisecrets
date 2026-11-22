@@ -117,10 +117,20 @@ def in_record(text: str) -> bool:
     return fields is not None and fields[0] is text
 
 
+def value_starts(text: str) -> tuple:
+    """The start of each field's string after its label in a record scan, or () outside one or when the caller gave
+    none. A rule that anchors at a line start counts these too: a scan of the string alone starts there (#94)."""
+    fields = _FIELDS.get()
+    if fields is None or fields[0] is not text:
+        return ()
+    return fields[2]
+
+
 @contextlib.contextmanager
-def record_fields(text: str, starts: list):
-    """In this block, field_start() knows the fields of `text` (the line start of each one, ascending)."""
-    token = _FIELDS.set((text, tuple(starts)))
+def record_fields(text: str, starts: list, values: list = ()):
+    """In this block, field_start() knows the fields of `text` (the line start of each one, ascending) and
+    value_starts() the start of each field's string after its label."""
+    token = _FIELDS.set((text, tuple(starts), tuple(values)))
     try:
         yield
     finally:

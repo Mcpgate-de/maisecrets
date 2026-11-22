@@ -1,4 +1,4 @@
-"""The load of a name service from its GET /metrics (mcpgate/ner from ai-gateway #1869), for /maisecrets:ner.
+"""The load of a name service from its GET /metrics (mcpgate/ner from ai-gateway #1869), for /maisecrets ner.
 
 The service answers the same counters as JSON with `Accept: application/json`, so no Prometheus parser is needed.
 Two samples about a second apart give the share of the workers in use (the growth of worker_busy_seconds_total per
@@ -102,7 +102,7 @@ def load(before: dict, after: dict, seconds: float) -> dict:
 
 
 def load_line(url: str, gap: float = 1.0, timeout: float = 1.0, bearer: str = "") -> str:
-    """One line for /maisecrets:ner: the load of the service at `url`, or why there is none. `bearer`: the metrics
+    """One line for /maisecrets ner: the load of the service at `url`, or why there is none. `bearer`: the metrics
     bearer of a container with a secret (bearer_of)."""
     first, why = sample(url, timeout, bearer)
     if first is None:

@@ -2,6 +2,7 @@
 description: "Mask your own words: names, case numbers, customers. Type add/remove yourself"
 argument-hint: "[add NAME | remove NAME]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" terms), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" terms)
+user-invocable: false
 ---
 
 Run exactly this command and show the user its output as is, then stop:

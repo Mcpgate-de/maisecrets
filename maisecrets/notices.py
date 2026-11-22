@@ -55,18 +55,19 @@ def _hours(seconds: int) -> str:
 
 
 def send_command() -> str:
-    """The command that sends the blocked prompt: `/ms` only when the person installed the shortcut (its command file
-    calls the maisecrets wrapper, cli.install_shortcut), else `/maisecrets:send`. The plugin ships no `/ms`: without
+    """The command that sends the blocked prompt: `/ms send` only when the person installed the shortcut
+    (cli.install_shortcut; /ms is the same as /maisecrets), else `/maisecrets send`. The plugin ships no `/ms`: without
     the shortcut it is an unknown command."""
     import os
     from pathlib import Path
     commands = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "commands"
     try:
-        if "maisecrets/bin/ms.sh" in (commands / "ms.md").read_text(encoding="utf-8"):
-            return "/ms"
+        from .cli import is_our_shortcut
+        if is_our_shortcut((commands / "ms.md").read_text(encoding="utf-8")):
+            return "/ms send"
     except (OSError, UnicodeDecodeError):
         pass
-    return "/maisecrets:send"
+    return "/maisecrets send"
 
 
 def launcher() -> str:
@@ -89,7 +90,7 @@ def _wrong_hit(entries: list, more: int, codex: bool) -> list[str]:
     if not keys and entries and not more:
         return []
     key = keys[0] if len(keys) == 1 and not more else "KEY"
-    return ["", f"A wrong hit? {'maisecrets: not a secret' if codex else '/maisecrets:not-a-secret'} {key}"]
+    return ["", f"A wrong hit? {'maisecrets: not a secret' if codex else '/maisecrets not-a-secret'} {key}"]
 
 
 def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: dict, vault, more: int = 0,

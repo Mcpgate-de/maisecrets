@@ -2,6 +2,7 @@
 description: "Try maisecrets on real data; no prompt reaches the AI until /clear"
 argument-hint: "on"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" status), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" status)
+user-invocable: false
 ---
 
 The maisecrets prompt hook answers `/maisecrets:demo on` itself, before this command runs, and only when the person types it as their own prompt in a session with no answer yet. The demo ends only with `/clear`. Do not switch the demo in another way, and do not write maisecrets files: if the user wants this, tell them the prompt to send (in Codex: `maisecrets: demo on`).

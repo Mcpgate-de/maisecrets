@@ -2,6 +2,7 @@
 argument-hint: "[uses [n]]"
 description: "Show the stored values, masked: type, age, uses"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" list *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" list *)
+user-invocable: false
 ---
 
 Run exactly this command and show the user its output as is, then stop:

@@ -7,7 +7,7 @@ Codex runs a plugin hook only while the trust the person gave it matches the hoo
   (hooks/src/engine/plugin_fingerprint.rs, openai/codex#54619). A new maisecrets version is a new folder, so Codex
   asks again after each update, and until then it lets every prompt and tool call through (measured with
   codex-cli 0.164.0-alpha.4, 2026-10-19).
-No hook can say that it does not run, so /maisecrets:status says it. Both hashes are recomputed here; the values
+No hook can say that it does not run, so /maisecrets status says it. Both hashes are recomputed here; the values
 Codex itself gave for a fixture plugin pin the recipe (tests/test_codex_trust.py).
 """
 from __future__ import annotations
@@ -103,7 +103,7 @@ def _load_toml(path: Path) -> dict | None:
 
 
 def status_lines(root: Path, codex_home: Path, windows: bool | None = None) -> list[str]:
-    """The lines /maisecrets:status prints for Codex; none for a folder Codex did not install."""
+    """The lines /maisecrets status prints for Codex; none for a folder Codex did not install."""
     windows = os.name == "nt" if windows is None else windows
     plugin_id = _plugin_id(root, codex_home)
     if plugin_id is None:

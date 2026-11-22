@@ -2,6 +2,7 @@
 description: "Same as /maisecrets:list uses: the last uses of stored values"
 argument-hint: "[n]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" audit *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" audit *)
+user-invocable: false
 ---
 
 Run exactly this command and show the user its output as is, then stop:
