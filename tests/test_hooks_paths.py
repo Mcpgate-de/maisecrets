@@ -489,7 +489,10 @@ class MentionAndPendingTests(unittest.TestCase):
             with self.subTest(prompt):
                 self.assertIsNone(hooks._blocking_mention(prompt, str(self.dir), {}))
         # a path after the slash is still a mention, and so is one with two slashes
-        for prompt in (f"see @{self.dir / 'notes.env'}", f"see @/{str(self.dir / 'notes.env').lstrip('/')}"):
+        cases = [f"see @{self.dir / 'notes.env'}"]
+        if os.name != "nt":  # a leading slash before a drive letter (/C:\\...) is no Windows path
+            cases.append(f"see @/{str(self.dir / 'notes.env').lstrip('/')}")
+        for prompt in cases:
             with self.subTest(prompt):
                 self.assertIsNotNone(hooks._blocking_mention(prompt, "", {}))
         self.assertEqual(hooks.AT_MENTION_RE.search("see @//etc").group("path"), "//etc")
