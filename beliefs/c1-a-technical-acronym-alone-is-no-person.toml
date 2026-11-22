@@ -1,0 +1,11 @@
+# c1-a-technical-acronym-alone-is-no-person: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-technical-acronym-alone-is-no-person"
+control = "C1"
+serves = ["M1.3"]
+statement = "Since 0.9.23, remote.is_no_person drops a NAME span that is one word of ACRONYMS alone (\"NER\", \"MCP\"), in any case; a short name that is no acronym stays a name."
+runner = ["tests/test_name_spans_that_are_no_person.py::SpanRuleTests::test_a_technical_acronym_alone_is_no_person", "tests/test_name_spans_that_are_no_person.py::RemotePathTests::test_a_technical_acronym_alone_stays_clear"]
+
+[proof]
+file = "maisecrets/detection/remote.py"
+find = '''            or word in RUNNER_WORDS or word in NEVER_A_NAME or word in ACRONYMS or is_hook_label(span)'''
+replace = '''            or word in RUNNER_WORDS or word in NEVER_A_NAME or is_hook_label(span)'''

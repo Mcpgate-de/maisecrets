@@ -1,6 +1,7 @@
 """A name span of the name service that has no shape of a person is dropped: a span with a digit or an initial and
-acronyms (#93), an observability product (#93), a greeting phrase (#95). The rule is `remote.is_no_person`, which a
-caller that applies the spans itself (the gateway) asks too, and the remote path applies it to every NAME span.
+acronyms (#93), a technical acronym alone ("NER"), an observability product (#93), a greeting phrase (#95). The rule
+is `remote.is_no_person`, which a caller that applies the spans itself (the gateway) asks too, and the remote path
+applies it to every NAME span.
 Real names of the same texts stay names. The names here are invented.
 
 Run: python3 -m unittest tests.test_name_spans_that_are_no_person -v
@@ -40,7 +41,19 @@ class SpanRuleTests(unittest.TestCase):
         # Gate B: a form or a label writes an initial and a surname of 2 to 4 capitals; a name runs into a user name's
         # digit or a footnote mark, and the remote path widens the span over it. Tempo and Jaeger are surnames
         for span in ("J. LEE", "T. KOCH", "M. KIM LEE", "A. API LEE", "Feldkamp2", "Feldkamp¹",
-                     "Mara Feldkamp2", "Team7", "Ola7", "Li2", "Wu1", "B. NER", "Tempo", "Jaeger"):
+                     "Mara Feldkamp2", "Team7", "Ola7", "Li2", "Wu1", "B. RAU", "Tempo", "Jaeger"):
+            with self.subTest(span=span):
+                self.assertFalse(rm.is_no_person(span))
+
+    def test_a_technical_acronym_alone_is_no_person(self):
+        # "NER" alone was masked as a person in a Cowork session (0.9.22): a word of ACRONYMS is never a surname
+        for span in ("NER", "ner", " NER ", "Ner", "MCP", "PII", "API"):
+            with self.subTest(span=span):
+                self.assertTrue(rm.is_no_person(span))
+                self.assertTrue(rm.is_no_person_in(f"the {span} service", 4, 4 + len(span)))
+
+    def test_a_short_name_that_is_no_acronym_stays_a_name(self):
+        for span in ("Lee", "Kim", "Nera", "NER Lee", "Lee NER", "Neri"):
             with self.subTest(span=span):
                 self.assertFalse(rm.is_no_person(span))
 
@@ -81,6 +94,11 @@ class RemotePathTests(unittest.TestCase):
                            ("The logs are in Loki for six days.", "Loki"),
                            ("See B. MCP and C. API in the table.", "B. MCP"),
                            ("Hallo Ihr Lieben, wie geht es euch?", "Hallo Ihr Lieben")):
+            with self.subTest(text=text):
+                self.assertEqual(self._kept(text, (word,)), [])
+
+    def test_a_technical_acronym_alone_stays_clear(self):
+        for text, word in (("Is the NER service on?", "NER"), ("Which NER model runs?", "NER")):
             with self.subTest(text=text):
                 self.assertEqual(self._kept(text, (word,)), [])
 

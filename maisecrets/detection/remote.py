@@ -504,7 +504,8 @@ GREETING_WORDS = _words("name-service/greetings")
 # one other word ("Hallo Anke") stay. Du, Sie, Ihr and Alle are parts of real names (du Bois): never alone here
 GREETING_ADDRESS_WORDS = _words("name-service/greeting-address-words")
 # an initial and one to three technical acronyms of ACRONYMS ("G. PII", "B. MCP"): a list label or a table cell, not
-# a person (#93). Only words of the list: an all-caps surname of 2 to 4 letters after an initial ("J. LEE", "T. KOCH")
+# a person (#93). A word of ACRONYMS alone is no person either: "NER" alone was masked as a name (Cowork, 0.9.22).
+# Only words of the list: an all-caps surname of 2 to 4 letters after an initial ("J. LEE", "T. KOCH")
 # is a name on a form or a label (Gate B)
 ACRONYMS = _words("name-service/acronyms")
 _INITIAL_AND_ACRONYMS_RE = re.compile(r"[A-Z]\.((?:[ \t]+[A-Z]{2,4}){1,3})")
@@ -607,11 +608,13 @@ def is_product_name(span: str) -> bool:
 def is_no_person(span: str) -> bool:
     """Whether a NAME span is no person: a product name (is_product_name), a word of GREETING_WORDS, of
     UI_LABEL_WORDS, of RUNNER_WORDS or of NEVER_A_NAME alone, a hook label (is_hook_label), a path of folder names
-    (is_path_words), a span with a digit, an initial and acronyms, or a greeting phrase (is_greeting_phrase). Public
-    since 0.9.8: a caller that applies the spans itself drops these, the same rule as the remote path here (#41)."""
+    (is_path_words), a span with a digit, a word of ACRONYMS alone or after an initial, or a greeting phrase
+    (is_greeting_phrase). Public since 0.9.8: a caller that applies the spans itself drops these, the same rule as the
+    remote path here (#41)."""
     word = span.strip().lower()
     return (is_product_name(span) or word in GREETING_WORDS or word in UI_LABEL_WORDS
-            or word in RUNNER_WORDS or word in NEVER_A_NAME or is_hook_label(span) or is_path_words(span)
+            or word in RUNNER_WORDS or word in NEVER_A_NAME or word in ACRONYMS or is_hook_label(span)
+            or is_path_words(span)
             or _has_digit(span) or _is_initial_and_acronyms(span) or is_greeting_phrase(span))
 
 
