@@ -250,7 +250,7 @@ def mangled(name: object) -> str | None:
     """A server name as Claude Code spells it in a tool name: each character outside [A-Za-z0-9_-] becomes `_`; for a
     name that starts with "claude.ai ", each run of `_` becomes one and a `_` at either end goes (Claude Code 2.1.330,
     its function `xn`): "claude.ai Acme (prod)" is "claude_ai_Acme_prod". So the key from the hook's display name equals
-    the key from the tool name, and a key of a connector never holds `__`."""
+    the key from the tool name, and a key never holds `__` when it comes from a display name."""
     if not isinstance(name, str) or not name.strip():
         return None
     out = re.sub(r"[^A-Za-z0-9_-]", "_", name.strip())

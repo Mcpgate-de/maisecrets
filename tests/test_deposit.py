@@ -477,6 +477,7 @@ class DepositHookTests(_Base):
                 self.assertRegex(hso["updatedInput"]["token"], D.HANDLE_RE.pattern)
                 self.assertTrue(vault_refs.forget_connector(key))
         self.assertEqual(vault_refs.connector_key("Acme (prod)"), None, "no claude.ai name, no key")
+        self.assertEqual(vault_refs.connector_key("Claude.ai X"), None, "the prefix is exact: a capital C gives no key")
         self.assertEqual(vault_refs.mangled("my  server"), "my__server", "other names keep their runs")
 
     def test_another_connector_name_on_a_bound_tool_gets_the_refusal(self):
