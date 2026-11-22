@@ -25,7 +25,7 @@ from typing import Any
 
 from . import check_value, detect, incidents, demo, not_a_secret, rehydration, term_files, value_files
 from .lazy_regex import LazyRx as _LazyRx
-from .placeholder import KEY_RE, find_refs
+from .placeholder import KEY_RE, find_refs, whole_references as _whole_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
 # parts of this module, moved so that no file is over the size limit of the plugin directory: hooks.<name> stays the
@@ -54,7 +54,7 @@ from .tool_output import (  # noqa: F401
     _resolved_values, _inserted_values, _exact_redact, _inside_server_values, _put_server_tokens, _raw_form, _TAGS_RE,
     _FLAG_TAGS, _VS_RE, _cjk, _selector_kept, strip_hidden, _HIDDEN_BYTES_RE, _escaped_backslash,
     _mask_hidden_in_transcript, _BINARY_READ_TYPES, _DATA_URI_RE, _IMAGE_MAGIC, _IMAGE_TRAILER, _is_image_data_uri,
-    _binary_paths,
+    _binary_paths, _kept_paths, _keep,
 )
 from .guarded_paths import (  # noqa: F401
     _is_ssh_config_path, _names_a_guarded_file, _holds_a_guarded_folder, _a_guarded_path, _identity, _abs,
@@ -66,8 +66,8 @@ from .server_values import _all_refs, _elsewhere_reason, _server_fetch, _server_
 from .sref_hooks import canonical as _sref_canonical, note as _sref_note, precheck as _sref_precheck, \
     program_of as _program_of, refs as _sref_refs, never_reason as _sref_never_reason
 
-# a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
-AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
+# a Windows path carries a drive letter and backslashes: @C:\Users\x\.env; slashes alone are no file (s/=.*@/x/)
+AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?!/+(?![\w./~\\:-]))(?P<path>[\w./~\\:-]+)")
 
 
 # ---------------------------------------------------------------- helpers --
@@ -525,6 +525,37 @@ def primer(cfg: dict | None = None, client: str = "claude") -> str:
     if cfg is not None and rehydration.outcome(client, rehydration.policy(cfg, "file")) == "deny":
         return _PRIMER_HEAD_WINDOWS + _PRIMER_TAIL_WINDOWS
     return PRIMER_WINDOWS
+
+
+# how the model names a maisecrets command to the person: the single commands are hidden since 0.9.22, and Cowork knows
+# only the entry. A command that maisecrets answers itself (forms._TYPED) shows its answer in Cowork only as text
+COMMANDS_CLAUDE = ("When you name a maisecrets command to the user, write a command that only shows as "
+                   "/maisecrets NAME, for example /maisecrets status. Write a command that changes maisecrets (term "
+                   "add or remove, not-a-secret, demo, a settings or ner change) as the text the user types: "
+                   "maisecrets: term add NAME, maisecrets: not a secret KEY, maisecrets: demo on, maisecrets: set "
+                   "KEY VALUE, maisecrets: ner local.")
+COMMANDS_CODEX = ("When you name a maisecrets command to the user, write the prompt maisecrets: NAME ARGS, for example "
+                  "maisecrets: status.")
+COMMANDS_COWORK = ("When you name a maisecrets command to the user, write /maisecrets NAME, for example /maisecrets "
+                   "status. Write a command that maisecrets answers itself (term add or remove, not-a-secret, demo, a "
+                   "settings change, a ner change, sref, report incident) as text: maisecrets: NAME ARGS, for example "
+                   "maisecrets: term add NAME.")
+# the model must not tell the person that names are masked where no name source runs (cowork.names_off)
+NAMES_OFF_COWORK = "maisecrets masks no names in this Cowork task: {why}."
+
+
+def session_context(cfg: dict | None = None, client: str = "claude") -> str:
+    """What the model reads at the session start: the primer, the form of a command for the person, and in Cowork,
+    while no name source is set, that names are not masked there and why (cowork.names_off)."""
+    from . import cowork
+    if client == "codex":
+        return primer(cfg, client) + " " + COMMANDS_CODEX
+    if not cowork.active():
+        return primer(cfg, client) + " " + COMMANDS_CLAUDE
+    text = primer(cfg, client) + " " + COMMANDS_COWORK
+    if cowork.names_off(cfg):
+        text += " " + NAMES_OFF_COWORK.format(why=cowork.NAMES_WHY.replace("your computer", "the user's computer"))
+    return text
 
 
 # --------------------------------------------------------- UserPromptSubmit --
@@ -1998,6 +2029,9 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
     _walk_strings(tool_input, collect)
     if not found:
         return {}
+    from . import connector_proxy, deposit
+    if connector_proxy.claude_ai_connector(payload, tool):
+        return deposit.pre_tool(payload, cfg, tool, tool_input, found)
     in_keys = [k for k, _a, _b in find_refs(" ".join(_dict_keys(tool_input)))]
     if in_keys:
         return _deny(f"maisecrets: ⟦{in_keys[0]}⟧ is used as a field name, where it is not resolved. "
@@ -2592,7 +2626,7 @@ def post_tool(payload: dict) -> dict:
     def scan_tool(s: str) -> list:
         return detect.scan(s, channel="tool", path=scan_path)
 
-    binary = _binary_paths(payload)
+    binary, kept = _binary_paths(payload), _kept_paths(payload)
     layer = _remote_layer(cfg, response, binary, strip, scan_tool, payload.get("session_id"))
     _rl.note_result(layer)
 
@@ -2604,7 +2638,7 @@ def post_tool(payload: dict) -> dict:
             hidden["n"] += gone
             hidden_runs.extend(runs)
         found = layer.matches(s, scan_tool) if layer is not None else scan_tool(s)
-        matches = [m for m in found if swap or not detect.is_fixture(m, s, path)]
+        matches = _whole_refs(s, [m for m in found if swap or not detect.is_fixture(m, s, path)])
         if not matches and not _has_live(cfg):
             return s
         if vault is None:
@@ -2659,6 +2693,8 @@ def post_tool(payload: dict) -> dict:
 
     def walk(node: Any, at: tuple = ()) -> Any:
         # keys too: a tool result's JSON can hide an instruction or a value in a key (Codex review, 2026-10-06)
+        if at in kept:
+            return _keep(node, kept[at], redact)
         if at in binary and isinstance(node, str):
             return redact_binary(node)
         if isinstance(node, str):
@@ -2877,7 +2913,10 @@ def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     _commit_destinations(payload)    # first: the call ran even when the redaction below fails; and before the hint
-    notice = None
+    from .deposit import post_tool as deposit_line
+    notice = deposit_line(payload)
+    if notice:
+        return notice
     try:
         if str(payload.get("tool_name") or "").startswith("mcp__"):     # no config read for any other tool
             from . import vault_refs
@@ -2960,9 +2999,12 @@ def post_tool_failure(payload: dict) -> dict:
     printed reaches the model as it is. What is left to do: store each value, so a later output, file or command
     that repeats it is redacted exactly; clean the transcript on disk; tell the model not to use the values and the
     person what happened. Measured over one user's transcripts: 14 such outputs with a hit in 105,241 Bash calls."""
+    from .deposit import post_tool_failure as deposit_line
     error = payload.get("error")
     if not isinstance(error, str) or not error or client_of(payload) == "codex":
         return {}
+    if line := deposit_line(payload):
+        return line
     cfg = load_config()
     session = payload.get("session_id")
     matches = detect.findings(error, channel="tool")

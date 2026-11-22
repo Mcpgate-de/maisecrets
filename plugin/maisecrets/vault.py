@@ -113,6 +113,9 @@ class Entry:
     fold: str | None = None
     # the value was checked for an English word (Vault.weaken_word_hits, #23): a new entry is checked when it is stored
     wordcheck: bool = False
+    # an own rule or an import found the value after a built-in rule stored it: the first kind stays, and the deposit
+    # takes the entry only at a target's path (deposit.MARKS_STRICT)
+    strict: bool = False
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -239,6 +242,11 @@ CHOSEN_KINDS = ("manual", "term:", "import:")
 OWN_NAME = __name__.split(".")[0].lower()
 
 
+def _marks_strict() -> tuple:
+    from .deposit import MARKS_STRICT
+    return MARKS_STRICT
+
+
 def own_name_spellings() -> list[str]:
     return [OWN_NAME, OWN_NAME.capitalize(), OWN_NAME.upper()]
 
@@ -248,7 +256,9 @@ def is_weak(kind: str, value: str, tool: bool = False) -> bool:
     a file (tool), an English word (is_dictionary_word); or a name or shape rule's hit that is an English word:
     replaced where it was found, never hunted in other texts. A word the person gives in a prompt after a label is a
     chosen password and stays hunted (is_quiet). The plugin's own name
-    (OWN_NAME, any case) is weak before every other rule, whoever stored it (#53)."""
+    (OWN_NAME, any case) is weak before every other rule, whoever stored it (#53). A gateway reference masked whole is
+    not weak: a server can put a secret in its id. The exact replacement keeps a trusted reference whole
+    (tool_output._replace_outside_references)."""
     from .registry import is_label
     if value.strip().lower() == OWN_NAME:
         return True    # the plugin's own name, even a chosen one (#53)
@@ -1150,6 +1160,7 @@ class Vault:
             e.quiet = False             # a value given outside a tool result: hunted in prompts again
             e.fold = e.fold or self.fold_of(value, e.type)
             e.weak = e.weak and is_weak(kind, value)   # and in every text, unless it is a default word
+            e.strict = e.strict or kind.startswith(_marks_strict())
             self._touch(e)
             return e
         e = self._put_new(value, type_, kind, session, ttl)
@@ -1210,6 +1221,7 @@ class Vault:
                     e.sessions.append(session)
                 if e.weak and e.kind.startswith("remote:") and not is_weak(kind, value, tool):
                     e.weak = False      # a rule found the model's name too: evidence enough to hunt it
+                e.strict = e.strict or kind.startswith(_marks_strict())
                 if not tool:
                     e.quiet = False     # a value the person gives in a prompt is hunted in prompts again
                     # a word a tool result stored weak is a chosen password once the person gives it (field report,

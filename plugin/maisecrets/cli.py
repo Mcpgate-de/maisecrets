@@ -1328,6 +1328,9 @@ def cmd_sref(args: list[str]) -> int:
         if cowork.active():
             print("maisecrets: in Cowork no gateway offers Sensitive References yet, and Sensitive References are not "
                   "tested in Cowork. Use them in Claude Code in the terminal or in the desktop app's Code tab.")
+        elif proposed:
+            # the line above names the proposal: this line says only what is missing besides it
+            print("maisecrets: no MCP server of your user configuration offers Sensitive References.")
         else:
             print("maisecrets: no MCP server of your user configuration offers Sensitive References, and no claude.ai "
                   "connector has named its gateway yet. Next step: use your gateway once in Claude Code (after a "

@@ -115,6 +115,9 @@ def _login_hint(payload: dict) -> str | None:
 
 # a server name that may go into the input box as an argument of the login: ASCII, as the mod's LOGIN_FILL
 _SERVER_NAME_RE = _LazyRx(r"[A-Za-z0-9_.-]{1,64}")
+# the login command the mod puts into the input box: the colon form, the one its LOGIN_FILL takes and the person's
+# Enter runs (the spaced entry is the mod's own command, which reaches no prompt hook)
+LOGIN_FILL = "/maisecrets:sref login "
 
 
 def login_offer(session: str | None) -> str | None:
@@ -134,7 +137,7 @@ def login_offer(session: str | None) -> str | None:
         backend = backend or Vault(load_config()).backend
         if sref_client.logged_in(backend, origin):
             continue
-        return f"/maisecrets sref login {name}"
+        return LOGIN_FILL + name
     return None
 
 
@@ -152,7 +155,7 @@ def connector_answer(session: str | None, server: str, answer: str, cwd: str | N
             not _SERVER_NAME_RE.fullmatch(key):
         return {"fill": None, "note": None}
     host = urlsplit(origin).hostname
-    return {"fill": f"/maisecrets sref login {key}",
+    return {"fill": LOGIN_FILL + key,
             "note": f"maisecrets: your claude.ai connector {key} names {host} as its gateway for Sensitive References: "
                     "values that a command or a file of yours can use. Only if this connector is your gateway at "
                     f"{host}, press Enter on the command in your input box: your browser opens at {host}, and you "
@@ -258,7 +261,8 @@ def pair_connector(key: str, nonce: str, answer: str) -> dict:
     if not hmac.compare_digest(mine.encode("ascii"), proof.encode("ascii")):
         return no(f"its proof does not match your login at {host}, so it is not your gateway there or it uses "
                   "another account")
-    if not vault_refs.bind_connector(key, url):
+    from . import deposit
+    if not vault_refs.bind_connector(key, url, deposit.seal(make_backend(cfg), key, url)):
         return no("another server or connector holds that gateway now")
     return {"bound": True, "note": f"maisecrets: the claude.ai connector {key} is bound to {host}: it proved that it "
                                    "reaches that gateway with your account."}
@@ -267,7 +271,7 @@ def pair_connector(key: str, nonce: str, answer: str) -> dict:
 def login_offered(session: str | None, command: str) -> bool:
     """The mod put this login command into the input box: no second offer of that gateway in this session."""
     from . import sref_notes
-    name = command[len("/maisecrets:sref login "):] if command.startswith("/maisecrets:sref login ") else ""
+    name = command[len(LOGIN_FILL):] if command.startswith(LOGIN_FILL) else ""
     origin = sref_notes.origin_of(sref_notes.user_servers().get(name)) if _SERVER_NAME_RE.fullmatch(name) else None
     return bool(origin) and sref_notes.first_offer(origin, session)
 

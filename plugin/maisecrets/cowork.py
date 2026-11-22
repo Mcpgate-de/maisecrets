@@ -9,11 +9,29 @@ from __future__ import annotations
 import os
 
 ENTRYPOINT = "remote_cowork"
+# the Cowork cloud entry points: Claude Code's own list of them is remote_cowork and remote_cowork_trigger (desktop app
+# 6.28899.6, app.asar)
+ENTRYPOINTS = frozenset({ENTRYPOINT, "remote_cowork_trigger"})
 
 
 def active() -> bool:
     """Whether this process serves a Cowork session."""
-    return os.environ.get("CLAUDE_CODE_ENTRYPOINT") == ENTRYPOINT
+    return os.environ.get("CLAUDE_CODE_ENTRYPOINT") in ENTRYPOINTS
+
+
+def names_off(cfg) -> bool:
+    """Whether names are off in this Cowork task: Cowork, and no name source set. Measured on 0.9.22: the name service
+    on the person's computer (127.0.0.1) is not reachable from the VM, and a gateway in Cowork is a claude.ai
+    connector, not an MCP server of the VM's configuration, so `ner gateway NAME` cannot name it."""
+    if not active():
+        return False
+    conf = cfg.get("remote_detector") if isinstance(cfg, dict) else None
+    return not (isinstance(conf, dict) and conf.get("url"))
+
+
+# why names are off in Cowork, for the person (the status) and for the model (the session start)
+NAMES_WHY = ("a name service on your computer is not reachable from Cowork, and a gateway name service is not "
+             "available in Cowork yet")
 
 
 # what the model gets in place of a command the hook answered: the answer only, never the typed command (it can carry
