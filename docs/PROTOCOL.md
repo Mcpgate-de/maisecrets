@@ -347,6 +347,15 @@ second gateway implements it, decision D12). The client side is `maisecrets/depo
 - **The metadata.** The deposit fields of `sensitive_references` are read over the direct channel and kept at most an
   hour (`sref/deposit-metadata.json` in the maisecrets home, no value). The sref login asks for `deposit_scope` when
   the gateway names usable fields; an older login is refused before any value leaves, with a hint to log in again.
+- **Any field.** When the metadata names `deposit_any_field` (`{"types": [...], "tools": [...]}`), a placeholder whose
+  class is in the intersection of maisecrets' own personal types (`deposit.ANY_FIELD_TYPES`: ADDRESS, BIRTH_DATE,
+  EMAIL, IBAN, IP, IPV6, NAME, PHONE, USERNAME) and the gateway's `types` may stand in any string value of a call of
+  a tool in `tools` (the name after the exact prefix of the bound connector), never in an object key. The class is
+  the type of the vault entry, and it must equal the prefix of the key; an own rule, a term, a model's finding, a
+  weak entry and a value that holds a gateway reference stay strict. A field of a wrong shape is ignored, and the
+  targets still apply. Each placeholder of a call passes the target rule or this rule, or the call is refused. The
+  request is unchanged. BIRTH_DATE is in the list, but its placeholder has a `_` in the type, which the form of the
+  contract's section 5.1 does not take, so it gets no deposit.
 - **The request.** `POST deposit_endpoint` with the person's sref access token, the JCS digest of the arguments as
   the model wrote them, and each value padded (section 5.1). The metadata read, a token renewal and the request
   share one deadline of 5 s. A gateway certificate whose issuer names a known interception CA stops the request

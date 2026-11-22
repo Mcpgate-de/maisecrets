@@ -595,6 +595,8 @@ class AnyFieldShapeTests(unittest.TestCase):
         self.assertLessEqual({personal.NAME, personal.ADDRESS, personal.BIRTH_DATE, personal.USERNAME,
                               personal.PHONE}, D.ANY_FIELD_TYPES)
         self.assertFalse({"SECRET", "CARD", personal.ID_NUMBER} & D.ANY_FIELD_TYPES)
+        # deposit-1 (section 5.1) takes no `_` in the type: a birth date is listed but gets no deposit
+        self.assertIsNone(D.PLACEHOLDER_RE.fullmatch(OPEN + personal.BIRTH_DATE + "_c3" + CLOSE))
 
     def test_the_binding_mismatch_line_names_the_other_causes_and_no_value(self):
         line = D._line("binding_mismatch", ["EMAIL_c1"])

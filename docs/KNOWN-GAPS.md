@@ -158,10 +158,19 @@ a to-do.
   your gateway, use its own references. The one exception is a deposit (`docs/PROTOCOL.md` section 6): for a
   connector that is bound to your gateway by a pairing proof, and a call that the gateway names as a deposit
   target, maisecrets sends the value to the gateway over its own connection, and the call carries a one-time
-  handle. The result of a connector passes the proxy before maisecrets masks it: there only the gateway's own
+  handle. When the gateway also names `deposit_any_field`, a name, an e-mail address, a phone number, a postal
+  address, an IBAN, an IP address or a user name can go in this way into any text field of a tool that
+  the gateway lists. A secret, a card number, an ID number, a value of your own rule or of your term list, and every
+  other type go only to a deposit target. A birth date gets no deposit at all: the `_` in its type `BIRTH_DATE` is
+  outside the placeholder form that a deposit takes. The result of a connector passes the proxy before maisecrets masks it: there only the gateway's own
   scrubber protects it. In Cowork every MCP server outside your own config counts as a connector, and in a remote
   session a server of the source `dynamic` does. A server of a plugin or an agent named `claude.ai X` is refused
   too.
+- **Detection can take a secret for a personal value.** If maisecrets types a secret as a phone number or a
+  name, the gateway's `deposit_any_field` lets that value go into any text field of a listed tool. A later read
+  of that field through the connector passes Anthropic's proxy, and only the gateway's own result scrub masks it.
+  A gateway also refuses a personal value at call time (`binding_mismatch`) in a tool that sends no JSON body, in a
+  tool outside its list, or in a body that it encodes before it sends it, such as a mail.
 - **The deposit does not work in Cowork.** maisecrets finds the binding of a connector by the tool-name prefix
   `mcp__claude_ai_<connector>__`. Cowork drops `claude_ai_` from the tool names (measured 2026-11-22), and the
   sref login has no way into the VM yet. So in Cowork (and in the desktop app's local agent session) a connector
