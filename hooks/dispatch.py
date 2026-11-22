@@ -234,7 +234,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         return any(k.startswith("CODEX_") for k in os.environ)
     codex = _is_codex()
     import time
-    from maisecrets.hooks import primer  # noqa: E402
+    from maisecrets.hooks import session_context  # noqa: E402
     from maisecrets.vault import ConfigError, load_config  # noqa: E402
     HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
@@ -497,7 +497,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         out["systemMessage"] = _sep(out) + note
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart",
-                                 "additionalContext": primer(cfg, "codex" if codex else "claude")}
+                                 "additionalContext": session_context(cfg, "codex" if codex else "claude")}
     try:
         # a row in hooks.log: the hub's status (settings.pane_status) sees that a hook of this session ran
         from maisecrets.hooks import _run_log  # noqa: E402
