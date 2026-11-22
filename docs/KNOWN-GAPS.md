@@ -160,7 +160,10 @@ a to-do.
   target, maisecrets sends the value to the gateway over its own connection, and the call carries a one-time
   handle. When the gateway also names `deposit_any_field`, a name, an e-mail address, a phone number, a postal
   address, a birth date, an IBAN, an IP address or a user name can go in this way into any text field of a tool that
-  the gateway lists. A secret, a card number, an ID number, a value of your own rule or of your term list, and every
+  the gateway lists, and only in the actions that the gateway lists for that tool. Today these are the GitLab and
+  Jira actions that create an issue, add a comment and update an issue; the gateway adds more actions one by one.
+  maisecrets refuses every other action before the value leaves, with the line that this action of the connector
+  does not take a stored value and that it was not sent. A secret, a card number, an ID number, a value of your own rule or of your term list, and every
   other type go only to a deposit target. The result of a connector passes the proxy before maisecrets masks it: there only the gateway's own
   scrubber protects it. In Cowork every MCP server outside your own config counts as a connector, and in a remote
   session a server of the source `dynamic` does. A server of a plugin or an agent named `claude.ai X` is refused
@@ -168,12 +171,12 @@ a to-do.
 - **Detection can take a secret for a personal value.** If maisecrets types a secret as a phone number or a
   name, the gateway's `deposit_any_field` lets that value go into any text field of a listed tool. A later read
   of that field through the connector passes Anthropic's proxy, and only the gateway's own result scrub masks it.
-- **Not every action of a listed tool takes a personal value, and maisecrets cannot see which.** The gateway
-  lists tools, but it checks each action at call time: an action takes a personal value only when it sends a JSON
-  body (POST, PUT or PATCH) and every hook that it runs is on the gateway's audited list. Examples that do not take
-  one: an action that encodes its body (a Gmail send), a dispatcher, an action whose fields go into the URL (such as
-  a project or an issue key of a lookup). The gateway then answers `binding_mismatch` before it uses the deposit, so
-  the value is not sent upstream; the deposit expires unused. The AI gets one line that says so.
+- **The gateway checks a listed action again at call time.** maisecrets refuses an action that `actions` does not
+  list. The gateway also checks each call: an action takes a personal value only when it sends a JSON body (POST,
+  PUT or PATCH) and every hook that it runs is on the gateway's audited list, and no handle may stand in a field that
+  goes into a URL (such as a project or an issue key of a lookup). Examples that do not take one: an action that
+  encodes its body (a Gmail send), a dispatcher. For such a call the gateway answers `binding_mismatch` before it
+  uses the deposit, so the value is not sent upstream; the deposit expires unused. The AI gets one line that says so.
 - **The deposit does not work in Cowork.** maisecrets finds the binding of a connector by the tool-name prefix
   `mcp__claude_ai_<connector>__`. Cowork drops `claude_ai_` from the tool names (measured 2026-11-22), and the
   sref login has no way into the VM yet. So in Cowork (and in the desktop app's local agent session) a connector

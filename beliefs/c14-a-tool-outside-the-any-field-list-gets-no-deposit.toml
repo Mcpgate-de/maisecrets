@@ -7,5 +7,5 @@ runner = ["tests/test_deposit.py::AnyFieldTests::test_a_tool_outside_the_list_is
 
 [proof]
 file = "maisecrets/deposit.py"
-find = '''    free_tool = name in free.get("tools", ())'''
-replace = '''    free_tool = bool(free)'''
+find = '''    listed_tool = name in free.get("tools", ())'''
+replace = '''    listed_tool = bool(free)'''

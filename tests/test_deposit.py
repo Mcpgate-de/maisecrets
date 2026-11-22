@@ -587,7 +587,23 @@ class AnyFieldShapeTests(unittest.TestCase):
     def test_the_gateway_can_narrow_the_list_and_never_widen_it(self):
         wide = ["EMAIL", "SECRET", "CARD", "ID_NUMBER", "FUTURE_TYPE", "PHONE"]
         got = D.fields(self.block({"types": wide, "tools": ["b", ANY_TOOL]}), self.ORIGIN)
-        self.assertEqual(got["deposit_any_field"], {"types": ["EMAIL", "PHONE"], "tools": ["b", ANY_TOOL]})
+        self.assertEqual(got["deposit_any_field"], {"types": ["EMAIL", "PHONE"], "tools": ["b", ANY_TOOL],
+                                                    "actions": {}})
+        self.assertEqual(D.fields(got, self.ORIGIN), got, "a kept copy passes the same check")
+
+    def test_missing_or_malformed_actions_allow_no_action(self):
+        base = {"types": ["EMAIL"], "tools": [ANY_TOOL]}
+        for acts in (None, [ANY_TOOL], "create_issue", {ANY_TOOL: "create_issue"}, {ANY_TOOL: ["create_issue", 1]},
+                     {ANY_TOOL: None}):
+            with self.subTest(actions=acts):
+                free = {**base, "actions": acts} if acts is not None else base
+                got = D.fields(self.block(free), self.ORIGIN)["deposit_any_field"]
+                self.assertEqual(got["actions"], {}, "no tool has a listed action")
+                self.assertFalse(D.listed_action(got, ANY_TOOL, {"action": "create_issue"}))
+        got = D.fields(self.block({**base, "actions": {ANY_TOOL: ["update_issue", "create_issue"], "other": 7}}),
+                       self.ORIGIN)
+        self.assertEqual(got["deposit_any_field"]["actions"], {ANY_TOOL: ["create_issue", "update_issue"]},
+                         "a malformed entry drops only its own tool")
         self.assertEqual(D.fields(got, self.ORIGIN), got, "a kept copy passes the same check")
 
     def test_the_own_list_holds_only_personal_types(self):
@@ -598,7 +614,8 @@ class AnyFieldShapeTests(unittest.TestCase):
 
     def test_the_class_is_the_type_before_the_last_c_and_digits(self):
         from maisecrets.placeholder import key_of
-        for key, kind in (("BIRTH_DATE_c3", "BIRTH_DATE"), ("IPV6_c12", "IPV6"), ("X__c9", "X_"), ("EMAIL_c1", "EMAIL")):
+        for key, kind in (("BIRTH_DATE_c3", "BIRTH_DATE"), ("IPV6_c12", "IPV6"), ("X__c9", "X_"),
+                          ("EMAIL_c1", "EMAIL")):
             with self.subTest(key=key):
                 self.assertEqual(D.class_of(key), kind)
                 self.assertIsNotNone(D.PLACEHOLDER_RE.fullmatch(OPEN + key + ":ab•••" + CLOSE))
@@ -633,9 +650,18 @@ class AnyFieldShapeTests(unittest.TestCase):
 class AnyFieldTests(_Base):
     """Section 6.1.5 with deposit_any_field: a personal placeholder in any string value of a listed tool's call."""
 
-    def free(self, types: list | None = None, tools: list | None = None) -> None:
-        self.srv.deposit_fields = {"deposit_any_field": {"types": types or sorted(D.ANY_FIELD_TYPES),
-                                                         "tools": tools or [ANY_TOOL]}}
+    def free(self, types: list | None = None, tools: list | None = None, actions: object = "default") -> None:
+        free = {"types": types or sorted(D.ANY_FIELD_TYPES), "tools": tools or [ANY_TOOL]}
+        if actions == "default":
+            actions = {t: ["create_issue", "create_webhook"] for t in free["tools"]}
+        if actions is not None:
+            free["actions"] = actions
+        self.srv.deposit_fields = {"deposit_any_field": free}
+
+    def assert_action_refused(self, hso: dict) -> None:
+        self.assert_refused(hso, "this action of the connector does not take a stored value; it was not sent")
+        self.assertEqual(self.srv.deposit_requests, [])
+        self.assertNotIn("deposit 127.0.0.1", self.audit(), "refused before any deposit: no value left the computer")
 
     def put(self, value: str, type_: str, kind: str = "manual") -> str:
         return Vault().put(value, type_, kind, session="s1").ref
@@ -668,6 +694,39 @@ class AnyFieldTests(_Base):
         self.assertRegex(hso["updatedInput"]["params"]["description"], r"^born msdep1_[A-Za-z0-9_-]{65}$")
         req = self.srv.deposit_requests[0]
         self.assertEqual([(v["path"], v["value"]) for v in req["values"]], [("/params/description", "1990-01-02")])
+
+    def test_without_actions_no_action_takes_a_personal_value(self):
+        self.free(actions=None)
+        self.bind()
+        self.assert_action_refused(self.pre(self.issue(self.put(MAIL, "EMAIL", "email"))))
+        self.assertIn("updatedInput", self.pre(call="t2"), "the targets still apply")
+
+    def test_malformed_actions_let_no_action_take_a_personal_value(self):
+        self.free(actions=[ANY_TOOL])
+        self.bind()
+        mail = self.put(MAIL, "EMAIL", "email")
+        self.assert_action_refused(self.pre(self.issue(mail)))
+        self.free(actions={ANY_TOOL: "create_issue"})                      # the tool's entry is no list
+        (HOME / "sref" / "deposit-metadata.json").unlink()
+        self.assert_action_refused(self.pre(self.issue(mail), call="t2"))
+
+    def test_an_action_outside_the_list_is_refused_before_the_deposit(self):
+        self.free()
+        self.bind()
+        self.assert_action_refused(self.pre({**self.issue(self.put(MAIL, "EMAIL", "email")), "action": "close_issue"}))
+
+    def test_a_call_without_an_action_argument_is_refused(self):
+        self.free()
+        self.bind()
+        args = self.issue(self.put(MAIL, "EMAIL", "email"))
+        del args["action"]
+        self.assert_action_refused(self.pre(args))
+
+    def test_an_action_argument_that_is_no_string_is_refused(self):
+        self.free()
+        self.bind()
+        self.assert_action_refused(self.pre({**self.issue(self.put(MAIL, "EMAIL", "email")),
+                                             "action": ["create_issue"]}))
 
     def test_without_the_field_a_personal_value_stays_strict(self):
         self.bind()

@@ -7,5 +7,5 @@ runner = ["tests/test_deposit.py::AnyFieldTests::test_a_personal_value_goes_into
 
 [proof]
 file = "maisecrets/deposit.py"
-find = '''        if free_tool and any_field_class(vault, ph) in free.get("types", ()):'''
+find = '''        if listed_tool and any_field_class(vault, ph) in free.get("types", ()):'''
 replace = '''        if False:'''

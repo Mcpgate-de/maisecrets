@@ -269,7 +269,9 @@ def fields(block: object, origin: str | None) -> dict | None:
 
 def any_field(raw: object) -> dict | None:
     """The `deposit_any_field` of the metadata, narrowed to ANY_FIELD_TYPES; None when it is absent or has a wrong
-    shape. A wrong shape drops only this field: deposit_targets still apply."""
+    shape. A wrong shape drops only this field: deposit_targets still apply. `actions` names, per tool, the actions
+    that take a personal value; when it is missing or no object, no tool gets one, and a tool whose entry is no list
+    of strings gets none either."""
     if not isinstance(raw, dict):
         return None
     types, tools = raw.get("types"), raw.get("tools")
@@ -278,7 +280,22 @@ def any_field(raw: object) -> dict | None:
     if not all(isinstance(t, str) for t in types) or not all(isinstance(t, str) and TOOL_RE.fullmatch(t)
                                                              for t in tools):
         return None
-    return {"types": sorted(ANY_FIELD_TYPES.intersection(types)), "tools": sorted(set(tools))}
+    acts = raw.get("actions")
+    if not isinstance(acts, dict) or len(acts) > MAX_TARGETS:
+        acts = {}
+    actions = {t: sorted(set(names)) for t, names in acts.items()
+               if isinstance(names, list) and len(names) <= MAX_TARGETS and all(isinstance(a, str) for a in names)}
+    return {"types": sorted(ANY_FIELD_TYPES.intersection(types)), "tools": sorted(set(tools)), "actions": actions}
+
+
+ACTION_LINE = "this action of the connector does not take a stored value; it was not sent"
+
+
+def listed_action(free: dict, name: str, args: object) -> bool:
+    """The call's `action` argument is a string that `actions[name]` lists (section 6.1.5)."""
+    acts = (free.get("actions") or {}).get(name)
+    act = args.get("action") if isinstance(args, dict) else None
+    return isinstance(acts, list) and isinstance(act, str) and act in acts
 
 
 def class_of(key: object) -> str | None:
@@ -547,14 +564,17 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
         raise Refused("a placeholder stands in a key of the arguments, and a deposit takes only a string value")
     targets = matching_targets(dep["deposit_targets"], name, tool_input)
     free = dep.get("deposit_any_field") or {}
-    free_tool = name in free.get("tools", ())
-    if not places or not (targets or free_tool):
+    listed_tool = name in free.get("tools", ())
+    free_tool = listed_tool and listed_action(free, name, tool_input)
+    if not places or not (targets or listed_tool):
         raise Refused(f"{host} takes no deposit for this call of {name}")
     loose = set()                      # the keys that stand outside a target's paths, by their class
     for pointer, segs, _a, _b, ph in places:
         if any(_path_matches(p, segs) for t in targets for p in t["paths"]):
             continue
-        if free_tool and any_field_class(vault, ph) in free.get("types", ()):
+        if listed_tool and any_field_class(vault, ph) in free.get("types", ()):
+            if not free_tool:          # an action that actions[name] does not list: refused before any deposit
+                raise Refused(ACTION_LINE)
             loose.add(key_of(ph))
             continue
         raise Refused(f"{host} takes no deposit at {pointer} of {name}")

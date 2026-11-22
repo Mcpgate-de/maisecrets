@@ -350,7 +350,11 @@ second gateway implements it, decision D12). The client side is `maisecrets/depo
 - **Any field.** When the metadata names `deposit_any_field` (`{"types": [...], "tools": [...]}`), a placeholder whose
   class is in the intersection of maisecrets' own personal types (`deposit.ANY_FIELD_TYPES`: ADDRESS, BIRTH_DATE,
   EMAIL, IBAN, IP, IPV6, NAME, PHONE, USERNAME) and the gateway's `types` may stand in any string value of a call of
-  a tool in `tools` (the name after the exact prefix of the bound connector), never in an object key. The class is
+  a tool in `tools` (the name after the exact prefix of the bound connector) whose `action` argument is a string that
+  `actions[tool]` lists, never in an object key. Without `actions`, with `actions` that is no object, without an
+  entry for the tool, with an entry that is no list of strings, or without a string `action`, no personal value goes
+  outside a target's paths; a listed tool with an unlisted action is refused before the deposit, with the line "this
+  action of the connector does not take a stored value; it was not sent". The class is
   the type of the vault entry, and it must equal the prefix of the key; an own rule, a term, a model's finding, a
   weak entry and a value that holds a gateway reference stay strict. A field of a wrong shape is ignored, and the
   targets still apply. Each placeholder of a call passes the target rule or this rule, or the call is refused. The
