@@ -213,10 +213,11 @@ class _Base(unittest.TestCase):
         return {"action": "create_webhook", "project": "group/app", "url": "https://hooks.example.com/in",
                 "token": self.ref, **change}
 
-    def pre(self, tool_input: dict | None = None, call: str = "t1", tool: str = TOOL, server: object = SERVER) -> dict:
+    def pre(self, tool_input: dict | None = None, call: str = "t1", tool: str = TOOL, server: object = SERVER,
+            extra: dict | None = None) -> dict:
         hooks._live_cache.clear()
         payload = {"tool_name": tool, "tool_input": tool_input or self.args(), "session_id": "s1",
-                   "tool_use_id": call, "transcript_path": "", **CLAUDE}
+                   "tool_use_id": call, "transcript_path": "", **CLAUDE, **(extra or {})}
         if server is not None:
             payload["mcp_server"] = server
         out = hooks.pre_tool(payload)
@@ -271,14 +272,19 @@ class DepositHookTests(_Base):
                          "deposit_refused: unknown_handle", "a handle works once")
         self.assertEqual(self.srv.upstream, [])
 
-    def test_with_confirm_the_person_is_asked_with_the_keys_and_the_host(self):
+    def test_with_confirm_no_value_leaves_before_the_answer(self):
         self.write_config({"rehydration": "confirm"})
         self.bind()
-        hso = self.pre()
-        self.assertEqual(hso["permissionDecision"], "ask")
-        self.assertRegex(hso["updatedInput"]["token"], D.HANDLE_RE.pattern)
-        self.assertIn(self.ref, hso["permissionDecisionReason"])
-        self.assertIn("went to 127.0.0.1", hso["permissionDecisionReason"])
+        self.assert_refused(self.pre(), "a deposit sends the value to the gateway before that answer, so no value "
+                                        "was sent")
+        self.assertEqual(self.srv.deposit_requests, [])
+        self.assertNotIn("deposit 127.0.0.1", self.audit(), "nothing counted: no value left")
+
+    def test_in_auto_mode_no_value_leaves_before_the_answer(self):
+        self.bind()
+        self.assert_refused(self.pre(extra={"permission_mode": "auto"}), "no value was sent")
+        self.assertEqual(self.srv.deposit_requests, [])
+        self.assertIn("updatedInput", self.pre(call="t2"), "with automatic and no auto mode the deposit goes")
 
     def test_block_refuses_before_any_value_leaves(self):
         self.write_config({"rehydration": "block"})
@@ -743,7 +749,7 @@ class AnyFieldTests(_Base):
 
     def test_all_types_other_than_true_keeps_a_secret_strict(self):
         self.bind()
-        for at in ("absent", "true", False, 1, None):
+        for at in ("absent", "true", False, 1, None, {}, [1]):
             with self.subTest(all_types=at):
                 self.free(all_types=at)
                 cache = HOME / "sref" / "deposit-metadata.json"
@@ -751,6 +757,26 @@ class AnyFieldTests(_Base):
                     cache.unlink()
                 self.assert_refused(self.pre(self.issue(self.ref), call="t-" + str(at)),
                                     "takes no deposit at /params/description")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_all_types_passes_each_strict_kind_and_the_strict_mark(self):
+        self.free(all_types=True)
+        self.bind()
+        refs = {kind: self.put(kind + "." + MAIL, "EMAIL", kind) for kind in ("term:t1", "import:i1", "remote:r1")}
+        refs["strict mark"] = self.put("marked." + MAIL, "EMAIL", "email")
+        for kind in ("remote:r1", "strict mark"):
+            self.change(refs[kind], weak=False, **({"strict": True} if kind == "strict mark" else {}))
+        for kind, ref in refs.items():
+            with self.subTest(kind=kind):
+                self.assertIsNone(D.any_field_class(Vault(), ref), "strict without all_types")
+                self.assertEqual(D.any_field_class(Vault(), ref, every=True), "EMAIL")
+
+    def test_an_unlisted_tool_stays_refused_inside_the_loop(self):
+        # the call matches a target, so the early check passes; the second placeholder needs the any-field rule
+        self.free(tools=["slack_write_actions"], all_types=True)
+        self.bind()
+        other = self.put(VALUE + "-second", "SECRET")
+        self.assert_refused(self.pre(self.args(description=other)), "takes no deposit at /description")
         self.assertEqual(self.srv.deposit_requests, [])
 
     def test_all_types_keeps_the_tool_list(self):
@@ -900,8 +926,9 @@ class AnyFieldTests(_Base):
         self.assertIn("updatedInput", self.pre(self.issue(self.put(MAIL, "EMAIL", "email"))))
         cache = HOME / "sref" / "deposit-metadata.json"
         data = json.loads(cache.read_text(encoding="utf-8"))
-        for rec in data.values():                       # a process on the computer widens the kept copy
+        for url, rec in data.items():                   # a process with the store key widens the kept copy (A3)
             rec["found"]["deposit"]["deposit_any_field"]["types"].append("SECRET")
+            rec["mac"] = D._meta_mac(self.backend, url, rec["t"], rec["found"], False)
         cache.write_text(json.dumps(data), encoding="utf-8")
         self.assert_refused(self.pre(self.issue(self.ref), call="t2"), "takes no deposit at /params/description")
         self.assertEqual(len(self.srv.deposit_requests), 1)
@@ -909,6 +936,22 @@ class AnyFieldTests(_Base):
                          "only the deposit of the e-mail address; the secret never left the computer")
         kept = json.loads(cache.read_text(encoding="utf-8"))
         self.assertEqual([r["found"]["deposit"]["deposit_any_field"]["types"] for r in kept.values()], [["EMAIL"]],
+                         "the gateway's metadata was read again over the direct channel")
+
+    def test_a_kept_metadata_copy_changed_without_the_key_is_read_again(self):
+        self.free()
+        self.bind()
+        self.assertIn("updatedInput", self.pre(self.issue(self.put(MAIL, "EMAIL", "email"))))
+        cache = HOME / "sref" / "deposit-metadata.json"
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        for rec in data.values():                       # a process without the store key switches all_types on
+            self.assertIsInstance(rec.get("mac"), str)
+            rec["found"]["deposit"]["deposit_any_field"]["all_types"] = True
+        cache.write_text(json.dumps(data), encoding="utf-8")
+        self.assert_refused(self.pre(self.issue(self.ref), call="t2"), "takes no deposit at /params/description")
+        self.assertEqual(len(self.srv.deposit_requests), 1, "the secret never left the computer")
+        kept = json.loads(cache.read_text(encoding="utf-8"))
+        self.assertEqual([r["found"]["deposit"]["deposit_any_field"]["all_types"] for r in kept.values()], [False],
                          "the gateway's metadata was read again over the direct channel")
 
     def test_in_a_mixed_call_each_placeholder_passes_one_of_the_two_rules(self):

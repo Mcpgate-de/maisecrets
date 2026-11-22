@@ -3,7 +3,7 @@ belief = "c14-all-types-passes-the-strict-kinds"
 control = "C14"
 serves = ["M3.8"]
 statement = '''With `all_types` true, an own rule, a term, an import, a model's finding and the strict mark no longer make a placeholder strict.'''
-runner = ["tests/test_deposit.py::AnyFieldTests::test_all_types_lets_every_class_go_on_a_listed_action"]
+runner = ["tests/test_deposit.py::AnyFieldTests::test_all_types_lets_every_class_go_on_a_listed_action", "tests/test_deposit.py::AnyFieldTests::test_all_types_passes_each_strict_kind_and_the_strict_mark"]
 
 [proof]
 file = "maisecrets/deposit.py"

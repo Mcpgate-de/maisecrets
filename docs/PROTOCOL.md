@@ -376,8 +376,9 @@ second gateway implements it, decision D12). The client side is `maisecrets/depo
   share one deadline of 5 s. A gateway certificate whose issuer names a known interception CA stops the request
   before its body is sent (D9).
 - **The answer.** One handle `msdep1_` + 65 characters for each value, all distinct, in the order of the
-  placeholders in the JCS text. The hook writes the handles into `updatedInput` and decides by the rehydration policy
-  (`confirm` asks, and the reason names the keys and the host). The audit line names the key, `deposit`, the host,
+  placeholders in the JCS text. The hook writes the handles into `updatedInput`. A call that maisecrets would ask
+  for (rehydration `confirm`, auto mode, a new destination under `protect`) gets no deposit: the ask and the handles
+  are one answer, so the value would leave before the answer. The audit line names the key, `deposit`, the host,
   the tool, the paths and the lifetime; a deposit counts in the limiter also when it fails.
 - **At call time.** A tool result `deposit_refused: <code>` (`isError` true) for a call that carried handles
   becomes one line for the model in PostToolUse. maisecrets never retries by itself.

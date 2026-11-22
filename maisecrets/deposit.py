@@ -49,8 +49,9 @@ CALL_CODES = ("expired", "unknown_handle", "binding_mismatch", "used", "unavaila
 _REFUSED_RE = re.compile(r"\s*deposit_refused: (" + "|".join(CALL_CODES) + r")\s*")
 _MAC_ENTRY = "_maisecrets_binding_mac"
 # deposit_any_field (section 6.1.5): the personal types whose placeholder may stand in any string of a listed tool's
-# call. maisecrets applies the intersection with the gateway's list, so a gateway can narrow it and never widen it.
-# ID_NUMBER, CARD, SECRET and every type not named here stay strict (deposit_targets only)
+# call. maisecrets applies the intersection with the gateway's list, so a gateway can narrow it; only `all_types` as
+# the JSON boolean true widens it to every class. Else ID_NUMBER, CARD, SECRET and every type not named here stay
+# strict (deposit_targets only)
 ANY_FIELD_TYPES = frozenset({"ADDRESS", "BIRTH_DATE", "EMAIL", "IBAN", "IP", "IPV6", "NAME", "PHONE", "USERNAME"})
 # an own rule, a term, an import and a model's finding stay strict whatever type they carry
 STRICT_KINDS = ("user:", "term:", "import:", "remote:")
@@ -342,9 +343,21 @@ def _cache_path():
     return HOME / "sref" / "deposit-metadata.json"
 
 
-def metadata(cfg: dict, url: str, deadline: float) -> dict:
+def _meta_mac(backend, url: str, t: object, found: object, create: bool) -> str | None:
+    """The MAC of a kept metadata copy, with the binding key in the store (seal, D7): a copy that a process changed
+    without that key is read again from the gateway. None when the store holds no key and `create` is False."""
+    from .vault_refs import profile
+    k = _mac_key(backend, create)
+    if k is None:
+        return None
+    blob = json.dumps(["maisecrets-deposit-metadata-1", profile(), url, t, found], sort_keys=True)
+    return hmac.new(k, blob.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def metadata(cfg: dict, url: str, deadline: float, backend=None) -> dict:
     """The gateway's discovery record with usable deposit fields, read over the direct channel (sref_client.discover)
-    and kept at most an hour. A copy older than that is read again; a failed read refuses and never extends it."""
+    and kept at most an hour. A copy older than that is read again; a failed read refuses and never extends it. The
+    copy carries a MAC with the binding key (_meta_mac); a copy whose MAC does not match is read again."""
     from . import sref_client
     from .vault import atomic_write
     from .vault_refs import origin_of
@@ -358,7 +371,9 @@ def metadata(cfg: dict, url: str, deadline: float) -> dict:
     data = data if isinstance(data, dict) else {}
     kept = data.get(url) if isinstance(data.get(url), dict) else {}
     t, found = kept.get("t"), kept.get("found")
-    if isinstance(t, (int, float)) and not isinstance(t, bool) and now - METADATA_TTL < t <= now + 60 \
+    mac = _meta_mac(backend, url, t, found, False) if backend is not None else None
+    if isinstance(mac, str) and isinstance(kept.get("mac"), str) and hmac.compare_digest(mac, kept["mac"]) \
+            and isinstance(t, (int, float)) and not isinstance(t, bool) and now - METADATA_TTL < t <= now + 60 \
             and sref_client._same_origin(found, origin) and isinstance(found, dict) \
             and fields(found.get("deposit"), origin) == found.get("deposit") and found.get("deposit"):
         return found
@@ -370,6 +385,11 @@ def metadata(cfg: dict, url: str, deadline: float) -> dict:
     data = {u: v for u, v in data.items() if isinstance(v, dict) and isinstance(v.get("t"), (int, float))
             and now - METADATA_TTL < v["t"] <= now + 60}
     data[url] = {"t": now, "found": found}
+    if backend is not None:
+        try:
+            data[url]["mac"] = _meta_mac(backend, url, now, found, True)
+        except Exception:  # noqa: BLE001 - without a MAC the copy is read again next time
+            pass
     try:
         _cache_path().parent.mkdir(parents=True, exist_ok=True)
         atomic_write(_cache_path(), json.dumps(data))
@@ -562,7 +582,7 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
     if not sref_client.logged_in(backend, origin):                                    # 6.1.3
         raise Refused(f"maisecrets has no login at {host}; the person types /maisecrets sref login {key}")
     deadline = start + BUDGET                                                         # 6.4
-    meta = metadata(cfg, url, deadline)                                               # 6.1.4
+    meta = metadata(cfg, url, deadline, backend)                                      # 6.1.4
     dep = meta["deposit"]
     granted = str(sref_client._load(backend, origin).get("scope") or "").split()
     if dep["deposit_scope"] not in granted:
@@ -621,6 +641,8 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
     if stop:
         return hooks._deny(stop)
     fresh = hooks._protect_fresh(cfg, tool, tool_input, keys)
+    if _asks(payload, cfg, fresh):                     # the value would leave before the person answers
+        raise Refused(ASK_LINE)
     failed = hooks._precheck(vault, keys, session)
     if failed:
         return hooks._deny(hooks._deny_reason(failed))
@@ -674,6 +696,20 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
                              f"maisecrets: {names} went to {host} as a one-time deposit over maisecrets' own "
                              f"connection; this call of {name} carries only its handle, which {host} replaces with "
                              "the value. Allow it only if you asked for this call.", fresh)
+
+
+ASK_LINE = ("maisecrets would ask the person for this call, and a deposit sends the value to the gateway before that "
+            "answer, so no value was sent (rehydration confirm, auto mode, or a new destination under "
+            "secret_destinations protect). With rehydration automatic the call can take a deposit")
+
+
+def _asks(payload: dict, cfg: dict, fresh: list) -> bool:
+    """hooks._rehydrated would return ask for this call. The ask and its updatedInput (the handles) are one answer,
+    and no hook runs between the person's approval and the call, so a deposit cannot wait for the approval."""
+    from . import hooks, rehydration
+    client = hooks.client_of(payload)
+    return rehydration.outcome(client, rehydration.policy(cfg, "mcp")) == "ask" or bool(fresh) \
+        or rehydration.auto_mode_asks(client, "mcp", payload)
 
 
 def _line(code: str, keys: list) -> str:

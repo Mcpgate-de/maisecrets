@@ -174,10 +174,24 @@ a to-do.
   target. Until your rule sees the value again (for example, a rule that you add after the value was stored), the
   entry can still go into any text field of a listed action.
 - **A changed copy of the gateway's metadata on your computer.** maisecrets keeps the gateway's metadata for at
-  most an hour in its home folder. When it reads that copy, it checks the types against its own list, so an added
-  type makes it read the metadata again from the gateway. An added tool or action in the copy passes that check.
+  most an hour in its home folder, with a MAC made with the binding key in the store. A copy that a process changed
+  without that key, for example with `all_types` switched on, fails the MAC, and maisecrets reads the metadata again
+  from the gateway. A process of your own user that reads the store key can still sign a changed copy (A3). Then an
+  added type still fails the check against maisecrets' own list, but an added tool, action or `all_types` passes.
   The AI cannot write the maisecrets home folder (C14), and the gateway checks each call again and refuses an action
-  that it does not list (`binding_mismatch`); a process of your own user can change the copy (A3).
+  that it does not list (`binding_mismatch`).
+- **No deposit when maisecrets would ask.** A deposit sends the value to the gateway in PreToolUse. The question and
+  the handles are one answer, and no hook runs between your answer and the call. So when maisecrets would ask
+  (rehydration `confirm`, Claude Code's auto mode, or a new destination under `secret_destinations` protect),
+  it sends no deposit, and the call is refused. With rehydration `automatic` the deposit goes; a permission prompt
+  that Claude Code shows by your own rules comes after it, and a call that you decline there leaves the deposit
+  unused at the gateway until it expires (at most 300 s). Under `protect`, a key whose first call went to another
+  destination gets no deposit at the connector.
+- **A prompt injection can put a stored value into a public issue (known risk).** With rehydration `automatic`, a
+  listed action takes a deposit without a question from maisecrets, as every MCP call takes a value in 0.9.22. A
+  text that the AI reads can make it write a stored value into an issue or a comment, and with `all_types` a
+  secret too. This is a design decision: a value in a ticket must not work worse than in 0.9.22. Set rehydration
+  to `confirm` if you want no deposit without your answer.
 - **With `all_types`, a secret can come back through Anthropic's proxy (open point).** When your gateway sets
   `all_types` to true, every stored value, a secret, a card number and an ID number too, goes as a deposit into
   any text field of a listed action, such as the text of a ticket. A later read of that ticket through the
