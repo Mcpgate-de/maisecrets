@@ -713,9 +713,15 @@ class SrefBashTests(unittest.TestCase):
             cli.cmd_sref(["status"])
         self.assertIn("Team_GW (127.0.0.1): a claude.ai connector that names this gateway; not bound", out.getvalue())
         self.assertNotIn("Team_GW (127.0.0.1): logged in", out.getvalue())
+        # live probe 2026-11-22: the next line said that no connector had named its gateway yet
+        self.assertNotIn("has named its gateway yet", out.getvalue())
+        self.assertIn("no MCP server of your user configuration offers Sensitive References.", out.getvalue())
         later = vault_refs.time.time() + vault_refs.PROPOSAL_TTL + 5
         with mock.patch.object(vault_refs.time, "time", lambda: later):
             self.assertEqual(vault_refs.connectors(pending=True), {})
+            with mock.patch("sys.stdout", new_callable=__import__("io").StringIO) as out:
+                cli.cmd_sref(["status"])
+        self.assertIn("no claude.ai connector has named its gateway yet", out.getvalue())
 
     def test_the_ai_cannot_run_the_sref_command(self):
         # a login it started could bind a connector; and only the person logs in (review of the connector source)
