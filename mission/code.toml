@@ -94,7 +94,7 @@
 "maisecrets/forms.py" = { none = "rewrites the command forms and /clear in a text for the person (a hint, a command's output, the answer cowork.show_answer sends) to the form that works in each client (terminal, Cowork, Codex); it decides nothing, and the mask runs after it on the text it gives (cowork.py, C1)" }
 "maisecrets/guarded_paths.py" = { controls = ["C27", "I3"] }
 "maisecrets/home.py" = { controls = ["C15", "C16", "C33", "I1"] }
-"maisecrets/hooks.py" = { controls = ["C1", "C2", "C3", "C4", "C5", "C6", "C8", "C13", "C14", "C16", "C18", "C20", "C21", "C22", "C23", "C24", "C26", "C27", "C28", "C29", "C31", "C33", "I1", "I2", "I3", "I4", "I5"] }
+"maisecrets/hooks.py" = { controls = ["C1", "C2", "C3", "C4", "C5", "C6", "C8", "C13", "C14", "C16", "C18", "C20", "C21", "C22", "C23", "C24", "C26", "C27", "C28", "C29", "C30a", "C31", "C33", "I1", "I2", "I3", "I4", "I5"] }
 "maisecrets/hub.py" = { controls = ["C22"] }
 "maisecrets/incidents.py" = { controls = ["C24"] }
 "maisecrets/json_lines.py" = { controls = ["C3"] }
@@ -133,7 +133,7 @@
 "maisecrets/sref_notes.py" = { controls = ["C31"] }
 "maisecrets/ssh_approval.py" = { controls = ["C18"] }
 "maisecrets/ssh_consent.py" = { controls = ["C21"] }
-"maisecrets/status_verdict.py" = { none = "the lines of /maisecrets:status: each claims only what it checked; it decides nothing for a prompt or a call" }
+"maisecrets/status_verdict.py" = { controls = ["C30a"] }
 "maisecrets/term_files.py" = { controls = ["C26"] }
 "maisecrets/terms.py" = { controls = ["C26"] }
 "maisecrets/terms_cli.py" = { controls = ["C26"] }

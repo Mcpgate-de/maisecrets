@@ -1,0 +1,11 @@
+# c30a-in-cowork-the-status-says-why-names-are-off: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-in-cowork-the-status-says-why-names-are-off"
+control = "C30a"
+serves = ["M5.4"]
+statement = "In Cowork, while no name source is set, /maisecrets status shows a names note: off in this task, the reason on the line below, and the step maisecrets: term add NAME; the head line counts it."
+runner = ["tests/test_status_verdict.py::CoworkNotesTests::test_in_cowork_names_off_say_why_and_name_the_term_step"]
+
+[proof]
+file = "maisecrets/status_verdict.py"
+find = '''    if off:'''
+replace = '''    if False:'''

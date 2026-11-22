@@ -537,16 +537,22 @@ COMMANDS_COWORK = ("When you name a maisecrets command to the user, write /maise
                    "status. Write a command that maisecrets answers itself (term add or remove, not-a-secret, demo, a "
                    "settings change, a ner change, sref, report incident) as text: maisecrets: NAME ARGS, for example "
                    "maisecrets: term add NAME.")
+# the model must not tell the person that names are masked where no name source runs (cowork.names_off)
+NAMES_OFF_COWORK = "maisecrets masks no names in this Cowork task: {why}."
 
 
 def session_context(cfg: dict | None = None, client: str = "claude") -> str:
-    """What the model reads at the session start: the primer and the form of a command for the person."""
+    """What the model reads at the session start: the primer, the form of a command for the person, and in Cowork,
+    while no name source is set, that names are not masked there and why (cowork.names_off)."""
     from . import cowork
     if client == "codex":
         return primer(cfg, client) + " " + COMMANDS_CODEX
     if not cowork.active():
         return primer(cfg, client) + " " + COMMANDS_CLAUDE
-    return primer(cfg, client) + " " + COMMANDS_COWORK
+    text = primer(cfg, client) + " " + COMMANDS_COWORK
+    if cowork.names_off(cfg):
+        text += " " + NAMES_OFF_COWORK.format(why=cowork.NAMES_WHY.replace("your computer", "the user's computer"))
+    return text
 
 
 # --------------------------------------------------------- UserPromptSubmit --

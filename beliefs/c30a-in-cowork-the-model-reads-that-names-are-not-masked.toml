@@ -1,0 +1,11 @@
+# c30a-in-cowork-the-model-reads-that-names-are-not-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-in-cowork-the-model-reads-that-names-are-not-masked"
+control = "C30a"
+serves = ["M5.4"]
+statement = "In Cowork, while no name source is set, the session start tells the model that maisecrets masks no names in this task and why (no name service of the person's computer is reachable, and no gateway name service is available there yet); with a source set it says nothing of it."
+runner = ["tests/test_cowork.py::SessionStartTests::test_in_cowork_the_model_reads_that_names_are_not_masked_and_why", "tests/test_cowork.py::SessionStartTests::test_in_cowork_a_name_source_that_is_set_gets_no_names_line"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''    if cowork.names_off(cfg):'''
+replace = '''    if False:'''
