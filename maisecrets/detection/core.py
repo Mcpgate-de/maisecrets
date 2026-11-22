@@ -2290,14 +2290,16 @@ _CONSTANT_NAME_RE = _LazyRx(r"(?:[A-Z]*[AEIOUY][A-Z]*|DB)(?:[-_](?:[A-Z]*[AEIOUY
 _TIME_OR_RATIO_RE = _LazyRx(r"\d+:[a-z]+")
 # a number and then `,name:number` fields: a log of timings after a field name such as secret_shape_scan (#92)
 _NUMBER_LIST_RE = _LazyRx(r"\d+(?:\.\d+)?(?:,[A-Za-z_][\w.-]*:\d+(?:\.\d+)?)+")
-# a census of records: `'token': 'bound=1234 unbound=5 ready=no'`. The value is a lower-case word=digits, a quoted one
-# holds only word=value fields, and the next field on the line is another word=digits: a count, not a value (#96)
-_CENSUS_VALUE_RE = _LazyRx(r"[a-z][a-z_]{0,30}=\d{1,12}(?:[ \t]+[a-z][a-z_]{0,30}=\w{1,20})*")
-_CENSUS_PAIR_RE = _LazyRx(r"[a-z][a-z_]{0,30}=\d{1,12}[ \t]+[a-z][a-z_]{0,30}=\d{1,12}(?![\w.=-])")
-def _census_count(text: str, secret: str, end: int) -> bool:
-    value = secret.strip("\"'`")
-    return bool(_CENSUS_VALUE_RE.fullmatch(value)
-                and _CENSUS_PAIR_RE.match(value + text[end:_line_end(text, end)]))
+# one entry of a census of records: `'token': 'bound=1234 unbound=5 plain=0 other=0 ready=no'`. The value starts a
+# quoted string that holds these five fields in this order and nothing else: a count, not a value (#96). Any other
+# word=digits list stays a value: `session: sid=<digits> expires=3600` (#101)
+_CENSUS_ENTRY_RE = _LazyRx(r"bound=[0-9]{1,12} unbound=[0-9]{1,12} plain=[0-9]{1,12} other=[0-9]{1,12}"
+                           r" ready=(?:yes|no)")
+def _census_count(text: str, start: int, end: int) -> bool:
+    before = text[max(0, start - 2):start]
+    quote = before if before in ("\\'", '\\"') else before[-1:]
+    m = _CENSUS_ENTRY_RE.match(text, start) if quote in ("'", '"', "\\'", '\\"') else None
+    return bool(m and text.startswith(quote, m.end()) and end <= m.end())
 
 
 _SECRET_WORD_LABEL_RE = _LazyRx(r"(?i)(?<![\w.-])secret(?:s|os?|as?)?:")
@@ -2865,7 +2867,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue   # 0:default after `secret:`
             if "number-list" in filters and _NUMBER_LIST_RE.fullmatch(secret.strip("\"'`")):
                 continue   # a list of timings after a field name such as secret_shape_scan, not one value
-            if "census-count" in filters and _census_count(text, secret, end):
+            if "census-count" in filters and _census_count(text, start, end):
                 continue   # token bound=1234 unbound=5: the count of a family in a census, not a token
             if "word-after-secret" in filters and _word_after_secret(text, m.start(1), secret, end):
                 continue   # a sentence: an article, secret, a colon and one ordinary word (#26)
