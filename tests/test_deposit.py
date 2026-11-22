@@ -272,19 +272,22 @@ class DepositHookTests(_Base):
                          "deposit_refused: unknown_handle", "a handle works once")
         self.assertEqual(self.srv.upstream, [])
 
-    def test_with_confirm_no_value_leaves_before_the_answer(self):
+    def test_with_confirm_the_person_is_asked_with_the_keys_and_the_host(self):
         self.write_config({"rehydration": "confirm"})
         self.bind()
-        self.assert_refused(self.pre(), "a deposit sends the value to the gateway before that answer, so no value "
-                                        "was sent")
-        self.assertEqual(self.srv.deposit_requests, [])
-        self.assertNotIn("deposit 127.0.0.1", self.audit(), "nothing counted: no value left")
+        hso = self.pre()
+        self.assertEqual(hso["permissionDecision"], "ask")
+        self.assertRegex(hso["updatedInput"]["token"], D.HANDLE_RE.pattern)
+        self.assertIn(self.ref, hso["permissionDecisionReason"])
+        self.assertIn("went to 127.0.0.1", hso["permissionDecisionReason"])
 
-    def test_in_auto_mode_no_value_leaves_before_the_answer(self):
+    def test_in_auto_mode_the_person_is_asked_for_a_deposit_call(self):
         self.bind()
-        self.assert_refused(self.pre(extra={"permission_mode": "auto"}), "no value was sent")
-        self.assertEqual(self.srv.deposit_requests, [])
-        self.assertIn("updatedInput", self.pre(call="t2"), "with automatic and no auto mode the deposit goes")
+        hso = self.pre(extra={"permission_mode": "auto"})
+        self.assertEqual(hso["permissionDecision"], "ask", "auto mode would deny a changed MCP input (#31)")
+        self.assertRegex(hso["updatedInput"]["token"], D.HANDLE_RE.pattern)
+        self.assertEqual(len(self.srv.deposit_requests), 1)
+        self.assertNotIn("permissionDecision", self.pre(call="t2"), "with automatic and no auto mode no question")
 
     def test_block_refuses_before_any_value_leaves(self):
         self.write_config({"rehydration": "block"})

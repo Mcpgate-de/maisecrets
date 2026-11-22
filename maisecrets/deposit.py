@@ -641,8 +641,6 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
     if stop:
         return hooks._deny(stop)
     fresh = hooks._protect_fresh(cfg, tool, tool_input, keys)
-    if _asks(payload, cfg, fresh):                     # the value would leave before the person answers
-        raise Refused(ASK_LINE)
     failed = hooks._precheck(vault, keys, session)
     if failed:
         return hooks._deny(hooks._deny_reason(failed))
@@ -696,20 +694,6 @@ def _deposit(payload: dict, cfg: dict, tool: str, tool_input: dict, found: list,
                              f"maisecrets: {names} went to {host} as a one-time deposit over maisecrets' own "
                              f"connection; this call of {name} carries only its handle, which {host} replaces with "
                              "the value. Allow it only if you asked for this call.", fresh)
-
-
-ASK_LINE = ("maisecrets would ask the person for this call, and a deposit sends the value to the gateway before that "
-            "answer, so no value was sent (rehydration confirm, auto mode, or a new destination under "
-            "secret_destinations protect). With rehydration automatic the call can take a deposit")
-
-
-def _asks(payload: dict, cfg: dict, fresh: list) -> bool:
-    """hooks._rehydrated would return ask for this call. The ask and its updatedInput (the handles) are one answer,
-    and no hook runs between the person's approval and the call, so a deposit cannot wait for the approval."""
-    from . import hooks, rehydration
-    client = hooks.client_of(payload)
-    return rehydration.outcome(client, rehydration.policy(cfg, "mcp")) == "ask" or bool(fresh) \
-        or rehydration.auto_mode_asks(client, "mcp", payload)
 
 
 def _line(code: str, keys: list) -> str:
