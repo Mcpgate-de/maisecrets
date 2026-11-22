@@ -3,7 +3,7 @@ belief = "c14-an-own-rule-or-a-term-stays-strict-in-any-field"
 control = "C14"
 serves = ["M3.8"]
 statement = '''A value that an own rule, a term or a model found stays strict: it goes only to a target's path, whatever type it carries.'''
-runner = ["tests/test_deposit.py::AnyFieldTests::test_an_own_rule_or_a_term_stays_strict"]
+runner = ["tests/test_deposit.py::AnyFieldTests::test_an_own_rule_or_a_term_stays_strict", "tests/test_deposit.py::AnyFieldTests::test_a_models_finding_stays_strict", "tests/test_deposit.py::AnyFieldTests::test_an_import_stays_strict"]
 
 [proof]
 file = "maisecrets/deposit.py"

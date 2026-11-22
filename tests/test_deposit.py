@@ -760,6 +760,40 @@ class AnyFieldTests(_Base):
         plain = self.put("plain." + MAIL, "EMAIL", "email")
         self.assertEqual(D.any_field_class(Vault(), plain), "EMAIL")
 
+    def test_a_models_finding_stays_strict(self):
+        self.free()
+        self.bind()
+        ref = self.put("Anyfield Modelfound", "NAME", "remote:x")
+        self.change(ref, weak=False)                    # a model's finding is weak; the kind alone must hold
+        self.assert_refused(self.pre(self.issue(ref)), "takes no deposit at /params/description")
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_an_import_stays_strict(self):
+        self.free()
+        self.bind()
+        ref = self.put("import." + MAIL, "EMAIL", "import:abc123")
+        # an import is never resolved (hooks._term_keys); its class is strict too, should it ever reach a deposit
+        self.assertEqual(self.pre(self.issue(ref)), {})
+        self.assertIsNone(D.any_field_class(Vault(), ref))
+        self.assertEqual(self.srv.deposit_requests, [])
+
+    def test_a_later_own_rule_match_marks_a_stored_entry_strict(self):
+        self.free()
+        self.bind()
+        # a tool result: a built-in rule stored the value first, an own rule finds it later (Vault.put_many)
+        tool_ref = self.put("tool." + MAIL, "EMAIL", "email")
+        Vault().put_many([("tool." + MAIL, "EMAIL", "user:my-mails")], session="s1", tool=True)
+        self.assert_refused(self.pre(self.issue(tool_ref)), "takes no deposit at /params/description")
+        # a prompt: the same through Vault.put
+        typed_ref = self.put("typed." + MAIL, "EMAIL", "email")
+        self.assertEqual(self.put("typed." + MAIL, "EMAIL", "user:my-mails"), typed_ref, "the first kind stays")
+        self.assert_refused(self.pre(self.issue(typed_ref), call="t2"), "takes no deposit at /params/description")
+        self.assertEqual(self.srv.deposit_requests, [])
+        # a model's later finding does not mark it: the name service finds most names a rule found before
+        model_ref = self.put("model." + MAIL, "EMAIL", "email")
+        Vault().put_many([("model." + MAIL, "EMAIL", "remote:x")], session="s1", tool=True)
+        self.assertIn("updatedInput", self.pre(self.issue(model_ref), call="t3"))
+
     def test_a_weak_entry_stays_strict(self):
         self.free()
         self.bind()

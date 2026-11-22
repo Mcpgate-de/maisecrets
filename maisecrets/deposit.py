@@ -52,8 +52,11 @@ _MAC_ENTRY = "_maisecrets_binding_mac"
 # call. maisecrets applies the intersection with the gateway's list, so a gateway can narrow it and never widen it.
 # ID_NUMBER, CARD, SECRET and every type not named here stay strict (deposit_targets only)
 ANY_FIELD_TYPES = frozenset({"ADDRESS", "BIRTH_DATE", "EMAIL", "IBAN", "IP", "IPV6", "NAME", "PHONE", "USERNAME"})
-# an own rule, a term and a model's finding stay strict whatever type they carry
-STRICT_KINDS = ("user:", "term:", "remote:")
+# an own rule, a term, an import and a model's finding stay strict whatever type they carry
+STRICT_KINDS = ("user:", "term:", "import:", "remote:")
+# a later match of an own rule or an import marks an entry that a built-in rule stored strict (Vault.put, put_many);
+# a model's later finding does not: the name service finds most names that a rule found before
+MARKS_STRICT = ("user:", "import:")
 
 
 class Refused(_VaultRefused):
@@ -308,10 +311,13 @@ def class_of(key: object) -> str | None:
 def any_field_class(vault, placeholder: str) -> str | None:
     """The class of a placeholder for deposit_any_field: the type of its vault entry, never text the model wrote. None
     (strict) when the entry is missing, purged or weak (a masked gateway reference, a word), comes from an own rule,
-    a term or a model, or when its stored type differs from the prefix of the key."""
+    a term, an import or a model, was marked strict by a later own rule or import, or when its stored type differs from
+    the prefix of the key."""
     key = key_of(placeholder)
     meta = vault._index.get("entries", {}).get(key) if key else None
     if not isinstance(meta, dict) or meta.get("purged") or meta.get("weak"):
+        return None
+    if meta.get("strict"):
         return None
     if str(meta.get("kind", "")).startswith(STRICT_KINDS):
         return None
