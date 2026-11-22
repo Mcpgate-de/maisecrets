@@ -175,6 +175,44 @@ Five goals hold over every path, each with its own tests and a mutation per path
   chat, type it again or rewrite a file of their own that a control trusts (the subagent transcript of C19). That
   is the job of data loss prevention and access rights, not of a hook in the agent.
 
+## Network paths
+
+Where each kind of traffic goes, per client, and who ends TLS on each hop. maisecrets acts where its hooks run. It
+keeps a value out of the model. It does not protect the transport: a hop that ends TLS before the hook runs reads
+the text in clear. Marks: **M** measured, **D** documented by the vendor, **A** assumed. Measured 2026-11-21 and
+2026-11-22, Claude desktop app 6.28899.6, Claude Code 2.1.330.
+
+| traffic | Claude Code local | Remote Control | Claude Code on the web | Cowork (cloud task) | Codex local |
+|---|---|---|---|---|---|
+| typed prompt | stays on the computer until the hook or the mod rewrites it (M) | typed in the terminal: as local. Typed in a browser or the phone: to Anthropic first, then to the local session (D) | browser to Anthropic, stored as a session event, then streamed to the cloud VM (D, A for the event) | the desktop app posts it to Anthropic, which stores it and streams it to the cloud VM (M for the code, A for the event store) | stays on the computer; a prompt with a value is blocked, not sent (M) |
+| model request | to Anthropic, TLS ends at Anthropic, placeholders only (M) | as local (D) | from the cloud VM to Anthropic, placeholders only (D, A) | from the cloud VM to Anthropic, placeholders only (M for the rewrite) | to OpenAI, TLS ends at OpenAI (D) |
+| direct MCP server | from the computer to the server, TLS ends at the server (D) | as local (D) | from the cloud VM (A) | a local server runs on the computer: the call goes VM, Anthropic, desktop app, server. Such a call gets no stored value (D) | from the computer to the server (D) |
+| claude.ai connector | through Anthropic's connector proxy, TLS ends there; no stored value (D) | as local (D) | through Anthropic's connector proxy (A) | outside the VM, through Anthropic's servers (D); no stored value | not used; a Codex app connector goes through OpenAI's apps gateway (D) |
+| Bash and network egress | from the computer; the Claude Code sandbox proxy is local (D) | as local (D) | through Anthropic's security proxy (D); TLS end per host not measured (A) | through a proxy at 127.0.0.1 with an allowlist: some hosts tunnelled (TLS ends at the host), some re-signed by an Anthropic CA (TLS ends at Anthropic) (M) | from the computer (D) |
+| gateway (sref, deposit, name service) | from the computer to the gateway, TLS ends at the gateway (M) | as local (M) | through Anthropic's proxy; only when the environment allows the host, else a 403 at CONNECT (M, 2026-10-01); TLS end not measured (A) | through the egress proxy; the gateway host was tunnelled, so TLS ended at the gateway (M). The login does not work there (M) | from the computer to the gateway (M) |
+
+Notes:
+
+- **The prompt in Cowork and in a cloud session.** The desktop app shows claude.ai and posts a message to the session
+  API as a JSON event of `type: "user"` (`app.asar`, `/v1/code/sessions/{id}/events`, and the first message in the
+  create call to `/api/organizations/{org}/cowork/sessions`). Claude Code in the cloud VM reads its events from
+  `/v1/code/sessions/{id}/worker/events/stream` (SSE). The maisecrets hooks and the mod run in the VM, so the
+  original text reaches Anthropic before maisecrets sees it (KNOWN-GAPS.md). Anthropic stores the transcript of a
+  cloud session and keeps it by the retention of the account (D). Whether the stored record keeps the original
+  prompt or only the rewritten one is not measured (A: it keeps the original event).
+- **What Cowork shows.** After a rewrite, Cowork shows the placeholders in the person's bubble (observed, not
+  measured). A: the bubble comes from the user message that Claude Code in the VM sends back after the rewrite
+  (the SDK schema has `isReplay` on a user message).
+- **The model's answer and tool results.** Both come from the VM to the client through Anthropic's session
+  service. maisecrets masks a tool result in the VM before the model and the stored transcript get it. The answer
+  of the model holds placeholders where the model only saw placeholders.
+- **Which machine.** Since 2026-10-06 a new Cowork task on Pro, Max and Ultra runs in the cloud (D). The desktop
+  app also has a local VM (Apple Virtualization, arm64, `CLAUDE_CODE_ENTRYPOINT=local-agent`); a cloud task uses it
+  only to run commands in a folder the person connected, sent from the cloud through the desktop app (M, the
+  desktop log `[remote-bash]`). `remote_cowork` is the entry point of the cloud task (M).
+- **Remote Control.** While connected, Anthropic stores the transcript to keep the devices in sync (D). A prompt
+  typed on another device reaches that store before the local hook sees it (D, A for the order).
+
 ## Decisions
 
 - **Issuer binding is considered and not built (2026-10-26).** The idea: a token whose type has one issuer
