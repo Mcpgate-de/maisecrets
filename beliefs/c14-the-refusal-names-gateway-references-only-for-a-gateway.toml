@@ -6,7 +6,7 @@ statement = "The refusal of a connector call names the gateway's own references 
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_claude_code_connector_call_gets_no_stored_value_and_nothing_is_counted"]
 
 [proof]
-file = "maisecrets/hooks.py"
+file = "maisecrets/connector_proxy.py"
 find = '''If this connector is your gateway, use the "
             "gateway's own references'''
 replace = '''Use the "

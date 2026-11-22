@@ -6,7 +6,7 @@ statement = "The mcp_server source claudeai is read before the client: a Claude 
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_claudeai_source_is_refused_also_when_the_payload_reads_like_codex"]
 
 [proof]
-file = "maisecrets/hooks.py"
+file = "maisecrets/connector_proxy.py"
 find = '''
     source = server.get("source")
     if source == "claudeai":

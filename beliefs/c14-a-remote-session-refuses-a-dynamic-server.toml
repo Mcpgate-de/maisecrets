@@ -6,7 +6,7 @@ statement = "In a remote session (CLAUDE_CODE_REMOTE set), an MCP call whose sou
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_remote_session_refuses_a_dynamic_server"]
 
 [proof]
-file = "maisecrets/hooks.py"
+file = "maisecrets/connector_proxy.py"
 find = '''
     if source == "dynamic" and os.environ.get("CLAUDE_CODE_REMOTE"):
 '''

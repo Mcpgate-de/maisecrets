@@ -6,7 +6,7 @@ statement = "A Codex payload carries no mcp_server, so a Codex MCP tool named mc
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_directly_configured_server_keeps_the_resolve"]
 
 [proof]
-file = "maisecrets/hooks.py"
+file = "maisecrets/connector_proxy.py"
 find = '''
     if "mcp_server" not in payload and client_of(payload) == "codex":
         return False

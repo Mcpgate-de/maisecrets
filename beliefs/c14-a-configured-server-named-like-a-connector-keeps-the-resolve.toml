@@ -6,7 +6,7 @@ statement = "A server of the person's own config (source user, project, local, m
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_directly_configured_server_keeps_the_resolve"]
 
 [proof]
-file = "maisecrets/hooks.py"
+file = "maisecrets/connector_proxy.py"
 find = '''
     if source in _CONFIG_SOURCES:
         return False

@@ -6,7 +6,7 @@ statement = "In Cowork (cowork.active()), an MCP call whose source is no scope o
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_cowork_connector_call_gets_no_stored_value"]
 
 [proof]
-file = "maisecrets/hooks.py"
+file = "maisecrets/connector_proxy.py"
 find = '''
     if cowork.active():
         return True

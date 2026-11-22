@@ -8,7 +8,7 @@ runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_cowork_con
 [proof]
 file = "maisecrets/hooks.py"
 find = '''
-    if claude_ai_connector(payload, tool):
-        return _deny(_connector_refusal(tool, found))
+    if connector_proxy.claude_ai_connector(payload, tool):
+        return _deny(connector_proxy.refusal(tool, found))
 '''
 replace = ''''''

@@ -6,7 +6,7 @@ statement = "In Claude Code, an MCP call whose mcp_server source is claudeai (a 
 runner = ["tests/test_connector_proxy.py::ConnectorProxyTests::test_a_claude_code_connector_call_gets_no_stored_value_and_nothing_is_counted"]
 
 [proof]
-file = "maisecrets/hooks.py"
+file = "maisecrets/connector_proxy.py"
 find = '''
     if source == "claudeai":
         return True
