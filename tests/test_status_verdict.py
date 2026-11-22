@@ -412,5 +412,56 @@ class StatusOutputTests(unittest.TestCase):
         self.assertFalse(any(ln.startswith("all details:") for ln in out))
 
 
+class CoworkNotesTests(unittest.TestCase):
+    """In Cowork each task runs in a new VM: the settings hold for one task, and no name service is reachable there.
+    The short status says both, with a step only where one exists; outside Cowork nothing changes."""
+
+    def run_status(self, env: dict, cfg: dict | None = None) -> list[str]:
+        from maisecrets import home
+        buf = io.StringIO()
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        base = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_ENTRYPOINT"}
+        loaded = {**home.load_config(), **(cfg or {})}
+        with redirect_stdout(buf), mock.patch.dict(os.environ, {**base, "CLAUDE_CONFIG_DIR": tmp + "/claude",
+                                                                "CODEX_HOME": tmp + "/codex", **env}, clear=True), \
+                mock.patch.object(home, "load_config", return_value=loaded):
+            cli.main(["status"])
+        return buf.getvalue().splitlines()
+
+    def test_in_cowork_the_settings_note_holds_for_this_task_and_has_no_step(self):
+        out = self.run_status({"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"})
+        row = [ln for ln in out if ln.startswith(" ! settings ")]
+        self.assertEqual(row, [" ! settings    this task only"])
+        at = out.index(row[0])
+        self.assertEqual(out[at + 1], " " * (sv.NAME_COL + 4) + "a new Cowork task starts with the defaults")
+
+    def test_in_cowork_names_off_say_why_and_name_the_term_step(self):
+        out = self.run_status({"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"})
+        row = [ln for ln in out if ln.startswith(" ! names ")]
+        self.assertEqual(row, [" ! names       " + "off in this task".ljust(sv.FACT_COL)
+                               + "  \u2192  maisecrets: term add NAME"])
+        why = " ".join(ln.strip() for ln in out[out.index(row[0]) + 1:out.index(row[0]) + 4])
+        self.assertIn("not reachable from Cowork", why)
+        self.assertIn("gateway name service is not available in Cowork yet", why)
+        notes = 2 + sum(ln.startswith(" ! ") for ln in out if not ln.startswith((" ! settings", " ! names")))
+        self.assertIn(f"{notes} notes", out[0])
+        for line in out:
+            self.assertLessEqual(len(line), sv.WIDTH, line)
+
+    def test_in_cowork_a_name_source_that_is_set_gets_no_names_off_note(self):
+        out = self.run_status({"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"},
+                              {"remote_detector": {"url": "https://ner.example.com/ner", "format": "hf"}})
+        self.assertFalse(any("off in this task" in ln for ln in out), out)
+        self.assertTrue(any(ln.startswith(" ! settings ") for ln in out))
+
+    def test_outside_cowork_no_task_note_and_no_names_note(self):
+        for entry in ("cli", "claude-desktop"):
+            with self.subTest(entry):
+                out = self.run_status({"CLAUDE_CODE_ENTRYPOINT": entry})
+                self.assertFalse(any(ln.startswith((" ! settings", " ! names")) for ln in out), out)
+                self.assertFalse(any("Cowork" in ln for ln in out), out)
+
+
 if __name__ == "__main__":
     unittest.main()
