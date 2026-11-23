@@ -31,6 +31,11 @@ machine, and the output comes back masked again. More examples: [What it looks l
 - **Local and deterministic:** no model, no telemetry, no network request except for a service you set
   up: a name service, a gateway, or a server with [vault references](docs/ADMIN.md#vault-references).
 
+The hooks block or mask a prompt that carries a value, mask tool output, and put the value into a command or a file
+only when the call runs. In Claude Code, maisecrets also loads a mod: it puts the placeholders into your prompt before
+it goes out, and shows the values on your screen with a lock. What the mod reads, starts and sends:
+[What the Claude Code mod does](docs/HOW-IT-WORKS.md#what-the-claude-code-mod-does).
+
 ## Install
 
 Claude Code (CLI, desktop app, Cowork):
@@ -88,6 +93,9 @@ Start a new session and run `/maisecrets status test` (in Codex, send `maisecret
 value that the AI only sees as `⟦SELFTEST⟧`; type that value as your next prompt, and maisecrets answers "Self-test
 passed" without sending it.
 
+To try it with real data, send `maisecrets: demo on` in a new session. Your messages show with their values locked,
+and no prompt goes to the AI until `/clear`. [More](docs/USING.md#try-it-with-real-data-the-demo-mode).
+
 ## Where you can use it today
 
 Only the clients that are built and measured (in the harness of this repository, or seen live):
@@ -99,6 +107,16 @@ Only the clients that are built and measured (in the harness of this repository,
 
 Not yet: Gemini CLI, Cursor, Copilot CLI, OpenCode. Why: [docs/CLIENTS.md](docs/CLIENTS.md#client-support).
 
+## How well it detects
+
+Measured on data that no rule was written from. Method and all numbers:
+[mcpgate.de/maisecrets/built-to-be-checked](https://mcpgate.de/maisecrets/built-to-be-checked/).
+
+- Personal data in four public datasets (0.9.12): precision 0.92 to 0.997, and the best F1 of four tools on three of
+  them (against Presidio, Preserve, pii-anon). Names are the weak point; the optional name service masks more.
+- Secrets in GitHub issues (3,761 values, 0.8.2): recall 0.72; Betterleaks 0.55, gitleaks 0.53.
+- A sealed holdout of 872 texts (0.9.12): 2 false alarms, precision 0.997.
+
 ## Everyday commands
 
 In Claude Code (`/ms NAME` is the same; `/maisecrets:NAME` needs the mod; a change is the text you type; Codex:
@@ -106,9 +124,6 @@ In Claude Code (`/ms NAME` is the same; `/maisecrets:NAME` needs the mod; a chan
 
 - `/maisecrets status`: does it protect this session? One short line per check; `/maisecrets status all` adds the details.
 - `ms:(your value)`: would this value be caught? Nothing is sent. [More](docs/USING.md#check-a-value-first-ms).
-- `maisecrets: demo on`, in a new session: try it with real data. Your messages show with their values locked,
-  and no prompt goes to the AI until `/clear` (a managed Claude Code may still send `/compact`, with placeholders).
-  [More](docs/USING.md#try-it-with-real-data-the-demo-mode).
 - `/maisecrets`: one panel in Claude Code for your settings, stored values and the name service, with no model turn. [More](docs/USING.md#the-maisecrets-panel-claude-code).
 - `/maisecrets settings`: the choices you make. [More](docs/USING.md#options).
 - `/maisecrets list`: the stored values, masked, never a secret. [More](docs/USING.md#vault).
@@ -116,39 +131,6 @@ In Claude Code (`/ms NAME` is the same; `/maisecrets:NAME` needs the mod; a chan
   [More](docs/USING.md#reporting-a-wrong-detection).
 - `/maisecrets:secret-hygiene`: the secrets that leaked before you installed maisecrets.
   [More](docs/USING.md#secret-hygiene-skill).
-
-## What the Claude Code mod does
-
-In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. These are the facts of its code:
-
-- **What it reads:** the prompts you send (to put placeholders in place of values), and the messages and tool rows
-  that Claude Code draws on your screen (to show you the values there). What it draws on the screen never goes to
-  the model. It also reads the session id and the working directory of the session, and the kind of screen and
-  whether a message is in view (to draw values only there). It keeps one counter of its own in the Claude Code
-  store of the plugin: how often it showed its hint about values on the screen. The screen facts and the counter
-  stay on this computer and go to no program.
-- **What it starts:** the mod itself starts only the plugin's `hooks/dispatch.py`, in the plugin folder, with a
-  fixed command line: `python3 hooks/dispatch.py mod-prompt` (or `mod-values`, `mod-reveal`, `mod-demo`,
-  `mod-settings`). On Windows it tries `py -3 hooks/dispatch.py …` and then `python hooks/dispatch.py …` with the
-  same last word, because Windows often has no `python3`. It does not start a shell. One panel action starts more:
-  when you choose the local name service in the `/maisecrets` panel, that Python starts another Python, which starts
-  the name service container with Docker or Podman.
-- **What it sends:** the text of the question (a prompt, the keys or references to show, a panel action), with the
-  session id and, for a prompt, the working directory and where the prompt came from (for example the prompt box or
-  Remote Control), goes to that local Python process on stdin, as JSON. The mod itself makes no network request.
-  The Python process sends text off this computer only to a service you set up: the name service of
-  `/maisecrets ner`, or a server you added that offers vault references or Sensitive References
-  (`/maisecrets sref login`). The details:
-  [What the plugin runs, sends and fetches](docs/HOW-IT-WORKS.md#what-the-plugin-runs-sends-and-fetches).
-- **The demo** (`/maisecrets demo on`): in a session in the demo, the `http.fetch` hook refuses every request that
-  Claude Code itself sends (the turns, and side requests such as the title or the next-prompt guess), and each model
-  step gets one line from the mod instead of a request. The `session.compact` hook skips a compaction in that
-  session, because a compaction is a model request of its own; the conversation stays as it is. When the plugin's
-  Python says that a session is not in the demo, these hooks let its requests and compactions go on unchanged. When
-  the Python gives no answer, they refuse, so nothing goes out by mistake.
-- **Prompt suggestions in the demo:** the mod switches `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` off for the demo.
-  After the demo, it sets the default of Claude Code. A value that you set before the demo is not kept. If that
-  reset fails, suggestions stay off until the next session.
 
 ## What it does not protect
 
@@ -170,7 +152,8 @@ In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. Th
   [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
 - **Known gaps:** [docs/KNOWN-GAPS.md](docs/KNOWN-GAPS.md).
 - **Clients:** [docs/CLIENTS.md](docs/CLIENTS.md).
-- **Benchmarks:** [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+- **Benchmarks:** [mcpgate.de/maisecrets/built-to-be-checked](https://mcpgate.de/maisecrets/built-to-be-checked/);
+  [docs/BENCHMARKS.md](docs/BENCHMARKS.md) is an older snapshot (October 2026).
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md), [docs/TESTING.md](docs/TESTING.md),
   [docs/REPO-STANDARDS.md](docs/REPO-STANDARDS.md).
 - **Changes, privacy, security:** [CHANGELOG.md](CHANGELOG.md), [PRIVACY.md](PRIVACY.md),
@@ -188,7 +171,7 @@ These sections moved to the documents by reader. An old link to one of them land
 
 **docs/USING.md:** <a name="quick-start"></a>[Quick start](docs/USING.md#quick-start) · <a name="what-it-looks-like"></a>[What it looks like](docs/USING.md#what-it-looks-like) · <a name="secret-hygiene-skill"></a>[Secret hygiene skill](docs/USING.md#secret-hygiene-skill) · <a name="options"></a>[Options](docs/USING.md#options) · <a name="settings-you-decide"></a>[Settings you decide](docs/USING.md#settings-you-decide) · <a name="where-your-secrets-went"></a>[Where your secrets went](docs/USING.md#where-your-secrets-went) · <a name="vault"></a>[Vault](docs/USING.md#vault) · <a name="check-a-value-first-ms"></a>[Check a value first: ms:(…)](docs/USING.md#check-a-value-first-ms) · <a name="handing-a-value-to-claude-on-purpose"></a>[Handing a value to Claude on purpose](docs/USING.md#handing-a-value-to-claude-on-purpose) · <a name="reporting-a-wrong-detection"></a>[Reporting a wrong detection](docs/USING.md#reporting-a-wrong-detection) · <a name="reporting-an-internal-failure"></a>[Reporting an internal failure](docs/USING.md#reporting-an-internal-failure) · <a name="test-data-that-maisecrets-leaves-alone"></a>[Test data that maisecrets leaves alone](docs/USING.md#test-data-that-maisecrets-leaves-alone) · <a name="pdfs-and-images"></a>[PDFs and images](docs/USING.md#pdfs-and-images) · <a name="terms-names-case-numbers-customer-names"></a>[Terms: names, case numbers, customer names](docs/USING.md#terms-names-case-numbers-customer-names)
 
-**docs/HOW-IT-WORKS.md:** <a name="how-it-works"></a>[How it works](docs/HOW-IT-WORKS.md#how-it-works) · <a name="status"></a>[Status](docs/HOW-IT-WORKS.md#status) · <a name="what-the-plugin-runs-sends-and-fetches"></a>[What the plugin runs, sends and fetches](docs/HOW-IT-WORKS.md#what-the-plugin-runs-sends-and-fetches) · <a name="invisible-characters"></a>[Invisible characters](docs/HOW-IT-WORKS.md#invisible-characters) · <a name="disguised-values-in-tool-results"></a>[Disguised values in tool results](docs/HOW-IT-WORKS.md#disguised-values-in-tool-results) · <a name="password-exports-in-tool-results"></a>[Password exports in tool results](docs/HOW-IT-WORKS.md#password-exports-in-tool-results) · <a name="gates-around-a-resolve"></a>[Gates around a resolve](docs/HOW-IT-WORKS.md#gates-around-a-resolve) · <a name="detection-rules"></a>[Detection rules](docs/HOW-IT-WORKS.md#detection-rules)
+**docs/HOW-IT-WORKS.md:** <a name="how-it-works"></a>[How it works](docs/HOW-IT-WORKS.md#how-it-works) · <a name="status"></a>[Status](docs/HOW-IT-WORKS.md#status) · <a name="what-the-plugin-runs-sends-and-fetches"></a>[What the plugin runs, sends and fetches](docs/HOW-IT-WORKS.md#what-the-plugin-runs-sends-and-fetches) · <a name="invisible-characters"></a>[Invisible characters](docs/HOW-IT-WORKS.md#invisible-characters) · <a name="disguised-values-in-tool-results"></a>[Disguised values in tool results](docs/HOW-IT-WORKS.md#disguised-values-in-tool-results) · <a name="password-exports-in-tool-results"></a>[Password exports in tool results](docs/HOW-IT-WORKS.md#password-exports-in-tool-results) · <a name="gates-around-a-resolve"></a>[Gates around a resolve](docs/HOW-IT-WORKS.md#gates-around-a-resolve) · <a name="detection-rules"></a>[Detection rules](docs/HOW-IT-WORKS.md#detection-rules) · <a name="what-the-claude-code-mod-does"></a>[What the Claude Code mod does](docs/HOW-IT-WORKS.md#what-the-claude-code-mod-does)
 
 **docs/CLIENTS.md:** <a name="client-support"></a>[Client support](docs/CLIENTS.md#client-support)
 

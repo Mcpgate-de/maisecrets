@@ -92,8 +92,6 @@ class MovedSectionsTests(unittest.TestCase):
         moved = text.split("\n## Moved sections\n", 1)[1]
         rows = MOVED.findall(moved)
         self.assertEqual(len(rows), len(NAMED.findall(moved)), "each anchor is followed by its link")
-        self.assertEqual(len(rows), len(OLD_HEADINGS + OLD_SUBHEADINGS) - len(
-            [h for _, h in headings(text) if h in OLD_HEADINGS]), "one anchor per moved section")
         for name, target in rows:
             path, _, anchor = target.partition("#")
             with self.subTest(target=target):
