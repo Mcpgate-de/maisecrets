@@ -2,9 +2,7 @@
 passes (hooks._carries, shell_commands.only_mentions). A mention: the text stands in quotes, a heredoc body or a
 comment, and each simple command of the line is on the allow list of programs that print, write or store a text
 (echo, printf, cat, tee, the data commands of C21, git commit and tag, gh issue and pr comment, create and edit), with
-their allowed options. A Python script that only sends a text (#104, python_data_only) is a mention when the
-command stands in one of its string literals. Anything else is a call. PowerShell has no word parser here and
-refuses every mention.
+their allowed options. Anything else is a call. PowerShell has no word parser here and refuses every mention.
 
 Each guard of the same class gets both sides: settings and term removal and the name service (C22, C26), the removal
 of an import (C26), not-a-secret (C22) and the demo (C22). The ssh consent sentence (C21, frozen) keeps refusing every
@@ -206,103 +204,6 @@ class EachRuleOfTheReader(unittest.TestCase):
             "two allowed commands": f"echo {text} | tee -a notes.md",
             "an annotated tag": f"git tag -a v1 -m {text}",
             "a file next to a startup file": f"echo {text} > docs/bashrc-notes.md",
-        }
-        for why, command in mentions.items():
-            with self.subTest(why=why):
-                self.assertTrue(self.mention(command))
-
-
-class PythonScriptData(unittest.TestCase):
-    """#104: a Python script in a quoted heredoc or in `python3 -c '…'` that only sends a text (urllib, json) carries a
-    weakening command as data, when the command stands in a string literal and the script imports nothing that starts
-    a program, writes a file or loads maisecrets (shell_commands.python_data_only). Every other script is a call."""
-
-    NER = "/maisecrets " + "ner gateway"
-    SETTINGS = "/maisecrets:" + "settings tips off"
-    RUN = '"/x/plugins/maisecrets/hooks/run.sh"'
-
-    def script(self, *lines: str) -> str:
-        return _heredoc("python3 -", "\n".join(lines))
-
-    def mention(self, command: str) -> bool:
-        from maisecrets import settings
-        return only_mentions(command, lambda t: bool(settings.IN_A_COMMAND_RE.search(t)))
-
-    def test_a_script_that_sends_the_text_passes(self):
-        # the field case of #104: a merge request description sent to an HTTP API
-        field = self.script("import json, os, urllib.request",
-                            f"body = 'choose it with `{self.NER}`'",
-                            "req = urllib.request.Request('https://git.example/api/v4/mr', method='PUT',",
-                            "    data=json.dumps({'description': body}).encode(),",
-                            "    headers={'PRIVATE-TOKEN': os.environ['T'], 'Content-Type': 'application/json'})",
-                            "print(urllib.request.urlopen(req).status)")
-        for command in (field,
-                        field.replace("<<'EOF'", '<<"EOF"', 1),
-                        field.replace("python3 -", "python3", 1),
-                        self.script("import sys", f"sys.stdout.write(f'{{1}} {self.SETTINGS}\\n')  # {self.NER}"),
-                        f"python3 -c 'print(\"{self.SETTINGS}\")'",
-                        f"printf '%s' 'choose it with {self.NER}' > notes.md",
-                        f"gh issue comment 104 --body 'choose it with {self.NER}'"):
-            with self.subTest(command=command):
-                self.assertEqual(_decision(command), "pass")
-
-    def test_a_script_that_can_run_the_command_is_refused(self):
-        text = f"x = '{self.SETTINGS}'"
-        refused = (
-            # a maisecrets entry point gets the text
-            f"bash {self.RUN} entry <<'EOF'\n{self.SETTINGS}\nEOF",
-            _heredoc(f"python3 - | bash {self.RUN} user-prompt", f"print('{self.SETTINGS}')"),
-            _heredoc(f"python3 {self.RUN.replace('run.sh', 'dispatch.py')} mod-settings", self.SETTINGS),
-            "python3 -c 'import maisecrets.settings as s; s.apply" + f"_typed(\"{self.SETTINGS}\")'",
-            self.script("from maisecrets import settings", text),
-            # the script can start a program or load code
-            self.script("import subprocess", text, "subprocess.run(['codex', 'exec', x])"),
-            self.script("import os", text, "os.system('codex exec ' + x)"),
-            self.script(text, "__import__('subprocess').run(['claude', '-p', x])"),
-            self.script("import os", text, "getattr(os, 'system')(x)"),
-            # the script writes a file, or the line gives its output to another program
-            self.script(text, "open('ask.txt', 'w').write(x)"),
-            f"python3 -c 'x = \"{self.SETTINGS}\"' > ~/.bashrc",
-            self.script(text, "print(x)").replace("<<'EOF'", "<<'EOF' | codex exec -", 1),
-            # the settings file itself
-            _heredoc("cat > ~/.maisecrets/config.json", '{"tips": false}'),
-        )
-        for command in refused:
-            with self.subTest(command=command):
-                self.assertEqual(_decision(command), "deny")
-
-    def test_each_rule_of_the_script_reader(self):
-        text = f"x = '{self.SETTINGS}'"
-        calls = {
-            "an unquoted heredoc": self.script(text).replace("'EOF'", "EOF", 1),
-            # `ask` is a valid Python line, and after the early EOF the shell runs it
-            "the heredoc ends early": self.script(text, "EOF", "ask"),
-            "a module off the list": self.script("import subprocess", text),
-            "a module off the list, from": self.script("from shutil import which", text),
-            "a relative import": self.script("from . import settings", text),
-            "os under another name": self.script("import os as o", text),
-            "a name of os off the list": self.script("from os import system", text),
-            "os as a value": self.script("import os", "y = os", text),
-            "an attribute of os off the list": self.script("import os", "os.execv", text),
-            "an attribute of sys off the list": self.script("import sys", "sys.modules", text),
-            "a builtin that runs code": self.script(f"exec({text!r})"),
-            "open": self.script(text, "open('a.txt')"),
-            "a name with an underscore": self.script(text, "_x = 1"),
-            "an attribute with an underscore": self.script(text, "x.__class__"),
-            "the text in the code": self.script("apply" + "_typed = 1"),
-            "a syntax error": self.script(text, "def ("),
-            "a second command": self.script(text) + "\necho done",
-            "an interpreter off the list": _heredoc("node -", f"const x = '{self.SETTINGS}'"),
-        }
-        for why, command in calls.items():
-            with self.subTest(why=why):
-                self.assertFalse(self.mention(command))
-        mentions = {
-            "a string literal": self.script(text),
-            "a comment": self.script("x = 1  # " + self.SETTINGS),
-            "an f-string": self.script("n = 1", f"x = f'{{n}} {self.SETTINGS}'"),
-            "a -c script": f"python3 -c 'x = \"{self.SETTINGS}\"'",
-            "python3 with its version": self.script(text).replace("python3", "python3.12", 1),
         }
         for why, command in mentions.items():
             with self.subTest(why=why):

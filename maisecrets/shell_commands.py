@@ -1105,77 +1105,6 @@ def _a_text_command(words: list[str]) -> bool:
     return False
 
 
-# a Python script that only sends a text (#104): `python3 - <<'EOF'` or `python3 -c '…'` and nothing else on the line
-_PY_HEREDOC_RE = _LazyRx(r"\Apython(?:3(?:\.\d{1,2})?)?(?: -)? ?<< ?(?P<q>['\"])(?P<tag>[A-Za-z_]\w*)(?P=q)\n"
-                         r"(?P<body>.*)\n(?P=tag)\n?\Z", re.S)
-_PY_C_RE = _LazyRx(r"\Apython(?:3(?:\.\d{1,2})?)? -c '(?P<body>[^']*)'\n?\Z")
-# the modules the script may import: none of them starts a program, opens a file for writing or loads code. An allow
-# list, as only_mentions reads a line. os and sys only with the names below
-_PY_MODULES = {"json", "urllib", "urllib.request", "urllib.parse", "urllib.error", "base64", "re", "textwrap",
-               "time", "datetime", "string", "html", "hashlib", "uuid", "math", "collections", "typing", "pprint",
-               "__future__", "os", "os.path", "sys"}
-_PY_ATTRS = {"os": {"environ", "getenv", "path", "linesep", "sep"},
-             "sys": {"argv", "stdin", "stdout", "stderr", "exit", "version_info", "platform"}}
-_PY_NAMES = {"exec", "eval", "compile", "getattr", "setattr", "delattr", "globals", "locals", "vars", "breakpoint",
-             "open", "input", "help", "memoryview", "classmethod", "staticmethod", "type", "super", "object"}
-
-
-def _python_imports_ok(tree) -> bool:
-    """Each node of the script: imports from _PY_MODULES, os and sys only as `os.NAME` with a name of _PY_ATTRS, no
-    builtin that runs or loads code or opens a file (_PY_NAMES), no name or attribute with a leading underscore."""
-    import ast
-    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            if any(a.name not in _PY_MODULES or (a.asname and a.name.split(".")[0] in _PY_ATTRS) for a in node.names):
-                return False
-        elif isinstance(node, ast.ImportFrom):
-            if node.level or node.module not in _PY_MODULES:
-                return False
-            allowed = _PY_ATTRS.get(node.module)
-            if any(a.name == "*" or (allowed is not None and a.name not in allowed) for a in node.names):
-                return False
-        elif isinstance(node, ast.Attribute) and node.attr.startswith("_"):
-            return False
-        elif isinstance(node, ast.Name):
-            if node.id.startswith("_") or node.id in _PY_NAMES:
-                return False
-            up = parents.get(node)
-            if node.id in _PY_ATTRS and not (isinstance(up, ast.Attribute) and up.value is node
-                                             and up.attr in _PY_ATTRS[node.id]):
-                return False                    # `x = os`, `os.system`: os or sys as a value
-    return True
-
-
-def python_data_only(command: str, found) -> bool:
-    """A line that is only `python3 - <<'TAG'` (a quoted heredoc) or `python3 -c '…'`, whose script can start no
-    program and write no file (_python_imports_ok), and every match of `found` stands in a string literal or a comment
-    of the script: the text is data the script sends, as in an HTTP request (#104). False when unsure."""
-    import ast
-    import io
-    import tokenize
-    m = _PY_HEREDOC_RE.match(command) or _PY_C_RE.match(command)
-    if not m:
-        return False
-    body = m.group("body")
-    if "tag" in m.groupdict() and any(line == m.group("tag") for line in body.split("\n")):
-        return False                            # the heredoc ends early: the rest runs as shell commands
-    try:
-        if not _python_imports_ok(ast.parse(body)):
-            return False
-        starts = [0]
-        for line in body.split("\n"):
-            starts.append(starts[-1] + len(line) + 1)
-        code = list(body)
-        for tok in tokenize.generate_tokens(io.StringIO(body).readline):
-            if tokenize.tok_name[tok.type] in ("STRING", "FSTRING_MIDDLE", "TSTRING_MIDDLE", "COMMENT"):
-                a, b = starts[tok.start[0] - 1] + tok.start[1], starts[tok.end[0] - 1] + tok.end[1]
-                code[a:b] = [ch if ch == "\n" else " " for ch in code[a:b]]
-    except (SyntaxError, ValueError, tokenize.TokenError, RecursionError, MemoryError):
-        return False
-    return not found("".join(code))
-
-
 # a substitution runs its text, also inside "…" and in an unquoted heredoc
 _SUBSTITUTION_RE = _LazyRx(r"\$\(|[<>]\(")
 
@@ -1190,8 +1119,6 @@ def only_mentions(command: str, found) -> bool:
     alias, `make --eval`, a pipe into another program) is a call. False when unsure: the caller then refuses."""
     if "\r" in command:
         return False
-    if python_data_only(command, found):
-        return True
     ctxs = _shell_contexts(command)
     if any(cx in ("backtick", "arith", "hdx") for cx in ctxs):
         return False
