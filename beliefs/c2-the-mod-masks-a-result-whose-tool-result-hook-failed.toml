@@ -1,0 +1,12 @@
+# c2-the-mod-masks-a-result-whose-tool-result-hook-failed: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-mod-masks-a-result-whose-tool-result-hook-failed"
+control = "C2"
+serves = ["M1.2"]
+statement = "When the PostToolUse hook did not mask a tool result (it failed, or the call failed), the mod masks the row before the client stores and sends it (session.append on the door tool-result)."
+runner = ["tests/mod.test.ts::a result whose PostToolUse failed (onFailure block) is masked by the second net",
+          "tests/mod.test.ts::a failed command (PostToolUseFailure, anthropics/claude-code#97278) is masked by the second net"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "  const due = dueBlocks(e, session)\n"
+replace = "  const due = []\n"

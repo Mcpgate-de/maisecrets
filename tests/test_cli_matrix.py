@@ -672,7 +672,7 @@ class PopulationTests(unittest.TestCase):
         # mod-prompt and mod-values are the questions of the mod (claude-mod/), not commands of the CLI
         dispatched = commands_in_dispatch() - {"pending", "session-start", "session-end", "mod-prompt", "mod-values",
                                                "mod-reveal", "mod-demo",
-                                               "mod-settings",
+                                               "mod-settings", "mod-result",
                                                # the help of cli.main, for a person in a terminal
                                                "help", "-h", "--help"}
         self.assertEqual(sorted(dispatched - cli_commands()), [], "dispatch.py sends these to cli.main")
@@ -1299,6 +1299,46 @@ class HookEventTests(unittest.TestCase):
                 self.assertEqual((r.returncode, out["maisecrets"]), (0, "mod-settings"))
                 self.assertNotIn(value, r.stdout + r.stderr)
         self.assertEqual(self.sb.run("mod-settings", stdin="not json").returncode, 1, "a broken question: nothing")
+
+    def test_the_second_net_masks_a_stored_value_through_the_dispatcher_and_answers_no_value(self):
+        """dispatch.py mod-result (the mod's second net, second_net.mask_result): a stored value in a tool result
+        that the PostToolUse hook did not mask comes back as its placeholder, a placeholder stays, and no row goes
+        to hooks.log (it is no hook run)."""
+        value = fake_value("Sn")
+        self.sb.run("mod-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1"}))
+        kept = "\u27e6" + "SECRET" + "_c1" + "\u27e7"
+        r = self.sb.run("mod-result", stdin=json.dumps({"session_id": "S1", "tool_name": "Bash",
+                                                        "texts": [f"out {value} end", f"kept {kept}"]}))
+        out = json.loads(r.stdout)
+        self.assertEqual((r.returncode, out["maisecrets"], out["changed"]), (0, "mod-result", True), r.stderr)
+        self.assertEqual(out["texts"], [f"out {kept} end", f"kept {kept}"])
+        self.assertNotIn(value, r.stdout + r.stderr)
+        log = self.sb.home / "hooks.log"
+        rows = log.read_text() if log.exists() else ""
+        self.assertNotIn("post-tool", rows, "the second net writes no hook row")
+        self.assertNotIn(value, rows)
+
+    def test_the_second_net_keeps_a_result_whose_hook_left_its_row_and_fails_closed(self):
+        value = fake_value("Sr")
+        self.sb.run("mod-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1"}))
+        since = time.time() - 5
+        question = {"session_id": "S1", "tool_name": "Bash", "texts": [f"out {value}"], "since": since}
+        masked = json.loads(self.sb.run("mod-result", stdin=json.dumps(question)).stdout)
+        self.assertNotIn("ran", masked, "no PostToolUse row: it masks")
+        self.assertNotIn(value, json.dumps(masked))
+        with open(self.sb.home / "hooks.log", "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%S") + "\tpost-tool\tclaude\tS1\tBash\tpass\t5ms\tok\n")
+        r = self.sb.run("mod-result", stdin=json.dumps(question))
+        self.assertEqual(json.loads(r.stdout), {"maisecrets": "mod-result", "ran": True}, "the hook ran: as it is")
+        # no answer on any failure: the mod then withholds the result
+        for bad in ("not json", json.dumps({"session_id": "S1", "texts": "no list"}),
+                    json.dumps({"session_id": "S1", "texts": [1]})):
+            with self.subTest(bad=bad):
+                r = self.sb.run("mod-result", stdin=bad)
+                self.assertEqual((r.returncode, r.stdout, r.stderr), (1, "", ""))
+        r = self.sb.run("mod-result", stdin=json.dumps({"session_id": "S1", "texts": ["x"]}),
+                        env=self.sb.env(MAISECRETS_TEST_FAULT="mod-result"))
+        self.assertEqual((r.returncode, r.stdout), (1, ""))
 
     def test_session_end_answers_nothing_through_the_dispatcher(self):
         r = self.sb.run("session-end", stdin=json.dumps({"session_id": "S1", "reason": "logout"}))

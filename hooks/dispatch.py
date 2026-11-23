@@ -90,6 +90,8 @@ except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         sys.exit(1)       # no traceback: the mod keeps what it knew of the demo
     if len(sys.argv) == 2 and sys.argv[1] == "mod-settings":
         sys.exit(1)       # no traceback: the pane says the settings cannot be read
+    if len(sys.argv) == 2 and sys.argv[1] == "mod-result":
+        sys.exit(1)       # no traceback: the mod withholds the result it could not have checked
     raise
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
@@ -151,6 +153,22 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-settings":
     except Exception:  # noqa: BLE001 - no traceback
         sys.exit(1)
     print(json.dumps({"maisecrets": "mod-settings", **answer}))
+    sys.exit(0)
+
+if len(sys.argv) == 2 and sys.argv[1] == "mod-result":
+    # the second net for a tool result that the PostToolUse hook did not mask (maisecrets/second_net.py). Any
+    # failure answers nothing, and the mod withholds the result. A tool call that names this entry is refused
+    # (shell_commands), so only the mod starts it; the answer holds masked texts, never a stored value
+    import json
+    try:
+        if os.environ.get("MAISECRETS_TEST_FAULT") == "mod-result":   # harness: post_tool_crash_mod_fails
+            raise RuntimeError("fault injected for the harness")
+        from maisecrets.second_net import mask_result  # noqa: E402
+        payload = json.load(sys.stdin)
+        answer = mask_result(payload if isinstance(payload, dict) else {})
+    except Exception:  # noqa: BLE001 - no traceback, no value in an error text
+        sys.exit(1)
+    print(json.dumps({"maisecrets": "mod-result", **answer}))
     sys.exit(0)
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-reveal":

@@ -1409,8 +1409,8 @@ def _carries(command: str, found) -> bool:
 
 
 _HOOK_ENTRY_TEXT_RE = _LazyRx(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
-                                 r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt|"
-                                 r"mod-values|mod-reveal|mod-settings|mod-demo)\b", re.I)
+                                 r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|"
+                                 r"mod-(?:prompt|values|reveal|settings|demo|result))\b", re.I)
 _GRANT_RE = _LazyRx(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
 
 

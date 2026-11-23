@@ -1,0 +1,11 @@
+# c13-the-hooks-watch-is-quiet-in-cowork: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-the-hooks-watch-is-quiet-in-cowork"
+control = "C13"
+serves = ["M5.2"]
+statement = "The hooks watch gives no verdict in Cowork, so the mod shows no line there; elsewhere it answers from the prompt hook's rows of the session since the prompt."
+runner = ["tests/test_status_verdict.py::HooksWatchTests::test_the_watch_answers_from_this_homes_log_and_nothing_in_cowork"]
+
+[proof]
+file = "maisecrets/status_verdict.py"
+find = "    if cowork.active():\n        return {\"ran\": None}\n    from .home import HOME\n"
+replace = "    if False:\n        return {\"ran\": None}\n    from .home import HOME\n"

@@ -1587,3 +1587,199 @@ test('each new session id is noted once, also for a slash line and a prompt not 
   expect(await until(() => notes().length === 2)).toBe(true)
   expect(notes()[1].session_id).toBe('sess-note-2')
 })
+
+// ---- the second net for tool results (session.append on the door tool-result) and the hooks watch
+
+// a placeholder built at run time: the session that writes this file resolves a placeholder in its own text
+const ph = (key: string) => String.fromCodePoint(0x27e6) + key + String.fromCodePoint(0x27e7)
+const RAW = 'out TOKENWORD end'
+const MASKED_TEXT = `out ${ph('SECRET' + '_c9')} end`
+const resultAnswer = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-result', ...o }) } })
+const watchAnswer = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-settings', ...o }) } })
+const WITHHELD_TEXT = '[maisecrets: the tool ran and finished, but maisecrets could not check its output, so the output ' +
+  'is withheld. Do not run the tool again to see it; /maisecrets status shows why.]'
+const HOOKS_TEXT = 'maisecrets hooks did not run in this session: values are not protected; run /maisecrets status'
+
+function netWorld(on, session, run, opts: any = {}) {
+  on('clock.now', () => ({ value: clock.t }))
+  on('clock.after', () => ({ value: undefined }))
+  on('session.id', () => ({ value: session }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('env.get', () => { throw new Error('the mod read an environment variable') })
+  on('ui.log', ($, e) => { opts.logs?.push(String(e.text)); return { value: undefined } })
+  on('ui.toast', ($, e) => { opts.toasts?.push(String(e.text)); return { value: undefined } })
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('process.run', run)
+  // the settings hooks beneath: what PostToolUse and UserPromptSubmit answered
+  on('classic.PostToolUse', () => opts.post ?? {})
+  on('classic.PostToolUseFailure', () => ({}))
+  on('classic.UserPromptSubmit', () => opts.prompt ?? {})
+}
+
+const resultRow = (id, content: any = RAW, tool = 'Bash') => ({
+  message: { type: 'user', role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content }] },
+  door: 'tool-result', origin: { kind: 'tool', tool }, uuid: 'row-' + id,
+})
+
+const stored = (r) => r.message.content[0].content
+const post = ($, id, tool = 'Bash') => $.classic.PostToolUse({ tool_name: tool, tool_use_id: id, tool_input: {},
+                                                              tool_response: RAW })
+
+test('a result that PostToolUse masked goes on as it is, and Python is not asked', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-1', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) },
+    { post: { updatedToolOutput: MASKED_TEXT } })
+  await post($, 'tu-net-1')
+  const r = await $.session.append(resultRow('tu-net-1', MASKED_TEXT))
+  expect(stored(r)).toBe(MASKED_TEXT)
+  expect(runs.filter(x => x.argv[2] === 'mod-result').length).toBe(0)
+})
+
+test('a result whose PostToolUse failed (onFailure block) is masked by the second net', async ($, on) => {
+  const runs: any[] = []
+  const toasts: string[] = []
+  netWorld(on, 'net-2', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: { block: 'hook error' }, toasts })
+  await post($, 'tu-net-2')
+  const r = await $.session.append(resultRow('tu-net-2'))
+  expect(stored(r)).toContain(MASKED_TEXT)
+  expect(stored(r)).not.toContain('TOKENWORD')
+  expect(stored(r)).toContain('maisecrets masked values in this tool result')
+  const asked = runs.filter(x => x.argv[2] === 'mod-result')
+  expect(asked.length).toBe(1)
+  expect(asked[0].argv).toEqual(['python3', 'hooks/dispatch.py', 'mod-result'])
+  expect(JSON.parse(asked[0].init.stdin)).toEqual({ session_id: 'net-2', cwd: '/work', tool_name: 'Bash', texts: [RAW],
+                                                    since: null })
+  // the person's toast names no value
+  expect(toasts.length).toBe(1)
+  expect(toasts[0]).not.toContain('TOKENWORD')
+})
+
+test('a failed command (PostToolUseFailure, anthropics/claude-code#97278) is masked by the second net', async ($, on) => {
+  netWorld(on, 'net-3', () => resultAnswer({ texts: [MASKED_TEXT], changed: true }))
+  await $.classic.PostToolUseFailure({ tool_name: 'Bash', tool_use_id: 'tu-net-3', tool_input: {}, error: RAW })
+  const r = await $.session.append(resultRow('tu-net-3'))
+  expect(stored(r)).toContain(MASKED_TEXT)
+  expect(stored(r)).not.toContain('TOKENWORD')
+})
+
+test('no answer from Python withholds the result, and the row is still stored: the session goes on', async ($, on) => {
+  netWorld(on, 'net-4', () => ({ value: { exitCode: 1, stderr: 'boom', stdout: '' } }), { post: { block: 'hook error' } })
+  await post($, 'tu-net-4')
+  const r = await $.session.append(resultRow('tu-net-4', [{ type: 'text', text: RAW }]))
+  expect(stored(r)).toBe(WITHHELD_TEXT)
+})
+
+test('an answer of the wrong length withholds the result', async ($, on) => {
+  netWorld(on, 'net-5', () => resultAnswer({ texts: [MASKED_TEXT, 'more'], changed: true }), { post: { block: 'x' } })
+  await post($, 'tu-net-5')
+  expect(stored(await $.session.append(resultRow('tu-net-5')))).toBe(WITHHELD_TEXT)
+})
+
+test('a quiet PostToolUse before the hooks are known asks Python with the time of the call, and its row keeps the result',
+  async ($, on) => {
+    const runs: any[] = []
+    netWorld(on, 'net-6', ($, e) => { runs.push(e); return resultAnswer({ ran: true }) })
+    await post($, 'tu-net-6')
+    const r = await $.session.append(resultRow('tu-net-6'))
+    expect(stored(r)).toBe(RAW)
+    const asked = runs.filter(x => x.argv[2] === 'mod-result').map(x => JSON.parse(x.init.stdin))
+    expect(asked.length).toBe(1)
+    expect(asked[0].since).toBe(clock.t / 1000)
+  })
+
+test('a quiet PostToolUse in a session whose prompt hook ran costs no Python', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-7', ($, e) => {
+    runs.push(e)
+    return e.argv[2] === 'mod-settings' ? watchAnswer({ ran: true }) : resultAnswer({ texts: ['changed'], changed: true })
+  })
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'net-7' })
+  expect(await until(() => runs.some(x => x.argv[2] === 'mod-settings'))).toBe(true)
+  await new Promise(resolve => setTimeout(resolve, 20))
+  await post($, 'tu-net-7')
+  const r = await $.session.append(resultRow('tu-net-7'))
+  expect(stored(r)).toBe(RAW)
+  expect(runs.filter(x => x.argv[2] === 'mod-result').length).toBe(0)
+})
+
+test('a refused call (an error no PostToolUse hook saw) goes on as it is, and Python is not asked', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-10', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) })
+  const row = resultRow('tu-net-10', 'Hook PreToolUse refused the call')
+  row.message.content[0].is_error = true
+  const r = await $.session.append(row)
+  expect(stored(r)).toBe('Hook PreToolUse refused the call')
+  expect(runs.length).toBe(0)
+})
+
+test('a result that is no error and that no PostToolUse hook saw is masked without the hooks.log look', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-8', ($, e) => { runs.push(e); return resultAnswer({ ran: true }) })
+  // `ran` answers only a question with `since`: without one it is no answer, so the result is withheld
+  const r = await $.session.append(resultRow('tu-net-8'))
+  expect(JSON.parse(runs[0].init.stdin).since).toBe(null)
+  expect(stored(r)).toBe(WITHHELD_TEXT)
+})
+
+test('a placeholder in the result stays: the texts go to Python and back in order, media blocks stay', async ($, on) => {
+  const img = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }
+  const kept = `a ${ph('SECRET' + '_c1')}`
+  netWorld(on, 'net-9', () => resultAnswer({ texts: [kept, MASKED_TEXT], changed: true }), { post: { block: 'x' } })
+  await post($, 'tu-net-9', 'Read')
+  const r = await $.session.append(resultRow('tu-net-9', [{ type: 'text', text: kept }, img, { type: 'text', text: RAW }],
+    'Read'))
+  const c = stored(r)
+  expect(c.map(b => b.type)).toEqual(['text', 'text', 'image', 'text'])
+  expect(c[1].text).toBe(kept)
+  expect(c[3].text).toBe(MASKED_TEXT)
+})
+
+test('the watch: no prompt-hook row after a prompt shows one line, once per session', async ($, on) => {
+  const logs: string[] = []
+  const asks: any[] = []
+  netWorld(on, 'watch-1', ($, e) => {
+    if (e.argv[2] === 'mod-settings') asks.push(JSON.parse(e.init.stdin))
+    return watchAnswer({ ran: false })
+  }, { logs })
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-1' })
+  expect(await until(() => logs.some(l => l.includes('hooks did not run')))).toBe(true)
+  expect(logs.filter(l => l.includes('hooks did not run'))).toEqual([HOOKS_TEXT])
+  expect(asks[0]).toEqual({ action: 'hooks_ran', session_id: 'watch-1', since: clock.t / 1000 })
+  await $.classic.UserPromptSubmit({ prompt: 'again', session_id: 'watch-1' })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(logs.filter(l => l.includes('hooks did not run')).length).toBe(1)
+})
+
+test('the watch says nothing when the hook ran, when Python gives no answer, or in Cowork', async ($, on) => {
+  const logs: string[] = []
+  let answer: any = { ran: true }
+  const asks: any[] = []
+  netWorld(on, 'watch-2', ($, e) => {
+    // a failed ask tries the next Python too: each session is counted once
+    const id = JSON.parse(e.init.stdin).session_id
+    if (e.argv[2] === 'mod-settings' && !asks.includes(id)) asks.push(id)
+    return answer === null ? { value: { exitCode: 1, stderr: '', stdout: '' } } : watchAnswer(answer)
+  }, { logs })
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-2' })
+  expect(await until(() => asks.length === 1)).toBe(true)
+  answer = null
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-3' })
+  expect(await until(() => asks.length === 2)).toBe(true)
+  answer = { ran: null }                      // Cowork (status_verdict.hooks_watch)
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-4' })
+  expect(await until(() => asks.length === 3)).toBe(true)
+  await $.classic.UserPromptSubmit({ prompt: 'again', session_id: 'watch-2' })   // known to run: not asked again
+  await new Promise(resolve => setTimeout(resolve, 100))
+  expect(asks).toEqual(['watch-2', 'watch-3', 'watch-4'])
+  expect(logs.filter(l => l.includes('hooks did not run'))).toEqual([])
+})
+
+test('the watch does not look at a prompt the settings hook blocked', async ($, on) => {
+  const asks: any[] = []
+  netWorld(on, 'watch-5', ($, e) => { asks.push(e); return { value: { exitCode: 1, stderr: '', stdout: '' } } },
+    { prompt: { block: 'maisecrets blocked it' } })
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-5' })
+  await new Promise(resolve => setTimeout(resolve, 100))
+  expect(asks.filter(x => x.argv[2] === 'mod-settings').length).toBe(0)
+})

@@ -389,7 +389,7 @@ class ToolCallTests(unittest.TestCase):
     def test_each_mod_entry_in_a_quoted_form_bash_hands_over_is_refused(self):
         # ANSI-C ($'…') and locale ($"…") quoting, split quotes and backslashes: bash hands the plain name to
         # dispatch.py, so the check reads the words as bash does. A name built at run time ($E) is C22's limit
-        for entry in ("mod-prompt", "mod-values", "mod-reveal", "mod-settings", "mod-demo"):
+        for entry in ("mod-prompt", "mod-values", "mod-reveal", "mod-settings", "mod-demo", "mod-result"):
             head, tail = entry.split("-")
             for form in (f"$'{entry}'", f'$"{entry}"', f"$'{head}\\x2d{tail}'", f"$'{head}\\055{tail}'",
                          f"{head[0]}'{head[1:]}-{tail}'", f'"{head}"-{tail}', f"{head}\\-{tail}",

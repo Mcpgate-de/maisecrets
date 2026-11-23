@@ -140,20 +140,21 @@ In Claude Code (`/ms NAME` is the same; `/maisecrets:NAME` needs the mod; a chan
 
 In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. These are the facts of its code:
 
-- **What it reads:** the prompts you send (to put placeholders in place of values), and the messages and tool rows
-  that Claude Code draws on your screen (to show you the values there). What it draws on the screen never goes to
-  the model. It also reads the session id and the working directory of the session, and the kind of screen and
+- **What it reads:** the prompts you send (to put placeholders in place of values), each tool result before
+  Claude Code keeps it (to mask what the hook missed), and the messages and tool rows that Claude Code draws on your
+  screen (to show you the values). What it draws on the screen never goes to the model. It also reads the session id and the working directory of the session, and the kind of screen and
   whether a message is in view (to draw values only there). It keeps one counter of its own in the Claude Code
   store of the plugin: how often it showed its hint about values on the screen. The screen facts and the counter
-  stay on this computer and go to no program.
+  stay on this computer.
 - **What it starts:** the mod itself starts only the plugin's `hooks/dispatch.py`, in the plugin folder, with a
   fixed command line: `python3 hooks/dispatch.py mod-prompt` (or `mod-values`, `mod-reveal`, `mod-demo`,
-  `mod-settings`). On Windows it tries `py -3 hooks/dispatch.py …` and then `python hooks/dispatch.py …` with the
-  same last word, because Windows often has no `python3`. It does not start a shell. One panel action starts more:
-  when you choose the local name service in the `/maisecrets` panel, that Python starts another Python, which starts
-  the name service container with Docker or Podman.
-- **What it sends:** the text of the question (a prompt, the keys or references to show, a panel action), with the
-  session id and, for a prompt, the working directory and where the prompt came from (for example the prompt box or
+  `mod-settings`, `mod-result`). On Windows it tries `py -3`, then `python`, with the same arguments, because
+  Windows often has no `python3`. It does not start a shell. One panel action starts more: for the local name
+  service in the `/maisecrets` panel, that Python starts another Python, which starts its container with Docker or
+  Podman.
+- **What it sends:** the text of the question (a prompt, a tool result, the keys or references to show, a panel
+  action), with the
+  session id and, for a prompt, the working directory and where the prompt came from (the prompt box or
   Remote Control), goes to that local Python process on stdin, as JSON. The mod itself makes no network request.
   The Python process sends text off this computer only to a service you set up: the name service of
   `/maisecrets ner`, or a server you added that offers vault references or Sensitive References

@@ -191,6 +191,37 @@ class ModLineTests(_Tmp):
                                  "the ask at the session start writes it, a drawing does not")
 
 
+class HooksWatchTests(_Tmp):
+    """The mod's hooks watch and its second net ask hooks.log whether a hook ran since a moment
+    (status_verdict.ran_since, hooks_watch): a row of the event, this session, at or after that second."""
+
+    log = HooksLineTests.log
+
+    def test_a_row_of_the_event_since_the_moment_counts_and_an_older_or_other_one_does_not(self):
+        now = time.time()
+        log = self.log([(now - 60, "user-prompt", SESSION), (now, "post-tool", SESSION),
+                        (now, "user-prompt", "another-session"), (now, sv.MOD_EVENT, SESSION)])
+        self.assertTrue(sv.ran_since(log, SESSION, "post-tool", now))
+        self.assertTrue(sv.ran_since(log, SESSION, "user-prompt", now - 60.4), "the same second counts")
+        self.assertFalse(sv.ran_since(log, SESSION, "user-prompt", now - 5), "only an older row")
+        self.assertFalse(sv.ran_since(log, SESSION, sv.MOD_EVENT, now - 5), "a mod row is no hook run")
+        self.assertFalse(sv.ran_since(log, "", "post-tool", 0), "no session")
+        self.assertFalse(sv.ran_since(self.tmp / "absent.log", SESSION, "post-tool", 0), "no log")
+
+    def test_the_watch_answers_from_this_homes_log_and_nothing_in_cowork(self):
+        log = HOME / "hooks.log"
+        old = log.read_bytes() if log.exists() else None
+        self.addCleanup(lambda: log.write_bytes(old) if old is not None else log.unlink(missing_ok=True))
+        now = time.time()
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
+            self.assertEqual(sv.hooks_watch({"session_id": SESSION + "-w", "since": now}), {"ran": False})
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"{stamp(now)}\tuser-prompt\tclaude\t{SESSION}-w\t-\tpass\t9ms\tok\n")
+            self.assertEqual(sv.hooks_watch({"session_id": SESSION + "-w", "since": now}), {"ran": True})
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"}):
+            self.assertEqual(sv.hooks_watch({"session_id": SESSION + "-x", "since": now}), {"ran": None})
+
+
 class VersionLineTests(_Tmp):
     def claude_install(self, installed: str, newest: str | None) -> Path:
         root = plugin(self.claude / "plugins" / "cache" / "maisecrets" / "maisecrets" / installed, installed)

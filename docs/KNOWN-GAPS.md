@@ -28,7 +28,7 @@ a to-do.
   blocked report shows no notice, so a report that maisecrets blocks for
   another reason is still lost without a word.
 - **The output of a command that fails reaches the model as it is (Claude
-  Code).** Claude Code reports a failed call through another hook event,
+  Code without the mod).** With the mod, the mod masks it before Claude Code keeps it. Claude Code reports a failed call through another hook event,
   whose answer cannot replace the output. A value that a failing command
   prints (`grep TOKEN .env` with exit 1, a script that prints its config and
   stops) is not redacted, and it stays in the transcript. Measured over one
@@ -69,6 +69,15 @@ a to-do.
   (such as `Kontaktperson:` or a
   salutation) or on your term list, and a stored name of one word only in
   the same case.
+- **The mod's second net for tool results has limits.** It masks no image or PDF
+  in a result. On Claude Code before 2.1.330 a tool-result hook that crashes
+  looks like a hook that found nothing, so the output passes. When the mod's
+  own Python fails too, the AI gets no output, but the tool's own record of it
+  stays in the transcript on disk. The second net does not keep a value in a
+  test file as a fixture, as the hook does.
+- **The hooks watch tells, it does not block.** It needs the mod. When the
+  hook cannot write `hooks.log` (a full disk, a home it cannot write), the
+  line says that the hooks did not run although they did.
 - **A client that rejects the manifest loads nothing and says nothing.**
   Claude Code 2.1.223 did so for a manifest key it did not know. Check with
   `/hooks` that maisecrets is listed; the harness checks the debug log.
@@ -83,7 +92,8 @@ a to-do.
   0.173 on, the client itself blocks the prompt and the tool call when such a
   hook cannot start, crashes or times out. Codex also withholds the tool
   result. Claude Code does not: a failed tool-result hook lets the output
-  through. The price: when maisecrets itself fails on every call, that session
+  through. The mod masks that output before Claude Code keeps it; without
+  the mod it reaches the model. The price: when maisecrets itself fails on every call, that session
   can send no prompt and run no tool until maisecrets runs again. The session
   start hook does not set it, so a failed start does not stop the session. On Windows the watchdog can come too
   late: Python has no SIGALRM there, and a detector regex that runs long

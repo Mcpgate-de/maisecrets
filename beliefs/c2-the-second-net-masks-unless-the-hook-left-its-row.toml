@@ -1,0 +1,11 @@
+# c2-the-second-net-masks-unless-the-hook-left-its-row: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-second-net-masks-unless-the-hook-left-its-row"
+control = "C2"
+serves = ["M1.2"]
+statement = "The mod's Python entry of the second net keeps a result as it is only when the PostToolUse hook of the session left its row in hooks.log since the call; else it masks it, and on any failure it answers nothing (the mod then withholds the result)."
+runner = ["tests/test_cli_matrix.py::HookEventTests::test_the_second_net_keeps_a_result_whose_hook_left_its_row_and_fails_closed"]
+
+[proof]
+file = "maisecrets/second_net.py"
+find = "        if ran_since(HOME / \"hooks.log\", session, \"post-tool\", payload.get(\"since\")):\n"
+replace = "        if True:\n"
