@@ -112,9 +112,9 @@ def _pdftotext():
 
 
 SCENARIOS = {
-    # a plugin update moves the folder of an open session (anthropics/claude-code#97847). The hooks
-    # should refuse; Claude Code 2.1.283 runs none of them and the tool runs unguarded (measured
-    # 2026-09-28, field report on 0.5.8). A known gap: see "known_gap" in run_scenario
+    # a plugin update moves the folder of an open session (anthropics/claude-code#97847). Claude Code 2.1.283 ran no
+    # hook of it and the tool ran unguarded (measured 2026-09-28, field report on 0.5.8). From 2.1.330 a hook with
+    # "onFailure": "block" that cannot start counts as exit code 2, so the tool call is refused (measured 2026-11-23)
     "plugin_folder_moved": {
         "prompt": "Run the check script.",
         "plugin_copy": True,
@@ -123,8 +123,7 @@ SCENARIOS = {
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
-        "expect_text": "reload-plugins",
-        "known_gap": "anthropics/claude-code#97847",
+        "expect_in_requests": ["blocking because onFailure is", "Plugin directory does not exist"],
     },
     # the same folder swap with the guard installed outside the plugin folder (hooks/guard.py, run from the
     # checkout, not from the copy that moves): maisecrets runs no hook, so no heartbeat comes, and the
@@ -408,8 +407,9 @@ SCENARIOS = {
         "expect_in_requests": ["\u27e6SELFTEST\u27e7"],
         "selftest": "pass",
     },
-    # the same with the plugin folder moved before the command (as plugin_folder_moved): no hook runs, so no value is
-    # registered, the command prints none and says FAIL, and nothing can answer "passed"
+    # the same with the plugin folder moved before the command (as plugin_folder_moved): no maisecrets hook runs, so no
+    # value is registered and nothing can answer "passed". The PreToolUse hook cannot start and onFailure blocks the
+    # command (Claude Code 2.1.330), so the self-test command does not run and prints nothing
     "selftest_hooks_not_running": {
         "prompt": "/maisecrets:maisecrets status test",
         "plugin_copy": True,
@@ -417,7 +417,8 @@ SCENARIOS = {
                    "before": {"rename": ["{plugin}", "{plugin}.moved"]}},
                   {"text": "done"}],
         "expect_requests": 2,
-        "expect_text": "maisecrets self-test: FAIL",
+        "expect_in_requests": ["blocking because onFailure is", "Plugin directory does not exist"],
+        "expect_not_in_requests": ["maisecrets self-test:"],
         "selftest": "fail",
     },
     "bash_echo": {
@@ -1168,19 +1169,6 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             fails.append(f"schema drift in {gname}: {keys}")
     if sc.get("selftest"):
         fails += _selftest_second_prompt(sc, home, joined, r, settings, plugin, cwd, env, work)
-    if sc.get("known_gap"):
-        # A canary for the client's own behaviour. Claude Code 2.1.283 runs no hook of a plugin whose
-        # folder is gone ("Plugin directory does not exist" in its debug log) and runs the tool
-        # unguarded; nothing inside the plugin can change that. The scenario passes while it sees the
-        # gap exactly so, and fails on any other outcome: a client that fixed it (update the README,
-        # "Updates and open sessions") or one that fails some other way.
-        gap = "Plugin directory does not exist" in dbg and (cwd / sc["expect_no_file"]).exists()
-        closed = not fails
-        if gap:
-            print(f"[GAP] {name}: {sc['known_gap']} is still open in this client version  out={out}")
-            return []
-        fails = ([f"the known gap {sc['known_gap']} looks closed: the hooks refused; update the README"]
-                 if closed else fails)
     print(f"[{'OK ' if not fails else 'FAIL'}] {name}  requests={len(bodies)}  out={out}")
     for f in fails:
         print("     -", f)

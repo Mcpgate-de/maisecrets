@@ -1,0 +1,11 @@
+# c13-a-failed-hook-blocks-in-codex: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-a-failed-hook-blocks-in-codex"
+control = "C13"
+serves = ["M5.2"]
+statement = "The prompt, tool-call and tool-result hooks carry onFailure block, so Codex 0.173 and newer block the prompt, refuse the tool call or withhold the result when the hook crashes or runs past its timeout; SessionStart and SessionEnd keep the default."
+runner = ["tests/test_codex_trust.py::CodexBlocksOnFailureTests::test_the_protecting_hooks_block_on_failure_and_the_others_do_not"]
+
+[proof]
+file = "hooks/hooks.json"
+find = "            \"statusMessage\": \"maisecrets checks the prompt\",\n            \"onFailure\": \"block\",\n"
+replace = "            \"statusMessage\": \"maisecrets checks the prompt\",\n"

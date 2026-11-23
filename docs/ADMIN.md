@@ -27,11 +27,15 @@ claude plugin update maisecrets@maisecrets              # later versions
 
 **Updates and open sessions.** A hook runs from the plugin folder of its version.
 When Claude Code cannot find that folder, it shows `Plugin directory does not
-exist` and runs the tool without the hook: every protection of that session is
-off until `/reload-plugins` or a new session. No code of the plugin runs then, so
-maisecrets cannot warn you itself. The harness measures this on every run
-(scenario `plugin_folder_moved`, Claude Code 2.1.283: no hook runs, the tool
-runs; anthropics/claude-code#97847). A client that runs the hook command anyway
+exist`. Before 2.1.330 it then ran the tool without the hook: every protection of
+that session was off until `/reload-plugins` or a new session
+(anthropics/claude-code#97847, still open; Claude Code 2.1.283). From 2.1.330 the
+hooks of maisecrets set `"onFailure": "block"`, so a hook that cannot start
+blocks the prompt and refuses the tool call. The harness measures this on every
+run (scenario `plugin_folder_moved`). Claude Code does not hold back the output
+of a call that started before the move, and older clients still run the tool, so
+the guard below stays useful. The price of the block: until `/reload-plugins` or
+a new session, that session can send no prompt and run no tool. A client that runs the hook command anyway
 gets a refusal: the command tests for the launcher first and blocks without it,
 in bash, in PowerShell and, for Codex on Windows (`commandWindows`), in
 `cmd.exe`. Codex needs this most: it removes the folder of the old version as
@@ -134,7 +138,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 61 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 19 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 626 proofs: each control's test, and each path of the 18 invariant beliefs, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 628 proofs: each control's test, and each path of the 18 invariant beliefs, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
