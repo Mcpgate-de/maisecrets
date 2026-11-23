@@ -3,47 +3,84 @@
 In Claude Code a PostToolUse hook that fails does not withhold the output, and a failed command takes the
 PostToolUseFailure path, whose answer cannot replace it. The mod sees each row before the client stores and sends it.
 
-The mod decides from positive evidence only. With the mod running, it sets MAISECRETS_MOD_NET=1 for the hooks it starts,
-and the tool-result hooks then put a fixed marker into their answer (mark_answers): RESULT_MASKED when the answer
-replaces the output, else RESULT_CHECKED. The mod reads the marker in the classic answer and removes it, so it never
-reaches the model. A result without the marker of maisecrets goes to mask_result (`hooks/dispatch.py mod-result`).
+The mod decides from positive evidence only. While the settings hooks of a tool result run, the mod sets
+MAISECRETS_MOD_NET to a random nonce of its process, and the tool-result hooks then end their additionalContext with a
+marker line (mark_answers): `[maisecrets: result masked NONCE HASH]` when the answer replaces the output (HASH: of the
+texts of that output, output_hash), else `[maisecrets: result checked NONCE]`, and only after the handler scanned a
+result. The mod accepts the marker only as the last line of an entry, with its own nonce, and `masked` only when the
+output that reaches it has the same hash; it takes the marker out, so it never reaches the model. A result without such
+a marker goes to mask_result (`hooks/dispatch.py mod-result`).
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 
 from .placeholder import KEY_RE
 
-RESULT_CHECKED = "[maisecrets: result checked]"
-RESULT_MASKED = "[maisecrets: result masked]"
 ENV = "MAISECRETS_MOD_NET"
+_NONCE = re.compile(r"[0-9a-f]{32}")
 _EVENTS = {"post-tool": "PostToolUse", "post-tool-failure": "PostToolUseFailure"}
-_KEY = re.compile("⟦(" + KEY_RE + ")(?::[^⟧\n]{0,80})?⟧")
+_KEY = re.compile("\u27e6(" + KEY_RE + ")(?::[^\u27e7\n]{0,80})?\u27e7")
 _AGENT = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
-def mark(obj: dict, event: str) -> dict:
-    """The answer of a tool-result hook with the marker of maisecrets in its additionalContext. A Codex answer (a
-    decision) and an event that is no tool-result event stay as they are. Holds no value."""
+def _texts_of(node, out: list) -> list:
+    """The strings of an output in a fixed order (an object's keys sorted, each key before its value); numbers and the
+    rest are left out, because JSON gives them no single written form in both languages."""
+    if isinstance(node, str):
+        out.append(node)
+    elif isinstance(node, list):
+        for x in node:
+            _texts_of(x, out)
+    elif isinstance(node, dict):
+        for k in sorted(node, key=str):
+            out.append(str(k))
+            _texts_of(node[k], out)
+    return out
+
+
+def output_hash(output) -> str:
+    """The first 16 hex digits of the SHA-256 of an output's strings joined by NUL: the mod computes the same."""
+    return hashlib.sha256("\0".join(_texts_of(output, [])).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
+def mark(obj: dict, event: str, nonce: str) -> dict:
+    """The answer of a tool-result hook with the marker line of maisecrets at the end of its additionalContext. A Codex
+    answer (a decision) and an event that is no tool-result event stay as they are. Holds no value."""
     name = _EVENTS.get(event)
     if not name or not isinstance(obj, dict) or "decision" in obj:
         return obj
     hso = dict(obj.get("hookSpecificOutput") or {})
     hso["hookEventName"] = name
-    tag = RESULT_MASKED if ("updatedToolOutput" in hso or "updatedMCPToolOutput" in hso) else RESULT_CHECKED
+    key = next((k for k in ("updatedToolOutput", "updatedMCPToolOutput") if k in hso), None)
+    tag = (f"[maisecrets: result masked {nonce} {output_hash(hso[key])}]" if key
+           else f"[maisecrets: result checked {nonce}]")
     ctx = hso.get("additionalContext")
     hso["additionalContext"] = f"{ctx}\n\n{tag}" if isinstance(ctx, str) and ctx else tag
     return {**obj, "hookSpecificOutput": hso}
 
 
 def mark_answers(hooks_module, event: str) -> None:
-    """Every answer this hook process writes (the handler's, the watchdog's, a crash's) carries the marker: they all go
-    out through hooks._out. Only when the mod asked for it (ENV): without the mod the text would reach the model."""
-    if os.environ.get(ENV) != "1" or event not in _EVENTS:
+    """Every answer this hook process writes after its handler scanned a result (the handler's, the watchdog's, a
+    crash's) carries the marker: they all go out through hooks._out. Only when the mod gave its nonce (ENV): without the
+    mod the text would reach the model. A payload with no result to scan gets no marker, so the mod masks it."""
+    nonce = os.environ.get(ENV) or ""
+    if not _NONCE.fullmatch(nonce) or event not in _EVENTS:
         return
+    scanned = {"v": False}
+    name = "post_tool" if event == "post-tool" else "post_tool_failure"
+    handler = getattr(hooks_module, name)
+
+    def watched(payload, *args, **kwargs):
+        if isinstance(payload, dict) and (payload.get("tool_response") is not None if event == "post-tool" else
+                                          isinstance(payload.get("error"), str) and payload.get("error")):
+            scanned["v"] = True
+        return handler(payload, *args, **kwargs)
+    setattr(hooks_module, name, watched)
     write = hooks_module._out
-    hooks_module._out = lambda obj: write(mark(obj, event))
+    hooks_module._out = lambda obj: write(mark(obj, event, nonce) if scanned["v"] else obj)
 
 
 def _keys(text: str) -> set:

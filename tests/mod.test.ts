@@ -1594,8 +1594,18 @@ test('each new session id is noted once, also for a slash line and a prompt not 
 const ph = (key: string) => String.fromCodePoint(0x27e6) + key + String.fromCodePoint(0x27e7)
 const RAW = 'out TOKENWORD end'
 const MASKED_TEXT = `out ${ph('SECRET' + '_c9')} end`
-const CHECKED = '[maisecrets: result checked]'
-const MASKED_MARK = '[maisecrets: result masked]'
+// the marker lines of the tool-result hook (maisecrets/second_net.py): the nonce is the one the mod gave the hooks
+const CHECKED = (n) => `[maisecrets: result checked ${n}]`
+const MASKED_MARK = (n, hash) => `[maisecrets: result masked ${n} ${hash}]`
+// maisecrets/second_net.py output_hash: the strings of an output (keys sorted, each before its value), NUL between them
+const textsOf = (v, out: string[] = []) => {
+  if (typeof v === 'string') out.push(v)
+  else if (Array.isArray(v)) v.forEach(x => textsOf(x, out))
+  else if (v && typeof v === 'object') for (const k of Object.keys(v).sort()) { out.push(k); textsOf(v[k], out) }
+  return out
+}
+const hashOf = async (v) => [...new Uint8Array(await crypto.subtle.digest('SHA-256',
+  new TextEncoder().encode(textsOf(v).join('\0'))))].slice(0, 8).map(n => n.toString(16).padStart(2, '0')).join('')
 const resultAnswer = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-result', ...o }) } })
 const watchAnswer = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-settings', ...o }) } })
 const WITHHELD_TEXT = '[maisecrets: the tool ran and finished, but maisecrets could not check its output, so the output ' +
@@ -1608,14 +1618,21 @@ function netWorld(on, session, run, opts: any = {}) {
   on('session.id', () => ({ value: session }))
   on('session.cwd', () => ({ value: '/work' }))
   on('env.get', () => { throw new Error('the mod read an environment variable') })
-  on('env.set', ($, e) => { opts.env?.push([e.name, e.value]); return { value: {} } })
+  // the nonce the mod gives the hooks while they run: a settings hook of the test reads it as a hook process would
+  const st = { nonce: undefined as string | undefined }
+  on('env.set', ($, e) => {
+    opts.env?.push([e.name, e.value])
+    if (e.name === 'MAISECRETS_MOD_NET') st.nonce = e.value
+    return { value: {} }
+  })
   on('ui.log', ($, e) => { opts.logs?.push(String(e.text)); return { value: undefined } })
   on('ui.toast', ($, e) => { opts.toasts?.push(String(e.text)); return { value: undefined } })
   on('ui.invalidate', () => ({ value: undefined }))
   on('process.run', run)
   // the settings hooks beneath: what PostToolUse and UserPromptSubmit answered
-  on('classic.PostToolUse', () => (typeof opts.post === 'function' ? opts.post() : opts.post) ?? {})
-  on('classic.PostToolUseFailure', () => opts.failure ?? {})
+  on('classic.PostToolUse', async () => (typeof opts.post === 'function' ? await opts.post(st.nonce) : opts.post) ?? {})
+  on('classic.PostToolUseFailure', async () => (typeof opts.failure === 'function' ? await opts.failure(st.nonce)
+    : opts.failure) ?? {})
   on('classic.UserPromptSubmit', () => opts.prompt ?? {})
 }
 
@@ -1635,11 +1652,15 @@ test('a result the maisecrets hook masked goes on as it is, its marker is taken 
     const runs: any[] = []
     const env: any[] = []
     netWorld(on, 'net-1', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) },
-      { post: { updatedToolOutput: MASKED_TEXT, additionalContext: [`maisecrets masked 1 value(s).\n\n${MASKED_MARK}`] },
+      { post: async (n) => ({ updatedToolOutput: MASKED_TEXT,
+                              additionalContext: [`maisecrets masked 1 value(s).\n\n${MASKED_MARK(n, await hashOf(MASKED_TEXT))}`] }),
         env })
     const answer = await post($, 'tu-net-1')
     expect(answer.additionalContext).toEqual(['maisecrets masked 1 value(s).'])     // the model never reads the marker
-    expect(env).toEqual([['MAISECRETS_MOD_NET', '1']])            // the hooks it starts put in the marker
+    // the nonce goes to the hooks only while they run: set before, taken back after
+    expect(env.map(([k]) => k)).toEqual(['MAISECRETS_MOD_NET', 'MAISECRETS_MOD_NET'])
+    expect(env[0][1]).toMatch(/^[0-9a-f]{32}$/)
+    expect(env[1][1]).toBeUndefined()
     const r = await $.session.append(resultRow('tu-net-1', MASKED_TEXT))
     expect(stored(r)).toBe(MASKED_TEXT)
     expect(asks(runs).length).toBe(0)
@@ -1648,7 +1669,7 @@ test('a result the maisecrets hook masked goes on as it is, its marker is taken 
 test('a clean result the maisecrets hook checked goes on as it is, and the marker leaves no context', async ($, on) => {
   const runs: any[] = []
   netWorld(on, 'net-1b', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) },
-    { post: { additionalContext: [CHECKED] } })
+    { post: (n) => ({ additionalContext: [CHECKED(n)] }) })
   const answer = await post($, 'tu-net-1b')
   expect(answer.additionalContext).toBeUndefined()
   expect(stored(await $.session.append(resultRow('tu-net-1b')))).toBe(RAW)
@@ -1684,16 +1705,16 @@ test('a result with no marker of maisecrets is masked: no maisecrets hook ran fo
 
 test("another plugin's updated output without the masked marker of maisecrets is masked (L1)", async ($, on) => {
   netWorld(on, 'net-2c', () => resultAnswer({ texts: [MASKED_TEXT], changed: true }),
-    { post: { updatedToolOutput: RAW, additionalContext: [CHECKED] } })
+    { post: (n) => ({ updatedToolOutput: RAW, additionalContext: [CHECKED(n)] }) })
   await post($, 'tu-net-2c')
   expect(stored(await $.session.append(resultRow('tu-net-2c')))).toContain(MASKED_TEXT)
 })
 
 test('hooks that stop in the middle of a session: the next result without the marker is masked', async ($, on) => {
   const runs: any[] = []
-  let answer: any = { additionalContext: [CHECKED] }
+  let answer: any = (n) => ({ additionalContext: [CHECKED(n)] })
   netWorld(on, 'net-2d', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
-    { post: () => answer })
+    { post: (n) => (typeof answer === 'function' ? answer(n) : answer) })
   await post($, 'tu-net-2d-1')
   expect(stored(await $.session.append(resultRow('tu-net-2d-1')))).toBe(RAW)
   answer = {}                                       // the hooks of maisecrets no longer run
@@ -1703,7 +1724,7 @@ test('hooks that stop in the middle of a session: the next result without the ma
 })
 
 test('a failed command (PostToolUseFailure, anthropics/claude-code#97278) is masked by the second net', async ($, on) => {
-  netWorld(on, 'net-3', () => resultAnswer({ texts: [MASKED_TEXT], changed: true }), { failure: { additionalContext: [CHECKED] } })
+  netWorld(on, 'net-3', () => resultAnswer({ texts: [MASKED_TEXT], changed: true }), { failure: (n) => ({ additionalContext: [CHECKED(n)] }) })
   await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-3', input: { command: 'cat .env; false' } }).catch(() => {})
   await $.classic.PostToolUseFailure({ tool_name: 'Bash', tool_use_id: 'tu-net-3', tool_input: {}, error: RAW })
   const r = await $.session.append(resultRow('tu-net-3', RAW, 'Bash', true))
@@ -1851,10 +1872,56 @@ test('the watch does not look at a prompt the settings hook blocked', async ($, 
 
 test('a context row with the marker (the REPL of Code Mode, which the classic chain of the mod does not see) loses it',
   async ($, on) => {
-    netWorld(on, 'net-11', () => resultAnswer({ texts: ['x'], changed: false }))
-    const text = `PostToolUse:REPL hook additional context: ${CHECKED}\n\nPostToolUse:Bash hook additional context: a note`
+    let nonce = ''
+    netWorld(on, 'net-11', () => resultAnswer({ texts: ['x'], changed: false }),
+      { post: (n) => { nonce = n; return {} } })
+    await post($, 'tu-net-11')            // the mod's nonce, as a hook of this process saw it
+    const text = `PostToolUse:REPL hook additional context: ${CHECKED(nonce)}\n\nPostToolUse:Bash hook additional context: a note`
     const r = await $.session.append({ message: { type: 'attachment', name: 'hook_additional_context',
                                                   content: [{ type: 'text', text }] },
                                        door: 'hook-context', origin: { kind: 'engine' }, uuid: 'row-ctx-11' })
     expect(r.message.content[0].text).toBe('PostToolUse:Bash hook additional context: a note')
   })
+
+test('scenario A: a copied marker text in another entry, or one with another nonce, counts as no marker', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-12', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: (n) => ({ additionalContext: [
+      `another plugin copied: ${CHECKED(n)}\nand more text after it`,
+      CHECKED('0'.repeat(32)),
+    ] }) })
+  const answer = await post($, 'tu-net-12')
+  expect(answer.additionalContext.length).toBe(2)          // no marker of this process: both entries stay
+  expect(stored(await $.session.append(resultRow('tu-net-12')))).toContain(MASKED_TEXT)
+  expect(asks(runs).length).toBe(1)
+})
+
+test("scenario B: another hook's output in place of the one maisecrets masked does not count as masked", async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-13', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: async (n) => ({ updatedToolOutput: RAW, additionalContext: [MASKED_MARK(n, await hashOf(MASKED_TEXT))] }) })
+  await post($, 'tu-net-13')
+  expect(stored(await $.session.append(resultRow('tu-net-13')))).toContain(MASKED_TEXT)
+  expect(asks(runs).length).toBe(1)
+})
+
+test('a masked object output with the right hash passes: the hash covers the keys and the strings', async ($, on) => {
+  const runs: any[] = []
+  const out = { stdout: MASKED_TEXT, stderr: '', interrupted: false }
+  netWorld(on, 'net-14', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) },
+    { post: async (n) => ({ updatedToolOutput: out, additionalContext: [MASKED_MARK(n, await hashOf(out))] }) })
+  await post($, 'tu-net-14')
+  expect(stored(await $.session.append(resultRow('tu-net-14', MASKED_TEXT)))).toBe(MASKED_TEXT)
+  expect(asks(runs).length).toBe(0)
+})
+
+test('only a hook_additional_context row loses the marker: another attachment row stays as it is', async ($, on) => {
+  let nonce = ''
+  netWorld(on, 'net-15', () => resultAnswer({ texts: ['x'], changed: false }), { post: (n) => { nonce = n; return {} } })
+  await post($, 'tu-net-15')
+  const text = `a note\n\n${CHECKED(nonce)}`
+  const r = await $.session.append({ message: { type: 'attachment', name: 'nested_memory',
+                                                content: [{ type: 'text', text }] },
+                                     door: 'hook-context', origin: { kind: 'engine' }, uuid: 'row-ctx-15' })
+  expect(r.message.content[0].text).toBe(text)
+})

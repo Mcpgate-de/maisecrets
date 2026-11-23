@@ -9,5 +9,5 @@ runner = ["tests/mod.test.ts::a result with no marker of maisecrets is masked: n
 
 [proof]
 file = "claude-mod/maisecrets-mod.mjs"
-find = "  if (tag === RESULT_CHECKED && !updated) return 'checked'\n  return 'unchecked'\n"
-replace = "  if (tag === RESULT_CHECKED && !updated) return 'checked'\n  return 'checked'\n"
+find = "  if (!tag || !r || typeof r !== 'object' || r.block !== undefined) return 'unchecked'\n"
+replace = "  if (!tag) return 'checked'\n  if (!r || typeof r !== 'object' || r.block !== undefined) return 'unchecked'\n"

@@ -17,32 +17,64 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 from maisecrets import second_net  # noqa: E402
 
 
-class MarkTests(unittest.TestCase):
-    def test_the_marker_names_what_the_answer_did_and_leaves_codex_and_other_events_alone(self):
-        self.assertEqual(second_net.mark({}, "post-tool")["hookSpecificOutput"],
-                         {"hookEventName": "PostToolUse", "additionalContext": second_net.RESULT_CHECKED})
-        masked = second_net.mark({"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": "x",
-                                                         "additionalContext": "note"}}, "post-tool")
-        self.assertEqual(masked["hookSpecificOutput"]["additionalContext"], "note\n\n" + second_net.RESULT_MASKED)
-        self.assertEqual(second_net.mark({"decision": "block", "reason": "r"}, "post-tool"),
-                         {"decision": "block", "reason": "r"}, "a Codex answer stays as it is")
-        self.assertEqual(second_net.mark({}, "pre-tool"), {}, "only the tool-result events")
+NONCE = "0123456789abcdef" * 2
 
-    def test_only_the_mod_switches_the_marker_on(self):
+
+class MarkTests(unittest.TestCase):
+    def test_the_marker_carries_the_nonce_and_for_masked_the_hash_of_the_output(self):
+        self.assertEqual(second_net.mark({}, "post-tool", NONCE)["hookSpecificOutput"],
+                         {"hookEventName": "PostToolUse", "additionalContext": f"[maisecrets: result checked {NONCE}]"})
+        out = {"stdout": "a", "stderr": ""}
+        masked = second_net.mark({"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": out,
+                                                         "additionalContext": "note"}}, "post-tool", NONCE)
+        self.assertEqual(masked["hookSpecificOutput"]["additionalContext"],
+                         f"note\n\n[maisecrets: result masked {NONCE} {second_net.output_hash(out)}]")
+        self.assertEqual(second_net.mark({"decision": "block", "reason": "r"}, "post-tool", NONCE),
+                         {"decision": "block", "reason": "r"}, "a Codex answer stays as it is")
+        self.assertEqual(second_net.mark({}, "pre-tool", NONCE), {}, "only the tool-result events")
+
+    def test_the_hash_takes_the_strings_and_keys_in_a_fixed_order(self):
+        # the mod computes the same (tests/mod.test.ts hashOf): keys sorted, each before its value, NUL between
+        import hashlib
+        want = hashlib.sha256("a\0x\0b\0y".encode()).hexdigest()[:16]
+        self.assertEqual(second_net.output_hash({"b": "y", "a": ["x", 1, None]}), want)
+        self.assertNotEqual(second_net.output_hash("x"), second_net.output_hash("y"))
+
+
+class MarkAnswersTests(unittest.TestCase):
+    def hooks(self):
         class Hooks:
             seen: list = []
 
             @staticmethod
             def _out(obj):
                 Hooks.seen.append(obj)
-        with mock.patch.dict(os.environ, {second_net.ENV: ""}):
-            second_net.mark_answers(Hooks, "post-tool")
-            Hooks._out({})
-        with mock.patch.dict(os.environ, {second_net.ENV: "1"}):
-            second_net.mark_answers(Hooks, "post-tool")
-            Hooks._out({})
-        self.assertEqual(Hooks.seen[0], {})
-        self.assertEqual(Hooks.seen[1]["hookSpecificOutput"]["additionalContext"], second_net.RESULT_CHECKED)
+
+            @staticmethod
+            def post_tool(payload):
+                Hooks._out({})
+                return {}
+        return Hooks
+
+    def test_only_the_mod_switches_the_marker_on_with_a_nonce_of_its_form(self):
+        for value in ("", "1", "zz" * 16):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {second_net.ENV: value}):
+                h = self.hooks()
+                second_net.mark_answers(h, "post-tool")
+                h.post_tool({"tool_response": "x"})
+                self.assertEqual(h.seen, [{}])
+
+    def test_a_payload_with_no_result_gets_no_marker(self):
+        with mock.patch.dict(os.environ, {second_net.ENV: NONCE}):
+            empty = self.hooks()
+            second_net.mark_answers(empty, "post-tool")
+            empty.post_tool({"session_id": "S1"})
+            self.assertEqual(empty.seen, [{}], "no tool_response: nothing was scanned")
+            full = self.hooks()
+            second_net.mark_answers(full, "post-tool")
+            full.post_tool({"tool_response": "x"})
+            self.assertEqual(full.seen[0]["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result checked {NONCE}]")
 
 
 class MaskResultTests(unittest.TestCase):

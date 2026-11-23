@@ -75,7 +75,10 @@ a to-do.
   does not keep a value in a test file as a fixture, as the hook does. Each
   result that the hook did not check costs one Python start (about 0.05 to
   0.1 s, measured on one Mac). In Code Mode the mod does not see the answer
-  of the REPL's own result hook, so each REPL result costs that start.
+  of the REPL's own result hook, so each REPL result costs that start. An
+  error that another mod answers itself, without the tool, passes as a
+  refusal. While a result hook runs, a command that another tool call starts
+  at the same time inherits the variable `MAISECRETS_MOD_NET`.
 - **The hooks watch tells, it does not block.** It needs the mod. When the
   hook cannot write `hooks.log` (a full disk, a home it cannot write), the
   line says that the hooks did not run although they did. Any program of yours

@@ -162,6 +162,18 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["\u27e6SECRET_c", "\u27e6EMAIL_c"],
     },
+    # a script whose shell call fails and throws: the inner Bash takes the PostToolUseFailure path, and the REPL
+    # result is an error that holds the output. The second net must mask it, not take it for a refusal
+    "code_mode_script_error": {
+        "prompt": "print the env",
+        "code_mode": True,
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\nMAIL={MAIL}\n"},
+        "turns": [{"tool": "REPL", "input": {"code": "await $`cat .env; exit 3`.text(); 'unreachable'"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": ["\u27e6SECRET_c", "\u27e6EMAIL_c"],
+    },
     # the script makes the stored value itself (no inner call returns it): only the PostToolUse of REPL sees it
     "code_mode_script_output": {
         "prompt": "join the parts",

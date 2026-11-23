@@ -1915,18 +1915,23 @@ function registerSettingsPane(on) {
 // hooks never run masks nothing. The mod sees each row before it is stored and sent (session.append, the door
 // tool-result) and masks a result that no PostToolUse hook of maisecrets checked, through dispatch.py mod-result.
 //
-// It decides from positive evidence only. Before the settings hooks of PostToolUse and PostToolUseFailure run, the mod
-// sets MAISECRETS_MOD_NET=1 for them; each answer of the maisecrets tool-result hook then carries a marker
-// (maisecrets/second_net.py): RESULT_MASKED when it replaced the output, else RESULT_CHECKED. The mod reads the marker
-// in the classic answer (classic.PostToolUse, which runs the settings hooks as `next`) and takes it out, so it never
-// reaches the model. Per call:
-//   masked:  RESULT_MASKED, no block: the row goes on as it is, no Python
-//   checked: RESULT_CHECKED, no block, no updated output: the row goes on as it is, no Python
-//   every other answer is masked: no marker (no maisecrets hook ran for this call), a block (a failed hook), an updated
-//   output with RESULT_CHECKED (another plugin's hook replaced it), PostToolUseFailure (its answer cannot replace the
-//   output, anthropics/claude-code#97278), and a call with no state at all (a mod reload, a hook of its own that threw)
+// It decides from positive evidence only. While the settings hooks of PostToolUse and PostToolUseFailure run, the mod
+// sets MAISECRETS_MOD_NET to NET_NONCE, a random nonce of this process; the maisecrets tool-result hook then ends its
+// additionalContext with a marker line (maisecrets/second_net.py): `masked NONCE HASH` when it replaced the output
+// (HASH: of that output's texts), else `checked NONCE`, and only after it scanned a result. The mod reads the marker in
+// the classic answer (classic.PostToolUse, which runs the settings hooks as `next`): only as the last line of an entry
+// and only with its own nonce, so a copied text or another plugin's entry cannot stand in. It takes the marker out, so
+// it never reaches the model. Per call:
+//   masked:  the masked marker, no block, and the output that reaches the mod has the hash the hook gave: as it is
+//   checked: the checked marker, no block, no replaced output: as it is, no Python
+//   every other answer is masked: no marker (no maisecrets hook ran for this call), a block (a failed hook), a replaced
+//   output with another hash or with the checked marker (another plugin's hook replaced it), PostToolUseFailure (its
+//   answer cannot replace the output, anthropics/claude-code#97278), and a call with no state at all (a mod reload, a
+//   hook of its own that threw, the REPL of Code Mode, which raises no classic hook, tool.call or tool.run here)
 //   refused: an error of a call this mod saw start (tool.call) that never ran (no tool.run, which the engine never raises
-//   for a refusal) and that raised no tool-result hook: no output of the tool, it goes on as it is
+//   for a refusal) and that raised no tool-result hook: no output of the tool, it goes on as it is. Limit: an error that
+//   another mod answers itself without `next` (its tool.call below this one, or its tool.run above it) looks like a
+//   refusal here
 //
 // Fail closed without a lock: when Python gives no well-formed answer, or this hook fails, the row is stored with the
 // text WITHHELD in place of each unchecked result. The row is always stored and the turn goes on, so the session never
@@ -1935,8 +1940,15 @@ function registerSettingsPane(on) {
 const RESULT_MS = 20000
 const POSTS_MAX = 500
 const posts = new Map()        // tool_use_id -> state: what the tool-result hooks answered, the oldest first
-const RESULT_CHECKED = '[maisecrets: result checked]'
-const RESULT_MASKED = '[maisecrets: result masked]'
+// the nonce of this mod process: the hooks put it into their marker, so no text of a tool or of another plugin's hook
+// can stand in for one (it never appears in an output: the variable is set only while the tool-result hooks run)
+const NET_NONCE = (() => {
+  const a = new Uint8Array(16)
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(a)
+  else for (let i = 0; i < 16; i++) a[i] = Math.floor(Math.random() * 256)
+  return [...a].map(n => n.toString(16).padStart(2, '0')).join('')
+})()
+const MARK_RE = new RegExp(`^\\[maisecrets: result (checked|masked) ${NET_NONCE}(?: ([0-9a-f]{16}))?\\]$`)
 const PASSES = new Set(['masked', 'checked'])
 const stages = new Map()       // tool_use_id -> 'called' (tool.call) or 'ran' (tool.run), the oldest first
 
@@ -1964,19 +1976,21 @@ function notePost(e, state) {
   if (posts.size > POSTS_MAX) posts.delete(posts.keys().next().value)
 }
 
-// the marker of maisecrets in a classic answer, and the answer without it
+// the marker of maisecrets in a classic answer: the last line of an entry, with this process's nonce. The answer comes
+// back without it
 function readMarks(r) {
   const ctx = r && typeof r === 'object' ? r.additionalContext : undefined
   const list = Array.isArray(ctx) ? ctx : typeof ctx === 'string' ? [ctx] : []
   let tag = null
   const kept = []
   for (const c of list) {
-    if (typeof c !== 'string') { kept.push(c); continue }
-    let t = c
-    for (const m of [RESULT_MASKED, RESULT_CHECKED]) {
-      if (t.includes(m)) { tag = tag ?? m; t = t.split('\n\n' + m).join('').split(m).join('') }
-    }
-    if (t.trim() !== '' || t === c) kept.push(t)
+    const cut = typeof c === 'string' ? c.lastIndexOf('\n') : -1
+    const line = typeof c === 'string' ? c.slice(cut + 1) : null
+    const m = line === null ? null : MARK_RE.exec(line)
+    if (!m) { kept.push(c); continue }
+    tag = tag ?? { kind: m[1], hash: m[2] ?? null }
+    const before = cut < 0 ? '' : c.slice(0, cut).replace(/\n+$/, '')
+    if (before !== '') kept.push(before)
   }
   if (ctx === undefined) return { tag, rest: r }
   const rest = { ...r }
@@ -1985,20 +1999,47 @@ function readMarks(r) {
   return { tag, rest }
 }
 
-function postState(tag, r) {
-  if (!r || typeof r !== 'object' || r.block !== undefined) return 'unchecked'
-  const updated = r.updatedToolOutput !== undefined || r.updatedMCPToolOutput !== undefined
-  if (tag === RESULT_MASKED) return 'masked'
-  if (tag === RESULT_CHECKED && !updated) return 'checked'
-  return 'unchecked'
+// the strings of an output in a fixed order, as maisecrets/second_net.py output_hash takes them
+function textsOf(node, out) {
+  if (typeof node === 'string') out.push(node)
+  else if (Array.isArray(node)) for (const x of node) textsOf(x, out)
+  else if (node && typeof node === 'object') {
+    for (const k of Object.keys(node).sort()) { out.push(k); textsOf(node[k], out) }
+  }
+  return out
 }
 
-// once per process: the tool-result hooks it starts after this put the marker in their answer
-let netAsked = false
-async function askForMarks($) {
-  if (netAsked) return
-  const r = await $.env.set('MAISECRETS_MOD_NET', '1')
-  if (!r || r.deny === undefined) netAsked = true
+async function outputHash(output) {
+  const bytes = new TextEncoder().encode(textsOf(output, []).join('\0'))
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))
+  return [...digest.slice(0, 8)].map(n => n.toString(16).padStart(2, '0')).join('')
+}
+
+// masked: the output that reaches the mod is the one the maisecrets hook made (its hash); checked: no hook replaced it
+async function postState(tag, r) {
+  if (!tag || !r || typeof r !== 'object' || r.block !== undefined) return 'unchecked'
+  const updated = r.updatedToolOutput !== undefined ? r.updatedToolOutput : r.updatedMCPToolOutput
+  if (tag.kind === 'checked') return updated === undefined ? 'checked' : 'unchecked'
+  if (updated === undefined || !tag.hash) return 'unchecked'
+  return (await outputHash(updated)) === tag.hash ? 'masked' : 'unchecked'
+}
+
+// The nonce goes to the hooks only while the settings hooks of a tool result run (calls run in parallel: it stays set
+// while any of them runs), so a command of the session started outside those moments does not inherit it
+let marksOpen = 0
+async function openMarks($) {
+  marksOpen += 1
+  if (marksOpen === 1) await $.env.set('MAISECRETS_MOD_NET', NET_NONCE)
+}
+async function closeMarks($) {
+  marksOpen = Math.max(0, marksOpen - 1)
+  if (marksOpen === 0) await $.env.set('MAISECRETS_MOD_NET', undefined)
+}
+async function withMarks($, run) {
+  try { await openMarks($) } catch { /* no marker: the second net masks the result */ }
+  try { return await run() } finally {
+    try { await closeMarks($) } catch { /* the next close tries again */ }
+  }
 }
 
 // the texts of one tool_result block, in order: its content string, or the text of each text block in it
@@ -2122,14 +2163,19 @@ function watchHooks($, session, since) {
 }
 
 // A hook answer the classic chain of the mod does not see (measured on 2.1.330: in Code Mode the REPL's own
-// PostToolUse) reaches the session as a context row with the marker in it: the marker, and the label line it alone
-// filled, go out of each such row, so the model never reads it. The REPL's result then has no state and is masked
-const MARK_LINE = /(?:^|\n)[^\n]{0,80} hook additional context: \[maisecrets: result (?:checked|masked)\](?=\n|$)|(?:\n\n)?\[maisecrets: result (?:checked|masked)\]/g
-const unmarked = (t) => (t.includes('[maisecrets: result ') ? t.replace(MARK_LINE, '').replace(/^\n+/, '') : t)
+// PostToolUse) reaches the session as a context row (door hook-context, name hook_additional_context) with the marker
+// in it: the marker line, and the label it alone filled, go out of each such row, so the model never reads it. The
+// REPL's result then has no state and is masked
+const unmarkedLine = (l) => !MARK_RE.test(l.replace(/^[^\n]{0,80} hook additional context: /, ''))
+const unmarked = (t) => {
+  if (!t.includes(NET_NONCE)) return t
+  return t.split('\n').filter(unmarkedLine).join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '')
+}
 
 function contextWithoutMarks(e, next) {
   const content = Array.isArray(e?.message?.content) ? e.message.content : null
-  if (!content || !content.some(b => b?.type === 'text' && typeof b.text === 'string' && b.text.includes('[maisecrets: result '))) {
+  if (e?.message?.name !== 'hook_additional_context' || !content ||
+      !content.some(b => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(NET_NONCE))) {
     return next(e)
   }
   const kept = content.map(b => (b?.type === 'text' && typeof b.text === 'string') ? { ...b, text: unmarked(b.text) } : b)
@@ -2137,26 +2183,22 @@ function contextWithoutMarks(e, next) {
 }
 
 // a classic hook of the mod only reads: when it fails, what the settings hooks answered stands, without the marker.
-// Not called yet: the settings hooks run now, once, after the mod asked for the marker; called: next(e) replays what
-// they answered (no second run). Either way the call keeps no state, so the second net masks its result
+// Not called yet: the settings hooks run now, once, with the nonce; called: next(e) replays what they answered (no
+// second run). Either way the call keeps no state, so the second net masks its result
 async function relayClassic($, e, next) {
-  if (!next.called) {
-    try { await askForMarks($) } catch { /* no marker: the second net masks the result */ }
-  }
-  return readMarks(await next(e)).rest
+  const r = next.called ? await next(e) : await withMarks($, () => next(e))
+  return readMarks(r).rest
 }
 
 function registerSecondNet(on) {
   on('classic.PostToolUse', async ($, e, next) => {
-    try { await askForMarks($) } catch { /* no marker: the second net masks the result */ }
-    const r = await next(e)
+    const r = await withMarks($, () => next(e))
     const { tag, rest } = readMarks(r)
-    try { notePost(e, postState(tag, r)) } catch { /* no state: the row is masked */ }
+    try { notePost(e, await postState(tag, r)) } catch { /* no state: the row is masked */ }
     return rest
   }).catch(relayClassic)
   on('classic.PostToolUseFailure', async ($, e, next) => {
-    try { await askForMarks($) } catch { /* the marker is not read here: the failed output is masked */ }
-    const r = await next(e)
+    const r = await withMarks($, () => next(e))
     try { notePost(e, 'failure') } catch { /* no state: the row is masked */ }
     return readMarks(r).rest
   }).catch(relayClassic)
@@ -2166,10 +2208,8 @@ function registerSecondNet(on) {
     const content = Array.isArray(e?.message?.content) ? e.message.content : []
     return next({ ...e, message: { ...e.message, content: content.map(b => b?.type === 'tool_result' ? withheld(b) : b) } })
   })
-  for (const door of ['hook-context', 'attachment']) {
-    on('session.append', { door }, async ($, e, next) => contextWithoutMarks(e, next))
-      .catch(async ($, e, next) => next(e))
-  }
+  on('session.append', { door: 'hook-context' }, async ($, e, next) => contextWithoutMarks(e, next))
+    .catch(async ($, e, next) => next(e))
   on('classic.UserPromptSubmit', async ($, e, next) => {
     let at = null
     try { at = (await $.clock.now()) / 1000 } catch { at = null }

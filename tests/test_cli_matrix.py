@@ -1340,9 +1340,11 @@ class HookEventTests(unittest.TestCase):
         self.assertEqual((r.returncode, r.stdout), (1, ""))
 
     def test_the_tool_result_hooks_mark_their_answer_only_for_the_mod(self):
-        """With MAISECRETS_MOD_NET=1 (the mod sets it for the hooks it starts) each answer of the tool-result hooks
-        carries the marker of maisecrets: masked when it replaced the output, checked else, the failure event too.
-        Without it the answer carries none: the text would reach the model."""
+        """With MAISECRETS_MOD_NET set to the mod's nonce each answer of the tool-result hooks that scanned a result
+        ends with the marker line: masked with the hash of the replaced output, checked else, the failure event too.
+        Without the nonce, or for a payload with no result, the answer carries none."""
+        from maisecrets.second_net import output_hash
+        nonce = "0123456789abcdef" * 2
         value = fake_value("Sm")
         self.sb.run("mod-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1"}))
         clean = {"tool_name": "Bash", "session_id": "S1", "prompt_id": "p", "tool_input": {"command": "ls"},
@@ -1350,18 +1352,23 @@ class HookEventTests(unittest.TestCase):
         hit = {**clean, "tool_response": {"stdout": f"out {value}", "stderr": ""}}
         failed = {"tool_name": "Bash", "session_id": "S1", "prompt_id": "p", "tool_input": {"command": "false"},
                   "error": "Exit code 1 nothing here"}
-        on = self.sb.env(MAISECRETS_MOD_NET="1")
-        for event, payload, mark in (("post-tool", clean, "[maisecrets: result checked]"),
-                                     ("post-tool", hit, "[maisecrets: result masked]"),
-                                     ("post-tool-failure", failed, "[maisecrets: result checked]")):
-            with self.subTest(event=event, mark=mark):
+        on = self.sb.env(MAISECRETS_MOD_NET=nonce)
+        for event, payload, kind in (("post-tool", clean, "checked"), ("post-tool", hit, "masked"),
+                                     ("post-tool-failure", failed, "checked")):
+            with self.subTest(event=event, kind=kind):
                 r = self.sb.run(event, stdin=json.dumps(payload), env=on)
                 hso = json.loads(r.stdout)["hookSpecificOutput"]
-                self.assertTrue(hso["additionalContext"].endswith(mark), hso)
+                last = hso["additionalContext"].split("\n")[-1]
+                want = (f"[maisecrets: result masked {nonce} {output_hash(hso['updatedToolOutput'])}]"
+                        if kind == "masked" else f"[maisecrets: result checked {nonce}]")
+                self.assertEqual(last, want)
                 self.assertEqual(hso["hookEventName"], "PostToolUse" if event == "post-tool" else "PostToolUseFailure")
                 self.assertNotIn(value, r.stdout)
                 off = self.sb.run(event, stdin=json.dumps(payload))
                 self.assertNotIn("[maisecrets: result", off.stdout)
+        empty = self.sb.run("post-tool", stdin=json.dumps({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p"}),
+                            env=on)
+        self.assertNotIn("[maisecrets: result", empty.stdout, "no result was scanned")
 
     def test_session_end_answers_nothing_through_the_dispatcher(self):
         r = self.sb.run("session-end", stdin=json.dumps({"session_id": "S1", "reason": "logout"}))
