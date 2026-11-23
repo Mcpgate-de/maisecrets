@@ -169,9 +169,10 @@ the prompt hook ran in this session and the mod never asked: the mod writes a
 `mod` row to `hooks.log` at the session start and for each prompt it checks.
 Without the mod there is no lock and no click on values and references, and
 the head line says `mod off`. The hooks still protect the session. Type the
-commands as text then, such as `maisecrets: sref login NAME`. The rows are
-the only signal: after `/clear`, a session whose prompts so far were only
-slash commands that the mod passes on has no row yet.
+commands as text then, such as `maisecrets: sref login NAME`. After `/clear`
+or a resume (a new session id without a session start), the mod writes the
+row one second after the first prompt of that id, also for a slash line or a
+prompt that is no person's.
 
 **older.** This line shows when an older maisecrets ran in the last day,
 after this version first started, and a gateway login was used on this

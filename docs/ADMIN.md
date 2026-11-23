@@ -1150,7 +1150,11 @@ and keeps its other keys. Written by hand, the setting looks like this:
   names `ner_endpoint` and `ner_scope`. One login asks for every scope the gateway offers, the name scope too, so
   this source needs no second consent. A login of maisecrets 0.9.24 or older lacks the name scope: log in once
   more for one new consent (`/maisecrets ner` says it). The gateway gets text only while you chose it as the
-  source; the name scope alone sends nothing. The text goes over https with your access token, the rules' findings as filler.
+  source (your typed setting, or the policy's `remote_detector`); the name scope alone sends nothing. If the
+  gateway refuses the name scope (`invalid_scope`, for a user who may not use its name service), the login runs
+  once more without it, and a line says that the name service was not granted. While the gateway's operator has
+  name detection off (404 `ner_not_enabled`), the rules mask alone, and the status says that the gateway offers no
+  name detection; a new login does not help there. The text goes over https with your access token, the rules' findings as filler.
   A tool result waits 3,000 ms by default (`timeout_ms`); measured from a laptop against the reference gateway:
   p50 160 ms for 200 characters and 740 ms for 10,000; with 8 sessions at once p95 600 ms. The gateway's wait
   does not grow with the length of the text, and its answers do not change the rate of this computer

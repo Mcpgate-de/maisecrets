@@ -327,7 +327,7 @@ class RemoteDetector:
                 # the gateway names a busy client slot in the body: 503 before ai-gateway v2.0.39xx, 429 with
                 # {"error": "busy"} after (a 503 took a gateway container out of the load balancer)
                 error = ""
-                if resp.status in (429, 503):
+                if resp.status in (404, 429, 503):        # 404 {"error": "ner_not_enabled"}: switched off
                     try:
                         doc = json.loads(resp.read(4096).decode("utf-8"))
                         error = str(doc.get("error") or "") if isinstance(doc, dict) else ""
@@ -447,6 +447,8 @@ class RemoteDetector:
             reason = {403: "forbidden", 413: "too_long", 429: "rate_limited", 503: "busy"}.get(code, "http")
             if len(exc.args) > 1 and exc.args[1] == "busy":
                 reason = "busy"                  # 429 {"error": "busy"}: the one client slot, not the quota
+            if code == 404 and len(exc.args) > 1 and exc.args[1] == "ner_not_enabled":
+                reason = "not_enabled"           # the gateway's operator has not switched name detection on
             return [], self.status("unavailable", reason, ms=_ms(t0))
         if isinstance(exc, (ConnectionRefusedError, FileNotFoundError)):
             # nothing listens there (no service, no socket file): the one reason a caller may take for "not running"

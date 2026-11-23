@@ -426,8 +426,19 @@ def register(cfg: dict, found: dict, redirect: str, deadline: float, patient: bo
     except (ValueError, RecursionError, AttributeError):
         client_id = None
     if status not in (200, 201) or not isinstance(client_id, str) or not client_id:
-        raise Refused(f"the gateway did not register the resolver (HTTP {status})")
+        err = Refused(f"the gateway did not register the resolver (HTTP {status})")
+        err.scope_refused = _error_code(headers, raw) == "invalid_scope"
+        raise err
     return client_id
+
+
+def _error_code(headers, raw: bytes):
+    """The `error` of a JSON error answer, or None."""
+    try:
+        data = json.loads(raw.decode("utf-8")) if _is_json(headers) else None
+    except (ValueError, RecursionError, UnicodeDecodeError):
+        return None
+    return data.get("error") if isinstance(data, dict) else None
 
 
 _OAUTH_PARAMS = frozenset({"response_type", "client_id", "redirect_uri", "scope", "code_challenge",
@@ -474,8 +485,10 @@ def _token(cfg: dict, found: dict, form: dict, deadline: float, patient: bool = 
         if code == "invalid_grant" and status == 400:
             raise _Revoked(f"the gateway no longer accepts the login (HTTP {status}); send /maisecrets sref login "
                            "again (with the server's name when more than one offers references)")
-        raise Refused(f"the gateway gave no token (HTTP {status}"
+        err = Refused(f"the gateway gave no token (HTTP {status}"
                       f"{', ' + code if code in _TOKEN_ERRORS else ''}); send /maisecrets sref login again")
+        err.scope_refused = code == "invalid_scope"
+        raise err
     return data
 
 
@@ -1193,8 +1206,32 @@ def resolve(cfg: dict, backend, found: dict, refs: list, sink_type: str, destina
     raise Refused(f"{host} gave no usable answer (HTTP {status})")
 
 
+# the line of a login whose name scope the gateway refused: the login holds the other scopes
+NER_NOT_GRANTED = ("maisecrets: the gateway did not grant its name service to this login; the other scopes are "
+                   "granted, and names are checked by the rules alone if you choose this gateway as the name source.")
+
+
 def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0, budget: float = BUDGET,
-          patient: bool = False, end: float | None = None) -> None:
+          patient: bool = False, end: float | None = None) -> str:
+    """The login with every scope of the discovery. When the gateway refuses a scope (invalid_scope: at the
+    registration, in the browser or at the token exchange) and the login asked for the name scope, it runs once more
+    without the name scope, and NER_NOT_GRANTED is returned; else "". A person who may not use the gateway's name
+    service still logs in for the values."""
+    try:
+        _login_once(cfg, backend, found, open_browser, wait, budget, patient, end)
+        return ""
+    except Refused as exc:
+        ner = found.get("ner")
+        if not (getattr(exc, "scope_refused", False) and isinstance(ner, dict)
+                and ner.get("scope") in found["scope"].split()):
+            raise
+    less = {**found, "scope": " ".join(w for w in found["scope"].split() if w != ner["scope"])}
+    _login_once(cfg, backend, less, open_browser, wait, budget, patient, end)
+    return NER_NOT_GRANTED
+
+
+def _login_once(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0, budget: float = BUDGET,
+                patient: bool = False, end: float | None = None) -> None:
     """The whole login: a loopback listener on 127.0.0.1 (a free port), the registration for its redirect, the
     browser at the authorize URL (`open_browser(url)`), the code back from the redirect (its state must match), and
     the tokens into the store. The listener answers one request and closes. The registration and the token exchange
@@ -1224,6 +1261,9 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0, bu
                 done.set()
             elif parts.path == "/callback" and q.get("state") == state and q.get("error") == "access_denied":
                 box["denied"] = True
+                done.set()
+            elif parts.path == "/callback" and q.get("state") == state and q.get("error") == "invalid_scope":
+                box["scope_refused"] = True
                 done.set()
             page = (b"maisecrets: logged in. You can close this tab." if ok else
                     b"maisecrets: the login did not complete. Run it again.")
@@ -1274,6 +1314,10 @@ def login(cfg: dict, backend, found: dict, open_browser, wait: float = 300.0, bu
         if t.is_alive():
             httpd.shutdown()
         httpd.server_close()
+    if box.get("scope_refused") and "code" not in box:
+        err = Refused("the login did not complete: the gateway refused a scope (invalid_scope)")
+        err.scope_refused = True
+        raise err
     if "code" not in box:
         raise Refused("the login did not complete: " + ("the person declined it" if box.get("denied") else
                                                          "no matching answer from the browser in time"))

@@ -117,6 +117,22 @@ class CommandTests(unittest.TestCase):
         self.assertIn("  /maisecrets sref login team-gw", lines)
         self.assertIn("  /maisecrets sref login other-gw", lines)
 
+    def test_a_login_whose_name_service_was_not_granted_says_so_in_one_line(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from maisecrets import cli, vault_refs
+        servers = {"team-gw": "https://gw.example.com/mcp"}
+        out = io.StringIO()
+        with mock.patch.object(vault_refs, "user_servers", return_value=servers), \
+                mock.patch.object(S, "discover", return_value={"origin": "https://gw.example.com"}), \
+                mock.patch.object(S, "login", return_value=S.NER_NOT_GRANTED), \
+                mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
+                                                                    "allow_plaintext_store": True}), \
+                redirect_stdout(out):
+            cli.cmd_sref(["login", "team-gw"])
+        self.assertIn(S.NER_NOT_GRANTED, out.getvalue().splitlines())
+
     def test_the_ready_command_quotes_a_server_name_as_the_argument_parser_reads_it(self):
         import io
         import shlex
@@ -170,8 +186,11 @@ class GatewaySourceTests(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             location = exc.headers["Location"]
             exc.close()
-        with urllib.request.urlopen(location, timeout=5) as answer:
-            answer.read()
+        try:
+            with urllib.request.urlopen(location, timeout=5) as answer:
+                answer.read()
+        except urllib.error.HTTPError as exc:     # an error the gateway sent back: the loopback page says 400
+            exc.close()
 
     def login(self, cfg: dict) -> None:
         S.login(cfg, self.backend, S.discover(cfg, self.srv.url + "/mcp"), self.browser, wait=10)
@@ -209,6 +228,50 @@ class GatewaySourceTests(unittest.TestCase):
         self.assertEqual(status.state, "ok", status)
         self.assertEqual([TEXT[s:e] for s, e, _t, _sc in spans], ["Okafor"])
         self.assertEqual(self.srv.code_exchanges, exchanges, "no new login, no browser consent")
+
+    def test_a_gateway_that_refuses_the_name_scope_still_logs_in_once_more_without_it(self):
+        for step in ("authorize", "token"):
+            with self.subTest(step=step):
+                S.forget(self.backend, self.origin)
+                self.srv.refuse_ner = step
+                found = S.discover({"client_vault_cafile": self.srv.cert}, self.srv.url + "/mcp")
+                self.assertIn(NER_SCOPE, found["scope"].split())
+                note = S.login(self.cfg, self.backend, found, self.browser, wait=10)
+                self.assertEqual(note, S.NER_NOT_GRANTED)
+                self.assertIn("did not grant its name service", note)
+                granted = str(S._load(self.backend, self.origin).get("scope") or "").split()
+                self.assertNotIn(NER_SCOPE, granted)
+                self.assertIn("sensitive-references.resolve", granted, "the login holds the other scopes")
+                det, why = remote_layer.from_config(self.cfg)
+                self.assertIsNone(det)
+                self.assertIn("lacks the name scope", why)
+        self.srv.refuse_ner = None
+        S.forget(self.backend, self.origin)
+        self.assertEqual(S.login(self.cfg, self.backend, S.discover(self.cfg, self.srv.url + "/mcp"), self.browser,
+                                 wait=10), "", "a gateway that grants it: no line")
+
+    def test_a_refused_scope_without_the_name_scope_asked_fails_as_before(self):
+        self.srv.ner = False                     # no name scope in the login: nothing to drop, no second try
+        self.srv.refuse_ner = "token"
+        found = S.discover({"client_vault_cafile": self.srv.cert}, self.srv.url + "/mcp")
+        found = {**found, "scope": found["scope"] + " " + NER_SCOPE, "ner": None}
+        with self.assertRaises(S.Refused):
+            S.login(self.cfg, self.backend, found, self.browser, wait=10)
+
+    def test_a_gateway_whose_name_detection_is_off_is_no_name_service_and_asks_for_no_login(self):
+        # ai-gateway: POST /sensitive-references/ner answers 404 ner_not_enabled while the operator has it off
+        self.login(self.cfg)
+        self.srv.ner_answer = (404, {"error": "ner_not_enabled"})
+        spans, status = self.ask()
+        self.assertEqual((spans, status.state, status.reason), ([], "unavailable", "not_enabled"))
+        out = self.post_tool(self.cfg["remote_detector"])
+        said = out.get("systemMessage", "")
+        self.assertIn("names are NOT checked \u2014 the gateway offers no name detection \u2192 /maisecrets ner", said)
+        self.assertNotIn("sref login", said, "no login helps here")
+        self.assertIn("the gateway offers no name service", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("Okafor", json.dumps(out["hookSpecificOutput"].get("updatedToolOutput", TEXT)),
+                      "the rules alone: a name no rule finds stays")
+        self.assertEqual(ner_health.cause_of(self.cfg["remote_detector"], "not_enabled"), "no_ner")
 
     def test_a_login_with_the_name_scope_sends_no_text_while_the_gateway_is_not_the_source(self):
         self.login({"client_vault_cafile": self.srv.cert})

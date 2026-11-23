@@ -249,7 +249,9 @@ The output holds no value, and it never goes to the AI.
   `/maisecrets ner gateway NAME` needs no second consent after the login, and
   the gateway gets text for names only while you chose it as the source. A
   login of maisecrets 0.9.24 or older lacks the name scope: then
-  `/maisecrets ner` says so, and one more login adds it.
+  `/maisecrets ner` says so, and one more login adds it. If the gateway
+  does not grant you its name service, the login asks once more without it
+  (the browser opens again), and a line says so.
 - `/maisecrets sref login NAME` opens the browser at once. While the login
   waits for your consent (up to 110 seconds), the status line says
   `maisecrets: waiting for your consent in the browser (NAME)`, and you can
