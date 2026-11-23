@@ -2,7 +2,8 @@
 
 Codex runs a plugin hook only while the trust the person gave it matches the hook. Per hook it keeps, in config.toml,
 `[hooks.state."<plugin id>:hooks/hooks.json:<event>:<group>:<handler>"]`:
-- `trusted_hash`: the hook's declaration (event, matcher, command, timeout; codex-rs hooks/src/engine/discovery.rs);
+- `trusted_hash`: the hook's declaration (event, matcher, command, timeout, from 0.173 on `onFailure`; codex-rs
+  hooks/src/engine/discovery.rs);
 - `trusted_content_hash`, from Codex 0.164 on: the contents of the whole plugin folder
   (hooks/src/engine/plugin_fingerprint.rs, openai/codex#54619). A new maisecrets version is a new folder, so Codex
   asks again after each update, and until then it lets every prompt and tool call through (measured with
@@ -30,6 +31,8 @@ def declaration_hash(event: str, group: dict, handler: dict, windows: bool) -> s
     hook = {"type": "command", "command": command, "timeout": handler.get("timeout", 600), "async": False}
     if handler.get("statusMessage") is not None:
         hook["statusMessage"] = handler["statusMessage"]   # part of the declaration (codex-rs config/hook_config.rs)
+    if handler.get("onFailure") is not None:
+        hook["onFailure"] = handler["onFailure"]   # part of it from Codex 0.173 on (openai/codex#62831)
     identity = {"event_name": EVENTS[event], "hooks": [hook]}
     if group.get("matcher") is not None:
         identity["matcher"] = group["matcher"]
@@ -132,7 +135,10 @@ def status_lines(root: Path, codex_home: Path, windows: bool | None = None) -> l
             for hi, handler in enumerate(group.get("hooks", [])):
                 total += 1
                 entry = state.get(f"{plugin_id}:hooks/hooks.json:{EVENTS[event]}:{gi}:{hi}") or {}
-                if entry.get("trusted_hash") != declaration_hash(event, group, handler, windows):
+                # Codex 0.172 and older ignore onFailure, so their hash has no onFailure
+                older = {k: v for k, v in handler.items() if k != "onFailure"}
+                if entry.get("trusted_hash") not in (declaration_hash(event, group, handler, windows),
+                                                     declaration_hash(event, group, older, windows)):
                     untrusted += 1
                 elif entry.get("trusted_content_hash") is None and baseline is None:
                     old += 1

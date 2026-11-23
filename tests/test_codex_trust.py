@@ -72,6 +72,14 @@ FIXTURE_CONTENTS_WINDOWS = "sha256:d0f73e3e4b2efac73ea2f649f0ae78db7c431c45c6e52
 # (2026-10-25): the message is part of the declaration
 FIXTURE_STATUS = "fixture checks the prompt"
 FIXTURE_DECLARATION_WITH_STATUS = "sha256:83d7f545053b1aed0efd9310af7bc57f2986db92d86cd1e8cc30a6d4131b5ab1"
+# the fixture hook with "onFailure": "block": codex-cli 0.173.0-alpha.4 gave this hash in hooks/list (2026-11-23), and
+# codex-cli 0.171.0 gave FIXTURE_DECLARATION, because it ignores the field
+FIXTURE_DECLARATION_WITH_ON_FAILURE = "sha256:0d818bcbd1310b425c2e47a88101d1a295b8d315f5b90c82ccedad5a235a5ba1"
+
+# Codex 0.173 and newer block the call when a hook with "onFailure": "block" crashes or runs past its timeout
+# (openai/codex#62831; measured on 0.173.0-alpha.4, 2026-11-23). Codex refuses the field on SessionEnd and drops that
+# hook, and on SessionStart a failure would stop the session, so those two keep the default (continue).
+BLOCK_ON_FAILURE = {"UserPromptSubmit", "PreToolUse", "PostToolUse"}
 
 # hook groups added after the trust above: Codex treats each as a new hook that needs its own trust, while the groups
 # above keep theirs (an added group changes no hash of another). apply_patch by its own name (0.6.40): Codex
@@ -92,8 +100,9 @@ def codex_hashes(platform: str) -> dict:
         for g in groups:
             if (event, g.get("matcher")) in ADDED_GROUPS:
                 continue
-            # without the statusMessage: the commands, matchers and timeouts stay the ones people trusted
-            handler = {k: v for k, v in g["hooks"][0].items() if k != "statusMessage"}
+            # without the statusMessage and onFailure (Codex 0.172 and older ignore it): the commands, matchers and
+            # timeouts stay the ones people trusted
+            handler = {k: v for k, v in g["hooks"][0].items() if k not in ("statusMessage", "onFailure")}
             out[codex_trust.EVENTS[event]] = codex_trust.declaration_hash(event, g, handler, platform == "windows")
     return out
 
@@ -145,6 +154,30 @@ class CodexTrustTests(unittest.TestCase):
                              ["codex hooks: unknown (needs Python 3.11 or newer to read Codex's config.toml)"])
 
 
+class CodexBlocksOnFailureTests(unittest.TestCase):
+    """A maisecrets hook that crashes or times out in Codex blocks the prompt, the tool call or the result."""
+
+    def test_the_protecting_hooks_block_on_failure_and_the_others_do_not(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        self.assertLessEqual(BLOCK_ON_FAILURE, set(hooks))
+        for event, groups in hooks.items():
+            for g in groups:
+                for h in g["hooks"]:
+                    with self.subTest(event=event, matcher=g.get("matcher")):
+                        self.assertFalse(h.get("async"), "Codex refuses onFailure on an async hook and drops it")
+                        if event in BLOCK_ON_FAILURE:
+                            self.assertEqual(h.get("onFailure"), "block",
+                                             "without it Codex lets the call through when the hook fails")
+                        else:
+                            self.assertNotIn("onFailure", h)
+
+    def test_the_recipe_gives_the_hash_codex_gave_with_on_failure(self):
+        group = json.loads(FIXTURE["hooks/hooks.json"])["hooks"]["UserPromptSubmit"][0]
+        self.assertEqual(codex_trust.declaration_hash("UserPromptSubmit", group,
+                                                      {**group["hooks"][0], "onFailure": "block"}, False),
+                         FIXTURE_DECLARATION_WITH_ON_FAILURE)
+
+
 class CodexTrustStatusTests(unittest.TestCase):
     """/maisecrets:status reads Codex's config.toml and says whether Codex runs the hooks of this folder."""
 
@@ -173,6 +206,16 @@ class CodexTrustStatusTests(unittest.TestCase):
         self.config({self.KEY: {"trusted_hash": FIXTURE_DECLARATION,
                                 "trusted_content_hash": codex_trust.content_hash(self.root, windows=False)}})
         self.assertEqual(self.lines(), "codex hooks: trusted (1 of 1)")
+
+    def test_a_hook_with_on_failure_is_trusted_by_the_hash_of_each_codex(self):
+        fx = json.loads(FIXTURE["hooks/hooks.json"])
+        fx["hooks"]["UserPromptSubmit"][0]["hooks"][0]["onFailure"] = "block"
+        (self.root / "hooks" / "hooks.json").write_text(json.dumps(fx), encoding="utf-8")
+        contents = codex_trust.content_hash(self.root, windows=False)
+        for trusted in (FIXTURE_DECLARATION, FIXTURE_DECLARATION_WITH_ON_FAILURE):   # Codex 0.171, Codex 0.173
+            with self.subTest(trusted=trusted):
+                self.config({self.KEY: {"trusted_hash": trusted, "trusted_content_hash": contents}})
+                self.assertEqual(self.lines(), "codex hooks: trusted (1 of 1)")
 
     def test_a_file_written_into_the_folder_is_a_change_codex_skips_the_hooks_for(self):
         self.config({self.KEY: {"trusted_hash": FIXTURE_DECLARATION,

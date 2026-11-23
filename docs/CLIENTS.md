@@ -129,6 +129,27 @@ name exactly the files the checked one named. A context line that reads like a h
 The captured payload is `tests/client_payloads/codex-apply-patch.json`; the rehydration matrix
 builds its Codex file row from it.
 
+## Codex: a hook that fails
+
+Codex 0.173 and newer read `"onFailure": "block"` on a command hook (openai/codex#62831). The default is
+`continue`: a hook that crashes or runs past its timeout lets the call through. `hooks/hooks.json` sets `block` on
+`UserPromptSubmit`, on the three `PreToolUse` groups and on `PostToolUse`. Measured on codex-cli 0.173.0-alpha.4 with a
+copy of the plugin whose launcher exits with 1, or sleeps past the timeout (2026-11-23):
+
+| hook that fails | 0.173.0-alpha.4 with `block` | 0.171.0, or no `block` |
+|---|---|---|
+| `UserPromptSubmit` | `UserPromptSubmit Blocked`, no request goes to the model | `Failed`, the prompt goes to the model |
+| `PreToolUse` | `PreToolUse Blocked`, the command does not run | `Failed`, the command runs |
+| `PostToolUse` | `PostToolUse Blocked`, the model gets an empty output and the reason | `Failed`, the model gets the output |
+
+The model reads the reason `<event> hook failed. This hook is configured to block continuation on failure.`
+`SessionStart` keeps the default: with `block`, a failed start stops the session. Codex refuses `block` on
+`SessionEnd` and on an async hook, and drops that hook. Codex 0.171.0 reads the plugin with the field and runs its
+hooks as before. Claude Code ignores the field (2.1.330, `harness/run.py`).
+
+The field is part of the hook's declaration hash in Codex 0.173 and newer, and not in older versions.
+`maisecrets/codex_trust.py` accepts a trust from either version.
+
 ## Codex: vault references
 
 Measured on codex-cli 0.162.0, and the helper also on 0.155.1 (2026-10-16), with a temp `CODEX_HOME`, a local
