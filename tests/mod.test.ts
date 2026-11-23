@@ -1557,7 +1557,7 @@ test('a login that waits and a list keep their own panes, titles and lines', asy
 // the status knows that the mod runs in a session from the row of an ask with no keys (status_verdict.note_mod).
 // /clear and a resume give a new session id without session.start, and a slash line or a prompt that is no person's
 // asks nothing else: each new session id is noted once, after the prompt's own check
-test('each new session id is noted once, also for a slash line and a prompt that is no person\'s', async ($, on) => {
+test('each new session id is noted once, also for a slash line and a prompt not from the person', async ($, on) => {
   const runs: any[] = []
   const afters: number[] = []
   let id = 'sess-note-1'
