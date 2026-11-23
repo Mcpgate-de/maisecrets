@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.9.24] - 2026-11-23
+
+### Fixes
+
+- a failure in the reference note after a tool ran never reaches the tool result (d068481)
+
 ## [0.9.23] - 2026-11-22
 
 - A command that changes maisecrets (a term, not-a-secret, the demo, a setting or the name service) is the text you type, such as `maisecrets: term add NAME`. Typed as `/maisecrets NAME` in the terminal, it changes nothing, and maisecrets names the text for you to type. A gateway login or logout typed as `/maisecrets sref login NAME` waits in your empty input box as `/maisecrets:sref login NAME` for your Enter.
