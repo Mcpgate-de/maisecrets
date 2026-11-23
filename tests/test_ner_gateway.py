@@ -1,6 +1,7 @@
 """The gateway of /maisecrets:sref login as the source of names (#33) against a fake gateway (harness/sref_server.py
-with the name endpoint of ai-gateway #1819): the command, discovery, the login that asks for the name scope only while
-the source is set, the token at each tool result, the gateway's refusals by name, its own wait, and a prompt only
+with the name endpoint of ai-gateway #1819): the command, discovery, the one login that asks for every scope the
+gateway offers (the name scope too), text only while the person chose the gateway as the source, the token at each
+tool result, the gateway's refusals by name, its own wait, and a prompt only
 as from any source that is set, with the rules' findings as filler (C30a). Synthetic values
 only.
 
@@ -116,6 +117,22 @@ class CommandTests(unittest.TestCase):
         self.assertIn("  /maisecrets sref login team-gw", lines)
         self.assertIn("  /maisecrets sref login other-gw", lines)
 
+    def test_a_login_whose_name_service_was_not_granted_says_so_in_one_line(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from maisecrets import cli, vault_refs
+        servers = {"team-gw": "https://gw.example.com/mcp"}
+        out = io.StringIO()
+        with mock.patch.object(vault_refs, "user_servers", return_value=servers), \
+                mock.patch.object(S, "discover", return_value={"origin": "https://gw.example.com"}), \
+                mock.patch.object(S, "login", return_value=S.NER_NOT_GRANTED), \
+                mock.patch.object(cli, "load_config", return_value={"backend": "jsonfile",
+                                                                    "allow_plaintext_store": True}), \
+                redirect_stdout(out):
+            cli.cmd_sref(["login", "team-gw"])
+        self.assertIn(S.NER_NOT_GRANTED, out.getvalue().splitlines())
+
     def test_the_ready_command_quotes_a_server_name_as_the_argument_parser_reads_it(self):
         import io
         import shlex
@@ -169,11 +186,20 @@ class GatewaySourceTests(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             location = exc.headers["Location"]
             exc.close()
-        with urllib.request.urlopen(location, timeout=5) as answer:
-            answer.read()
+        try:
+            with urllib.request.urlopen(location, timeout=5) as answer:
+                answer.read()
+        except urllib.error.HTTPError as exc:     # an error the gateway sent back: the loopback page says 400
+            exc.close()
 
     def login(self, cfg: dict) -> None:
         S.login(cfg, self.backend, S.discover(cfg, self.srv.url + "/mcp"), self.browser, wait=10)
+
+    def older_login(self) -> None:
+        """A login of maisecrets 0.9.24 or older, made before the gateway was the name source: no name scope."""
+        found = S.discover(self.cfg, self.srv.url + "/mcp")
+        found = {**found, "scope": " ".join(w for w in found["scope"].split() if w != NER_SCOPE)}
+        S.login(self.cfg, self.backend, found, self.browser, wait=10)
 
     def ask(self, text: str = TEXT, prompt: bool = False) -> tuple:
         cfg = self.cfg
@@ -184,12 +210,81 @@ class GatewaySourceTests(unittest.TestCase):
             return None, why
         return det.ask(text, [])
 
-    def test_discovery_names_the_endpoint_and_a_login_asks_for_its_scope_only_while_the_source_is_set(self):
+    def test_one_login_asks_for_the_name_scope_whether_or_not_the_source_is_set(self):
         found = S.discover(self.cfg, self.srv.url + "/mcp")
         self.assertEqual(found["ner"]["endpoint"], self.srv.url + "/sensitive-references/ner")
         self.assertIn(NER_SCOPE, found["scope"].split())
         other = S.discover({"client_vault_cafile": self.srv.cert}, self.srv.url + "/mcp")
-        self.assertNotIn(NER_SCOPE, other["scope"].split(), "no source set: the login does not ask for it")
+        self.assertIn(NER_SCOPE, other["scope"].split(), "no source set: the one login asks for it too")
+        self.srv.ner = False
+        off = S.discover({"client_vault_cafile": self.srv.cert}, self.srv.url + "/mcp")
+        self.assertNotIn(NER_SCOPE, off["scope"].split(), "a gateway without name detection: no name scope")
+
+    def test_a_login_before_the_source_is_set_needs_no_second_consent(self):
+        self.login({"client_vault_cafile": self.srv.cert})        # the sref login first, no name source yet
+        self.assertEqual(self.srv.ner_texts, [], "no source: the gateway gets no text")
+        exchanges = self.srv.code_exchanges
+        spans, status = self.ask()                                 # then the person chooses the gateway
+        self.assertEqual(status.state, "ok", status)
+        self.assertEqual([TEXT[s:e] for s, e, _t, _sc in spans], ["Okafor"])
+        self.assertEqual(self.srv.code_exchanges, exchanges, "no new login, no browser consent")
+
+    def test_a_gateway_that_refuses_the_name_scope_still_logs_in_once_more_without_it(self):
+        for step in ("authorize", "token"):
+            with self.subTest(step=step):
+                S.forget(self.backend, self.origin)
+                self.srv.refuse_ner = step
+                found = S.discover({"client_vault_cafile": self.srv.cert}, self.srv.url + "/mcp")
+                self.assertIn(NER_SCOPE, found["scope"].split())
+                note = S.login(self.cfg, self.backend, found, self.browser, wait=10)
+                self.assertEqual(note, S.NER_NOT_GRANTED)
+                self.assertIn("did not grant its name service", note)
+                granted = str(S._load(self.backend, self.origin).get("scope") or "").split()
+                self.assertNotIn(NER_SCOPE, granted)
+                self.assertIn("sensitive-references.resolve", granted, "the login holds the other scopes")
+                det, why = remote_layer.from_config(self.cfg)
+                self.assertIsNone(det)
+                self.assertIn("lacks the name scope", why)
+        self.srv.refuse_ner = None
+        S.forget(self.backend, self.origin)
+        self.assertEqual(S.login(self.cfg, self.backend, S.discover(self.cfg, self.srv.url + "/mcp"), self.browser,
+                                 wait=10), "", "a gateway that grants it: no line")
+
+    def test_a_refused_scope_without_the_name_scope_asked_fails_as_before(self):
+        self.srv.ner = False                     # no name scope in the login: nothing to drop, no second try
+        self.srv.refuse_ner = "token"
+        found = S.discover({"client_vault_cafile": self.srv.cert}, self.srv.url + "/mcp")
+        found = {**found, "scope": found["scope"] + " " + NER_SCOPE, "ner": None}
+        with self.assertRaises(S.Refused):
+            S.login(self.cfg, self.backend, found, self.browser, wait=10)
+
+    def test_a_gateway_whose_name_detection_is_off_is_no_name_service_and_asks_for_no_login(self):
+        # ai-gateway: POST /sensitive-references/ner answers 404 ner_not_enabled while the operator has it off
+        self.login(self.cfg)
+        self.srv.ner_answer = (404, {"error": "ner_not_enabled"})
+        spans, status = self.ask()
+        self.assertEqual((spans, status.state, status.reason), ([], "unavailable", "not_enabled"))
+        out = self.post_tool(self.cfg["remote_detector"])
+        said = out.get("systemMessage", "")
+        self.assertIn("names are NOT checked \u2014 the gateway offers no name detection \u2192 /maisecrets ner", said)
+        self.assertNotIn("sref login", said, "no login helps here")
+        self.assertIn("the gateway offers no name service", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("Okafor", json.dumps(out["hookSpecificOutput"].get("updatedToolOutput", TEXT)),
+                      "the rules alone: a name no rule finds stays")
+        self.assertEqual(ner_health.cause_of(self.cfg["remote_detector"], "not_enabled"), "no_ner")
+
+    def test_a_login_with_the_name_scope_sends_no_text_while_the_gateway_is_not_the_source(self):
+        self.login({"client_vault_cafile": self.srv.cert})
+        self.assertIn(NER_SCOPE, str(S._load(self.backend, self.origin).get("scope") or "").split())
+        for conf in (None, ner_setup.updated(self.cfg["remote_detector"], "off")):
+            with self.subTest(source=conf):
+                cfg = {k: v for k, v in self.cfg.items() if k != "remote_detector"}
+                if conf is not None:
+                    cfg["remote_detector"] = conf
+                self.assertEqual(remote_layer.from_config(cfg), (None, ""), "no source: no detector, no reason")
+                self.assertEqual(remote_layer.prompt_names(cfg, TEXT, [], lambda: None, typed=True), ([], ""))
+                self.assertIsNone(remote_layer.prepare(cfg, [TEXT], lambda s: [], lambda s: []))
+        self.assertEqual(self.srv.ner_texts, [], "the name scope alone sends no text")
 
     def test_a_logged_in_source_finds_the_name_and_the_gateway_got_the_text(self):
         self.login(self.cfg)
@@ -199,10 +294,11 @@ class GatewaySourceTests(unittest.TestCase):
         self.assertEqual(self.srv.ner_texts, [TEXT])
 
     def test_a_login_without_the_name_scope_gives_the_reason_and_sends_nothing(self):
-        self.login({"client_vault_cafile": self.srv.cert})        # logged in before the source was set
+        self.older_login()
         det, why = remote_layer.from_config(self.cfg)
         self.assertIsNone(det)
         self.assertIn("/maisecrets sref login", why)
+        self.assertIn("0.9.24 or older", why, "the reason says why one new consent is needed")
         self.assertEqual(self.srv.ner_texts, [])
 
     def test_a_source_that_cannot_be_asked_leaves_its_results_unchecked_on_the_screen_and_withheld(self):
@@ -256,7 +352,7 @@ class GatewaySourceTests(unittest.TestCase):
         code, lines = ner_setup.report(conf)
         self.assertEqual(code, 4, lines)
         self.assertTrue(any(x.startswith("login: run.sh sref login") for x in lines), lines)
-        self.login({"client_vault_cafile": self.srv.cert})        # a login without the name scope
+        self.older_login()                                         # a login without the name scope
         self.assertEqual(ner_setup.report(conf)[0], 4)
         self.login(self.cfg)
         code, lines = ner_setup.report(conf)

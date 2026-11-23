@@ -1,0 +1,12 @@
+# c32-the-status-says-when-the-mod-did-not-run: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c32-the-status-says-when-the-mod-did-not-run"
+control = "C32"
+serves = ["M1.5"]
+statement = "In Claude Code outside Cowork, when this session's prompt hook ran and the mod never asked (no `mod` row of the session in hooks.log), the status says that the mod is off: no lock or click on values and references, and commands typed as text, such as `maisecrets: sref login NAME`."
+runner = ["tests/test_status_verdict.py::ModLineTests::test_claude_code_with_a_prompt_and_no_mod_row_says_the_mod_is_off_and_names_the_text_form",
+          "tests/test_status_verdict.py::StatusOutputTests::test_a_claude_code_session_without_the_mod_gets_the_mod_line_and_says_it_in_the_head"]
+
+[proof]
+file = "maisecrets/status_verdict.py"
+find = '''    if not session or "user-prompt" not in last_runs(log, session) or last_runs(log, session, mod=True):'''
+replace = '''    if True:'''

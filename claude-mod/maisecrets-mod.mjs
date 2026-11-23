@@ -112,6 +112,23 @@ async function askValues($, asked) {
   return was !== mode || Object.keys(values).length > 0 || refs.length > 0
 }
 
+// the status knows that the mod runs in a session from a row the launcher writes for an ask with no keys
+// (status_verdict.note_mod). session.start asks once; /clear and a resume give a new session id without it, and a
+// slash line or a prompt that is no person's asks nothing else, so each prompt asks once per new session id. It asks
+// after NOTE_MS, outside the prompt's own check and its budget
+const noted = new Set()
+const NOTE_MS = 1000
+function noteSession($) {
+  void (async () => {
+    const id = await $.session.id()
+    if (typeof id !== 'string' || noted.has(id)) return
+    noted.add(id)
+    $.clock.after(NOTE_MS, async () => {
+      try { if (await askValues($, [])) $.ui.invalidate('ui.render') } catch { /* the status may say the mod is off */ }
+    })
+  })().catch(() => {})
+}
+
 // one question for every key the drawings of this moment miss, outside the drawing (a ui.render hook may not act)
 function fetchLater($) {
   if (asking || !wanted.size) return
@@ -348,6 +365,7 @@ const lineAsMarkdown = (l) => l.split(/(⟦[^⟧\n]{1,140}⟧)/).map((part, i) =
 function registerShowValues(on) {
   on('session.start', async ($, e, next) => {
     try {
+      try { noted.add(await $.session.id()) } catch { /* the first prompt asks */ }
       if (await askValues($, [])) $.ui.invalidate('ui.render')
     } catch { /* off until an answer */ }
     // the settings pane's rows, so the first /maisecrets:settings draws at once
@@ -1901,6 +1919,7 @@ export function register(on) {
   registerShowValues(on)
   registerSettingsPane(on)
   on('prompt.submit', async ($, e, next) => {
+    noteSession($)          // before every check below: a slash line and another origin count too
     // a pairing runs: its nonce in any prompt taints it (#91)
     if (pairings.size > 0) try { notePairingUse(String(e?.text ?? ''), null) } catch { /* the pairing goes on */ }
     const person = PERSON.has(e.origin?.kind)

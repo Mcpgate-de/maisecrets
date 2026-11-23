@@ -164,6 +164,16 @@ command, and the prompt hook must stop it when you send it. A pass counts for
 this version, in this session or for 4 hours. If the AI wrote the test value
 into a tool call, it had the value: start a new session and test again.
 
+**mod.** In Claude Code (not in Codex, not in Cowork), this line shows when
+the prompt hook ran in this session and the mod never asked: the mod writes a
+`mod` row to `hooks.log` at the session start and for each prompt it checks.
+Without the mod there is no lock and no click on values and references, and
+the head line says `mod off`. The hooks still protect the session. Type the
+commands as text then, such as `maisecrets: sref login NAME`. After `/clear`
+or a resume (a new session id without a session start), the mod writes the
+row one second after the first prompt of that id, also for a slash line or a
+prompt that is no person's.
+
 **older.** This line shows when an older maisecrets ran in the last day,
 after this version first started, and a gateway login was used on this
 computer. maisecrets cannot see whether that session is still open, so the

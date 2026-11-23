@@ -94,6 +94,7 @@ class SrefServer:
         self.deposits: dict = {}         # handle -> record (the value, as the gateway keeps it until the call)
         self.deposit_requests: list = [] # each request as received, with the values unpadded
         self.upstream: list = []         # the arguments each call sent upstream, after the replacement
+        self.refuse_ner = None           # "authorize" or "token": that step answers invalid_scope for the name scope
         self.ner = False                 # ai-gateway #1819: the name endpoint and its scope, while the switch is on
         self.ner_answer = None           # (status, body): the name endpoint answers this instead
         self.ner_texts: list = []        # every text the name endpoint got
@@ -191,6 +192,13 @@ class SrefServer:
                             or q.get("scope") not in server._login_scopes() or not server.consent
                             or q.get("response_type") != "code" or q.get("resource") != server.url):
                         return self._send(400, {"error": "invalid_request"})
+                    if server.refuse_ner == "authorize" and NER_SCOPE in q["scope"].split():
+                        self.send_response(302)
+                        self.send_header("Location", redirect + "?" + urlencode(
+                            {"error": "invalid_scope", "state": q.get("state", "")}))
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return None
                     code = secrets.token_urlsafe(16)
                     server.codes[code] = (q["client_id"], redirect, q.get("code_challenge", ""), q["scope"])
                     self.send_response(302)
@@ -234,6 +242,8 @@ class SrefServer:
                         if not got or got[1] != form.get("redirect_uri") or got[2] != challenge \
                                 or got[0] != form.get("client_id"):
                             return self._send(400, {"error": "invalid_grant"})
+                        if server.refuse_ner == "token" and NER_SCOPE in got[3].split():
+                            return self._send(400, {"error": "invalid_scope"})
                         return self._send(200, server._pair(got[0], got[3]))
                     if form.get("grant_type") == "refresh_token" and server.token_answer is not None:
                         return self._send(*server.token_answer)

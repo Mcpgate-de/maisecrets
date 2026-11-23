@@ -8,6 +8,13 @@ was measured or documented. The controls and where each one ends are in [THREAT-
 What the plugin does not protect. Each item is a limit of the mechanism, not
 a to-do.
 
+- **The status knows the mod only from its rows in `hooks.log`.** The mod
+  writes one at the session start, for each prompt it checks, and once per new
+  session id one second after its first prompt (after `/clear` or a resume).
+  A status in that first second, or one after the mod's Python failed, can show
+  `mod off` while the mod runs. The next prompt writes the row. An older login without the name
+  scope (maisecrets 0.9.24 or older) needs one new consent before the gateway
+  can check names.
 - **The ids in the result of an Agent or Task call are not masked (#31).**
   Claude Code writes the agent id, the task id and the output file into that
   result, and it shows the AI the pointer it makes from the result that the

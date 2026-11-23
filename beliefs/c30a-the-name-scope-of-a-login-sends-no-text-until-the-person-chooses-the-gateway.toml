@@ -1,0 +1,11 @@
+# c30a-the-name-scope-of-a-login-sends-no-text-until-the-person-chooses-the-gateway: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-the-name-scope-of-a-login-sends-no-text-until-the-person-chooses-the-gateway"
+control = "C30a"
+serves = ["M6.4"]
+statement = "One sref login asks for the name scope too, but the gateway gets no text until the person sets it as the name source: with no source, or with the source off, no detector is made and nothing is sent."
+runner = ["tests/test_ner_gateway.py::GatewaySourceTests::test_a_login_with_the_name_scope_sends_no_text_while_the_gateway_is_not_the_source"]
+
+[proof]
+file = "maisecrets/remote_layer.py"
+find = "    if not isinstance(conf, dict) or not conf.get(\"url\"):"
+replace = "    if not isinstance(conf, dict):"

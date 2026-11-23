@@ -668,7 +668,8 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
         if why:
             return False, f"maisecrets: the address is not used ({why}). Nothing was changed."
         note = (" " + ner_setup.SENT_NOTE.format(where="this gateway")
-                + " Log in once more with /maisecrets sref login: it asks for the name scope.")
+                + " A login of maisecrets 0.9.25 or later holds the name scope. An older login needs one new "
+                "consent: /maisecrets sref login. /maisecrets ner shows which one you have.")
     if key == "read_pdf" and word == "convert":
         from .file_reads import INSTALL, pdftotext
         if not pdftotext():

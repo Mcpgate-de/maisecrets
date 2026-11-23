@@ -67,6 +67,9 @@ function engine(on, calls: any[], opened: { placed: boolean },
   })
   on('prompt.fill', ($, e) => { filled.push(e.text); return { isFilled: true } })
   on('process.run', async ($, e) => {
+    if (e.argv[2] === 'mod-' + 'values') {      // the mod notes the session (noteSession): no call of the hub
+      return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-' + 'values', mode: 'off' }) } }
+    }
     calls.push(e)
     if (e.argv.includes('mod-' + 'prompt') && JSON.parse(e.init.stdin || '{}').fill_check === true) {
       const prompt = JSON.parse(e.init.stdin).prompt

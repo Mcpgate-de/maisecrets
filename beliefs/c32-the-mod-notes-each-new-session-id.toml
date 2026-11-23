@@ -1,0 +1,11 @@
+# c32-the-mod-notes-each-new-session-id: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c32-the-mod-notes-each-new-session-id"
+control = "C32"
+serves = ["M1.5"]
+statement = "The mod asks once with no keys for each new session id, also after /clear or a resume and for a slash line or a prompt that is no person's, so the launcher writes the mod row and the status does not say the mod is off while it runs."
+runner = ["tests/mod.test.ts::each new session id is noted once, also for a slash line and a prompt not from the person"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = '''    noteSession($)          // before every check below: a slash line and another origin count too'''
+replace = '''    // no note'''

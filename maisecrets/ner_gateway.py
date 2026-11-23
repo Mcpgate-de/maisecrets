@@ -4,8 +4,9 @@
 "allow_network": true}. At each tool result, from_config() asks here for the gateway's name endpoint (its protected
 resource metadata names `ner_endpoint`, `ner_scope` and `ner_max_chars`; kept for an hour in ner-gateway.json, never
 a token; /maisecrets sref uses an older record of the same MCP URL when the gateway does not answer) and for an
-access token of the login (sref_client, refreshed under its lock). The login must hold the name scope: a login asks
-for it only while this source is set (sref_client.discover), so the person logs in once more after the switch. A
+access token of the login (sref_client, refreshed under its lock). The login must hold the name scope. One login
+asks for every scope the gateway offers (sref_client.discover), so this source needs no second consent; a login of
+0.9.24 or older, or one made while the gateway offered no name detection, needs one new consent (NO_SCOPE). A
 typed prompt goes to this source too, as to any source that is set (C30a: remote_layer.prompt_names); the rules'
 findings and the stored values go there as filler, as for a tool result.
 """
@@ -22,6 +23,10 @@ CACHE_S = 3600
 # the person's timeout_ms of this source wins. Measured: p95 600 ms with 8 sessions at once, and 2 of 45 requests
 # over 2 s (README "Names from a service")
 DEFAULT_TIMEOUT_MS = 3000
+# the reason for a login without the name scope: it says why one new consent is needed
+NO_SCOPE = ("the login lacks the name scope: a login of maisecrets 0.9.24 or older, or one made while the gateway "
+            "offered no name detection, did not ask for it; the person runs /maisecrets sref login once more and "
+            "gives one new consent")
 # why the last detector() of this process gave none, as a cause of ner_health.CAUSES ("" when it gave one)
 LAST = {"cause": ""}
 
@@ -191,7 +196,7 @@ def detector(cfg: dict, conf: dict, make, deadline: float | None = None) -> tupl
         return None, f"maisecrets is not logged in at {origin}; the person runs /maisecrets sref login"
     if found["ner"]["scope"] not in str(rec.get("scope") or "").split():
         LAST["cause"] = "no_scope"
-        return None, "the login lacks the name scope; the person runs /maisecrets sref login once more"
+        return None, NO_SCOPE
     try:
         token = sref_client._access(cfg, backend, found, deadline)
     except sref_client.Refused as exc:
