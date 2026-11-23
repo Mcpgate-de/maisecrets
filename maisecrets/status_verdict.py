@@ -73,10 +73,11 @@ def _version_tuple(v) -> tuple | None:
 
 # --- the hooks of this session ------------------------------------------------------------------------------------
 
-def last_runs(log: Path, session: str | None) -> dict:
+def last_runs(log: Path, session: str | None, mod: bool = False) -> dict:
     """{event: the time of its last row in hooks.log}, of this session's rows when a session is known. hooks.log keeps
     the first 40 characters of the session id; a row of an older version (8 characters) does not count, because Codex
-    thread ids share their first characters for about a minute."""
+    thread ids share their first characters for about a minute. The rows of the mod (note_mod) count only with `mod`,
+    and then only they: a mod row is no hook run."""
     out: dict = {}
     try:
         with open(log, encoding="utf-8", errors="replace") as f:
@@ -86,7 +87,7 @@ def last_runs(log: Path, session: str | None) -> dict:
     tag = session[:40] if session else None
     for row in rows:
         cols = row.split("\t")
-        if len(cols) < 4 or (tag and cols[3] != tag):
+        if len(cols) < 4 or (tag and cols[3] != tag) or (cols[1] == MOD_EVENT) != mod:
             continue
         try:
             at = time.mktime(time.strptime(cols[0], "%Y-%m-%dT%H:%M:%S"))
@@ -133,6 +134,47 @@ def hooks_verdict(log: Path, session, now: float | None = None, client: str | No
                      f"the tool-call hook did not run in the last {RECENT // 60} minutes, although this command is a "
                      f"tool call; in this session: {seen}")
     return Check("ok", "hooks", f"ran ({_hook_facts(runs, now)})", None, f"in this session: {seen}")
+
+
+# --- the mod of Claude Code ---------------------------------------------------------------------------------------
+
+MOD_EVENT = "mod"
+MOD_NOTE = ("The mod is off: no lock or click on values and references. Type commands as text, such as "
+            "maisecrets: sref login NAME.")
+
+
+def note_mod(payload: dict) -> None:
+    """A `mod` row in hooks.log for the session of the payload: the mod asked (hooks/dispatch.py, its prompt check and
+    its ask at the session start). mod_verdict reads it. Never raises. A tool call that runs dispatch.py is refused
+    (shell_commands); a row only hides a note, it grants nothing."""
+    try:
+        from .home import HOME
+        sess = str(payload.get("session_id") or "-")[:40]
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(HOME / "hooks.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:     # hooks._run_log caps the file at its next row
+            f.write(f"{stamp}\t{MOD_EVENT}\tclaude\t{sess}\t-\tpass\t0ms\tmod\n")
+    except (OSError, AttributeError):
+        pass
+
+
+def mod_verdict(log: Path, sessions, client: str | None) -> Check | None:
+    """A warn in Claude Code when this session's prompt hook ran and the mod never asked in it: then no lock and no
+    click draw a value or a reference, and a slash form that needs the mod does not run. None in Codex, in Cowork
+    (there the mod draws nothing in any case), outside a session, and before the first prompt of the session."""
+    if client != "claude":
+        return None
+    from . import cowork
+    if cowork.active():
+        return None
+    session = this_session(log, sessions) if isinstance(sessions, list) else sessions
+    if not session or "user-prompt" not in last_runs(log, session) or last_runs(log, session, mod=True):
+        return None
+    return Check("warn", "mod", "did not run", None,
+                 "the prompt hook ran in this session, but the Claude Code mod (claude-mod/maisecrets-mod.mjs) asked "
+                 "nothing; mods need Claude Code 2.1.287 or later, and a switch of the client can turn them off",
+                 MOD_NOTE)
 
 
 # --- the version --------------------------------------------------------------------------------------------------
@@ -394,6 +436,12 @@ def report(root: Path, claude_dir: Path | None = None, codex_home: Path | None =
     if names:
         checks.append(names)
     checks += cowork_notes()
+    try:
+        mod = mod_verdict(log, sessions, client)
+    except Exception:  # noqa: BLE001 - a note that cannot be read is no check
+        mod = None
+    if mod:
+        checks.append(mod)
     dm = demo_verdict(sessions)
     if dm:
         checks.append(dm)
@@ -481,6 +529,9 @@ def head_line(version: str, checks: list, client: str | None) -> str:
     if any(c.name == "names" and c.state == "warn" for c in checks):
         # secrets are protected; a person's name in a tool result is left to the rules (ner_health)
         return f"\U0001F512 maisecrets {version} protects secrets in this session; names are not checked{tail}"
+    if any(c.name == "mod" and c.state == "warn" for c in checks):
+        # the hooks protect; without the mod no value or reference is drawn, and the slash forms need it
+        return f"\U0001F512 maisecrets {version} protects this session; mod off: no lock or click{tail}"
     return f"\U0001F512 maisecrets {version} protects this session{tail or ' · all checks ok'}"
 
 

@@ -366,6 +366,7 @@ _TOOL_WHY = {"timeout": "no answer in time", "too_long": "the text is longer tha
              "http": "the service answered with an error", "busy": "the gateway was busy",
              "rate_limited": "the gateway's limit per minute was reached",
              "forbidden": "the login lacks the name scope",
+             "not_enabled": "the gateway offers no name service",
              "setup": "the source cannot be asked; /maisecrets ner names the reason"}
 
 # the person's screen, one line per tool result: the same words for every source (a missed name must not look like a
@@ -374,6 +375,7 @@ _SCREEN_WHY = {"timeout": "did not answer in time", "too_long": "does not take a
                "refused": "is not running", "network": "could not be reached", "busy": "was busy",
                "rate_limited": "reached its limit per minute", "forbidden": "refused the login",
                "not_ours": "is not the container maisecrets started", "policy": "is at an address it may not use",
+               "not_enabled": "is not switched on at the gateway",
                "setup": "cannot be asked; /maisecrets ner names the reason"}
 
 

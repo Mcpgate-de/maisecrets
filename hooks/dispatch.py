@@ -105,6 +105,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
         from maisecrets.hooks import rewrite_prompt  # noqa: E402
         payload = json.load(sys.stdin)
         payload = payload if isinstance(payload, dict) else {}
+        from maisecrets.status_verdict import note_mod  # noqa: E402
+        note_mod(payload)          # the status knows that the mod runs in this session
         # the mod starts this in the plugin folder (a fixed command line); an @mention is relative to the session
         if isinstance(payload.get("cwd"), str) and os.path.isdir(payload["cwd"]):
             os.chdir(payload["cwd"])
@@ -128,7 +130,11 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-values":
     try:
         from maisecrets.show_values import answer as show_answer  # noqa: E402
         payload = json.load(sys.stdin)
-        answer = show_answer(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        if not payload.get("keys") and not payload.get("refs"):
+            from maisecrets.status_verdict import note_mod  # noqa: E402
+            note_mod(payload)      # the mod's ask at the session start, not one per drawing
+        answer = show_answer(payload)
     except Exception:  # noqa: BLE001 - no traceback, no value in an error text
         sys.exit(1)
     print(json.dumps({"maisecrets": "mod-values", **answer}))
