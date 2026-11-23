@@ -27,7 +27,9 @@ _MINE_TMP = "MAISECRETS_TEST_TMP_OWNED"
 
 # the client environment the code reads (see above); prefixes and names
 CLIENT_PREFIXES = ("CODEX_", "CLAUDE_CODE_", "CLAUDE_PLUGIN_OPTION_")
-CLIENT_NAMES = ("CLAUDECODE", "XDG_RUNTIME_DIR", "MAISECRETS_KEY_FILE", "MAISECRETS_DEBUG_LOG")
+# MAISECRETS_MOD_NET: the mod of a Claude Code session that runs the tests sets it, and every tool-result answer
+# would then carry the marker of the second net (maisecrets/second_net.py)
+CLIENT_NAMES = ("CLAUDECODE", "XDG_RUNTIME_DIR", "MAISECRETS_KEY_FILE", "MAISECRETS_DEBUG_LOG", "MAISECRETS_MOD_NET")
 
 
 def client_variables(environ=os.environ) -> list[str]:

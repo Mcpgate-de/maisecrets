@@ -624,6 +624,19 @@ SCENARIOS = {
         "expect_placeholders": [REF1],
         "expect_in_requests": ["maisecrets masked values in this tool result"],
     },
+    # no PostToolUse hook of maisecrets is registered (a copy without it, like hooks that stop in a session):
+    # the answer carries no marker, and the mod masks the result; the prompt hook still runs, so no row in hooks.log
+    # and no earlier call can stand in for the marker (review of !659, H2 and H3)
+    "post_tool_hook_missing_mod_masks": {
+        "prompt": "print the env",
+        "plugin_copy": True, "drop_hook_event": "PostToolUse",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": [REF1],
+        "expect_in_requests": ["maisecrets masked values in this tool result"],
+    },
     # the same, and the mod's own ask fails too (an injected fault: dispatch.py mod-result exits 1): the output is
     # withheld, and the session goes on to its next request
     "post_tool_crash_mod_fails": {
@@ -1014,7 +1027,10 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                                                   **sc.get("config", {})}))
     for fname, content in sc.get("home_files", {}).items():
         (home / fname).write_text(content, encoding="utf-8")
-    env = dict(os.environ, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
+    # the client under test sets MAISECRETS_MOD_NET itself when its mod runs: one from the session that runs the
+    # harness would mark the answers of a scenario without the mod
+    outer = {k: v for k, v in os.environ.items() if k != "MAISECRETS_MOD_NET"}
+    env = dict(outer, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
                MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
                MAISECRETS_GUARD_CLIPBOARD="off")   # a guarded scenario must not write the real clipboard
     env["PATH"] = tripwire_path(work, env)
@@ -1210,6 +1226,10 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # the client masks a failed output now: the workaround for this gap is dead weight (maisecrets/exit_wrap.py)
         fails.append(f"gap closed ({sc['upstream_leak_is_a_known_gap']}): the client replaces a failed output now; "
                      "drop the exit-0 wrap (maisecrets/exit_wrap.py) and update CLAUDE.md, the watch list")
+    for mark in ("[maisecrets: result checked]", "[maisecrets: result masked]"):
+        # the marker of the tool-result hook is the mod's alone (maisecrets/second_net.py): the mod takes it out
+        if mark in joined:
+            fails.append(f"the marker {mark!r} reached the model")
     for ph in sc.get("expect_placeholders", []):
         if ph not in joined:
             fails.append(f"placeholder {ph} missing in requests")

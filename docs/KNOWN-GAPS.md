@@ -70,14 +70,17 @@ a to-do.
   salutation) or on your term list, and a stored name of one word only in
   the same case.
 - **The mod's second net for tool results has limits.** It masks no image or PDF
-  in a result. On Claude Code before 2.1.330 a tool-result hook that crashes
-  looks like a hook that found nothing, so the output passes. When the mod's
-  own Python fails too, the AI gets no output, but the tool's own record of it
-  stays in the transcript on disk. The second net does not keep a value in a
-  test file as a fixture, as the hook does.
+  in a result. When the mod's own Python fails too, the AI gets no output, but
+  the tool's own record of it stays in the transcript on disk. The second net
+  does not keep a value in a test file as a fixture, as the hook does. Each
+  result that the hook did not check costs one Python start (about 0.05 to
+  0.1 s, measured on one Mac). In Code Mode the mod does not see the answer
+  of the REPL's own result hook, so each REPL result costs that start.
 - **The hooks watch tells, it does not block.** It needs the mod. When the
   hook cannot write `hooks.log` (a full disk, a home it cannot write), the
-  line says that the hooks did not run although they did.
+  line says that the hooks did not run although they did. Any program of yours
+  can write a row into `hooks.log` and so silence the watch. It cannot switch
+  off the second net: that reads the hook's own answer.
 - **A client that rejects the manifest loads nothing and says nothing.**
   Claude Code 2.1.223 did so for a manifest key it did not know. Check with
   `/hooks` that maisecrets is listed; the harness checks the debug log.

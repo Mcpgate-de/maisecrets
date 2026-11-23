@@ -5,6 +5,8 @@ import sys
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt" and sys.version_info < (3, 9):
     sys.exit(3)   # the mod then tries its next Python (claude-mod/maisecrets-mod.mjs); run.sh checks 3.9 for the hooks
+if len(sys.argv) == 2 and sys.argv[1] == "mod-result" and sys.version_info < (3, 9):
+    sys.exit(3)   # the same for the second net of the mod
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "post-tool-failure", "session-start", "session-end")
@@ -540,4 +542,14 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         out["systemMessage"] = forms.for_this_client(out["systemMessage"])   # Cowork: a hook's command as text
     print(json.dumps(out))
     sys.exit(0)
+
+# the mod's second net (maisecrets/second_net.py): with the mod running, every answer of a tool-result hook carries
+# the marker that it ran, the crash and watchdog answers too
+if len(sys.argv) == 2 and sys.argv[1] in HOOK_EVENTS:      # mark_answers takes the two tool-result events alone
+    try:
+        import maisecrets.hooks as _hooks  # noqa: E402
+        from maisecrets.second_net import mark_answers  # noqa: E402
+        mark_answers(_hooks, sys.argv[1])
+    except Exception:  # noqa: BLE001 - no marker: the mod masks the result itself
+        pass
 sys.exit(main(["hook", sys.argv[1] if len(sys.argv) == 2 else ""]))
