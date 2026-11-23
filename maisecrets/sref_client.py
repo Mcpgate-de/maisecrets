@@ -161,8 +161,9 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None, patient: bo
                 extra.setdefault(entry.get("sink_type"), more[0])
     process_scope = block.get("process_scope") if isinstance(block.get("process_scope"), str) else extra.get("process")
     display_scope = block.get("display_scope") if isinstance(block.get("display_scope"), str) else extra.get("display")
-    # the gateway's name detection (ai-gateway #1819): its endpoint on the same origin, its own scope. A login asks
-    # for that scope only while /maisecrets:ner gateway names this origin: text of tool results goes there (#33)
+    # the gateway's name detection (ai-gateway #1819): its endpoint on the same origin, its own scope. One login asks
+    # for every scope the gateway offers, so setting the gateway as the name source needs no second consent. Text
+    # goes to that endpoint only while /maisecrets ner gateway names this origin (remote_layer.from_config, #33)
     ner = None
     ner_scope = block.get("ner_scope")
     if origin_of(block.get("ner_endpoint")) == origin and isinstance(ner_scope, str) and _SCOPE_RE.fullmatch(ner_scope):
@@ -172,10 +173,8 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None, patient: bo
         # its load and the person's quota, read with the same token (counts no quota)
         if origin_of(block.get("ner_status_endpoint")) == origin:
             ner["status"] = block["ner_status_endpoint"]
-    conf = cfg.get("remote_detector") if isinstance(cfg, dict) else None
-    wants_ner = bool(ner) and isinstance(conf, dict) and conf.get("gateway") == origin
     scope = login_scope(resolve_scope, process_scope, display_scope=display_scope)
-    if wants_ner and ner["scope"] not in scope.split():
+    if ner and ner["scope"] not in scope.split():
         scope += " " + ner["scope"]
     # #100: the deposit of a value for a claude.ai connector (D1): its own scope, asked for only where the gateway
     # names usable deposit fields

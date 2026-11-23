@@ -1147,8 +1147,10 @@ and keeps its other keys. Written by hand, the setting looks like this:
   output of a failed command (Bash with an exit code other than 0) is neither checked by the service nor
   withheld: Claude Code does not let a hook replace it (threat model, PostToolUseFailure).
 - **gateway**: the gateway of your `/maisecrets sref login` finds the names, when its protected resource metadata
-  names `ner_endpoint` and `ner_scope`. The login asks for that scope only while this source is set, so you log in
-  once more after the switch. The text goes over https with your access token, the rules' findings as filler.
+  names `ner_endpoint` and `ner_scope`. One login asks for every scope the gateway offers, the name scope too, so
+  this source needs no second consent. A login of maisecrets 0.9.24 or older lacks the name scope: log in once
+  more for one new consent (`/maisecrets ner` says it). The gateway gets text only while you chose it as the
+  source; the name scope alone sends nothing. The text goes over https with your access token, the rules' findings as filler.
   A tool result waits 3,000 ms by default (`timeout_ms`); measured from a laptop against the reference gateway:
   p50 160 ms for 200 characters and 740 ms for 10,000; with 8 sessions at once p95 600 ms. The gateway's wait
   does not grow with the length of the text, and its answers do not change the rate of this computer
