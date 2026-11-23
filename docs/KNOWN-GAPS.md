@@ -71,10 +71,14 @@ a to-do.
   block, deny, or withheld output), and a hook that crashes answers the same
   way; Claude Code ignores exit 2 from `PostToolUse`, so the raw output would
   otherwise reach the model. Codex 0.172 and older run the tool anyway when a
-  hook fails, so there the watchdog is the only net. From Codex 0.173 on, the
-  prompt, tool-call and tool-result hooks set `onFailure: block`, and Codex
-  itself blocks when such a hook crashes or times out. The session start hook
-  does not set it, so a failed start in Codex does not stop the session. On Windows the watchdog can come too
+  hook fails, so there the watchdog is the only net. The prompt, tool-call and
+  tool-result hooks set `onFailure: block`. From Claude Code 2.1.330 and Codex
+  0.173 on, the client itself blocks the prompt and the tool call when such a
+  hook cannot start, crashes or times out. Codex also withholds the tool
+  result. Claude Code does not: a failed tool-result hook lets the output
+  through. The price: when maisecrets itself fails on every call, that session
+  can send no prompt and run no tool until maisecrets runs again. The session
+  start hook does not set it, so a failed start does not stop the session. On Windows the watchdog can come too
   late: Python has no SIGALRM there, and a detector regex that runs long
   holds the interpreter until it ends, so a hook past the client's timeout
   fails open. A tool result with more than 100 new

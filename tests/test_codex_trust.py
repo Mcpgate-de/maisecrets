@@ -76,9 +76,11 @@ FIXTURE_DECLARATION_WITH_STATUS = "sha256:83d7f545053b1aed0efd9310af7bc57f2986db
 # codex-cli 0.171.0 gave FIXTURE_DECLARATION, because it ignores the field
 FIXTURE_DECLARATION_WITH_ON_FAILURE = "sha256:0d818bcbd1310b425c2e47a88101d1a295b8d315f5b90c82ccedad5a235a5ba1"
 
-# Codex 0.173 and newer block the call when a hook with "onFailure": "block" crashes or runs past its timeout
-# (openai/codex#62831; measured on 0.173.0-alpha.4, 2026-11-23). Codex refuses the field on SessionEnd and drops that
-# hook, and on SessionStart a failure would stop the session, so those two keep the default (continue).
+# Claude Code 2.1.330 and Codex 0.173 and newer block the prompt and the tool call when a hook with
+# "onFailure": "block" cannot start, crashes or runs past its timeout (openai/codex#62831; measured on 2.1.330 and
+# 0.173.0-alpha.4, 2026-11-23; the harness scenario plugin_folder_moved holds it in Claude Code). Codex refuses the
+# field on SessionEnd and drops that hook, and on SessionStart a failure would stop the session, so those two keep the
+# default (continue).
 BLOCK_ON_FAILURE = {"UserPromptSubmit", "PreToolUse", "PostToolUse"}
 
 # hook groups added after the trust above: Codex treats each as a new hook that needs its own trust, while the groups
@@ -155,7 +157,8 @@ class CodexTrustTests(unittest.TestCase):
 
 
 class CodexBlocksOnFailureTests(unittest.TestCase):
-    """A maisecrets hook that crashes or times out in Codex blocks the prompt, the tool call or the result."""
+    """A maisecrets hook that cannot start, crashes or times out blocks the prompt and the tool call (Claude Code
+    2.1.330, Codex 0.173), and in Codex the result too."""
 
     def test_the_protecting_hooks_block_on_failure_and_the_others_do_not(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]

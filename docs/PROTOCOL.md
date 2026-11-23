@@ -328,10 +328,11 @@ The client side is tested against a fake server with both endpoints
 - A timeout is fail-open in Claude Code and in Codex: the prompt goes to the model, the tool runs, the
   output goes to the model as it is (Claude Code 2.1.302 and codex-cli 0.162.0, measured 2026-10-17). The
   detector must stay a regex in milliseconds.
-- Codex 0.173 and newer read `"onFailure": "block"` on a hook (openai/codex#62831). `hooks/hooks.json` sets it on
-  `UserPromptSubmit`, `PreToolUse` and `PostToolUse`. When such a hook crashes or times out, Codex blocks the prompt,
-  refuses the tool call or withholds the tool result (codex-cli 0.173.0-alpha.4, measured 2026-11-23). Codex 0.172 and
-  older and Claude Code ignore the field.
+- `hooks/hooks.json` sets `"onFailure": "block"` on `UserPromptSubmit`, `PreToolUse` and `PostToolUse`. Claude Code
+  2.1.330 and Codex 0.173 (openai/codex#62831) read it. When such a hook cannot start, crashes or times out, both
+  clients block the prompt and refuse the tool call. Codex also withholds the tool result; Claude Code counts the
+  failure as exit code 2 and the output still goes to the model (both measured 2026-11-23). Older clients ignore the
+  field.
 - Codex reads a hook until its stdout closes; Claude Code reads it when the process ends. A child process
   that keeps the hook's stdout open makes the hook time out in Codex after it answered. The launcher
   (`hooks/run.sh`) gives its Python probes no descriptor of the hook and 2 s in total.
