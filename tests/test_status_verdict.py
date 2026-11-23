@@ -120,6 +120,77 @@ class HooksLineTests(_Tmp):
         self.assertIn("Next:", text)
 
 
+class ModLineTests(_Tmp):
+    """The mod of Claude Code (status_verdict.mod_verdict): a `mod` row in hooks.log, which the mod's prompt check and
+    its ask at the session start write (note_mod), tells that it runs in this session."""
+
+    log = HooksLineTests.log
+
+    def test_claude_code_with_a_prompt_and_no_mod_row_says_the_mod_is_off_and_names_the_text_form(self):
+        now = time.time()
+        log = self.log([(now - 60, "user-prompt", SESSION), (now - 2, "pre-tool", SESSION),
+                        (now - 30, sv.MOD_EVENT, "other-session-with-the-mod")])
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
+            check = sv.mod_verdict(log, [SESSION], "claude")
+        self.assertEqual((check.state, check.name, check.fact), ("warn", "mod", "did not run"))
+        self.assertIn("no lock or click on values and references", check.note)
+        self.assertIn("maisecrets: sref login NAME", check.note, "the text form, which runs without the mod")
+        head = sv.head_line("9.9.9", [check], "claude")
+        self.assertIn("protects this session; mod off: no lock or click", head)
+        self.assertIn("maisecrets: sref login NAME", "\n".join(sv.check_lines([check], "claude")))
+
+    def test_a_mod_row_of_this_session_or_no_prompt_yet_gives_no_line(self):
+        now = time.time()
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
+            with_mod = self.log([(now - 60, "user-prompt", SESSION), (now - 61, sv.MOD_EVENT, SESSION)])
+            self.assertIsNone(sv.mod_verdict(with_mod, [SESSION], "claude"))
+            no_prompt = self.log([(now - 2, "pre-tool", SESSION)])
+            self.assertIsNone(sv.mod_verdict(no_prompt, [SESSION], "claude"), "nothing to compare yet")
+
+    def test_codex_cowork_and_no_session_get_no_line(self):
+        now = time.time()
+        log = self.log([(now - 60, "user-prompt", SESSION), (now - 2, "pre-tool", SESSION)])
+        self.assertIsNone(sv.mod_verdict(log, [SESSION], "codex"), "Codex has no mod")
+        self.assertIsNone(sv.mod_verdict(log, [], None), "outside a session")
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"}):
+            self.assertIsNone(sv.mod_verdict(log, [SESSION], "claude"), "Cowork: the mod draws nothing there")
+
+    def test_a_mod_row_is_no_hook_run(self):
+        now = time.time()
+        log = self.log([(now - 2, sv.MOD_EVENT, SESSION)])
+        check = sv.hooks_verdict(log, SESSION, now)
+        self.assertEqual((check.state, check.fact), ("FAIL", "no hook ran"), "the mod ran, no hook did")
+        log = self.log([(now - 9, "user-prompt", SESSION), (now - 2, sv.MOD_EVENT, SESSION)])
+        self.assertEqual(set(sv.last_runs(log, SESSION)), {"user-prompt"})
+        self.assertEqual(set(sv.last_runs(log, SESSION, mod=True)), {sv.MOD_EVENT})
+
+    def test_note_mod_writes_the_row_the_check_reads(self):
+        log = HOME / "hooks.log"
+        old = log.read_bytes() if log.exists() else None
+        self.addCleanup(lambda: log.write_bytes(old) if old is not None else log.unlink(missing_ok=True))
+        sv.note_mod({"session_id": SESSION + "-note"})
+        self.assertIn(sv.MOD_EVENT, sv.last_runs(log, SESSION + "-note", mod=True))
+        self.assertEqual(sv.last_runs(log, SESSION + "-note"), {})
+
+    def test_the_mod_entries_of_the_launcher_write_the_row(self):
+        import subprocess
+        log = HOME / "hooks.log"
+        old = log.read_bytes() if log.exists() else None
+        self.addCleanup(lambda: log.write_bytes(old) if old is not None else log.unlink(missing_ok=True))
+        values, prompt = "mod" + "-values", "mod" + "-prompt"   # the test's environment keeps its temp home
+        for entry, payload, rows in (
+                (values, {"session_id": SESSION + "-start", "keys": [], "refs": []}, 1),
+                (values, {"session_id": SESSION + "-draw", "keys": ["SECRET" + "_c1"]}, 0),
+                (prompt, {"session_id": SESSION + "-prompt", "prompt": "a plain question", "origin": "composer",
+                          "cwd": str(self.tmp)}, 1)):
+            with self.subTest(entry=entry, payload=payload):
+                r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), entry],
+                                   input=json.dumps(payload), capture_output=True, text=True, timeout=60)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(len(sv.last_runs(log, payload["session_id"], mod=True)), rows,
+                                 "the ask at the session start writes it, a drawing does not")
+
+
 class VersionLineTests(_Tmp):
     def claude_install(self, installed: str, newest: str | None) -> Path:
         root = plugin(self.claude / "plugins" / "cache" / "maisecrets" / "maisecrets" / installed, installed)
@@ -400,6 +471,30 @@ class StatusOutputTests(unittest.TestCase):
         self.assertTrue(out[10].startswith("all details: /maisecrets status all"))
         self.assertEqual(len(out), 11, "the default shows no details")
         self.assertNotIn("Details", out)
+
+    def test_a_claude_code_session_without_the_mod_gets_the_mod_line_and_says_it_in_the_head(self):
+        log = HOME / "hooks.log"
+        old = log.read_bytes() if log.exists() else None
+        self.addCleanup(lambda: log.write_bytes(old) if old is not None else log.unlink(missing_ok=True))
+        now = time.time()
+        sess = "0b6f1c2e-0000-4000-8000-00000000mod1"
+        log.write_text("".join(f"{stamp(now - d)}\t{ev}\tclaude\t{sess}\tBash\tpass\t5ms\tok\n"
+                               for d, ev in ((30, "user-prompt"), (1, "pre-tool"))))
+        env = {"CLAUDE_CODE_SESSION_ID": sess, "CLAUDE_CODE_ENTRYPOINT": "cli"}
+        with mock.patch.dict(os.environ, env):
+            os.environ.pop("CODEX_THREAD_ID", None)
+            out = self.run_status([])
+        self.assertIn("mod off: no lock or click", out[0])
+        mod = [i for i, ln in enumerate(out) if ln.split()[:2] == ["!", "mod"]]
+        self.assertEqual(len(mod), 1, out)
+        self.assertIn("did not run", out[mod[0]])
+        self.assertIn("maisecrets: sref login NAME", " ".join(out[mod[0] + 1:mod[0] + 3]))
+        sv.note_mod({"session_id": sess})              # the mod asked in this session: no line
+        with mock.patch.dict(os.environ, env):
+            os.environ.pop("CODEX_THREAD_ID", None)
+            out = self.run_status([])
+        self.assertFalse(any(ln.split()[:2] == ["!", "mod"] for ln in out), out)
+        self.assertNotIn("mod off", out[0])
 
     def test_all_shows_the_checks_then_the_details_with_grouped_vault_references(self):
         out = self.run_status(["all"], servers=8)

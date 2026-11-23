@@ -387,6 +387,23 @@ class EntryCliTests(unittest.TestCase):
                 self.assertIn("as your own prompt", out.getvalue())
                 self.assertNotIn("Cowork", out.getvalue())
 
+    def test_a_typed_slash_login_without_the_mod_names_the_text_form_first(self):
+        # with the mod, Claude Code runs `/maisecrets sref login NAME` itself; this route means the mod did not run it
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
+            for args, text in ((["sref", "login", "team-gw"], "maisecrets: sref login team-gw"),
+                               (["sref", "login"], "maisecrets: sref login NAME"),
+                               (["sref", "login", "a;b"], "maisecrets: sref login NAME"),
+                               (["sref", "LOGOUT"], "maisecrets: sref logout")):
+                with self.subTest(args):
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        self.assertEqual(cli.cmd_entry(args), 2)
+                    said = out.getvalue()
+                    self.assertIn(text, said)
+                    self.assertLess(said.index(text), said.index("/maisecrets sref"), "the text form comes first")
+                    self.assertIn("needs the maisecrets mod", said)
+                    self.assertNotIn("a;b", said, "a name that is no plain name is never echoed")
+
     def test_in_cowork_the_refusal_names_the_text_form_and_no_slash_form(self):
         # Cowork answers sref only in its text form (prompt_commands._cowork_sref): a slash form there does nothing
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "remote_cowork"}):

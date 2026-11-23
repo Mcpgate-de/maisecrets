@@ -1,0 +1,11 @@
+# c22-a-refused-slash-login-names-the-text-form-first: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-a-refused-slash-login-names-the-text-form-first"
+control = "C22"
+serves = ["M4.2"]
+statement = "A `/maisecrets sref login NAME` that reaches the AI (Claude Code without the mod) is refused, and the refusal names the text form `maisecrets: sref login NAME` first, which the person's own prompt runs without the mod; a server name that is no plain name is never echoed."
+runner = ["tests/test_entry.py::EntryCliTests::test_a_typed_slash_login_without_the_mod_names_the_text_form_first"]
+
+[proof]
+file = "maisecrets/cli.py"
+find = '''        if not cowork.active() and name == "sref":'''
+replace = '''        if False:'''

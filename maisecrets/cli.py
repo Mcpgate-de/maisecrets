@@ -1480,7 +1480,14 @@ def cmd_entry(args: list[str]) -> int:
         # or a login starts only from report.md, sref.md or the mod's own run of the person's prompt
         what = "report" if name == "report" else rest[0].lower()  # a fixed word: login or logout
         from . import cowork
-        if not cowork.active():
+        if not cowork.active() and name == "sref":
+            # this route means the mod did not run the person's line: the text form works without it (the prompt
+            # hook counts it as the person's own); the server name only when it is a plain name, never echoed else
+            server = rest[1] if len(rest) == 2 and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", rest[1]) else "NAME"
+            words = f"{what} {server}" if what == "login" else what
+            print(f"maisecrets: the AI does not start a {what}. Type it as text, as your own prompt: maisecrets: "
+                  f"sref {words}. The slash form /maisecrets sref {words} needs the maisecrets mod of Claude Code.")
+        elif not cowork.active():
             print(f"maisecrets: the AI does not start a {what}. Send /maisecrets:{name} with its words as your own "
                   "prompt.")
         elif what == "login":
