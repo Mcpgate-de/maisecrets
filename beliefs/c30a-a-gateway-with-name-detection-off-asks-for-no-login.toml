@@ -1,0 +1,11 @@
+# c30a-a-gateway-with-name-detection-off-asks-for-no-login: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-a-gateway-with-name-detection-off-asks-for-no-login"
+control = "C30a"
+serves = ["M5.4"]
+statement = "When the gateway's name endpoint answers 404 ner_not_enabled, the result is masked by the rules alone, and the person reads that the gateway offers no name detection with the step /maisecrets ner, never a login step."
+runner = ["tests/test_ner_gateway.py::GatewaySourceTests::test_a_gateway_whose_name_detection_is_off_is_no_name_service_and_asks_for_no_login"]
+
+[proof]
+file = "maisecrets/ner_health.py"
+find = '''        return "no_ner"                     # no login step helps: the gateway offers no name service now'''
+replace = '''        return "no_scope"'''

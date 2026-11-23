@@ -8,6 +8,13 @@ was measured or documented. The controls and where each one ends are in [THREAT-
 What the plugin does not protect. Each item is a limit of the mechanism, not
 a to-do.
 
+- **The status knows the mod only from its rows in `hooks.log`.** The mod
+  writes one at the session start, for each prompt it checks, and once per new
+  session id one second after its first prompt (after `/clear` or a resume).
+  A status in that first second, or one after the mod's Python failed, can show
+  `mod off` while the mod runs. The next prompt writes the row. An older login without the name
+  scope (maisecrets 0.9.24 or older) needs one new consent before the gateway
+  can check names.
 - **The ids in the result of an Agent or Task call are not masked (#31).**
   Claude Code writes the agent id, the task id and the output file into that
   result, and it shows the AI the pointer it makes from the result that the
@@ -70,8 +77,15 @@ a to-do.
   own watchdog answers fail-closed before that (7 s, 16 s for tool output:
   block, deny, or withheld output), and a hook that crashes answers the same
   way; Claude Code ignores exit 2 from `PostToolUse`, so the raw output would
-  otherwise reach the model. Codex runs the tool anyway when a hook fails, so
-  there the watchdog is the only net. On Windows the watchdog can come too
+  otherwise reach the model. Codex 0.172 and older run the tool anyway when a
+  hook fails, so there the watchdog is the only net. The prompt, tool-call and
+  tool-result hooks set `onFailure: block`. From Claude Code 2.1.330 and Codex
+  0.173 on, the client itself blocks the prompt and the tool call when such a
+  hook cannot start, crashes or times out. Codex also withholds the tool
+  result. Claude Code does not: a failed tool-result hook lets the output
+  through. The price: when maisecrets itself fails on every call, that session
+  can send no prompt and run no tool until maisecrets runs again. The session
+  start hook does not set it, so a failed start does not stop the session. On Windows the watchdog can come too
   late: Python has no SIGALRM there, and a detector regex that runs long
   holds the interpreter until it ends, so a hook past the client's timeout
   fails open. A tool result with more than 100 new

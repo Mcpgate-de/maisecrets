@@ -557,12 +557,15 @@ function ownSetup(on, answer, logs: string[] = []) {
   on('ui.log', ($, e) => { logs.push(e.text ?? JSON.stringify(e)); return { value: undefined } })
   on('prompt.fill', ($, e) => { seen.filled.push(e.text); return { isFilled: true } })
   on('process.run', ($, e) => {
+    if (e.argv[2] === 'mod-values') return NOTE_ANSWER      // the mod notes the session (noteSession), not counted
     seen.runs += 1
     return seen.answer(JSON.parse(e.init.stdin))
   })
   on('prompt.submit', ($, e) => { seen.downstream += 1; return { text: e.text } })
   return seen
 }
+// the answer of the launcher to the mod's ask with no keys (noteSession): nothing to draw
+const NOTE_ANSWER = { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-values', mode: 'off', values: {} }) } }
 const own = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt', ...o }) } })
 
 test('a command the prompt hook answers is dropped with its answer, and the box is emptied', async ($, on) => {
@@ -815,6 +818,7 @@ function runSetup(on, opts: any = {}) {
   on('clock.after', ($, e) => { st.afters.push(e.ms); return new Promise(() => {}) })
   on('prompt.fill', ($, e) => { st.fills.push(e.text); return { isFilled: true } })
   on('process.run', async ($, e) => {
+    if (e.argv[2] === 'mod-values') return NOTE_ANSWER      // the mod notes the session (noteSession), not counted
     st.checks.push(e)
     if (opts.before) await opts.before(st.checks.filter(c => c.argv[2] === 'mod-prompt').length, e)
     const answer = typeof opts.answer === 'function' ? opts.answer(JSON.parse(e.init.stdin), e) : opts.answer
@@ -1283,7 +1287,7 @@ test('a command that needs the model is dropped, and the entry command file runs
   expect(st.spawns.length).toBe(0)
   expect(st.downstream).toBe(0)
   // the entry starts after a wait, so it does not wait on the turn that this hook holds (the other wait empties the box)
-  expect(st.afters).toEqual([60, 60])
+  expect(st.afters.filter(ms => ms !== 1000)).toEqual([60, 60])     // 1000: the note of the session (noteSession)
   // words that name no command, a second line or no text start nothing: the prompt goes on as typed
   for (const entry of ['bogus words', 'status\ntest', 12]) {
     answer.now = { entry }
@@ -1548,4 +1552,38 @@ test('a login that waits and a list keep their own panes, titles and lines', asy
   expect(await c.find({ type: 'Text', text: 'LOGIN-END' })).toBeDefined()
   await c.unmount()
   await b.unmount()
+})
+
+// the status knows that the mod runs in a session from the row of an ask with no keys (status_verdict.note_mod).
+// /clear and a resume give a new session id without session.start, and a slash line or a prompt that is no person's
+// asks nothing else: each new session id is noted once, after the prompt's own check
+test('each new session id is noted once, also for a slash line and a prompt not from the person', async ($, on) => {
+  const runs: any[] = []
+  const afters: number[] = []
+  let id = 'sess-note-1'
+  on('clock.now', () => ({ value: clock.t }))
+  on('clock.after', ($, e) => { afters.push(e.ms); return { value: undefined } })
+  on('session.id', () => ({ value: id }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('env.get', () => { throw new Error('the mod read an environment variable') })
+  on('ui.log', () => ({ value: undefined }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('process.run', ($, e) => {
+    runs.push(e)
+    return e.argv[2] === 'mod-values' ? NOTE_ANSWER : { value: { exitCode: 1, stderr: '', stdout: '' } }
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  const notes = () => runs.filter(r => r.argv[2] === 'mod-values').map(r => JSON.parse(r.init.stdin))
+  const r = await $.prompt.submit({ text: '/compact', wait: false, origin: { kind: 'composer' } })
+  expect(r.text).toBe('/compact')
+  expect(await until(() => notes().length === 1)).toBe(true)
+  expect(notes()[0]).toEqual({ keys: [], refs: [], session_id: 'sess-note-1' })
+  expect(afters).toContain(1000)
+  await $.prompt.submit({ text: 'a report of a subagent', wait: false, origin: { kind: 'task-notification' } })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(notes().length).toBe(1)                 // the same session: once
+  id = 'sess-note-2'                             // after /clear: a new id, no session.start
+  await $.prompt.submit({ text: 'a report of a subagent', wait: false, origin: { kind: 'task-notification' } })
+  expect(await until(() => notes().length === 2)).toBe(true)
+  expect(notes()[1].session_id).toBe('sess-note-2')
 })

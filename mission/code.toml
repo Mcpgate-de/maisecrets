@@ -40,7 +40,7 @@
 "maisecrets/agent_reports.py" = { controls = ["C19"] }
 "maisecrets/check_value.py" = { controls = ["C29"] }
 "maisecrets/checksums.py" = { none = "an old module name: the same module object as maisecrets/detection/checksums.py, whose entry declares its controls" }
-"maisecrets/cli.py" = { controls = ["C13", "C24", "C31"] }
+"maisecrets/cli.py" = { controls = ["C13", "C22", "C24", "C31"] }
 "maisecrets/codex_helper.py" = { controls = ["C27"] }
 "maisecrets/codex_trust.py" = { none = "reads Codex's hook trust for /maisecrets:status; it decides nothing and writes nothing" }
 "maisecrets/codex_vault.py" = { controls = ["C27"] }
@@ -135,7 +135,7 @@
 "maisecrets/sref_notes.py" = { controls = ["C31"] }
 "maisecrets/ssh_approval.py" = { controls = ["C18"] }
 "maisecrets/ssh_consent.py" = { controls = ["C21"] }
-"maisecrets/status_verdict.py" = { controls = ["C30a"] }
+"maisecrets/status_verdict.py" = { controls = ["C30a", "C32"] }
 "maisecrets/term_files.py" = { controls = ["C26"] }
 "maisecrets/terms.py" = { controls = ["C26"] }
 "maisecrets/terms_cli.py" = { controls = ["C26"] }

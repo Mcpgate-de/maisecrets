@@ -1,0 +1,11 @@
+# c31-a-refused-name-scope-still-gives-the-login: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-refused-name-scope-still-gives-the-login"
+control = "C31"
+serves = ["M3.3"]
+statement = "When the gateway answers invalid_scope to a login that asked for the name scope (in the browser or at the token exchange), the login runs once more without the name scope, holds the other scopes, and the person reads that the name service was not granted."
+runner = ["tests/test_ner_gateway.py::GatewaySourceTests::test_a_gateway_that_refuses_the_name_scope_still_logs_in_once_more_without_it"]
+
+[proof]
+file = "maisecrets/sref_client.py"
+find = '''    less = {**found, "scope": " ".join(w for w in found["scope"].split() if w != ner["scope"])}'''
+replace = '''    less = found'''

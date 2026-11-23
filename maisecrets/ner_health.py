@@ -59,6 +59,8 @@ def cause_of(conf: dict, reason: str) -> str | None:
         return LAST.get("cause") or "other"
     if reason == "forbidden":
         return "no_scope" if conf.get("gateway") else "other"
+    if reason == "not_enabled":
+        return "no_ner"                     # no login step helps: the gateway offers no name service now
     if reason == "not_ours":
         return "not_ours"
     if reason == "refused":

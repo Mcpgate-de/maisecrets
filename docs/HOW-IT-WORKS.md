@@ -164,6 +164,16 @@ command, and the prompt hook must stop it when you send it. A pass counts for
 this version, in this session or for 4 hours. If the AI wrote the test value
 into a tool call, it had the value: start a new session and test again.
 
+**mod.** In Claude Code (not in Codex, not in Cowork), this line shows when
+the prompt hook ran in this session and the mod never asked: the mod writes a
+`mod` row to `hooks.log` at the session start and for each prompt it checks.
+Without the mod there is no lock and no click on values and references, and
+the head line says `mod off`. The hooks still protect the session. Type the
+commands as text then, such as `maisecrets: sref login NAME`. After `/clear`
+or a resume (a new session id without a session start), the mod writes the
+row one second after the first prompt of that id, also for a slash line or a
+prompt that is no person's.
+
 **older.** This line shows when an older maisecrets ran in the last day,
 after this version first started, and a gateway login was used on this
 computer. maisecrets cannot see whether that session is still open, so the
@@ -254,36 +264,7 @@ rules, the regions and the number of label languages.
 
 ## What the Claude Code mod does
 
-In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. These are the facts of its code:
-
-- **What it reads:** the prompts you send (to put placeholders in place of values), and the messages and tool rows
-  that Claude Code draws on your screen (to show you the values there). What it draws on the screen never goes to
-  the model. It also reads the session id and the working directory of the session, and the kind of screen and
-  whether a message is in view (to draw values only there). It keeps one counter of its own in the Claude Code
-  store of the plugin: how often it showed its hint about values on the screen. The screen facts and the counter
-  stay on this computer and go to no program.
-- **What it starts:** the mod itself starts only the plugin's `hooks/dispatch.py`, in the plugin folder, with a
-  fixed command line: `python3 hooks/dispatch.py mod-prompt` (or `mod-values`, `mod-reveal`, `mod-demo`,
-  `mod-settings`). On Windows it tries `py -3 hooks/dispatch.py …` and then `python hooks/dispatch.py …` with the
-  same last word, because Windows often has no `python3`. It does not start a shell. One panel action starts more:
-  when you choose the local name service in the `/maisecrets` panel, that Python starts another Python, which starts
-  the name service container with Docker or Podman.
-- **What it sends:** the text of the question (a prompt, the keys or references to show, a panel action), with the
-  session id and, for a prompt, the working directory and where the prompt came from (for example the prompt box or
-  Remote Control), goes to that local Python process on stdin, as JSON. The mod itself makes no network request.
-  The Python process sends text off this computer only to a service you set up: the name service of
-  `/maisecrets ner`, or a server you added that offers vault references or Sensitive References
-  (`/maisecrets sref login`). The details:
-  [What the plugin runs, sends and fetches](#what-the-plugin-runs-sends-and-fetches).
-- **The demo** (`/maisecrets demo on`): in a session in the demo, the `http.fetch` hook refuses every request that
-  Claude Code itself sends (the turns, and side requests such as the title or the next-prompt guess), and each model
-  step gets one line from the mod instead of a request. The `session.compact` hook skips a compaction in that
-  session, because a compaction is a model request of its own; the conversation stays as it is. When the plugin's
-  Python says that a session is not in the demo, these hooks let its requests and compactions go on unchanged. When
-  the Python gives no answer, they refuse, so nothing goes out by mistake.
-- **Prompt suggestions in the demo:** the mod switches `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` off for the demo.
-  After the demo, it sets the default of Claude Code. A value that you set before the demo is not kept. If that
-  reset fails, suggestions stay off until the next session.
+The section is in the README: [What the Claude Code mod does](../README.md#what-the-claude-code-mod-does).
 
 ## Invisible characters
 
