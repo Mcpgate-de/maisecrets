@@ -23,7 +23,7 @@
 - the resumed agent id of a SendMessage result keeps its text, and the folder of an agent's output file is masked as usual (5bcc268)
 - a subagent's report reaches the session also when a rule or a stored value finds the agent's id (4d48544)
 - with rehydration confirm or in auto mode, a claude.ai connector's call gets its deposit again, and you are asked as in 0.9.22 (466505a)
-- an e-mail address that your own rule or an import also finds goes only to a deposit target, never into any text field (32bf8c2)
+- an e-mail address that your own rule or an import also finds goes only to a deposit target, unless your gateway allows every type (`all_types`) (32bf8c2)
 - a birth date goes as a deposit into any text field of a gateway tool that allows it, as the other personal values do (ced7802)
 - when your gateway refuses a personal value for an action, the AI learns that the action takes no stored value and that the value was not sent (7dbca16)
 - the leading literals file names the phone rule that skips an ISO date after a plus (6943bed)
@@ -51,9 +51,9 @@
 
 ### Security
 
-- a stored value no longer goes to your gateway before you answer maisecrets' question; a changed copy of the gateway's metadata is read again (6ceb746)
+- a changed copy of the gateway's metadata is read again (6ceb746); the deposit still goes before maisecrets' question, as in 0.9.22, and stays unused at your gateway for at most 300 s when you decline (466505a)
 - a reference of your gateway that was masked whole is masked again where it shows up later, so a secret in its id stays hidden (9c3797d)
-- a stored value never cuts a reference of your gateway, and a reference masked whole is never looked for again (53052ba)
+- a stored value never cuts a reference of your gateway (53052ba)
 - a stored value next to a refused deposit in a tool result is masked, and a deposit needs its own connector named by the call (61cb3d2)
 - in Cowork and in a remote session, a call to an MCP server outside your own config gets no stored value (723877e)
 - a claude.ai connector's tool call no longer gets a stored value (cafeefc)

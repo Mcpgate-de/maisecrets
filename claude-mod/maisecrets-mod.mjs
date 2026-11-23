@@ -1821,8 +1821,12 @@ function registerSettingsPane(on) {
   // (placeholder.whole_references), and the connector that showed it must still be asked (#91)
   on('tool.run', async ($, e, next) => {
     const r = await next(e)
-    noteReferences(e, r)
+    try { noteReferences(e, r) } catch { /* a failure of its own never reaches the result */ }
     return r
+  }).catch(async ($, e, next) => {
+    // the tool ran and failed: its failure stands, the tool never runs a second time
+    if (next.called) throw next.error ?? new Error('maisecrets: the tool failed')
+    return next(e)
   })
   on('tool.call', async ($, e, next) => {
     // a pairing runs: its nonce in any call but the mod's own taints it, and that call never runs (#91)
