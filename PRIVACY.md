@@ -120,6 +120,8 @@ image). Connections start only from a command you run, or go to a service you se
   there too, with the same filler, but only in Claude Code with the mod (which rewrites the prompt),
   and not when a machine policy sets `"prompts": false`. A prompt of a program (`claude -p`, the
   Agent SDK) never goes to a service on the network. The gateway source sends the text with the access token of your own `/maisecrets sref login`.
+  That login holds the name scope whenever the gateway offers it, but the gateway gets text only while you chose it
+  as the source.
   A fallback you add (`/maisecrets ner fallback url URL`) gets tool results only while the
   service on this computer is not running, and never a prompt. `ner.log` in the store folder
   records per request the time, the service, the kind, the length and the count of names, never text. The plugin accepts only a loopback address (127.0.0.0/8, `::1`, `localhost`)

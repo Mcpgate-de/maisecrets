@@ -1386,11 +1386,13 @@ def cmd_sref(args: list[str]) -> int:
         vault_refs.clear_login_mark(server)       # a mark of an earlier login is never used by this one (#91)
     try:
         # the browser gets up to 110 s, less the time of a slow discovery and registration
-        sref_client.login(cfg, backend, f, open_browser, wait=110.0, budget=SREF_LOGIN_REQUEST_S, patient=True,
-                          end=start + SREF_LOGIN_END_S)
+        note = sref_client.login(cfg, backend, f, open_browser, wait=110.0, budget=SREF_LOGIN_REQUEST_S,
+                                 patient=True, end=start + SREF_LOGIN_END_S)
     except sref_client.Refused as exc:
         print(f"maisecrets: the login to {host} did not complete: {exc}")
         return 1
+    if note:
+        print(note)
     if server in proposed:
         from . import events
         from .selftest import sessions_of_this_command
@@ -1480,7 +1482,16 @@ def cmd_entry(args: list[str]) -> int:
         # or a login starts only from report.md, sref.md or the mod's own run of the person's prompt
         what = "report" if name == "report" else rest[0].lower()  # a fixed word: login or logout
         from . import cowork
-        if not cowork.active():
+        if not cowork.active() and name == "sref":
+            # this route means the mod did not run the person's line: the text form works without it (the prompt
+            # hook counts it as the person's own). The word is echoed only as a server name of the person's
+            # configuration: a placeholder can be resolved into it (as for `list bogus`)
+            from .ner_setup import _servers
+            server = rest[1] if len(rest) == 2 and rest[1] in _servers() else "NAME"
+            words = f"{what} {server}" if what == "login" else what
+            print(f"maisecrets: the AI does not start a {what}. Type it as text, as your own prompt: maisecrets: "
+                  f"sref {words}. The slash form /maisecrets sref {words} needs the maisecrets mod of Claude Code.")
+        elif not cowork.active():
             print(f"maisecrets: the AI does not start a {what}. Send /maisecrets:{name} with its words as your own "
                   "prompt.")
         elif what == "login":

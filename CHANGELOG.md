@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.9.25] - 2026-11-23
+
+### Features
+
+- the status says when the Claude Code mod is off, and a refused slash login names the text form maisecrets: sref login NAME (bb88a95)
+- one login asks for every scope the gateway offers, so the name service of the gateway needs no second consent (d2940ac)
+- Claude Code 2.1.330 blocks the prompt and the tool call when a maisecrets hook cannot start, crashes or times out (d24406f)
+- Codex 0.173 and newer block the prompt, the tool call or the result when a maisecrets hook fails (3212ad7)
+
+### Fixes
+
+- a gateway that refuses its name service still gives the login, and the status knows the mod after /clear (47a3df4)
+- "What the Claude Code mod does" is back in the README (719cbc3)
+
 ## [0.9.24] - 2026-11-23
 
 ### Fixes
