@@ -578,7 +578,8 @@ class GatewaySourceTests(unittest.TestCase):
     def test_the_gateways_refusals_have_their_names(self):
         self.login(self.cfg)
         cases = ((403, "x", "forbidden"), (413, "x", "too_long"), (429, "rate_limited", "rate_limited"),
-                 (503, "x", "busy"), (429, "busy", "busy"), (503, "busy", "busy"), (500, "x", "http"))
+                 (503, "temporarily_unavailable", "unavailable"), (503, "ner_unavailable", "unavailable"),
+                 (429, "busy", "busy"), (503, "busy", "busy"), (500, "x", "http"))
         for code, body, reason in cases:
             # 429 {"error": "busy"}: the gateway's one client slot since it stopped answering busy with 503
             with self.subTest(code=code, error=body):

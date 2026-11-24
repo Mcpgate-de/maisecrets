@@ -93,7 +93,10 @@ def from_config(cfg: dict, fallback: bool = False, deadline: float | None = None
             # at most 5 s: the hook's watchdog is 16 s, and the rules' scan of a large result needs its share
             timeout=min(ms, 5000) / 1000, max_chars=int(conf.get("max_chars", 20000)),
             language=str(conf.get("language", "en")), allow_network=conf.get("allow_network") is True,
-            mask=mask, ask_labels=conf.get("ask_labels") is True, private_http_only=True, secret=secret), ""
+            mask=mask, ask_labels=conf.get("ask_labels") is True, private_http_only=True, secret=secret,
+            # pieces only where the text stays on this computer (the url source and the fallback alike); a service
+            # on the network may count each piece against a quota, as the gateway does
+            pieces=remote.is_local(url)), ""
     except (ValueError, TypeError, AttributeError) as exc:
         return None, str(exc)
 
@@ -119,8 +122,10 @@ def _stored_secret(cfg: dict, url: str) -> str:
 class Layer:
     """The findings of the strings of one tool result: the rules' (as `scan` gave them) and the service's."""
 
-    def __init__(self, found: dict, status: remote.RemoteStatus):
-        self.found, self.status = found, status
+    def __init__(self, found: dict, status: remote.RemoteStatus, long: bool = False):
+        # long: the text went in more than one piece (#105); `unavailable: withhold` keeps such a text from the AI
+        # only in MR 2 of #105, as it never withheld a text over max_chars before
+        self.found, self.status, self.long = found, status, long
 
     def matches(self, text: str, scan) -> list:
         got = self.found.get(text)
@@ -245,14 +250,23 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
     # the share by length is the rate of the service on this computer; a gateway waits its own fixed time
     scaled = (kind == "tool" and conf_of(cfg).get("timeout_scales", True) is not False
               and not conf_of(cfg).get("gateway"))
+    # more than one piece: the text with its escapes as characters is longer than the service takes (as ask() cuts)
+    long = ner.pieces and len(joined) > ner.max_chars and len(remote.unescape_json(joined)[0]) > ner.max_chars
     if scaled:
-        ner.timeout = wait_ms(conf_of(cfg), len(joined)) / 1000
+        # the wait of one piece: each request of ask() waits at most this, a one-piece text as before 0.9.28
+        ner.timeout = wait_ms(conf_of(cfg), min(len(joined), ner.max_chars)) / 1000
     if deadline is None and kind == "tool":
-        # in a hook: the wait follows the hook's watchdog, not the cap of 3 to 5 s (#105, B8)
+        # in a hook: the pieces of the text together end within the hook's budget (#105, B8); each still waits at
+        # most its own wait, so a service that hangs holds a short result no longer than before
         deadline = tool_deadline(time.monotonic() - scan_began)
-    spans, status = ner.ask(joined, occupied, deadline if deadline is not None else time.monotonic() + ner.timeout)
+    asked_at = time.monotonic()
+    spans, status = ner.ask(joined, occupied, deadline if deadline is not None else asked_at + ner.timeout)
     if scaled:
-        note_rate(len(joined), status)
+        # a sample says how fast the service is: an answer of the whole text, or a timeout of a one-piece text that
+        # its own wait ended. A timeout of the hook's budget or of a later piece says nothing of the rate
+        budget = deadline is not None and deadline - asked_at < ner.timeout
+        if status.available or (not long and not budget and status.state == "unavailable"):
+            note_rate(len(joined), status)
     source = "gateway" if conf_of(cfg).get("gateway") else ("local" if remote.is_local(ner.url) else "url")
     asked = ner
     # only a local service that nothing answers for (refused: not running) hands over: never a network primary, a
@@ -264,10 +278,10 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
                                    time.monotonic() + fb.timeout)
             source, asked = "fallback", fb
     from . import ner_setup
-    checked = status.available or status.state == "partial"
-    ner_setup.log(source if checked else "rules", kind, len(joined), len(spans),
-                  why=("" if status.available else f"partial {share(status)} %: {status.reason}" if checked
-                       else (status.reason or status.state)), ms=status.ms)
+    partial = status.state == "partial"
+    ner_setup.log(source if status.available or partial else "rules", kind, len(joined), len(spans),
+                  why="" if status.available else (status.reason or status.state), ms=status.ms,
+                  share=share(status) if partial else 0)
     starts = [off for _s, off in pieces]
     added: dict = {}
     # the allow list holds for the service's names as for the rules' findings: an exact value, never a part of one
@@ -281,7 +295,7 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
                                                      b - off, score))
     for s, extra in added.items():
         found[s] = sorted(found[s] + extra, key=lambda m: (m.start, m.end))
-    return Layer(found, status)
+    return Layer(found, status, long)
 
 
 def _allowed() -> frozenset:
@@ -408,6 +422,7 @@ _TOOL_WHY = {"timeout": "no answer in time", "too_long": "the text is longer tha
              "rate_limited": "the gateway's limit per minute was reached",
              "forbidden": "the login lacks the name scope",
              "not_enabled": "the gateway offers no name service",
+             "unavailable": "the service is down",
              "setup": "the source cannot be asked; /maisecrets ner names the reason"}
 
 # the person's screen, one line per tool result: the same words for every source (a missed name must not look like a
@@ -416,7 +431,7 @@ _SCREEN_WHY = {"timeout": "did not answer in time", "too_long": "does not take a
                "refused": "is not running", "network": "could not be reached", "busy": "was busy",
                "rate_limited": "reached its limit per minute", "forbidden": "refused the login",
                "not_ours": "is not the container maisecrets started", "policy": "is at an address it may not use",
-               "not_enabled": "is not switched on at the gateway",
+               "not_enabled": "is not switched on at the gateway", "unavailable": "is down",
                "setup": "cannot be asked; /maisecrets ner names the reason"}
 
 
@@ -468,6 +483,7 @@ def note_result(layer) -> None:
     # service checked only a part of the text, `share` percent of it
     NER_DOWN["unchecked"] = layer is not None and layer.status.state in ("unavailable", "too_long", "partial")
     NER_DOWN["share"] = share(layer.status) if layer is not None and layer.status.state == "partial" else 0
+    NER_DOWN["long"] = layer is not None and layer.long
     NER_DOWN["state"] = layer.status.state if layer is not None else ""
     NER_DOWN["not_ours"] = layer is not None and layer.status.reason == "not_ours"
     NER_DOWN["why"] = (layer.status.reason or layer.status.state) if layer is not None else ""

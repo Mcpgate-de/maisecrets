@@ -1120,10 +1120,10 @@ and keeps its other keys. Written by hand, the setting looks like this:
   that grows with its length: 1.5 times the rate of this computer (ms per 1,000 characters,
   from its last answers; 60 until it has five, the rate of the reference setup) per 1,000
   characters, at most `max_timeout_ms` (3000 by default, at most 5000). `"timeout_scales": false`
-  keeps the fixed `timeout_ms`. Since 0.9.28, in a hook a tool result waits from the start of the hook's
-  watchdog up to the smaller of 8 s and half the watchdog (8 s of the 16 s of `PostToolUse`), less the time the
-  rules' scan of the result took (at least 0.5 s), in place of `max_timeout_ms`: the watchdog never fires because
-  of the name check. `ner.log` names the reason of each result that the rules took
+  keeps the fixed `timeout_ms`. This wait holds for each piece of a long text (below). Since 0.9.28, in a hook
+  the pieces of one tool result end together at the latest at the smaller of 8 s and half the watchdog (8 s of
+  the 16 s of `PostToolUse`) from the start of the hook, less the time the rules' scan of the result took (at least
+  0.5 s): the watchdog never fires because of the name check, and a short result waits as before. `ner.log` names the reason of each result that the rules took
   alone (timeout, too_long, refused …), and `/maisecrets ner` counts the reasons. A prompt waits
   `prompt_timeout_ms` (1000 by default for a service on this computer, never less than its `timeout_ms`;
   2000 in total for a service on the network, the gateway's discovery and token included, plus at most about 0.1 s that a thread needs to end; at most 5000): you wait for
@@ -1140,7 +1140,9 @@ and keeps its other keys. Written by hand, the setting looks like this:
   longer than `max_chars` goes to a service on this computer or at a URL in pieces of `max_chars` (since 0.9.28):
   cut at a line break, else at a space, with 200 characters of overlap, one after the other until the wait ends.
   A gateway answers `busy` with a time to come back; maisecrets asks again once per piece when that time and the
-  piece fit the wait, never after `rate_limited`. When the wait or a refusal leaves a rest unchecked, the line
+  piece fit the wait, never after `rate_limited` and never for an outage. A service on the network (a `url` that is
+  not on this computer, or such a fallback) gets no pieces: it may count each one against a quota.
+  `/maisecrets status` counts a text checked in part apart from the texts checked in full. When the wait or a refusal leaves a rest unchecked, the line
   under the result names the share, for example `⚠ names 70 % checked by the name service`, and the AI is told
   that the rest had the rules alone. To a gateway a text longer than `max_chars` is not sent yet: pieces would
   spend your quota of the minute.

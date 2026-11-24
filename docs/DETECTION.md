@@ -486,13 +486,18 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
   and the findings of the rules go out as filler in each piece they reach. The pieces go one after the other until
   the deadline; the secret of a container (`secret=`) is proven once per text. `pieces=False` keeps the old rule: a
   text longer than `max_chars` is not sent (`too_long`).
-- **One deadline for the whole text.** A `deadline` that the caller gives is the one end of all pieces and retries;
-  since 0.9.28 it is no longer cut to `timeout`. Without a deadline the call gets `timeout`, as before. A 504 of
-  the service (the gateway's own deadline) is the reason `timeout`.
-- **Retry-After once per piece.** A 429 or 503 that names `busy` and a time to come back (the header `Retry-After`
+- **Each piece waits at most `timeout`; the deadline ends the whole text.** Each request waits at most `timeout`
+  from its start (the first one from the start of `ask`, the proof of the secret included), so a one-piece text
+  waits as before 0.9.28 and a service that hangs holds a short text no longer. A `deadline` that the caller gives
+  can only shorten this: it is the one end of all pieces and retries of the text. Without a deadline the whole text
+  gets `timeout`, as before. A 504 of the service (the gateway's own deadline) is the reason `timeout`.
+- **Retry-After once per piece.** A 429 or 503 that names `busy` (or a 503 without an `error`, an older gateway's
+  busy slot) and a time to come back (the header `Retry-After`
   in seconds, or the body field `retry_after`) is sent again once, when the wait and the expected time of the piece
   still fit the deadline. The expected time is the measured time of the piece before it in the same text, and for the
-  first piece 60 ms per 1,000 characters times 1.5. After `rate_limited` no further piece of the text is sent.
+  first piece 60 ms per 1,000 characters times 1.5. After `rate_limited` no further piece of the text is sent. A 503
+  with another `error` (`temporarily_unavailable`, `ner_unavailable`) is an outage: the reason `unavailable`, and no
+  retry.
 - **The checked share.** `RemoteStatus.checked_to` is the offset in the text (escapes included) where the first
   unchecked character stands, `total` its length; both are 0 in a status made without them. The state is `partial`
   when `0 < checked_to < total`: the spans of the checked pieces are kept, `reason` says why the rest was not

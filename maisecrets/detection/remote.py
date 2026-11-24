@@ -417,8 +417,9 @@ class RemoteDetector:
         and no span may overlap one. Each span is (start, end, type, score), widened to whole words, in the order of
         the answers. Never raises, and never takes longer than the deadline: the request, the reading of the answer
         and the choice of spans run in a thread that ask() leaves at the deadline (a dribbled answer, a slow name
-        lookup and a valid answer that is costly to sort out all count; codex review). Without a deadline the call
-        gets `timeout`; a given deadline is the one end of the whole text, all its pieces and retries (#105).
+        lookup and a valid answer that is costly to sort out all count; codex review). Each request (the first with
+        the proof) waits at most `timeout`; `deadline`, when given, ends the whole text, all its pieces and retries,
+        earlier than their caps when it comes first (#105). Without a deadline the whole text gets `timeout`.
         `kind` ("prompt" or "result"): sent as a top-level field of an hf request, for a service that orders by it."""
         t0 = time.monotonic()
         total = len(text)
@@ -444,19 +445,24 @@ class RemoteDetector:
                 for a, b in occ if self.mask else ():
                     sent[a:b] = FILLER * (b - a)       # occupied over a cut: each piece gets its own part as filler
                 sent_text = "".join(sent)
+                # each request waits at most `timeout` from its start, the first one from the start of ask() (the
+                # proof included): a one-piece text waits as before 0.9.28. `deadline` ends the whole text
+                cap = min(deadline, t0 + self.timeout)
                 if self.__secret:
-                    self._prove(deadline, gate)    # no text goes to a listener that cannot prove the secret; once
-                    if time.monotonic() > deadline:
+                    self._prove(cap, gate)    # no text goes to a listener that cannot prove the secret; once a text
+                    if time.monotonic() > cap:
                         raise TimeoutError     # a proof after the deadline: the caller was told "timeout"
                 keeper = _Keeper(plain, occ)
                 mapped: list = []
                 took = None                    # the measured seconds of the last piece of this text
-                for p, c0, c1, e in plan_pieces(plain, self.max_chars):
+                for n, (p, c0, c1, e) in enumerate(plan_pieces(plain, self.max_chars)):
                     body = self._body(sent_text[p:e], kind)
                     began, retried = time.monotonic(), False
+                    if n:
+                        cap = min(deadline, began + self.timeout)
                     while True:
                         try:
-                            raw = self._request(body, deadline, gate)
+                            raw = self._request(body, cap, gate)
                             break
                         except _HttpStatus as exc:
                             # Retry-After once per piece, only for `busy` (the one client slot frees in a second;
@@ -471,10 +477,12 @@ class RemoteDetector:
                             retried = True
                             time.sleep(wait)
                             began = time.monotonic()
+                            cap = min(deadline, began + self.timeout)     # the second request waits its own time
                     found = self._parse(raw, e - p)
-                    # a span belongs to the piece whose core (the part without the overlap) holds its start: the
-                    # gateway's rule (sref_ner._detect), so a name on a cut is taken once, whole
-                    new = keeper.add([(p + s, p + t, ty, sc) for s, t, ty, sc in found if c0 <= p + s < c1], deadline)
+                    # a span belongs to the piece whose core (the part without the overlap) holds its start. Each piece
+                    # reads `overlap` characters past its core on both sides, so a name that starts in a core lies
+                    # whole in that piece, and a name on a cut is taken once, whole
+                    new = keeper.add([(p + s, p + t, ty, sc) for s, t, ty, sc in found if c0 <= p + s < c1], cap)
                     mapped += new if starts is None else [(starts[a], ends[b - 1], ty, sc) for a, b, ty, sc in new]
                     took = time.monotonic() - began
                     box["progress"] = (tuple(mapped), total if c1 >= len(plain) else
@@ -582,9 +590,15 @@ def _why(exc: BaseException) -> str:
         # a gateway's refusals by name (ai-gateway #1819): 403 the login lacks the name scope, 413 the text is too
         # long, 429 a limit per person, 503 the gateway's own name lookups run first, 504 its deadline passed
         code = exc.args[0] if exc.args else 0
+        error = exc.args[1] if len(exc.args) > 1 else ""
         reason = {403: "forbidden", 413: "too_long", 429: "rate_limited", 503: "busy", 504: "timeout"}.get(code, "http")
-        if len(exc.args) > 1 and exc.args[1] == "busy":
+        if error == "busy":
             reason = "busy"                  # 429 {"error": "busy"}: the one client slot, not the quota
+        elif code == 503 and error:
+            # a 503 with another error (temporarily_unavailable: the gateway's store; ner_unavailable: no service) is
+            # an outage, not a busy slot: its own reason, and no retry. Only a 503 without an error is an older
+            # gateway's busy slot
+            reason = "unavailable"
         if code == 404 and len(exc.args) > 1 and exc.args[1] == "ner_not_enabled":
             reason = "not_enabled"           # the gateway's operator has not switched name detection on
         return reason

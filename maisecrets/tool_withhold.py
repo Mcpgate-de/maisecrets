@@ -32,7 +32,11 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool, load_config) 
         return result
     why = str(_rl.NER_DOWN.get("why") or "")
     conf = _rl.conf_of(load_config())
-    withhold = conf.get("unavailable") == "withhold" and _rl.NER_DOWN.get("state") == "unavailable"
+    # a text of more than one piece whose first piece got no answer is not withheld, as a text over max_chars was
+    # not before 0.9.28: each long file would be. Withhold for such a text and for a partial one comes with MR 2
+    # of #105
+    withhold = (conf.get("unavailable") == "withhold" and _rl.NER_DOWN.get("state") == "unavailable"
+                and not _rl.NER_DOWN.get("long"))
     if withhold:
         _rl.NER_DOWN["v"] = False      # the note for the AI says the rules masked the result; none did here
     out = withheld(payload, _rl.withhold_text(why), codex) if withhold else dict(result or {})

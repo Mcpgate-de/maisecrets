@@ -1113,7 +1113,7 @@ class PiecesTests(unittest.TestCase):
         text = J([dots(700), "\n", dots(900)])
         busy = (429, {"error": "busy", "retry_after": 0.1}, {}, 0.0)
         svc = self.svc([(200, [], {}, 0.4), busy])
-        _spans, status = self.ask(svc, text, wait=0.4 + 0.3)
+        _spans, status = self.ask(svc, text, wait=0.4 + 0.3, timeout=2.0)
         self.assertEqual((status.state, status.reason, len(svc.received)), ("partial", "busy", 2))
 
     def test_retry_after_comes_from_the_header_or_from_the_body(self):
@@ -1150,13 +1150,72 @@ class PiecesTests(unittest.TestCase):
         _spans, status = self.ask(svc, f"ask {NAME} now")
         self.assertEqual((status.state, status.reason), ("unavailable", "timeout"))
 
-    def test_a_given_deadline_is_not_cut_to_the_timeout(self):
+    def test_each_piece_waits_at_most_its_own_timeout_and_the_deadline_ends_the_text(self):
+        # review H1: the deadline bounds the sum of the pieces; a piece never waits longer than `timeout`
+        text = J([dots(700), "\n", dots(700), "\n", dots(700)])
+        pieces = len(rm.plan_pieces(text, SIZE))
+        svc = self.svc([(200, [], {}, 0.3)] * pieces)
+        _spans, status = self.ask(svc, text, wait=3.0, timeout=0.6)
+        self.assertEqual((status.state, len(svc.received)), ("ok", pieces), "together longer than one timeout")
+        t = time.monotonic()
+        svc = self.svc([(200, None, {}, 3.0)])            # a service that hangs
+        _spans, status = self.ask(svc, f"ask {NAME} now", wait=3.0, timeout=0.2)
+        self.assertLess(time.monotonic() - t, 1.0, "a short text waits its timeout, not the deadline")
+        self.assertEqual((status.state, status.reason), ("unavailable", "timeout"))
+        t = time.monotonic()
+        svc = self.svc([(200, [], {}, 0.0), (200, None, {}, 3.0)])      # the second piece hangs
+        _spans, status = self.ask(svc, text, wait=3.0, timeout=0.3)
+        self.assertLess(time.monotonic() - t, 1.5, "a later piece waits its own timeout, not the deadline")
+        self.assertEqual((status.state, status.reason), ("partial", "timeout"))
         svc = self.svc([(200, None, {}, 0.5)])
-        spans, status = self.ask(svc, f"ask {NAME} now", wait=2.0, timeout=0.1)
-        self.assertEqual((status.state, len(spans)), ("ok", 1))
+        _spans, status = self.ask(svc, f"ask {NAME} now", wait=0.2, timeout=2.0)
+        self.assertEqual(status.reason, "timeout", "a deadline before the timeout ends the request")
         svc = self.svc([(200, None, {}, 0.5)])
         det = rm.RemoteDetector(svc.url, timeout=0.1)
         self.assertEqual(det.ask(f"ask {NAME} now", [])[1].reason, "timeout", "without a deadline: the timeout")
+
+    def test_a_503_that_names_another_error_is_no_busy_slot_and_gets_no_retry(self):
+        # gateway review G1: temporarily_unavailable (its store) with Retry-After 5 must not cost 5 s
+        for error in ("temporarily_unavailable", "ner_unavailable"):
+            with self.subTest(error):
+                svc = self.svc([(503, {"error": error}, {"Retry-After": "0.1"}, 0.0)])
+                t = time.monotonic()
+                _spans, status = self.ask(svc, f"ask {NAME} now", wait=3.0, timeout=2.0)
+                self.assertEqual((status.state, status.reason, len(svc.received)), ("unavailable", "unavailable", 1))
+                self.assertLess(time.monotonic() - t, 0.5)
+        svc = self.svc([(503, {"error": "temporarily_unavailable"}, {"Retry-After": "5"}, 0.0)])
+        t = time.monotonic()
+        _spans, status = self.ask(svc, f"ask {NAME} now", wait=8.0, timeout=2.0)
+        self.assertLess(time.monotonic() - t, 1.0, "no wait of 5 s for an outage")
+        self.assertNotEqual(status.reason, "busy")
+        svc = self.svc([(503, {}, {"Retry-After": "0.1"}, 0.0)])       # an older gateway's busy slot: no error
+        spans, status = self.ask(svc, f"ask {NAME} now", wait=2.0, timeout=1.0)
+        self.assertEqual((status.state, len(svc.received)), ("ok", 2))
+
+    def test_a_second_busy_of_a_piece_gets_no_second_retry(self):
+        # review L5: two busy answers in a row with time to spare: one retry, two requests, the piece unchecked
+        svc = self.svc([BUSY, BUSY])
+        _spans, status = self.ask(svc, f"ask {NAME} now", wait=3.0, timeout=1.0)
+        self.assertEqual((status.state, status.reason, len(svc.received)), ("unavailable", "busy", 2))
+
+    def test_every_body_holds_at_most_max_chars_code_points(self):
+        # gateway review G3: the gateway counts the code points of the decoded inputs; escapes and characters
+        # outside the BMP (two escapes, one character) must not make a piece longer
+        emoji = "\\ud83d" + "\\ude00"
+        unit = J(["r\\u00e9sum\\u00e9 ", emoji, " line", "\\r\\n"])
+        plain_unit = rm.unescape_json(unit)[0]
+        text = unit * (SIZE // len(plain_unit))
+        text += "x" * (SIZE + 1 - len(rm.unescape_json(text)[0]))
+        plain = rm.unescape_json(text)[0]
+        self.assertEqual(len(plain), SIZE + 1, "max_chars + 1 code points")
+        self.assertLess(len(plain), len(text), "premise: the escapes make the text longer than its characters")
+        self.assertTrue(any(ord(c) > 0xFFFF for c in plain), "premise: a character outside the BMP")
+        svc = self.svc()
+        _spans, status = self.ask(svc, text, wait=3.0, timeout=2.0)
+        self.assertEqual(status.state, "ok")
+        self.assertGreater(len(svc.received), 1)
+        for r in svc.received:
+            self.assertLessEqual(len(r["inputs"]), SIZE)
 
     def test_kind_goes_out_only_when_given_and_only_in_the_hf_format(self):
         svc = self.svc()
