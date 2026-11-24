@@ -65,7 +65,12 @@ plugin blocks every prompt and names the missing piece.
 
 ## Update and uninstall
 
+Claude Code does not update a marketplace outside Anthropic's by itself, so new sessions keep starting the old
+version: turn on auto-update for maisecrets in `/plugin` under Marketplaces, or fetch it before the update. A
+running session keeps its version until it restarts.
+
 ```bash
+claude plugin marketplace update maisecrets            # fetch the newest release first
 claude plugin update maisecrets@maisecrets             # or a new session with an org-synced plugin
 claude plugin uninstall maisecrets@maisecrets
 codex plugin remove maisecrets@maisecrets
@@ -160,15 +165,19 @@ In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. Th
   `/maisecrets ner`, or a server you added that offers vault references or Sensitive References
   (`/maisecrets sref login`). The details:
   [What the plugin runs, sends and fetches](docs/HOW-IT-WORKS.md#what-the-plugin-runs-sends-and-fetches).
+- **The hooks on results and prompts:** `session.append` masks a tool result that the maisecrets result hook did
+  not check, before Claude Code keeps it; if that fails, it withholds the output. `classic.PostToolUse` and
+  `classic.PostToolUseFailure` give that hook a one-time code and take its proof line out. `tool.run` notes the
+  references a call used. `classic.UserPromptSubmit` shows a line when the prompt hook did not run.
 - **The demo** (`/maisecrets demo on`): in a session in the demo, the `http.fetch` hook refuses every request that
   Claude Code itself sends (the turns, and side requests such as the title or the next-prompt guess), and each model
   step gets one line from the mod instead of a request. The `session.compact` hook skips a compaction in that
   session, because a compaction is a model request of its own; the conversation stays as it is. When the plugin's
   Python says that a session is not in the demo, these hooks let its requests and compactions go on unchanged. When
   the Python gives no answer, they refuse, so nothing goes out by mistake.
-- **Prompt suggestions in the demo:** the mod switches `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` off for the demo.
-  After the demo, it sets the default of Claude Code. A value that you set before the demo is not kept. If that
-  reset fails, suggestions stay off until the next session.
+- **Prompt suggestions in the demo:** the mod sets `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` off for the demo, and
+  after it back to the default of Claude Code (not to a value you set). If that reset fails, suggestions stay off
+  until the next session.
 
 ## Documentation by reader
 
