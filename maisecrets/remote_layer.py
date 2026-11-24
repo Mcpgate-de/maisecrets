@@ -29,6 +29,12 @@ SEPARATOR = "\n\n"       # between the strings of one tool result: a line break 
 DEFAULT_RATE = 60.0      # netcup RS 2000 G12 (AMD EPYC 9645, Zen 5), --cpus 4 --memory 1536m: 54 to 64, median 57
 SAFETY = 1.5
 MAX_TIMEOUT_MS = 3000    # the default cap; the setting may raise it to 5,000 (the hook's watchdog is 16 s)
+# In a hook (#105, B8) a tool result waits from the start of the hook's watchdog: min(TOOL_WAIT_MAX_S, half the
+# watchdog), less a reserve for the work after the name check (the redaction, a store for each new name). The reserve
+# is the time the rules' scan of this result took, at least RESERVE_MIN_S: the walk after the check goes over the
+# same text. The watchdog must never fire because of the name check; its other half stays for that work.
+TOOL_WAIT_MAX_S = 8.0
+RESERVE_MIN_S = 0.5
 RATE_SAMPLES, RATE_MIN, RATE_MIN_CHARS = 40, 5, 500
 
 
@@ -72,7 +78,10 @@ def from_config(cfg: dict, fallback: bool = False, deadline: float | None = None
                 timeout=min(ms, 5000) / 1000, max_chars=min(int(conf.get("max_chars", max_chars)), max_chars),
                 language=str(conf.get("language", "en")), allow_network=True, mask=True,
                 ask_labels=conf.get("ask_labels") is True, private_http_only=True, token=token,
-                cafile=str(cfg.get("client_vault_cafile") or ""))
+                cafile=str(cfg.get("client_vault_cafile") or ""),
+                # a long text in pieces spends the person's quota of the minute at the gateway: off until the
+                # gateway shares its quota under load (ai-gateway #2141); a text over max_chars stays too_long there
+                pieces=False)
         try:
             return ner_gateway.detector(cfg, conf, make, deadline)
         except (ValueError, TypeError, AttributeError, OSError) as exc:
@@ -175,6 +184,25 @@ def note_rate(chars: int, status) -> None:
         pass                 # the default rate and the old samples still give a wait
 
 
+def tool_deadline(reserve_s: float) -> float | None:
+    """The end of a tool result's wait for the name service in a hook: from the start of its watchdog,
+    min(TOOL_WAIT_MAX_S, half the watchdog), less `reserve_s` (at least RESERVE_MIN_S). None outside a hook."""
+    from .vault import hook_window
+    window = hook_window()
+    if window is None:
+        return None
+    start, seconds = window
+    return start + min(TOOL_WAIT_MAX_S, seconds / 2) - max(RESERVE_MIN_S, reserve_s)
+
+
+def share(status) -> int:
+    """The checked share of a `partial` status in whole percent, 1 to 99 (never 100 for a rest, never 0 for a check)."""
+    total = getattr(status, "total", 0) or 0
+    if total <= 0:
+        return 0
+    return max(1, min(99, int(100 * getattr(status, "checked_to", 0) / total)))
+
+
 def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = True,
             kind: str = "tool", deadline: float | None = None) -> Layer | None:
     """One request for all strings of a tool result. `scan(text)` gives the rules' findings of a string; `protect(text)`
@@ -202,6 +230,7 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
     found: dict = {}
     pieces: list = []          # (text, offset in the joined text)
     at = 0
+    scan_began = time.monotonic()
     for s in dict.fromkeys(strings):
         found[s] = list(scan(s))
         if s.strip():
@@ -218,6 +247,9 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
               and not conf_of(cfg).get("gateway"))
     if scaled:
         ner.timeout = wait_ms(conf_of(cfg), len(joined)) / 1000
+    if deadline is None and kind == "tool":
+        # in a hook: the wait follows the hook's watchdog, not the cap of 3 to 5 s (#105, B8)
+        deadline = tool_deadline(time.monotonic() - scan_began)
     spans, status = ner.ask(joined, occupied, deadline if deadline is not None else time.monotonic() + ner.timeout)
     if scaled:
         note_rate(len(joined), status)
@@ -228,11 +260,14 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
     if status.state == "unavailable" and status.reason == "refused" and use_fallback and source == "local":
         fb, _why = from_config(cfg, fallback=True)
         if fb is not None:
-            spans, status = fb.ask(joined, occupied, time.monotonic() + fb.timeout)
+            spans, status = fb.ask(joined, occupied, deadline if deadline is not None and kind == "tool" else
+                                   time.monotonic() + fb.timeout)
             source, asked = "fallback", fb
     from . import ner_setup
-    ner_setup.log(source if status.available else "rules", kind, len(joined), len(spans),
-                  why="" if status.available else (status.reason or status.state), ms=status.ms)
+    checked = status.available or status.state == "partial"
+    ner_setup.log(source if checked else "rules", kind, len(joined), len(spans),
+                  why=("" if status.available else f"partial {share(status)} %: {status.reason}" if checked
+                       else (status.reason or status.state)), ms=status.ms)
     starts = [off for _s, off in pieces]
     added: dict = {}
     # the allow list holds for the service's names as for the rules' findings: an exact value, never a part of one
@@ -316,12 +351,15 @@ def prompt_names(cfg: dict, prompt: str, matches: list, protect_of, typed: bool 
     if layer is None:
         return [], ""
     st = layer.status
-    return [m for m in layer.found.get(prompt, []) if m.kind.startswith("remote:")], (
-        "" if st.available else (st.reason or st.state))
+    why = "" if st.available else (f"partial:{share(st)}:{st.reason}" if st.state == "partial"
+                                   else (st.reason or st.state))
+    return [m for m in layer.found.get(prompt, []) if m.kind.startswith("remote:")], why
 
 
 UNCHECKED_NOTE = ("maisecrets: the names in this prompt were not checked by the name service ({why}); the rules "
                   "ran. /maisecrets ner shows the service. This note comes once per session.")
+PARTIAL_NOTE = ("maisecrets: the name service checked {share} % of this prompt ({why} for the rest); the rules ran "
+                "on all of it. /maisecrets ner shows the service. This note comes once per session.")
 _WHY = {"timeout": "no answer in time", "too_long": "the prompt is longer than max_chars", "refused": "not running",
         "unauthorized": "it wants another bearer", "policy": "the address is not on this computer"}
 
@@ -333,6 +371,9 @@ def unchecked_note(session: str | None, why: str) -> str | None:
     from .vault import HOME
     if not (session and ner_setup.claim_down_note(HOME, f"{session}:prompt")):
         return None
+    if why.startswith("partial:"):
+        _p, pct, reason = (why.split(":", 2) + ["", ""])[:3]
+        return PARTIAL_NOTE.format(share=pct, why=_WHY.get(reason, "no usable answer"))
     return UNCHECKED_NOTE.format(why=_WHY.get(why, "it gave no usable answer"))
 
 
@@ -379,21 +420,29 @@ _SCREEN_WHY = {"timeout": "did not answer in time", "too_long": "does not take a
                "setup": "cannot be asked; /maisecrets ner names the reason"}
 
 
-def screen_line(why: str, withheld: bool) -> str:
-    """The line on the person's screen for a tool result whose names the service did not check."""
+def screen_line(why: str, withheld: bool, part: int = 0) -> str:
+    """The line on the person's screen for a tool result whose names the service did not check, or (`part`, the
+    checked share in percent of a `partial` status) did not check in full."""
     said = _SCREEN_WHY.get(why, "gave no usable answer")
+    if part:
+        return (f"⚠ names {part} % checked by the name service; for the rest it {said}, and the rules alone masked "
+                "the rest of this result.")
     if withheld:
         return (f"⚠ maisecrets withheld this result from the AI: names not checked, the name service {said}. "
                 "/maisecrets ner unavailable rules lets the rules alone mask it.")
     return f"⚠ names not checked: the name service {said}; the rules masked this result."
 
 
-def unchecked_context(why: str) -> str:
+def unchecked_context(why: str, part: int = 0) -> str:
     """The note for the AI at each tool result whose names the service did not check. It says nothing of the person's
     screen: a line there comes once per session and cause, and not at all in a subagent or a headless run
     (ner_health), so the AI must not claim one. Without the note the AI told the person that names were masked
     (live test of #33)."""
     said = _TOOL_WHY.get(why, "no usable answer")
+    if part:
+        return (f"maisecrets: the name service checked only {part} % of this tool result ({said} for the rest); the "
+                "rules alone masked the rest, so a person's name there may stand in clear text; do not say that the "
+                "names in it were masked.")
     return (f"maisecrets: the name service did not check the names in this tool result ({said}); the rules alone "
             "masked it, so a person's name in it may stand in clear text; do not say that the names in it were "
             "masked.")
@@ -415,8 +464,10 @@ NER_DOWN = {"v": False}
 
 def note_result(layer) -> None:
     NER_DOWN["v"] = layer is not None and layer.status.state == "unavailable"
-    # the names were not checked: the service gave no answer, or the text was longer than it takes
-    NER_DOWN["unchecked"] = layer is not None and layer.status.state in ("unavailable", "too_long")
+    # the names were not checked: the service gave no answer, or the text was longer than it takes; or (partial) the
+    # service checked only a part of the text, `share` percent of it
+    NER_DOWN["unchecked"] = layer is not None and layer.status.state in ("unavailable", "too_long", "partial")
+    NER_DOWN["share"] = share(layer.status) if layer is not None and layer.status.state == "partial" else 0
     NER_DOWN["state"] = layer.status.state if layer is not None else ""
     NER_DOWN["not_ours"] = layer is not None and layer.status.reason == "not_ours"
     NER_DOWN["why"] = (layer.status.reason or layer.status.state) if layer is not None else ""

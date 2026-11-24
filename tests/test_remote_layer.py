@@ -186,12 +186,59 @@ class RemoteLayerTests(unittest.TestCase):
         self.addCleanup(Path(HOME, "ner.log").unlink, True)
         _reset(remote_detector={"url": slow.url, "format": "hf", "timeout_ms": 100, "timeout_scales": False})
         _post({"stdout": f"ask {NAME}\n", "stderr": ""})
-        _reset(remote_detector={"url": self.svc.url, "format": "hf", "max_chars": 10})
+        # a text the service refuses as too long (413): a local service takes a long text in pieces since #105
+        long_ = Service("hf", answer=self.names, status=413)
+        self.addCleanup(long_.close)
+        _reset(remote_detector={"url": long_.url, "format": "hf"})
         _post({"stdout": f"ask {NAME} about the long text\n", "stderr": ""})
         lines = [json.loads(x) for x in Path(HOME, "ner.log").read_text().splitlines()]
         self.assertEqual([(d["source"], d.get("why")) for d in lines], [("rules", "timeout"), ("rules", "too_long")])
         self.assertGreaterEqual(lines[0]["ms"], 90)
         self.assertIn("rules 2 (too_long 1, timeout 1)", ner_setup.counts_line())
+
+    def test_a_tool_result_in_a_hook_waits_from_the_watchdog_start_not_the_cap(self):
+        # #105, B8: min(8 s, half the watchdog) from its start, less the reserve; outside a hook the old wait
+        from maisecrets import remote_layer, vault
+        self.addCleanup(vault.hook_deadline, None)
+        vault.hook_deadline(16.0)
+        start = vault.hook_window()[0]
+        self.assertAlmostEqual(remote_layer.tool_deadline(0.0), start + 8.0 - remote_layer.RESERVE_MIN_S)
+        self.assertAlmostEqual(remote_layer.tool_deadline(1.5), start + 8.0 - 1.5, msg="a slow scan: its own time")
+        slow = Service("hf", answer=self.names, delay=1.0)
+        self.addCleanup(slow.close)
+        _reset(remote_detector={"url": slow.url, "format": "hf", "timeout_ms": 100, "timeout_scales": False})
+        vault.hook_deadline(6.0)       # the tests' watchdog: 3 s, less 0.5 s, from now
+        self.assertAlmostEqual(remote_layer.tool_deadline(0.0), vault.hook_window()[0] + 2.5)
+        out = _out(_post({"stdout": f"ask {NAME}\n", "stderr": ""}))
+        self.assertTrue(out and NAME not in json.dumps(out), "the answer after 1 s came and masked the name")
+        vault.hook_deadline(None)
+        self.assertIsNone(remote_layer.tool_deadline(0.0))
+        self.assertEqual(_post({"stdout": f"ask {NAME}\n", "stderr": ""}).get("hookSpecificOutput", {}).get(
+            "updatedToolOutput"), None, "outside a hook: the 100 ms of timeout_ms, the rules alone")
+
+    def test_a_result_checked_in_part_names_the_share_to_the_model_and_the_person(self):
+        # #105, B11: the first piece answered, the second did not in time
+        from test_remote_detector import Scripted
+        svc = Scripted([(200, None, {}, 0.0), (200, None, {}, 3.0)])
+        self.addCleanup(svc.close)
+        _reset(remote_detector={"url": svc.url, "format": "hf", "max_chars": 1000, "timeout_ms": 1000,
+                                "timeout_scales": False})
+        text = f"ask {NAME} first\n" + "row of the log\n" * 100
+
+        def guarded(out: str) -> dict:          # the path that adds the notes (hooks._with_unchecked_names)
+            return hooks._post_tool_guarded_rest({
+                "hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                "tool_input": {"command": "cat notes.txt"}, "tool_response": {"stdout": out, "stderr": ""}})
+        answer = guarded(text)
+        self.assertEqual(len(svc.received), 2)
+        self.assertNotIn(NAME, json.dumps(answer), "the name of the checked piece is masked")
+        line = answer.get("systemMessage", "")
+        share = re.search(r"names (\d+) % checked by the name service", line)
+        self.assertTrue(share, line)
+        self.assertTrue(0 < int(share.group(1)) < 100)
+        note = answer["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(f"checked only {share.group(1)} % of this tool result (no answer in time for the rest)", note)
+        self.assertNotIn("checked", guarded("short\n").get("systemMessage", ""), "a full check: no share")
 
     def test_the_wait_is_capped_at_five_seconds(self):
         from maisecrets import remote_layer

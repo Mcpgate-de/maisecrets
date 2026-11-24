@@ -293,6 +293,14 @@ class GatewaySourceTests(unittest.TestCase):
         self.assertEqual([TEXT[s:e] for s, e, _t, _sc in spans], ["Okafor"])
         self.assertEqual(self.srv.ner_texts, [TEXT])
 
+    def test_a_text_over_max_chars_is_not_sent_in_pieces_to_the_gateway(self):
+        # #105: pieces would spend the person's quota of the minute; off until the gateway shares it (ai-gateway #2141)
+        self.login(self.cfg)
+        det, _why = remote_layer.from_config(self.cfg)
+        self.assertFalse(det.pieces)
+        spans, status = det.ask("a" * (det.max_chars + 1), [])
+        self.assertEqual((spans, status.state, self.srv.ner_texts), ([], "too_long", []))
+
     def test_a_login_without_the_name_scope_gives_the_reason_and_sends_nothing(self):
         self.older_login()
         det, why = remote_layer.from_config(self.cfg)
