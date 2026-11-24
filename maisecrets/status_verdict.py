@@ -177,6 +177,29 @@ def mod_verdict(log: Path, sessions, client: str | None) -> Check | None:
                  MOD_NOTE)
 
 
+def ran_since(log: Path, session, event: str, since) -> bool:
+    """Whether hooks.log holds a row of `event` for this session at or after `since` (epoch seconds). A row's time is
+    cut to whole seconds, so a row of the second of `since` counts. A row of the mod is no hook run (last_runs)."""
+    if not isinstance(session, str) or not session:
+        return False
+    try:
+        floor = int(float(since))
+    except (TypeError, ValueError, OverflowError):
+        floor = 0
+    return last_runs(log, session).get(event, -1) >= floor
+
+
+def hooks_watch(payload: dict) -> dict:
+    """The mod's question a moment after a person's prompt went on to the model (claude-mod/maisecrets-mod.mjs, the
+    hooks watch): did the prompt hook of this session leave its row since the prompt (`since`)? {"ran": bool}, or
+    {"ran": None} where the mod must say nothing: in Cowork, as mod_verdict. Writes nothing."""
+    from . import cowork
+    if cowork.active():
+        return {"ran": None}
+    from .home import HOME
+    return {"ran": ran_since(HOME / "hooks.log", payload.get("session_id"), "user-prompt", payload.get("since"))}
+
+
 # --- the version --------------------------------------------------------------------------------------------------
 
 def installed_version(root: Path) -> str:

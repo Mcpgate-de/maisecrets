@@ -140,20 +140,21 @@ In Claude Code (`/ms NAME` is the same; `/maisecrets:NAME` needs the mod; a chan
 
 In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. These are the facts of its code:
 
-- **What it reads:** the prompts you send (to put placeholders in place of values), and the messages and tool rows
-  that Claude Code draws on your screen (to show you the values there). What it draws on the screen never goes to
-  the model. It also reads the session id and the working directory of the session, and the kind of screen and
+- **What it reads:** the prompts you send (to put placeholders in place of values), each tool result before
+  Claude Code keeps it (to mask what the hook missed), and the messages and tool rows that Claude Code draws on your
+  screen (to show you the values). What it draws on the screen never goes to the model. It also reads the session id and the working directory of the session, and the kind of screen and
   whether a message is in view (to draw values only there). It keeps one counter of its own in the Claude Code
   store of the plugin: how often it showed its hint about values on the screen. The screen facts and the counter
-  stay on this computer and go to no program.
+  stay on this computer.
 - **What it starts:** the mod itself starts only the plugin's `hooks/dispatch.py`, in the plugin folder, with a
   fixed command line: `python3 hooks/dispatch.py mod-prompt` (or `mod-values`, `mod-reveal`, `mod-demo`,
-  `mod-settings`). On Windows it tries `py -3 hooks/dispatch.py …` and then `python hooks/dispatch.py …` with the
-  same last word, because Windows often has no `python3`. It does not start a shell. One panel action starts more:
-  when you choose the local name service in the `/maisecrets` panel, that Python starts another Python, which starts
-  the name service container with Docker or Podman.
-- **What it sends:** the text of the question (a prompt, the keys or references to show, a panel action), with the
-  session id and, for a prompt, the working directory and where the prompt came from (for example the prompt box or
+  `mod-settings`, `mod-result`). On Windows it tries `py -3`, then `python`, with the same arguments, because
+  Windows often has no `python3`. It does not start a shell. One panel action starts more: for the local name
+  service in the `/maisecrets` panel, that Python starts another Python, which starts its container with Docker or
+  Podman.
+- **What it sends:** the text of the question (a prompt, a tool result, the keys or references to show, a panel
+  action), with the
+  session id and, for a prompt, the working directory and where the prompt came from (the prompt box or
   Remote Control), goes to that local Python process on stdin, as JSON. The mod itself makes no network request.
   The Python process sends text off this computer only to a service you set up: the name service of
   `/maisecrets ner`, or a server you added that offers vault references or Sensitive References
@@ -190,14 +191,132 @@ Apache-2.0. The licensor is named in `NOTICE`; the vendored rule sets carry thei
 
 ## Moved sections
 
-These sections moved. An old link to one of them lands here.
+The sections below moved to the documents by reader. Each heading keeps the old link to its section.
 
-**docs/USING.md:** <a name="quick-start"></a>[Quick start](docs/USING.md#quick-start) · <a name="what-it-looks-like"></a>[What it looks like](docs/USING.md#what-it-looks-like) · <a name="secret-hygiene-skill"></a>[Secret hygiene skill](docs/USING.md#secret-hygiene-skill) · <a name="options"></a>[Options](docs/USING.md#options) · <a name="settings-you-decide"></a>[Settings you decide](docs/USING.md#settings-you-decide) · <a name="where-your-secrets-went"></a>[Where your secrets went](docs/USING.md#where-your-secrets-went) · <a name="vault"></a>[Vault](docs/USING.md#vault) · <a name="check-a-value-first-ms"></a>[Check a value first: ms:(…)](docs/USING.md#check-a-value-first-ms) · <a name="handing-a-value-to-claude-on-purpose"></a>[Handing a value to Claude on purpose](docs/USING.md#handing-a-value-to-claude-on-purpose) · <a name="reporting-a-wrong-detection"></a>[Reporting a wrong detection](docs/USING.md#reporting-a-wrong-detection) · <a name="reporting-an-internal-failure"></a>[Reporting an internal failure](docs/USING.md#reporting-an-internal-failure) · <a name="test-data-that-maisecrets-leaves-alone"></a>[Test data that maisecrets leaves alone](docs/USING.md#test-data-that-maisecrets-leaves-alone) · <a name="pdfs-and-images"></a>[PDFs and images](docs/USING.md#pdfs-and-images) · <a name="terms-names-case-numbers-customer-names"></a>[Terms: names, case numbers, customer names](docs/USING.md#terms-names-case-numbers-customer-names)
+### Quick start
 
-**docs/HOW-IT-WORKS.md:** <a name="how-it-works"></a>[How it works](docs/HOW-IT-WORKS.md#how-it-works) · <a name="status"></a>[Status](docs/HOW-IT-WORKS.md#status) · <a name="what-the-plugin-runs-sends-and-fetches"></a>[What the plugin runs, sends and fetches](docs/HOW-IT-WORKS.md#what-the-plugin-runs-sends-and-fetches) · <a name="invisible-characters"></a>[Invisible characters](docs/HOW-IT-WORKS.md#invisible-characters) · <a name="disguised-values-in-tool-results"></a>[Disguised values in tool results](docs/HOW-IT-WORKS.md#disguised-values-in-tool-results) · <a name="password-exports-in-tool-results"></a>[Password exports in tool results](docs/HOW-IT-WORKS.md#password-exports-in-tool-results) · <a name="gates-around-a-resolve"></a>[Gates around a resolve](docs/HOW-IT-WORKS.md#gates-around-a-resolve) · <a name="detection-rules"></a>[Detection rules](docs/HOW-IT-WORKS.md#detection-rules)
+Moved to [docs/USING.md](docs/USING.md#quick-start).
 
-**docs/CLIENTS.md:** <a name="client-support"></a>[Client support](docs/CLIENTS.md#client-support)
+### How it works
 
-**docs/ADMIN.md:** <a name="for-administrators"></a>[For administrators](docs/ADMIN.md#for-administrators) · <a name="ssh-consent-optional"></a>[SSH consent (optional)](docs/ADMIN.md#ssh-consent-optional) · <a name="rehydration-policy-optional"></a>[Rehydration policy (optional)](docs/ADMIN.md#rehydration-policy-optional) · <a name="rules-of-your-own"></a>[Rules of your own](docs/ADMIN.md#rules-of-your-own) · <a name="values-from-your-own-tools"></a>[Values from your own tools](docs/ADMIN.md#values-from-your-own-tools) · <a name="vault-references"></a>[Vault references](docs/ADMIN.md#vault-references) · <a name="sensitive-references"></a>[Sensitive References](docs/ADMIN.md#sensitive-references) · <a name="names-from-a-service-optional"></a>[Names from a service (optional)](docs/ADMIN.md#names-from-a-service-optional)
+Moved to [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#how-it-works).
 
-**docs/KNOWN-GAPS.md:** <a name="known-gaps-measured-or-documented"></a>[Known gaps (measured or documented)](docs/KNOWN-GAPS.md#known-gaps-measured-or-documented)
+### What it looks like
+
+Moved to [docs/USING.md](docs/USING.md#what-it-looks-like).
+
+### Status
+
+Moved to [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#status).
+
+### Client support
+
+Moved to [docs/CLIENTS.md](docs/CLIENTS.md#client-support).
+
+### For administrators
+
+Moved to [docs/ADMIN.md](docs/ADMIN.md#for-administrators).
+
+### What the plugin runs, sends and fetches
+
+Moved to [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#what-the-plugin-runs-sends-and-fetches).
+
+### Secret hygiene skill
+
+Moved to [docs/USING.md](docs/USING.md#secret-hygiene-skill).
+
+### Options
+
+Moved to [docs/USING.md](docs/USING.md#options).
+
+### Settings you decide
+
+Moved to [docs/USING.md](docs/USING.md#settings-you-decide).
+
+### Where your secrets went
+
+Moved to [docs/USING.md](docs/USING.md#where-your-secrets-went).
+
+### Vault
+
+Moved to [docs/USING.md](docs/USING.md#vault).
+
+### Check a value first: ms:(…)
+
+Moved to [docs/USING.md](docs/USING.md#check-a-value-first-ms).
+
+### Handing a value to Claude on purpose
+
+Moved to [docs/USING.md](docs/USING.md#handing-a-value-to-claude-on-purpose).
+
+### Invisible characters
+
+Moved to [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#invisible-characters).
+
+### Disguised values in tool results
+
+Moved to [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#disguised-values-in-tool-results).
+
+### Password exports in tool results
+
+Moved to [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#password-exports-in-tool-results).
+
+### Reporting a wrong detection
+
+Moved to [docs/USING.md](docs/USING.md#reporting-a-wrong-detection).
+
+### Reporting an internal failure
+
+Moved to [docs/USING.md](docs/USING.md#reporting-an-internal-failure).
+
+### Gates around a resolve
+
+Moved to [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#gates-around-a-resolve).
+
+### SSH consent (optional)
+
+Moved to [docs/ADMIN.md](docs/ADMIN.md#ssh-consent-optional).
+
+### Rehydration policy (optional)
+
+Moved to [docs/ADMIN.md](docs/ADMIN.md#rehydration-policy-optional).
+
+### Test data that maisecrets leaves alone
+
+Moved to [docs/USING.md](docs/USING.md#test-data-that-maisecrets-leaves-alone).
+
+### Detection rules
+
+Moved to [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#detection-rules).
+
+### Rules of your own
+
+Moved to [docs/ADMIN.md](docs/ADMIN.md#rules-of-your-own).
+
+### PDFs and images
+
+Moved to [docs/USING.md](docs/USING.md#pdfs-and-images).
+
+### Terms: names, case numbers, customer names
+
+Moved to [docs/USING.md](docs/USING.md#terms-names-case-numbers-customer-names).
+
+### Values from your own tools
+
+Moved to [docs/ADMIN.md](docs/ADMIN.md#values-from-your-own-tools).
+
+### Vault references
+
+Moved to [docs/ADMIN.md](docs/ADMIN.md#vault-references).
+
+### Sensitive References
+
+Moved to [docs/ADMIN.md](docs/ADMIN.md#sensitive-references).
+
+### Names from a service (optional)
+
+Moved to [docs/ADMIN.md](docs/ADMIN.md#names-from-a-service-optional).
+
+### Known gaps (measured or documented)
+
+Moved to [docs/KNOWN-GAPS.md](docs/KNOWN-GAPS.md#known-gaps-measured-or-documented).
