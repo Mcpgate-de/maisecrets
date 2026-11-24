@@ -171,7 +171,8 @@ In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. Th
   Python says that a session is not in the demo, these hooks let its requests and compactions go on unchanged. When
   the Python gives no answer, they refuse, so nothing goes out by mistake.
 - **Prompt suggestions in the demo:** the mod sets `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` off for the demo, and
-  after it back to the default of Claude Code (not to a value you set).
+  after it back to the default of Claude Code (not to a value you set). If that reset fails, suggestions stay off
+  until the next session.
 
 ## Documentation by reader
 
