@@ -100,6 +100,7 @@ class SrefServer:
         self.ner_texts: list = []        # every text the name endpoint got
         self.ner_word = "Okafor"         # the endpoint finds this word as a person
         self.ner_delay = 0.0             # seconds the endpoint waits before it answers
+        self.ner_meta: dict = {}         # more fields of the name block (#105: ner_pieces, ner_deadline_ms), as given
         # RESOLVER-PROFILE 12.4 (SC-28): a success names the audit event of the release; a refusal never does. "auto":
         # a new id per success (kept in `audit_ids`); None: no field, as an older gateway; anything else as it is
         self.audit_id: object = "auto"
@@ -175,7 +176,8 @@ class SrefServer:
                                                      "ner_scope": NER_SCOPE, "ner_format": "hf",
                                                      "ner_max_chars": 20000, "ner_labels": ["PER", "ORG", "LOC"],
                                                      "ner_status_endpoint":
-                                                         server.url + "/sensitive-references/ner/status"}
+                                                         server.url + "/sensitive-references/ner/status",
+                                                     **server.ner_meta}
                                                     if server.ner else {}),
                                                  **(server._deposit_meta() if server.deposit else {}),
                                                  "status": "experimental"}})

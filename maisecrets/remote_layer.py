@@ -73,16 +73,21 @@ def from_config(cfg: dict, fallback: bool = False, deadline: float | None = None
     if gateway:
         from . import ner_gateway
 
-        def make(endpoint: str, token: str, max_chars: int):
+        def make(endpoint: str, token: str, max_chars: int, pieces: bool = False, deadline_ms: int | None = None):
+            # one request waits the person's timeout_ms; without one, the gateway's own deadline plus a margin (it
+            # answers 504 then, ai-gateway #2141), never above the hook's budget for a tool result; else 3,000 ms
+            wait = (min(ms, 5000) if "timeout_ms" in conf or deadline_ms is None else
+                    min(deadline_ms + ner_gateway.DEADLINE_MARGIN_MS, TOOL_WAIT_MAX_S * 1000))
             return remote.RemoteDetector(
                 endpoint, format="hf", classes=conf.get("classes"), min_score=conf.get("min_score"),
-                timeout=min(ms, 5000) / 1000, max_chars=min(int(conf.get("max_chars", max_chars)), max_chars),
+                timeout=wait / 1000, max_chars=min(int(conf.get("max_chars", max_chars)), max_chars),
                 language=str(conf.get("language", "en")), allow_network=True, mask=True,
                 ask_labels=conf.get("ask_labels") is True, private_http_only=True, token=token,
                 cafile=str(cfg.get("client_vault_cafile") or ""),
-                # a long text in pieces spends the person's quota of the minute at the gateway: off until the
-                # gateway shares its quota under load (ai-gateway #2141); a text over max_chars stays too_long there
-                pieces=False)
+                # a long text in pieces spends the person's quota of the minute at the gateway: only when the
+                # gateway admits them (`ner_pieces`, ai-gateway #2141 slice 4); else a text over max_chars stays
+                # too_long there
+                pieces=bool(pieces))
         try:
             return ner_gateway.detector(cfg, conf, make, deadline)
         except (ValueError, TypeError, AttributeError, OSError) as exc:
