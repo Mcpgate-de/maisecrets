@@ -1,0 +1,11 @@
+# c13-the-mod-names-a-session-whose-prompt-hook-did-not-run: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-the-mod-names-a-session-whose-prompt-hook-did-not-run"
+control = "C13"
+serves = ["M5.2"]
+statement = "When a person's prompt went on to the model and the prompt hook left no row in hooks.log for the session, the mod shows one line that the hooks did not run and names /maisecrets status, once per session."
+runner = ["tests/mod.test.ts::the watch: no prompt-hook row after a prompt shows one line, once per session"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "    try { $.ui.log(HOOKS_LINE) } catch { /* a line for the person only */ }\n"
+replace = ""

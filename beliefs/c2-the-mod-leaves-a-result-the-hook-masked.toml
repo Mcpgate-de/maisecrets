@@ -1,0 +1,11 @@
+# c2-the-mod-leaves-a-result-the-hook-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-mod-leaves-a-result-the-hook-masked"
+control = "C2"
+serves = ["M1.2"]
+statement = "A tool result whose maisecrets hook answer carries the marker (masked, or checked with no other plugin's output) goes on as the hook left it: the second net asks no Python for it and masks nothing twice."
+runner = ["tests/mod.test.ts::a result the maisecrets hook masked goes on as it is, its marker is taken out, and Python is not asked"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "const PASSES = new Set(['masked', 'checked'])\n"
+replace = "const PASSES = new Set([])\n"

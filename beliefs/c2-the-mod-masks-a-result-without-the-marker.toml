@@ -1,0 +1,13 @@
+# c2-the-mod-masks-a-result-without-the-marker: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-mod-masks-a-result-without-the-marker"
+control = "C2"
+serves = ["M1.2"]
+statement = "Only the marker of the maisecrets tool-result hook lets a result pass the second net: a call with no marker (no maisecrets hook ran, also when the hooks stop in the middle of a session) and another plugin's replaced output are masked. No row in hooks.log and no earlier call of the session counts."
+runner = ["tests/mod.test.ts::a result with no marker of maisecrets is masked: no maisecrets hook ran for that call",
+          "tests/mod.test.ts::hooks that stop in the middle of a session: the next result without the marker is masked",
+          "tests/mod.test.ts::another plugin's updated output without the masked marker of maisecrets is masked (L1)"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "  if (!tag || !r || typeof r !== 'object' || r.block !== undefined) return 'unchecked'\n"
+replace = "  if (!tag) return 'checked'\n  if (!r || typeof r !== 'object' || r.block !== undefined) return 'unchecked'\n"

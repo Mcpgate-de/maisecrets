@@ -28,7 +28,7 @@ a to-do.
   blocked report shows no notice, so a report that maisecrets blocks for
   another reason is still lost without a word.
 - **The output of a command that fails reaches the model as it is (Claude
-  Code).** Claude Code reports a failed call through another hook event,
+  Code without the mod).** With the mod, the mod masks it before Claude Code keeps it. Claude Code reports a failed call through another hook event,
   whose answer cannot replace the output. A value that a failing command
   prints (`grep TOKEN .env` with exit 1, a script that prints its config and
   stops) is not redacted, and it stays in the transcript. Measured over one
@@ -69,6 +69,21 @@ a to-do.
   (such as `Kontaktperson:` or a
   salutation) or on your term list, and a stored name of one word only in
   the same case.
+- **The mod's second net for tool results has limits.** It masks no image or PDF
+  in a result. When the mod's own Python fails too, the AI gets no output, but
+  the tool's own record of it stays in the transcript on disk. The second net
+  does not keep a value in a test file as a fixture, as the hook does. Each
+  result that the hook did not check costs one Python start (about 0.05 to
+  0.1 s, measured on one Mac). In Code Mode the mod does not see the answer
+  of the REPL's own result hook, so each REPL result costs that start. An
+  error that another mod answers itself, without the tool, passes as a
+  refusal. While a result hook runs, a command that another tool call starts
+  at the same time inherits the variable `MAISECRETS_MOD_NET`.
+- **The hooks watch tells, it does not block.** It needs the mod. When the
+  hook cannot write `hooks.log` (a full disk, a home it cannot write), the
+  line says that the hooks did not run although they did. Any program of yours
+  can write a row into `hooks.log` and so silence the watch. It cannot switch
+  off the second net: that reads the hook's own answer.
 - **A client that rejects the manifest loads nothing and says nothing.**
   Claude Code 2.1.223 did so for a manifest key it did not know. Check with
   `/hooks` that maisecrets is listed; the harness checks the debug log.
@@ -83,7 +98,8 @@ a to-do.
   0.173 on, the client itself blocks the prompt and the tool call when such a
   hook cannot start, crashes or times out. Codex also withholds the tool
   result. Claude Code does not: a failed tool-result hook lets the output
-  through. The price: when maisecrets itself fails on every call, that session
+  through. The mod masks that output before Claude Code keeps it; without
+  the mod it reaches the model. The price: when maisecrets itself fails on every call, that session
   can send no prompt and run no tool until maisecrets runs again. The session
   start hook does not set it, so a failed start does not stop the session. On Windows the watchdog can come too
   late: Python has no SIGALRM there, and a detector regex that runs long
@@ -220,7 +236,11 @@ a to-do.
   `all_types` to true, every stored value, a secret, a card number and an ID number too, goes as a deposit into
   any text field of a listed action, such as the text of a ticket. A later read of that ticket through the
   connector returns the value through the proxy, and the gateway's result scrub finds only known secret formats.
-  maisecrets has no answer for this read-back yet.
+  maisecrets has no answer for this read-back of its own. Since gateway v2.0.4132 (ai-gateway #2048), the gateway
+  returns a SECRET that it took into a listed action as a Sensitive Reference when the same person reads it
+  again, and maisecrets treats that reference as any other (C31). The gateway refuses a SECRET that is too weak to
+  find again (`weak_secret`): such a value does not go into the action. Any other read-back depends on the
+  gateway's result scrub.
 - **Detection can take a secret for a personal value.** If maisecrets types a secret as a phone number or a
   name, the gateway's `deposit_any_field` lets that value go into any text field of a listed tool. A later read
   of that field through the connector passes Anthropic's proxy, and only the gateway's own result scrub masks it.
@@ -238,9 +258,10 @@ a to-do.
   call that carried a deposit handle, its tool result is `deposit_refused: <code>` with `isError: true`. Claude
   Code 2.1.330 reports such a call as failed (PostToolUseFailure, seen in the live probe of 2026-11-22), and that
   answer cannot replace the output (anthropics/claude-code#97278). So the AI sees the code itself, which holds no
-  value and no handle, and maisecrets adds its one line as context. The `error` field that maisecrets reads is
-  the text of the result's blocks, joined by a line break and trimmed, with no prefix. That form is read from the
-  2.1.330 bundle; it is not measured against a live payload of a refusal.
+  value and no handle, and maisecrets adds its one line as context. A code that maisecrets does not know reaches
+  the AI with no line. The `error` field that maisecrets reads is the text of the result's blocks, joined by a
+  line break and trimmed, with no prefix. That form is read from the 2.1.330 bundle; it is not measured against a
+  live payload of a refusal.
 - **Codex has connectors too, and maisecrets does not detect them.** Codex's `codex_apps` server (ChatGPT app
   connectors behind OpenAI's apps gateway) relays a call like a claude.ai connector. Codex sends no server source,
   so maisecrets cannot tell such a call from a direct server, and it puts the stored value in.

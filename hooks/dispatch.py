@@ -5,6 +5,8 @@ import sys
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt" and sys.version_info < (3, 9):
     sys.exit(3)   # the mod then tries its next Python (claude-mod/maisecrets-mod.mjs); run.sh checks 3.9 for the hooks
+if len(sys.argv) == 2 and sys.argv[1] == "mod-result" and sys.version_info < (3, 9):
+    sys.exit(3)   # the same for the second net of the mod
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "post-tool-failure", "session-start", "session-end")
@@ -90,6 +92,8 @@ except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         sys.exit(1)       # no traceback: the mod keeps what it knew of the demo
     if len(sys.argv) == 2 and sys.argv[1] == "mod-settings":
         sys.exit(1)       # no traceback: the pane says the settings cannot be read
+    if len(sys.argv) == 2 and sys.argv[1] == "mod-result":
+        sys.exit(1)       # no traceback: the mod withholds the result it could not have checked
     raise
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
@@ -151,6 +155,22 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-settings":
     except Exception:  # noqa: BLE001 - no traceback
         sys.exit(1)
     print(json.dumps({"maisecrets": "mod-settings", **answer}))
+    sys.exit(0)
+
+if len(sys.argv) == 2 and sys.argv[1] == "mod-result":
+    # the second net for a tool result that the PostToolUse hook did not mask (maisecrets/second_net.py). Any
+    # failure answers nothing, and the mod withholds the result. A tool call that names this entry is refused
+    # (shell_commands), so only the mod starts it; the answer holds masked texts, never a stored value
+    import json
+    try:
+        if os.environ.get("MAISECRETS_TEST_FAULT") == "mod-result":   # harness: post_tool_crash_mod_fails
+            raise RuntimeError("fault injected for the harness")
+        from maisecrets.second_net import mask_result  # noqa: E402
+        payload = json.load(sys.stdin)
+        answer = mask_result(payload if isinstance(payload, dict) else {})
+    except Exception:  # noqa: BLE001 - no traceback, no value in an error text
+        sys.exit(1)
+    print(json.dumps({"maisecrets": "mod-result", **answer}))
     sys.exit(0)
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-reveal":
@@ -522,4 +542,14 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         out["systemMessage"] = forms.for_this_client(out["systemMessage"])   # Cowork: a hook's command as text
     print(json.dumps(out))
     sys.exit(0)
+
+# the mod's second net (maisecrets/second_net.py): with the mod running, every answer of a tool-result hook carries
+# the marker that it ran, the crash and watchdog answers too
+if len(sys.argv) == 2 and sys.argv[1] in HOOK_EVENTS:      # mark_answers takes the two tool-result events alone
+    try:
+        import maisecrets.hooks as _hooks  # noqa: E402
+        from maisecrets.second_net import mark_answers  # noqa: E402
+        mark_answers(_hooks, sys.argv[1])
+    except Exception:  # noqa: BLE001 - no marker: the mod masks the result itself
+        pass
 sys.exit(main(["hook", sys.argv[1] if len(sys.argv) == 2 else ""]))

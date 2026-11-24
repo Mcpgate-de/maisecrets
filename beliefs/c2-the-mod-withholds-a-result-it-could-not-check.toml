@@ -1,0 +1,12 @@
+# c2-the-mod-withholds-a-result-it-could-not-check: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-mod-withholds-a-result-it-could-not-check"
+control = "C2"
+serves = ["M1.2"]
+statement = "When the mod's own Python gives no well-formed answer for a result it must check, the row is stored with the result withheld, never as it came; the row is still stored, so the session goes on."
+runner = ["tests/mod.test.ts::no answer from Python withholds the result, and the row is still stored: the session goes on",
+          "tests/mod.test.ts::an answer of the wrong length withholds the result"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "    if (a === null || a === 'withheld') { content[i] = withheld(content[i]); return }\n"
+replace = "    if (a === 'withheld') { content[i] = withheld(content[i]); return }\n    if (a === null) return\n"

@@ -1,0 +1,11 @@
+# c2-the-mod-takes-masked-only-for-the-output-the-hook-made: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-mod-takes-masked-only-for-the-output-the-hook-made"
+control = "C2"
+serves = ["M1.2"]
+statement = "A masked marker lets a result pass only when the output that reaches the mod has the hash the maisecrets hook gave: another hook's output in its place is masked."
+runner = ["tests/mod.test.ts::scenario B: another hook's output in place of the one maisecrets masked does not count as masked"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "  return (await outputHash(updated)) === tag.hash ? 'masked' : 'unchecked'\n"
+replace = "  return 'masked'\n"

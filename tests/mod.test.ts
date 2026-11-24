@@ -1587,3 +1587,341 @@ test('each new session id is noted once, also for a slash line and a prompt not 
   expect(await until(() => notes().length === 2)).toBe(true)
   expect(notes()[1].session_id).toBe('sess-note-2')
 })
+
+// ---- the second net for tool results (session.append on the door tool-result) and the hooks watch
+
+// a placeholder built at run time: the session that writes this file resolves a placeholder in its own text
+const ph = (key: string) => String.fromCodePoint(0x27e6) + key + String.fromCodePoint(0x27e7)
+const RAW = 'out TOKENWORD end'
+const MASKED_TEXT = `out ${ph('SECRET' + '_c9')} end`
+// the marker lines of the tool-result hook (maisecrets/second_net.py): the nonce is the one the mod gave the hooks
+const CHECKED = (n) => `[maisecrets: result checked ${n}]`
+const MASKED_MARK = (n, hash) => `[maisecrets: result masked ${n} ${hash}]`
+// maisecrets/second_net.py output_hash: the strings of an output (keys sorted, each before its value), NUL between them
+const textsOf = (v, out: string[] = []) => {
+  if (typeof v === 'string') out.push(v)
+  else if (Array.isArray(v)) v.forEach(x => textsOf(x, out))
+  else if (v && typeof v === 'object') for (const k of Object.keys(v).sort()) { out.push(k); textsOf(v[k], out) }
+  return out
+}
+const hashOf = async (v) => [...new Uint8Array(await crypto.subtle.digest('SHA-256',
+  new TextEncoder().encode(textsOf(v).join('\0'))))].slice(0, 8).map(n => n.toString(16).padStart(2, '0')).join('')
+const resultAnswer = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-result', ...o }) } })
+const watchAnswer = (o) => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-settings', ...o }) } })
+const WITHHELD_TEXT = '[maisecrets: the tool ran and finished, but maisecrets could not check its output, so the output ' +
+  'is withheld. Do not run the tool again to see it; /maisecrets status shows why.]'
+const HOOKS_TEXT = 'maisecrets hooks did not run in this session: values are not protected; run /maisecrets status'
+
+function netWorld(on, session, run, opts: any = {}) {
+  on('clock.now', () => ({ value: clock.t }))
+  on('clock.after', () => ({ value: undefined }))
+  on('session.id', () => ({ value: session }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('env.get', () => { throw new Error('the mod read an environment variable') })
+  // the nonce the mod gives the hooks while they run: a settings hook of the test reads it as a hook process would
+  const st = { nonce: undefined as string | undefined }
+  on('env.set', ($, e) => {
+    opts.env?.push([e.name, e.value])
+    if (e.name === 'MAISECRETS_MOD_NET') st.nonce = e.value
+    return { value: {} }
+  })
+  on('ui.log', ($, e) => { opts.logs?.push(String(e.text)); return { value: undefined } })
+  on('ui.toast', ($, e) => { opts.toasts?.push(String(e.text)); return { value: undefined } })
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('process.run', run)
+  // the settings hooks beneath: what PostToolUse and UserPromptSubmit answered
+  on('classic.PostToolUse', async () => (typeof opts.post === 'function' ? await opts.post(st.nonce) : opts.post) ?? {})
+  on('classic.PostToolUseFailure', async () => (typeof opts.failure === 'function' ? await opts.failure(st.nonce)
+    : opts.failure) ?? {})
+  on('classic.UserPromptSubmit', () => opts.prompt ?? {})
+}
+
+const resultRow = (id, content: any = RAW, tool = 'Bash', isError = false) => ({
+  message: { type: 'user', role: 'user',
+             content: [{ type: 'tool_result', tool_use_id: id, content, ...(isError ? { is_error: true } : {}) }] },
+  door: 'tool-result', origin: { kind: 'tool', tool }, uuid: 'row-' + id,
+})
+
+const stored = (r) => r.message.content[0].content
+const post = ($, id, tool = 'Bash') => $.classic.PostToolUse({ tool_name: tool, tool_use_id: id, tool_input: {},
+                                                              tool_response: RAW })
+const asks = (runs) => runs.filter(x => x.argv.includes('mod-result'))
+
+test('a result the maisecrets hook masked goes on as it is, its marker is taken out, and Python is not asked',
+  async ($, on) => {
+    const runs: any[] = []
+    const env: any[] = []
+    netWorld(on, 'net-1', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) },
+      { post: async (n) => ({ updatedToolOutput: MASKED_TEXT,
+                              additionalContext: [`maisecrets masked 1 value(s).\n\n${MASKED_MARK(n, await hashOf(MASKED_TEXT))}`] }),
+        env })
+    const answer = await post($, 'tu-net-1')
+    expect(answer.additionalContext).toEqual(['maisecrets masked 1 value(s).'])     // the model never reads the marker
+    // the nonce goes to the hooks only while they run: set before, taken back after
+    expect(env.map(([k]) => k)).toEqual(['MAISECRETS_MOD_NET', 'MAISECRETS_MOD_NET'])
+    expect(env[0][1]).toMatch(/^[0-9a-f]{32}$/)
+    expect(env[1][1]).toBeUndefined()
+    const r = await $.session.append(resultRow('tu-net-1', MASKED_TEXT))
+    expect(stored(r)).toBe(MASKED_TEXT)
+    expect(asks(runs).length).toBe(0)
+  })
+
+test('a clean result the maisecrets hook checked goes on as it is, and the marker leaves no context', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-1b', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) },
+    { post: (n) => ({ additionalContext: [CHECKED(n)] }) })
+  const answer = await post($, 'tu-net-1b')
+  expect(answer.additionalContext).toBeUndefined()
+  expect(stored(await $.session.append(resultRow('tu-net-1b')))).toBe(RAW)
+  expect(asks(runs).length).toBe(0)
+})
+
+test('a result whose PostToolUse failed (onFailure block) is masked by the second net', async ($, on) => {
+  const runs: any[] = []
+  const toasts: string[] = []
+  netWorld(on, 'net-2', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: { block: 'hook error' }, toasts })
+  await post($, 'tu-net-2')
+  const r = await $.session.append(resultRow('tu-net-2'))
+  expect(stored(r)).toContain(MASKED_TEXT)
+  expect(stored(r)).not.toContain('TOKENWORD')
+  expect(stored(r)).toContain('maisecrets masked values in this tool result')
+  expect(asks(runs).length).toBe(1)
+  expect(asks(runs)[0].argv).toEqual(['python3', 'hooks/dispatch.py', 'mod-result'])
+  expect(JSON.parse(asks(runs)[0].init.stdin)).toEqual({ session_id: 'net-2', cwd: '/work', tool_name: 'Bash',
+                                                         agent_id: null, texts: [RAW] })
+  // the person's toast names no value
+  expect(toasts.length).toBe(1)
+  expect(toasts[0]).not.toContain('TOKENWORD')
+})
+
+test('a result with no marker of maisecrets is masked: no maisecrets hook ran for that call', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-2b', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) })
+  await post($, 'tu-net-2b')
+  expect(stored(await $.session.append(resultRow('tu-net-2b')))).toContain(MASKED_TEXT)
+  expect(asks(runs).length).toBe(1)
+})
+
+test("another plugin's updated output without the masked marker of maisecrets is masked (L1)", async ($, on) => {
+  netWorld(on, 'net-2c', () => resultAnswer({ texts: [MASKED_TEXT], changed: true }),
+    { post: (n) => ({ updatedToolOutput: RAW, additionalContext: [CHECKED(n)] }) })
+  await post($, 'tu-net-2c')
+  expect(stored(await $.session.append(resultRow('tu-net-2c')))).toContain(MASKED_TEXT)
+})
+
+test('hooks that stop in the middle of a session: the next result without the marker is masked', async ($, on) => {
+  const runs: any[] = []
+  let answer: any = (n) => ({ additionalContext: [CHECKED(n)] })
+  netWorld(on, 'net-2d', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: (n) => (typeof answer === 'function' ? answer(n) : answer) })
+  await post($, 'tu-net-2d-1')
+  expect(stored(await $.session.append(resultRow('tu-net-2d-1')))).toBe(RAW)
+  answer = {}                                       // the hooks of maisecrets no longer run
+  await post($, 'tu-net-2d-2')
+  expect(stored(await $.session.append(resultRow('tu-net-2d-2')))).toContain(MASKED_TEXT)
+  expect(asks(runs).length).toBe(1)
+})
+
+test('a failed command (PostToolUseFailure, anthropics/claude-code#97278) is masked by the second net', async ($, on) => {
+  netWorld(on, 'net-3', () => resultAnswer({ texts: [MASKED_TEXT], changed: true }), { failure: (n) => ({ additionalContext: [CHECKED(n)] }) })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-3', input: { command: 'cat .env; false' } }).catch(() => {})
+  await $.classic.PostToolUseFailure({ tool_name: 'Bash', tool_use_id: 'tu-net-3', tool_input: {}, error: RAW })
+  const r = await $.session.append(resultRow('tu-net-3', RAW, 'Bash', true))
+  expect(stored(r)).toContain(MASKED_TEXT)
+  expect(stored(r)).not.toContain('TOKENWORD')
+})
+
+test('an error with no state at all (a mod reload, a hook of its own that threw) is masked, not taken for a refusal',
+  async ($, on) => {
+    const runs: any[] = []
+    netWorld(on, 'net-3b', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) })
+    const r = await $.session.append(resultRow('tu-net-3b', RAW, 'Bash', true))
+    expect(stored(r)).toContain(MASKED_TEXT)
+    expect(asks(runs).length).toBe(1)
+  })
+
+test('no answer from Python withholds the result, and the row is still stored: the session goes on', async ($, on) => {
+  netWorld(on, 'net-4', () => ({ value: { exitCode: 1, stderr: 'boom', stdout: '' } }), { post: { block: 'hook error' } })
+  await post($, 'tu-net-4')
+  const r = await $.session.append(resultRow('tu-net-4', [{ type: 'text', text: RAW }]))
+  expect(stored(r)).toBe(WITHHELD_TEXT)
+})
+
+test('an answer of the wrong length withholds the result', async ($, on) => {
+  netWorld(on, 'net-5', () => resultAnswer({ texts: [MASKED_TEXT, 'more'], changed: true }), { post: { block: 'x' } })
+  await post($, 'tu-net-5')
+  expect(stored(await $.session.append(resultRow('tu-net-5')))).toBe(WITHHELD_TEXT)
+})
+
+test('a withheld answer of Python (names not checked, withhold) withholds the result', async ($, on) => {
+  netWorld(on, 'net-5b', () => resultAnswer({ withheld: true }), { post: { block: 'x' } })
+  await post($, 'tu-net-5b')
+  expect(stored(await $.session.append(resultRow('tu-net-5b')))).toBe(WITHHELD_TEXT)
+})
+
+test('one Python start per row: a failed start of a Python that exists ends the search', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-6', ($, e) => { runs.push(e); return { value: { exitCode: 1, stderr: '', stdout: '' } } },
+    { post: { block: 'x' } })
+  await post($, 'tu-net-6a')
+  await post($, 'tu-net-6b')
+  const row = resultRow('tu-net-6a')
+  row.message.content.push({ type: 'tool_result', tool_use_id: 'tu-net-6b', content: RAW })
+  const r = await $.session.append(row)
+  expect(r.message.content.map(b => b.content)).toEqual([WITHHELD_TEXT, WITHHELD_TEXT])
+  expect(asks(runs).length).toBe(1)
+})
+
+test('a Python that is not there hands on to the next one; exit 3 too; the note of Python goes with the result',
+  async ($, on) => {
+    const runs: any[] = []
+    netWorld(on, 'net-6c', ($, e) => {
+      runs.push(e)
+      // the rejection Claude Code 2.1.330 gives for a missing program (measured in the harness)
+      if (e.argv[0] === 'python3') return { deny: 'failed to start: ENOENT: Executable not found in $PATH' }
+      if (e.argv[0] === 'py') return { value: { exitCode: 3, stderr: '', stdout: '' } }
+      return resultAnswer({ texts: [MASKED_TEXT], changed: true, note: 'names: not checked' })
+    }, { post: { block: 'x' } })
+    await post($, 'tu-net-6c')
+    const r = await $.session.append(resultRow('tu-net-6c'))
+    expect(asks(runs).map(x => x.argv[0])).toEqual(['python3', 'py', 'python'])
+    expect(stored(r)).toContain('names: not checked')
+    expect(stored(r)).toContain(MASKED_TEXT)
+  })
+
+test('a timeout of the first Python withholds the result and starts no second one', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-6d', ($, e) => { runs.push(e); return { deny: 'the command timed out' } }, { post: { block: 'x' } })
+  await post($, 'tu-net-6d')
+  expect(stored(await $.session.append(resultRow('tu-net-6d')))).toBe(WITHHELD_TEXT)
+  expect(asks(runs).length).toBe(1)
+})
+
+test('a refused call (an error of a call that never ran) goes on as it is, and Python is not asked', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-10', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) })
+  on('tool.check', () => ({ decision: 'deny', reason: 'refused by a hook' }))
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-10', input: { command: 'cat .env' } }).catch(() => {})
+  const r = await $.session.append(resultRow('tu-net-10', 'PreToolUse:Bash hook error: refused', 'Bash', true))
+  expect(stored(r)).toBe('PreToolUse:Bash hook error: refused')
+  expect(asks(runs).length).toBe(0)
+})
+
+test('a placeholder in the result stays: the texts go to Python and back in order, media blocks stay', async ($, on) => {
+  const img = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }
+  const kept = `a ${ph('SECRET' + '_c1')}`
+  netWorld(on, 'net-9', () => resultAnswer({ texts: [kept, MASKED_TEXT], changed: true }), { post: { block: 'x' } })
+  await post($, 'tu-net-9', 'Read')
+  const r = await $.session.append(resultRow('tu-net-9', [{ type: 'text', text: kept }, img, { type: 'text', text: RAW }],
+    'Read'))
+  const c = stored(r)
+  expect(c.map(b => b.type)).toEqual(['text', 'text', 'image', 'text'])
+  expect(c[1].text).toBe(kept)
+  expect(c[3].text).toBe(MASKED_TEXT)
+})
+
+test('the watch: no prompt-hook row after a prompt shows one line, once per session', async ($, on) => {
+  const logs: string[] = []
+  const asked: any[] = []
+  netWorld(on, 'watch-1', ($, e) => {
+    if (e.argv[2] === 'mod-settings') asked.push(JSON.parse(e.init.stdin))
+    return watchAnswer({ ran: false })
+  }, { logs })
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-1' })
+  expect(await until(() => logs.some(l => l.includes('hooks did not run')))).toBe(true)
+  expect(logs.filter(l => l.includes('hooks did not run'))).toEqual([HOOKS_TEXT])
+  expect(asked[0]).toEqual({ action: 'hooks_ran', session_id: 'watch-1', since: clock.t / 1000 })
+  await $.classic.UserPromptSubmit({ prompt: 'again', session_id: 'watch-1' })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(logs.filter(l => l.includes('hooks did not run')).length).toBe(1)
+})
+
+test('the watch says nothing when the hook ran, when Python gives no answer, or in Cowork', async ($, on) => {
+  const logs: string[] = []
+  let answer: any = { ran: true }
+  const asked: any[] = []
+  netWorld(on, 'watch-2', ($, e) => {
+    // a failed ask tries the next Python too: each session is counted once
+    const id = JSON.parse(e.init.stdin).session_id
+    if (e.argv[2] === 'mod-settings' && !asked.includes(id)) asked.push(id)
+    return answer === null ? { value: { exitCode: 1, stderr: '', stdout: '' } } : watchAnswer(answer)
+  }, { logs })
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-2' })
+  expect(await until(() => asked.length === 1)).toBe(true)
+  answer = null
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-3' })
+  expect(await until(() => asked.length === 2)).toBe(true)
+  answer = { ran: null }                      // Cowork (status_verdict.hooks_watch)
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-4' })
+  expect(await until(() => asked.length === 3)).toBe(true)
+  await $.classic.UserPromptSubmit({ prompt: 'again', session_id: 'watch-2' })   // known to run: not asked again
+  await new Promise(resolve => setTimeout(resolve, 100))
+  expect(asked).toEqual(['watch-2', 'watch-3', 'watch-4'])
+  expect(logs.filter(l => l.includes('hooks did not run'))).toEqual([])
+})
+
+test('the watch does not look at a prompt the settings hook blocked', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'watch-5', ($, e) => { runs.push(e); return { value: { exitCode: 1, stderr: '', stdout: '' } } },
+    { prompt: { block: 'maisecrets blocked it' } })
+  await $.classic.UserPromptSubmit({ prompt: 'hello', session_id: 'watch-5' })
+  await new Promise(resolve => setTimeout(resolve, 100))
+  expect(runs.filter(x => x.argv[2] === 'mod-settings').length).toBe(0)
+})
+
+test('a context row with the marker (the REPL of Code Mode, which the classic chain of the mod does not see) loses it',
+  async ($, on) => {
+    let nonce = ''
+    netWorld(on, 'net-11', () => resultAnswer({ texts: ['x'], changed: false }),
+      { post: (n) => { nonce = n; return {} } })
+    await post($, 'tu-net-11')            // the mod's nonce, as a hook of this process saw it
+    const text = `PostToolUse:REPL hook additional context: ${CHECKED(nonce)}\n\nPostToolUse:Bash hook additional context: a note`
+    const r = await $.session.append({ message: { type: 'attachment', name: 'hook_additional_context',
+                                                  content: [{ type: 'text', text }] },
+                                       door: 'hook-context', origin: { kind: 'engine' }, uuid: 'row-ctx-11' })
+    expect(r.message.content[0].text).toBe('PostToolUse:Bash hook additional context: a note')
+  })
+
+test('scenario A: a copied marker text in another entry, or one with another nonce, counts as no marker', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-12', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: (n) => ({ additionalContext: [
+      `another plugin copied: ${CHECKED(n)}\nand more text after it`,
+      CHECKED('0'.repeat(32)),
+    ] }) })
+  const answer = await post($, 'tu-net-12')
+  expect(answer.additionalContext.length).toBe(2)          // no marker of this process: both entries stay
+  expect(stored(await $.session.append(resultRow('tu-net-12')))).toContain(MASKED_TEXT)
+  expect(asks(runs).length).toBe(1)
+})
+
+test("scenario B: another hook's output in place of the one maisecrets masked does not count as masked", async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-13', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: async (n) => ({ updatedToolOutput: RAW, additionalContext: [MASKED_MARK(n, await hashOf(MASKED_TEXT))] }) })
+  await post($, 'tu-net-13')
+  expect(stored(await $.session.append(resultRow('tu-net-13')))).toContain(MASKED_TEXT)
+  expect(asks(runs).length).toBe(1)
+})
+
+test('a masked object output with the right hash passes: the hash covers the keys and the strings', async ($, on) => {
+  const runs: any[] = []
+  const out = { stdout: MASKED_TEXT, stderr: '', interrupted: false }
+  netWorld(on, 'net-14', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) },
+    { post: async (n) => ({ updatedToolOutput: out, additionalContext: [MASKED_MARK(n, await hashOf(out))] }) })
+  await post($, 'tu-net-14')
+  expect(stored(await $.session.append(resultRow('tu-net-14', MASKED_TEXT)))).toBe(MASKED_TEXT)
+  expect(asks(runs).length).toBe(0)
+})
+
+test('only a hook_additional_context row loses the marker: another attachment row stays as it is', async ($, on) => {
+  let nonce = ''
+  netWorld(on, 'net-15', () => resultAnswer({ texts: ['x'], changed: false }), { post: (n) => { nonce = n; return {} } })
+  await post($, 'tu-net-15')
+  const text = `a note\n\n${CHECKED(nonce)}`
+  const r = await $.session.append({ message: { type: 'attachment', name: 'nested_memory',
+                                                content: [{ type: 'text', text }] },
+                                     door: 'hook-context', origin: { kind: 'engine' }, uuid: 'row-ctx-15' })
+  expect(r.message.content[0].text).toBe(text)
+})

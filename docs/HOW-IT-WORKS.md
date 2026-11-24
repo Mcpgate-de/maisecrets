@@ -266,6 +266,11 @@ rules, the regions and the number of label languages.
 
 The section is in the README: [What the Claude Code mod does](../README.md#what-the-claude-code-mod-does).
 
+Two parts of the mod work next to the hooks, not in their place:
+
+- **The second net for tool results.** Claude Code gives the mod each tool result before it keeps it and sends it. When the tool-result hook did not mask the result (the hook crashed or timed out, the command failed, or no hook ran), the mod asks the plugin's Python (`dispatch.py mod-result`) to mask it the same way. A result that the hook masked goes on unchanged, with no Python call. The mod knows that the hook checked a result from the hook's own answer: with the mod running, the hook adds a short marker, and the mod takes it out again before the AI reads the answer. A result without the marker is masked. When the Python gives no answer, the mod puts a short note in place of the output ("the output is withheld"). The turn goes on, so the session never locks.
+- **The hooks watch.** After a prompt of yours that went to the AI, the mod checks that the prompt hook left its row in `hooks.log`. When it did not, the mod shows one line: `maisecrets hooks did not run in this session: values are not protected; run /maisecrets status`. It shows the line once per session, and not in Cowork.
+
 ## Invisible characters
 
 A tool result can carry text that the model reads and a person does not see. maisecrets removes two

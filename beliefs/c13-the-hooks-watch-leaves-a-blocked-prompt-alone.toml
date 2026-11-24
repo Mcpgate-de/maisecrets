@@ -1,0 +1,11 @@
+# c13-the-hooks-watch-leaves-a-blocked-prompt-alone: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-the-hooks-watch-leaves-a-blocked-prompt-alone"
+control = "C13"
+serves = ["M5.2"]
+statement = "The hooks watch looks only at a prompt the settings hooks let through: a blocked prompt went nowhere, and the person sees the block."
+runner = ["tests/mod.test.ts::the watch does not look at a prompt the settings hook blocked"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "    try { if (at !== null && (!r || r.block === undefined)) watchHooks($, e?.session_id, at) } catch { /* no line */ }\n"
+replace = "    try { if (at !== null) watchHooks($, e?.session_id, at) } catch { /* no line */ }\n"

@@ -247,6 +247,9 @@ def mod_answer(payload: dict) -> dict:
         return {"note": pane_forget_all(), **pane_values(0)}
     if action == "ner":
         return pane_ner()
+    if action == "hooks_ran":
+        from .status_verdict import hooks_watch
+        return hooks_watch(payload)
     if action == "login_offer":
         from . import sref_hooks
         return {"fill": sref_hooks.login_offer(str(payload.get("session_id") or "")) or None}
