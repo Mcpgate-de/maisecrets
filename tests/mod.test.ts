@@ -1946,8 +1946,8 @@ function bandWorld(on, session, run, opts: any = {}) {
 }
 const newTurn = ($, kind = 'composer') => $.prompt.submit({ text: 'the next question', wait: false, origin: { kind } })
 
-test('a rest shows the share above the prompt; a later result without a rest keeps the line; only the person\'s ' +
-  'next prompt takes it away', async ($, on) => {
+test("a rest shows the share above the prompt; a later result without a rest keeps the line; only the person's next prompt takes it away",
+  async ($, on) => {
   let answer = (n) => ({ additionalContext: [`note for the AI\n\n${withRest(n, '70 rules')}`] })
   bandWorld(on, 'band-1', () => resultAnswer({ texts: ['x'], changed: false }), { post: (n) => answer(n) })
   await newTurn($)
