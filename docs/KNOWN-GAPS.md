@@ -28,7 +28,7 @@ a to-do.
   blocked report shows no notice, so a report that maisecrets blocks for
   another reason is still lost without a word.
 - **The output of a command that fails reaches the model as it is (Claude
-  Code).** Claude Code reports a failed call through another hook event,
+  Code without the mod).** With the mod, the mod masks it before Claude Code keeps it. Claude Code reports a failed call through another hook event,
   whose answer cannot replace the output. A value that a failing command
   prints (`grep TOKEN .env` with exit 1, a script that prints its config and
   stops) is not redacted, and it stays in the transcript. Measured over one
@@ -69,6 +69,21 @@ a to-do.
   (such as `Kontaktperson:` or a
   salutation) or on your term list, and a stored name of one word only in
   the same case.
+- **The mod's second net for tool results has limits.** It masks no image or PDF
+  in a result. When the mod's own Python fails too, the AI gets no output, but
+  the tool's own record of it stays in the transcript on disk. The second net
+  does not keep a value in a test file as a fixture, as the hook does. Each
+  result that the hook did not check costs one Python start (about 0.05 to
+  0.1 s, measured on one Mac). In Code Mode the mod does not see the answer
+  of the REPL's own result hook, so each REPL result costs that start. An
+  error that another mod answers itself, without the tool, passes as a
+  refusal. While a result hook runs, a command that another tool call starts
+  at the same time inherits the variable `MAISECRETS_MOD_NET`.
+- **The hooks watch tells, it does not block.** It needs the mod. When the
+  hook cannot write `hooks.log` (a full disk, a home it cannot write), the
+  line says that the hooks did not run although they did. Any program of yours
+  can write a row into `hooks.log` and so silence the watch. It cannot switch
+  off the second net: that reads the hook's own answer.
 - **A client that rejects the manifest loads nothing and says nothing.**
   Claude Code 2.1.223 did so for a manifest key it did not know. Check with
   `/hooks` that maisecrets is listed; the harness checks the debug log.
@@ -83,7 +98,8 @@ a to-do.
   0.173 on, the client itself blocks the prompt and the tool call when such a
   hook cannot start, crashes or times out. Codex also withholds the tool
   result. Claude Code does not: a failed tool-result hook lets the output
-  through. The price: when maisecrets itself fails on every call, that session
+  through. The mod masks that output before Claude Code keeps it; without
+  the mod it reaches the model. The price: when maisecrets itself fails on every call, that session
   can send no prompt and run no tool until maisecrets runs again. The session
   start hook does not set it, so a failed start does not stop the session. On Windows the watchdog can come too
   late: Python has no SIGALRM there, and a detector regex that runs long

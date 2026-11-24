@@ -1,0 +1,12 @@
+# c2-the-tool-result-hook-marks-masked-only-when-it-replaced-the-output: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-tool-result-hook-marks-masked-only-when-it-replaced-the-output"
+control = "C2"
+serves = ["M1.2"]
+statement = "With the mod running, the maisecrets tool-result hook marks its answer masked only when it replaced the output, else checked, so another plugin's replaced output is never taken for a masked one."
+runner = ["tests/test_second_net.py::MarkTests::test_the_marker_carries_the_nonce_and_for_masked_the_hash_of_the_output",
+          "tests/test_cli_matrix.py::HookEventTests::test_the_tool_result_hooks_mark_their_answer_only_for_the_mod"]
+
+[proof]
+file = "maisecrets/second_net.py"
+find = "    tag = (f\"[maisecrets: result masked {nonce} {output_hash(hso[key])}]\" if key\n"
+replace = "    tag = (f\"[maisecrets: result masked {nonce} 0000000000000000]\" if key\n"

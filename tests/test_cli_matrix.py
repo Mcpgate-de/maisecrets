@@ -672,7 +672,7 @@ class PopulationTests(unittest.TestCase):
         # mod-prompt and mod-values are the questions of the mod (claude-mod/), not commands of the CLI
         dispatched = commands_in_dispatch() - {"pending", "session-start", "session-end", "mod-prompt", "mod-values",
                                                "mod-reveal", "mod-demo",
-                                               "mod-settings",
+                                               "mod-settings", "mod-result",
                                                # the help of cli.main, for a person in a terminal
                                                "help", "-h", "--help"}
         self.assertEqual(sorted(dispatched - cli_commands()), [], "dispatch.py sends these to cli.main")
@@ -1299,6 +1299,76 @@ class HookEventTests(unittest.TestCase):
                 self.assertEqual((r.returncode, out["maisecrets"]), (0, "mod-settings"))
                 self.assertNotIn(value, r.stdout + r.stderr)
         self.assertEqual(self.sb.run("mod-settings", stdin="not json").returncode, 1, "a broken question: nothing")
+
+    def test_the_second_net_masks_a_stored_value_through_the_dispatcher_and_answers_no_value(self):
+        """dispatch.py mod-result (the mod's second net, second_net.mask_result): a stored value in a tool result
+        that the PostToolUse hook did not mask comes back as its placeholder, a placeholder stays, and no row goes
+        to hooks.log (it is no hook run)."""
+        value = fake_value("Sn")
+        self.sb.run("mod-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1"}))
+        kept = "\u27e6" + "SECRET" + "_c1" + "\u27e7"
+        r = self.sb.run("mod-result", stdin=json.dumps({"session_id": "S1", "tool_name": "Bash",
+                                                        "texts": [f"out {value} end", f"kept {kept}"]}))
+        out = json.loads(r.stdout)
+        self.assertEqual((r.returncode, out["maisecrets"], out["changed"]), (0, "mod-result", True), r.stderr)
+        self.assertEqual(out["texts"], [f"out {kept} end", f"kept {kept}"])
+        self.assertNotIn(value, r.stdout + r.stderr)
+        log = self.sb.home / "hooks.log"
+        rows = log.read_text() if log.exists() else ""
+        self.assertNotIn("post-tool", rows, "the second net writes no hook row")
+        self.assertNotIn(value, rows)
+
+    def test_the_second_net_masks_whatever_hooks_log_says_and_fails_closed(self):
+        """A row in hooks.log is no evidence for the second net (any program can write one): the entry masks the result
+        it gets, with or without a PostToolUse row of the session. On any failure it answers nothing, and the mod then
+        withholds the result."""
+        value = fake_value("Sr")
+        self.sb.run("mod-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1"}))
+        with open(self.sb.home / "hooks.log", "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%S") + "\tpost-tool\tclaude\tS1\tBash\tpass\t5ms\tok\n")
+        question = {"session_id": "S1", "tool_name": "Bash", "texts": [f"out {value}"], "since": time.time() - 5}
+        masked = json.loads(self.sb.run("mod-result", stdin=json.dumps(question)).stdout)
+        self.assertEqual((masked.get("ran"), masked["changed"]), (None, True), "a forged row keeps nothing")
+        self.assertNotIn(value, json.dumps(masked))
+        for bad in ("not json", json.dumps({"session_id": "S1", "texts": "no list"}),
+                    json.dumps({"session_id": "S1", "texts": [1]})):
+            with self.subTest(bad=bad):
+                r = self.sb.run("mod-result", stdin=bad)
+                self.assertEqual((r.returncode, r.stdout, r.stderr), (1, "", ""))
+        r = self.sb.run("mod-result", stdin=json.dumps({"session_id": "S1", "texts": ["x"]}),
+                        env=self.sb.env(MAISECRETS_TEST_FAULT="mod-result"))
+        self.assertEqual((r.returncode, r.stdout), (1, ""))
+
+    def test_the_tool_result_hooks_mark_their_answer_only_for_the_mod(self):
+        """With MAISECRETS_MOD_NET set to the mod's nonce each answer of the tool-result hooks that scanned a result
+        ends with the marker line: masked with the hash of the replaced output, checked else, the failure event too.
+        Without the nonce, or for a payload with no result, the answer carries none."""
+        from maisecrets.second_net import output_hash
+        nonce = "0123456789abcdef" * 2
+        value = fake_value("Sm")
+        self.sb.run("mod-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1"}))
+        clean = {"tool_name": "Bash", "session_id": "S1", "prompt_id": "p", "tool_input": {"command": "ls"},
+                 "tool_response": {"stdout": "nothing here", "stderr": ""}}
+        hit = {**clean, "tool_response": {"stdout": f"out {value}", "stderr": ""}}
+        failed = {"tool_name": "Bash", "session_id": "S1", "prompt_id": "p", "tool_input": {"command": "false"},
+                  "error": "Exit code 1 nothing here"}
+        on = self.sb.env(MAISECRETS_MOD_NET=nonce)
+        for event, payload, kind in (("post-tool", clean, "checked"), ("post-tool", hit, "masked"),
+                                     ("post-tool-failure", failed, "checked")):
+            with self.subTest(event=event, kind=kind):
+                r = self.sb.run(event, stdin=json.dumps(payload), env=on)
+                hso = json.loads(r.stdout)["hookSpecificOutput"]
+                last = hso["additionalContext"].split("\n")[-1]
+                want = (f"[maisecrets: result masked {nonce} {output_hash(hso['updatedToolOutput'])}]"
+                        if kind == "masked" else f"[maisecrets: result checked {nonce}]")
+                self.assertEqual(last, want)
+                self.assertEqual(hso["hookEventName"], "PostToolUse" if event == "post-tool" else "PostToolUseFailure")
+                self.assertNotIn(value, r.stdout)
+                off = self.sb.run(event, stdin=json.dumps(payload))
+                self.assertNotIn("[maisecrets: result", off.stdout)
+        empty = self.sb.run("post-tool", stdin=json.dumps({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p"}),
+                            env=on)
+        self.assertNotIn("[maisecrets: result", empty.stdout, "no result was scanned")
 
     def test_session_end_answers_nothing_through_the_dispatcher(self):
         r = self.sb.run("session-end", stdin=json.dumps({"session_id": "S1", "reason": "logout"}))

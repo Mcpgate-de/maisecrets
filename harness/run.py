@@ -35,7 +35,8 @@ GOLDEN = ROOT / "harness" / "golden"
 MARK = "glpat-" + "HARNESSxxx1234567890abcd"   # matches gitlab_pat; split so the repo scan stays clean
 MAIL = "harness.person@beispiel-gmbh.de"   # not example.org: a reserved domain is no hit (0.5.15)
 MARK2 = "pa$s'w\"ord`x $(echo no) y\\z"     # no known shape; quotes, $( and spaces
-PORT = 8791
+# another port for a second run on the same machine (two worktrees): MAISECRETS_HARNESS_PORT
+PORT = int(os.environ.get("MAISECRETS_HARNESS_PORT") or 8791)
 FRONT_PORT = 8790   # harness/tls_front.py, for the Code Mode scenarios
 CODE_MODE_MODEL = "claude-opus-5-5"   # Code Mode refuses a model older than 5.5 (2.1.330)
 # the shell tool the client offers: Bash, or PowerShell on Windows without Git Bash (the CI of the
@@ -157,6 +158,18 @@ SCENARIOS = {
         "preload": [(MARK, "SECRET", "gitlab_pat")],
         "files": {".env": f"TOKEN={MARK}\nMAIL={MAIL}\n"},
         "turns": [{"tool": "REPL", "input": {"code": "const out = await $`cat .env`.text(); log(out); out"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": ["\u27e6SECRET_c", "\u27e6EMAIL_c"],
+    },
+    # a script whose shell call fails and throws: the inner Bash takes the PostToolUseFailure path, and the REPL
+    # result is an error that holds the output. The second net must mask it, not take it for a refusal
+    "code_mode_script_error": {
+        "prompt": "print the env",
+        "code_mode": True,
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\nMAIL={MAIL}\n"},
+        "turns": [{"tool": "REPL", "input": {"code": "await $`cat .env; exit 3`.text(); 'unreachable'"}},
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_placeholders": ["\u27e6SECRET_c", "\u27e6EMAIL_c"],
@@ -585,7 +598,9 @@ SCENARIOS = {
     },
     # a command that fails: Claude Code answers PostToolUseFailure, whose answer cannot replace the output, so the
     # value reaches the model (a known gap). What maisecrets still does: the model is told not to use the value, it is
-    # stored so a repeat is redacted, and the transcript on disk is cleaned (checked for every scenario below)
+    # stored so a repeat is redacted, and the transcript on disk is cleaned (checked for every scenario below). With
+    # the mod the second net masks the failed output before it is stored and sent (session.append, the door
+    # tool-result), so the gap is closed there; without the mod (Codex, a client before mods) it stays
     "bash_failed_output": {
         "prompt": "print the env",
         "files": {".env": f"TOKEN={MARK}\n"},
@@ -593,6 +608,76 @@ SCENARIOS = {
         "expect_requests": 2,
         "upstream_leak_is_a_known_gap": "anthropics/claude-code#97278",
         "expect_in_requests": ["the output of this failed call held"],
+        "with_mod": {"upstream_leak_is_a_known_gap": None,
+                     "expect_in_requests": ["the output of this failed call held",
+                                            "maisecrets masked values in this tool result"]},
+    },
+    # the second net (claude-mod/maisecrets-mod.mjs, session.append on the door tool-result): the PostToolUse hook
+    # crashes for this call (a crash copy, as plugin_folder_moved) and the output holds a stored value. Claude Code
+    # 2.1.330 lets the output through even with onFailure block (block counts as exit code 2). Without the mod the value
+    # reaches the upstream and the transcript (the [GAP] lines); with the mod it arrives masked
+    "post_tool_crash_without_mod": {
+        "prompt": "print the env",
+        "plugin_copy": True, "crash_hook": "post-tool", "no_mod": True,
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "upstream_leak_is_a_known_gap": "a failed PostToolUse does not withhold (Claude Code 2.1.330)",
+        "transcript_leak_is_a_known_gap": "no hook and no mod ran after the tool",
+    },
+    "post_tool_crash_mod_masks": {
+        "prompt": "print the env",
+        "plugin_copy": True, "crash_hook": "post-tool",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": [REF1],
+        "expect_in_requests": ["maisecrets masked values in this tool result"],
+    },
+    # no PostToolUse hook of maisecrets is registered (a copy without it, like hooks that stop in a session):
+    # the answer carries no marker, and the mod masks the result; the prompt hook still runs, so no row in hooks.log
+    # and no earlier call can stand in for the marker (review of !659, H2 and H3)
+    "post_tool_hook_missing_mod_masks": {
+        "prompt": "print the env",
+        "plugin_copy": True, "drop_hook_event": "PostToolUse",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": [REF1],
+        "expect_in_requests": ["maisecrets masked values in this tool result"],
+    },
+    # the same, and the mod's own ask fails too (an injected fault: dispatch.py mod-result exits 1): the output is
+    # withheld, and the session goes on to its next request
+    "post_tool_crash_mod_fails": {
+        "prompt": "print the env",
+        "plugin_copy": True, "crash_hook": "post-tool",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "env": {"MAISECRETS_TEST_FAULT": "mod-result"},
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_in_requests": ["maisecrets could not check its output, so the output is withheld"],
+        # the model gets nothing, but no Python of maisecrets ran to scrub the tool's own record on disk
+        "transcript_leak_is_a_known_gap": "the result hook and the mod's Python both failed",
+    },
+    # the hooks watch of the mod: the prompt hook is not registered (a copy without it), so the prompt goes to the model
+    # and leaves no row in hooks.log. The mod says it in one line. The Bash call keeps the session open past the watch
+    "hooks_watch_prompt_hook_missing": {
+        "prompt": "wait a moment",
+        "plugin_copy": True, "drop_hook_event": "UserPromptSubmit",
+        "turns": [{"tool": "Bash", "input": {"command": "sleep 4; echo waited"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_debug": ["maisecrets hooks did not run in this session: values are not protected"],
+    },
+    # the same with every hook registered: no line (no false alarm)
+    "hooks_watch_quiet": {
+        "prompt": "wait a moment",
+        "turns": [{"tool": "Bash", "input": {"command": "sleep 4; echo waited"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_no_debug": ["maisecrets hooks did not run in this session"],
     },
     # secret destinations (#13): the real client resolves a placeholder into a command for a host, and maisecrets
     # notes the destination without stopping the call (observe)
@@ -954,7 +1039,10 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                                                   **sc.get("config", {})}))
     for fname, content in sc.get("home_files", {}).items():
         (home / fname).write_text(content, encoding="utf-8")
-    env = dict(os.environ, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
+    # the client under test sets MAISECRETS_MOD_NET itself when its mod runs: one from the session that runs the
+    # harness would mark the answers of a scenario without the mod
+    outer = {k: v for k, v in os.environ.items() if k != "MAISECRETS_MOD_NET"}
+    env = dict(outer, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
                MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
                MAISECRETS_GUARD_CLIPBOARD="off")   # a guarded scenario must not write the real clipboard
     env["PATH"] = tripwire_path(work, env)
@@ -980,6 +1068,16 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             launcher = plugin / "hooks" / "run.sh"
             launcher.write_text(launcher.read_text().replace(
                 "set -u\n", f'set -u\n[ "${{1:-}}" = {sc["crash_hook"]} ] && exit 1\n', 1))
+        if sc.get("drop_hook_event"):
+            # a copy whose hooks file does not register this event: the hook never runs, as in a session whose hooks
+            # did not load
+            hooks_file = plugin / "hooks" / "hooks.json"
+            data = json.loads(hooks_file.read_text())
+            del data["hooks"][sc["drop_hook_event"]]
+            hooks_file.write_text(json.dumps(data))
+        if sc.get("no_mod"):
+            # the same copy without the mod: what the client does with the hooks alone
+            (plugin / "claude-mod" / "maisecrets-mod.json").write_text(json.dumps({"modules": [], "hooks": {}}))
     # each path as a JSON string body: a Windows path has backslashes, which raw text turns into bad
     # escapes (measured on a GitLab-hosted Windows runner, 2026-09-29)
     def _js(p) -> str:
@@ -1082,7 +1180,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     # outcome there and the hook's outcome elsewhere. A client that should load it and does not is a failure,
     # or a broken mod would pass as "an older client"
     mod_loaded = re.search(r"hooks module maisecrets@\S+ loaded", dbg) is not None
-    if _client_version() >= (2, 1, 287) and not mod_loaded and "hooks modules not loaded" not in dbg:
+    if _client_version() >= (2, 1, 287) and not mod_loaded and "hooks modules not loaded" not in dbg \
+            and not sc.get("no_mod"):
         fails.append("MOD NOT LOADED: this client loads mods, but the mod did not load (see claude-debug.log)")
     if _client_version() >= (2, 1, 287) and "hooks modules not loaded" in dbg:
         # a saved rollout switch can keep mods off on a client that has them; the scenario then tests the hook
@@ -1139,6 +1238,10 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # the client masks a failed output now: the workaround for this gap is dead weight (maisecrets/exit_wrap.py)
         fails.append(f"gap closed ({sc['upstream_leak_is_a_known_gap']}): the client replaces a failed output now; "
                      "drop the exit-0 wrap (maisecrets/exit_wrap.py) and update CLAUDE.md, the watch list")
+    for mark in ("[maisecrets: result checked]", "[maisecrets: result masked]"):
+        # the marker of the tool-result hook is the mod's alone (maisecrets/second_net.py): the mod takes it out
+        if mark in joined:
+            fails.append(f"the marker {mark!r} reached the model")
     for ph in sc.get("expect_placeholders", []):
         if ph not in joined:
             fails.append(f"placeholder {ph} missing in requests")
@@ -1172,6 +1275,13 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         fails.append("prompt was not blocked")
     if sc.get("expect_dropped") and "Prompt dropped by a hook" not in (r.stdout + r.stderr):
         fails.append("the mod did not drop the prompt")
+    # what the mod showed the person (a line of $.ui.log), as the client's debug log records it
+    for text in sc.get("expect_debug", []):
+        if text not in dbg:
+            fails.append(f"expected {text!r} in the client's debug log")
+    for text in sc.get("expect_no_debug", []):
+        if text in dbg:
+            fails.append(f"{text!r} in the client's debug log: a false alarm")
     for text in sc.get("expect_output", []):
         # what the person sees in the client's own output, not what reaches the model
         if text not in r.stdout + r.stderr:
@@ -1270,6 +1380,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     for t in transcripts:
         txt = t.read_text(errors="ignore")
         for marker in (MARK, MARK2, MARK[-8:]):
+            if marker in txt and sc.get("transcript_leak_is_a_known_gap"):
+                # nothing of maisecrets ran after the tool to scrub it (a crashed tool-result hook, and no mod or a mod
+                # whose own Python failed too): the client keeps the tool's own record of the output
+                print(f"[GAP] {name}: the transcript holds …{marker[-6:]} ({sc['transcript_leak_is_a_known_gap']})")
+                break
             if marker in txt:
                 fails.append(f"transcript {t.parent.name}/{t.name} still holds the secret (…{marker[-6:]})")
                 break

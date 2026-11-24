@@ -903,7 +903,7 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
 
 
 _HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "post-tool-failure", "mod-prompt",
-                 "mod-values", "mod-reveal", "mod-settings", "mod-demo"}
+                 "mod-values", "mod-reveal", "mod-settings", "mod-demo", "mod-result"}
 
 
 _ANSI_ESCAPES = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r", "t": "\t",
@@ -1020,7 +1020,7 @@ def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
     printers = {"echo", "printf", "grep", "egrep", "rg", "cat", "head", "tail", "less", "git"}
     for m in re.finditer(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
                          r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt|mod-values|"
-                         r"mod-reveal|mod-settings|mod-demo)\b", command):
+                         r"mod-reveal|mod-settings|mod-demo|mod-result)\b", command):
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
         if seg and seg.get("cmd") in shells:
             return True

@@ -299,6 +299,9 @@ def payloads(ref: str, key: str, world: World) -> list[tuple[str, dict]]:
         ("mod-values", {"keys": [key], "refs": [], "session_id": "S1", "transcript_path": None}),
         ("mod-reveal", {"ref": "⟦sref:secret:abc⟧", "session_id": "S1", "transcript_path": None}),
         ("mod-settings", {"session_id": "S1", "transcript_path": None}),
+        ("mod-settings", {"action": "hooks_ran", "session_id": "S1", "since": 0, "transcript_path": None}),
+        ("mod-result", {"session_id": "S1", "tool_name": "Bash", "texts": [f"api_key={fake_value('Rq')}"],
+                        "transcript_path": None}),
         ("mod-demo", {"session_id": "S1", "prompt": "hi", "origin": "composer", "transcript_path": None}),
         ("session-start", {**codex, "source": "startup"}),
         ("user-prompt", {**codex, "prompt": f"password: {world.values['Rx']}"}),
@@ -365,8 +368,9 @@ class ReadsOnlyListedFilesTests(unittest.TestCase):
         for log, pid, _w, _p in seen:
             pids.setdefault(log, set()).add(pid)
         with_child = {log for log, ps in pids.items() if len(ps) > 1}
-        # each kind of child: the scrub of a prompt, the server of a value, the scrub the mod starts, the Codex scrub
-        for wanted_child in ("01-user-prompt", "03-pre-tool", "10-" + "mod-prompt", "16-user-prompt"):
+        # each kind of child: the scrub of a prompt, the server of a value, the scrubs the mod starts, the Codex scrub
+        for wanted_child in ("01-user-prompt", "03-pre-tool", "10-" + "mod-prompt", "15-" + "mod-result",
+                             "18-user-prompt"):
             self.assertIn(wanted_child, with_child, "this event's child wrote no read")
 
     def test_the_guard_reads_only_the_client_configuration(self):
