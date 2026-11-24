@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.9.29] - 2026-11-24
+
+### Features
+
+- with the withhold setting, the part of a tool result the name service did not check no longer reaches the AI (3c57808)
+- a text longer than the name service takes is checked in pieces, and the line names the share it checked (ec11af1)
+
+### Fixes
+
+- a withheld result keeps a shape the client accepts, and only a gateway or the container maisecrets started gets the request kind (5a3ddee)
+- with the withhold setting, a long result of the gateway is no longer withheld whole, and a stored value is never cut in half (50c4893)
+- the mod's second net gives a long tool result the same time for its name check as the hook does (5949e7e)
+- a hung name service holds a short result no longer than before, and a gateway outage gets no retry (e680d11)
+
 ## [0.9.28] - 2026-11-24
 
 ### Fixes
