@@ -353,9 +353,10 @@ def version_verdict(info: dict, now: float | None = None) -> Check:
         # "the newest" then says nothing (measured 2026-11-24: 0.9.22 "the newest" while 0.9.26 was released)
         return Check("warn", "version", f"copy {int(age)} days old", "/plugin, turn on auto-update",
                      f"{inst} is the newest in {copy}, and Claude Code does not update that copy by itself "
-                     f"(auto-update is off for this marketplace); next: claude plugin marketplace update "
-                     f"{info.get('market') or 'maisecrets'}, then {update_command(info)}, or turn on auto-update "
-                     f"in /plugin under Marketplaces")
+                     f"(auto-update is off for this marketplace), so new sessions may start an old version; "
+                     f"next: claude plugin marketplace update {info.get('market') or 'maisecrets'}, then "
+                     f"{update_command(info)}, or turn on auto-update in /plugin under Marketplaces; a running "
+                     f"session keeps its version until it restarts")
     return Check("ok", "version", f"{inst}, the newest", None,
                  f"the newest in {copy} (that copy is only as new as its last fetch)")
 

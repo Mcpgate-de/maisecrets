@@ -65,8 +65,9 @@ plugin blocks every prompt and names the missing piece.
 
 ## Update and uninstall
 
-Claude Code does not update a marketplace outside Anthropic's by itself: turn on auto-update for maisecrets in
-`/plugin` under Marketplaces, or fetch it before the update.
+Claude Code does not update a marketplace outside Anthropic's by itself, so new sessions keep starting the old
+version: turn on auto-update for maisecrets in `/plugin` under Marketplaces, or fetch it before the update. A
+running session keeps its version until it restarts.
 
 ```bash
 claude plugin marketplace update maisecrets            # fetch the newest release first
