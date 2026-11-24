@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.9.30] - 2026-11-24
+
+### Features
+
+- the band also names a result too long for the name service, and goes when you send the next prompt (21d7b3b)
+- a line above the prompt says when the name service checked the last tool result only in part (e1d33f1)
+
+### Fixes
+
+- the band names the worst name check of the whole turn, also for parallel calls and subagents (b267fd6)
+
 ## [0.9.29] - 2026-11-24
 
 ### Features
