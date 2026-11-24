@@ -6,6 +6,7 @@ Run: python3 -m unittest tests.test_status_verdict -v
 """
 from __future__ import annotations
 
+import calendar
 import io
 import json
 import os
@@ -223,13 +224,15 @@ class HooksWatchTests(_Tmp):
 
 
 class VersionLineTests(_Tmp):
-    def claude_install(self, installed: str, newest: str | None) -> Path:
+    def claude_install(self, installed: str, newest: str | None, auto: bool | None = True) -> Path:
         root = plugin(self.claude / "plugins" / "cache" / "maisecrets" / "maisecrets" / installed, installed)
         if newest:
             checkout = self.claude / "plugins" / "marketplaces" / "maisecrets"
             marketplace(checkout, newest)
-            (self.claude / "plugins" / "known_marketplaces.json").write_text(json.dumps({"maisecrets": {
-                "installLocation": str(checkout), "lastUpdated": "2026-11-15T10:00:00.000Z"}}))
+            entry = {"installLocation": str(checkout), "lastUpdated": "2026-11-15T10:00:00.000Z"}
+            if auto is not None:
+                entry["autoUpdate"] = auto
+            (self.claude / "plugins" / "known_marketplaces.json").write_text(json.dumps({"maisecrets": entry}))
         return root
 
     def codex_install(self, installed: str, newest: str | None) -> Path:
@@ -252,6 +255,21 @@ class VersionLineTests(_Tmp):
         state, text = self.verdict(self.claude_install("0.9.11", "0.9.11"))
         self.assertEqual(state, "ok")
         self.assertIn("2026-11-15 10:00", text)
+
+    def test_an_old_copy_without_auto_update_is_no_ok_with_the_way_to_fresh_it(self):
+        # 2026-11-24: Claude Code said "0.9.22, the newest" from a copy of 11-22; 0.9.26 was out
+        fetched = calendar.timegm((2026, 11, 15, 10, 0, 0, 0, 0, 0))
+        root = self.claude_install("0.9.11", "0.9.11", auto=None)        # no autoUpdate key: Claude Code's default
+        info = sv.newest(root, self.claude, self.codex)
+        state, text = st(sv.version_verdict(info, now=fetched + 9 * 86400))
+        self.assertEqual(state, "warn")
+        self.assertIn("copy 9 days old", text)
+        self.assertIn("claude plugin marketplace update maisecrets", text)
+        self.assertIn("auto-update", text)
+        self.assertEqual(sv.version_verdict(info, now=fetched + 2 * 86400).state, "ok", "a fresh copy: ok")
+        root = self.claude_install("0.9.11", "0.9.11", auto=True)
+        self.assertEqual(sv.version_verdict(sv.newest(root, self.claude, self.codex), now=fetched + 9 * 86400).state,
+                         "ok", "auto-update on: Claude Code keeps the copy fresh")
 
     def test_newest_unknown_without_a_copy_is_no_ok(self):
         state, text = self.verdict(self.claude_install("0.9.11", None))
@@ -420,6 +438,9 @@ class CheckLineTests(_Tmp):
             for inst, new in (("0.9.13", "0.9.13"), ("0.9.12", "0.9.13"), ("0.9.13", None), ("0.10.0-rc1", "0.9.13")):
                 out.append(sv.version_verdict({"installed": inst, "newest": new, "kind": kind, "market": "maisecrets",
                                                "fetched": "2026-11-15T10:00:00.000Z", "where": "Claude Code"}))
+                out.append(sv.version_verdict({"installed": inst, "newest": new, "kind": kind, "market": "maisecrets",
+                                               "fetched": "2026-11-15T10:00:00.000Z", "where": "Claude Code",
+                                               "auto": False}, now=time.time() + 999 * 86400))
         lines = ["WARNING: maisecrets does not protect Codex now: codex hooks: 3 of 8 not trusted: open /hooks"]
         with mock.patch("maisecrets.codex_trust.status_lines", return_value=lines):
             out.append(sv.codex_verdict(ROOT, self.codex))

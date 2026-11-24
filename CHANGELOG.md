@@ -13,12 +13,7 @@
 - the second net takes the marker only with the nonce of the mod and the hash of the masked output (40a48f1)
 - the second net passes a tool result only on the answer of the maisecrets result hook (3e5f192)
 - a refused settings command that stands only in data says how to send it from a file (c16ed49)
-- a Python script that only sends a settings command as text runs (6737164)
 - the AI gets one line when the gateway refuses a secret as too weak, or cannot open its fingerprint store (14dca1a)
-
-### Reverts
-
-- revert: fix(guard): a Python script that only sends a settings command as text runs (7c1b58a)
 
 ## [0.9.25] - 2026-11-23
 
