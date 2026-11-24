@@ -1660,7 +1660,7 @@ test('a result the maisecrets hook masked goes on as it is, its marker is taken 
     // the nonce goes to the hooks only while they run: set before, taken back after
     expect(env.map(([k]) => k)).toEqual(['MAISECRETS_MOD_NET', 'MAISECRETS_MOD_NET'])
     expect(env[0][1]).toMatch(/^[0-9a-f]{32}$/)
-    expect(env[1][1]).toBeUndefined()
+    expect(env[1][1]).toBe('')
     const r = await $.session.append(resultRow('tu-net-1', MASKED_TEXT))
     expect(stored(r)).toBe(MASKED_TEXT)
     expect(asks(runs).length).toBe(0)

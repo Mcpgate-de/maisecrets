@@ -84,7 +84,8 @@ NAMES_ONLY = {"maisecrets/incidents.py": "names subprocess.TimeoutExpired"}
 # command lines), and a new one fails.
 MOD_MEMBERS = {"clock", "command", "env", "mcp", "plugin", "process", "prompt", "session", "state", "store", "ui"}
 MOD_GLOBALS = {"crypto"}
-MOD_PROCESS_RUNS = 10    # each $.process.run( or $.process.spawn(; any other use of $.process is a finding
+# 19 since #106: the directory reads only a fixed command at the call, so runEntry writes out 15 of them
+MOD_PROCESS_RUNS = 19    # each $.process.run( or $.process.spawn(; any other use of $.process is a finding
 MEMBER = r"\$\s*\??\.\s*"  # $. and $?. and $ on one line with .x on the next
 # the one form of the MCP call: the connector's tool, and as its argument nothing or an object with the nonce alone
 MOD_MCP_CALL = r"\.call\(server, CONNECTOR_TOOL, nonce === undefined \? undefined : \{ nonce \}\)"
