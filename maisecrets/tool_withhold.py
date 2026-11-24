@@ -2,15 +2,19 @@
 which the plugin directory caps at 200,000 bytes.
 
 The unchecked rest of a result (#105, B9). With `unavailable: withhold`, a result whose name check left a rest
-(`partial`: the pieces up to `checked_to` were checked; `too_long`, or a text in pieces whose first piece failed: none)
-does not pass that rest to the AI. The walk of hooks.post_tool calls `cut` for each string value: `checked_to` is an
-offset in the joined text of remote_layer.prepare, and Layer.rest_of maps it to the offset in that string. The checked
-part goes on, masked as usual; the rest is replaced by one line that names it (lines, or characters for a text without
-a line break before the cut) and tells the AI to fetch it again in a narrower form. Every string keeps its place, so the
-result keeps its shape: Bash, Read, an MCP result and the texts of the mod's second net (maisecrets/second_net.py, the
-same number of texts) alike. Not cut: a key (the client checks the keys of its shape: a Bash result without `stderr`
-fails open); it keeps the rules. Without `withhold` (the default) the rest keeps the rules and the share is named.
-A short result whose one piece got no answer is withheld whole, as before (`with_unchecked_names`)."""
+(`partial`: the pieces up to `checked_to` were checked; a text in pieces whose first piece failed: none) does not pass
+that rest to the AI. Only a service that takes pieces cuts: for a source without them (the gateway until ai-gateway
+#2141) a text over max_chars stays `too_long` as before 0.9.29, not cut and not withheld, and its line says so. The walk
+of hooks.post_tool calls `cut` for each string value: `checked_to` is an offset in the joined text of
+remote_layer.prepare, and Layer.rest_of maps it to the offset in that string. The checked part goes on, masked as usual;
+the rest is replaced by one line that names it (lines, or characters for a text without a line break before the cut) and
+tells the AI to fetch it again in a narrower form. Every string keeps its place, so the result keeps its shape: Bash,
+Read, an MCP result and the texts of the mod's second net (maisecrets/second_net.py, the same number of texts) alike.
+Not cut: a key (the client checks the keys of its shape: a Bash result without `stderr` fails open). A key of a JSON
+result after the cut keeps the rules alone, so a name in such a key can reach the AI. The cut never splits a finding, a
+placeholder or a stored value (Layer.held: the exact spans of the store). Without `withhold` (the default) the rest
+keeps the rules and the share is named. A short result whose one piece got no answer is withheld whole, as before
+(`with_unchecked_names`)."""
 from __future__ import annotations
 
 FIRST = ("[maisecrets withheld {part} from the AI: the name service did not check it ({why}), and the person keeps "
@@ -22,7 +26,7 @@ AGAIN = "[maisecrets withheld {part}: not checked by the name service]"
 def cut(layer, s: str, found: list) -> tuple:
     """(the checked part of `s`, its findings, the line that stands for the rest), or (s, found, "") when no rest of
     `s` is withheld. The cut moves back to a line start, else after a space (a value seldom holds one), and before any
-    finding and any placeholder it would split: no half of a value stays visible."""
+    finding, placeholder or stored value it would split: no half of a value stays visible."""
     r = layer.rest_of(s) if layer is not None else None
     if r is None:
         return s, found, ""
@@ -33,9 +37,9 @@ def cut(layer, s: str, found: list) -> tuple:
     moved = True
     while moved and r:
         moved = False
-        for m in found:
-            if m.start < r < m.end:
-                r, moved = m.start, True
+        for a, b in [(m.start, m.end) for m in found] + list(layer.held.get(s, ())):
+            if a < r < b:
+                r, moved = a, True
         ref = s.rfind("⟦", 0, r)
         if ref > s.rfind("⟧", 0, r):
             r, moved = ref, True

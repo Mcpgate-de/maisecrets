@@ -123,11 +123,13 @@ class Layer:
     """The findings of the strings of one tool result: the rules' (as `scan` gave them) and the service's."""
 
     def __init__(self, found: dict, status: remote.RemoteStatus, long: bool = False, at: dict | None = None,
-                 cut: bool = False):
+                 cut: bool = False, held: dict | None = None):
         # long: the text went in more than one piece (#105). at: the offset of each string in the joined text. cut:
-        # `unavailable: withhold` and a rest the service did not check (partial, too_long, or a text in pieces whose
-        # first piece failed): the walk withholds the rest of each string (tool_withhold.cut, #105 B9)
+        # `unavailable: withhold` and a rest a service that takes pieces did not check (partial, or a text in pieces
+        # whose first piece failed): the walk withholds the rest of each string (tool_withhold.cut, #105 B9). held:
+        # the (start, end) of the stored values in each string, which a cut never splits
         self.found, self.status, self.long, self.at, self.cut = found, status, long, at or {}, cut
+        self.held = held or {}
 
     def matches(self, text: str, scan) -> list:
         got = self.found.get(text)
@@ -258,15 +260,16 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
         return Layer(found, ner.status("ok"))
     joined = SEPARATOR.join(s for s, _ in pieces)
     occupied = [(off + m.start, off + m.end) for s, off in pieces for m in found[s]]
-    if protect is not None:
-        occupied += [(off + a, off + b) for s, off in pieces for a, b in protect(s)]
+    # the stored values of each string: filler for the service, and no cut of a rest splits one (tool_withhold.cut)
+    held = {s: list(protect(s) or ()) for s, _off in pieces} if protect is not None else {}
+    occupied += [(off + a, off + b) for s, off in pieces for a, b in held.get(s, ())]
     # the share by length is the rate of the service on this computer; a gateway waits its own fixed time
     scaled = (kind == "tool" and conf_of(cfg).get("timeout_scales", True) is not False
               and not conf_of(cfg).get("gateway"))
     # more than one piece: the text with its escapes as characters is longer than the service takes (as ask() cuts)
     long = ner.pieces and len(joined) > ner.max_chars and len(remote.unescape_json(joined)[0]) > ner.max_chars
     if scaled:
-        # the wait of one piece: each request of ask() waits at most this, a one-piece text as before 0.9.28
+        # the wait of one piece: each request of ask() waits at most this, a one-piece text as before 0.9.29
         ner.timeout = wait_ms(conf_of(cfg), min(len(joined), ner.max_chars)) / 1000
     if deadline is None and kind == "tool":
         # in a hook: the pieces of the text together end within the hook's budget (#105, B8); each still waits at
@@ -311,10 +314,12 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
     for s, extra in added.items():
         found[s] = sorted(found[s] + extra, key=lambda m: (m.start, m.end))
     # a prompt keeps the rules for its rest (C30: a name never blocks a prompt); a whole result whose short text got
-    # no answer is withheld whole, as before (tool_withhold.with_unchecked_names)
+    # no answer is withheld whole, as before (tool_withhold.with_unchecked_names). Only where the service could check
+    # the text: a source without pieces (the gateway until ai-gateway #2141) keeps `too_long` as before 0.9.29, not
+    # cut and not withheld, or each long result would be withheld whole
     cut = (kind == "tool" and conf_of(cfg).get("unavailable") == "withhold"
-           and (status.state in ("partial", "too_long") or (status.state == "unavailable" and long)))
-    return Layer(found, status, long, {s: off for s, off in pieces}, cut)
+           and (status.state == "partial" or (status.state == "unavailable" and long)))
+    return Layer(found, status, long, {s: off for s, off in pieces}, cut, held)
 
 
 def _allowed() -> frozenset:

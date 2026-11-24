@@ -10,6 +10,7 @@ import re
 import sys
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -573,6 +574,67 @@ class RestWithheldTests(unittest.TestCase):
         hooks.user_prompt({"hook_event_name": "UserPromptSubmit", "session_id": "S1", **CODEX,
                            "prompt": f"please write to {NAME}"})
         self.assertEqual(len(self.svc.received), n, "a Codex prompt goes to no name service")
+
+    def test_a_grep_result_keeps_its_shape(self):
+        self.on()
+        response = {"mode": "content", "numFiles": 1, "filenames": [], "content": LONG, "numLines": LONG.count("\n")}
+        out = _guarded("Grep", response)["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual({k: v for k, v in out.items() if k != "content"},
+                         {k: v for k, v in response.items() if k != "content"})
+        self.assert_cut(out["content"])
+
+    def test_a_webfetch_result_keeps_its_shape(self):
+        self.on()
+        response = {"bytes": len(LONG), "code": 200, "codeText": "OK", "result": LONG, "durationMs": 120,
+                    "url": "https://docs.example.org/list"}
+        out = _guarded("WebFetch", response)["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual({k: v for k, v in out.items() if k not in ("result", "url")},
+                         {k: v for k, v in response.items() if k not in ("result", "url")})
+        self.assert_cut(out["result"])
+        # the url comes after the result in the joined text: unchecked, so it is withheld too, as a string
+        self.assertEqual(out["url"], "[maisecrets withheld this text: not checked by the name service]")
+
+    def test_a_source_without_pieces_keeps_too_long_and_cuts_nothing(self):
+        # the gateway until ai-gateway #2141: a text over max_chars is not sent, not cut and not withheld, as before
+        from maisecrets import remote_layer as R
+        self.on()
+        real = R.from_config
+
+        def no_pieces(*args, **kwargs):
+            det, why = real(*args, **kwargs)
+            if det is not None:
+                det.pieces = False
+            return det, why
+        with mock.patch.object(R, "from_config", no_pieces):
+            answer = _guarded("Bash", {"stdout": LONG, "stderr": ""})
+        self.assertEqual(self.svc.received, [], "premise: the text was not sent")
+        self.assertEqual(R.NER_DOWN["state"], "too_long")
+        self.assertNotIn("updatedToolOutput", answer["hookSpecificOutput"], "not cut: the output passes as it is")
+        self.assertNotIn("withheld", json.dumps(answer))
+        self.assertIn("names not checked: the name service does not take a text this long", answer["systemMessage"])
+        self.svc = self.service()
+        self.on()
+        answer = _guarded("Bash", {"stdout": LONG, "stderr": ""})
+        self.assertEqual(R.NER_DOWN["state"], "partial", "the same text where the service takes pieces: cut")
+        self.assert_cut(answer["hookSpecificOutput"]["updatedToolOutput"]["stdout"])
+
+    def test_a_stored_value_across_the_cut_is_never_split(self):
+        # one line without a space or a line break: the piece ends at 800 (1,000 less the overlap of 200), inside
+        # the stored value at 790; the cut moves before it, so no part of the value stays visible. The commas make
+        # the value a token, as the exact match of the store needs (a value glued into a longer token is not masked)
+        from maisecrets import remote_layer as R
+        value = "Qz7k" + "Wm2p" + "Xv9r" + "Tb4n"
+        self.on()
+        Vault(load_config()).put(value, "SECRET", "manual", session="S1")
+        hooks._live_cache.clear()
+        text = "x" * 789 + "," + value + "," + "y" * 700
+        out = _guarded("Bash", {"stdout": text, "stderr": ""})["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+        self.assertEqual(R.NER_DOWN["state"], "partial")
+        head = out.split("\n[maisecrets withheld", 1)[0]
+        self.assertEqual(head, "x" * 789 + ",", "the cut moved before the value")
+        self.assertIn(f"characters 791 to {len(text)}", out)
+        for n in range(4, len(value)):
+            self.assertNotIn(value[:n], out)
 
 
 class SecondNetWindowTests(unittest.TestCase):
