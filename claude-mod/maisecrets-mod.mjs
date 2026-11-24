@@ -64,13 +64,43 @@ const labels = new Map()
 let revealing = false
 let reveals = 0
 
+// The commands of the mod, each written out at its call (the plugin directory reads a process call whose argument list
+// is a variable as a program it cannot check, #106): `which` picks the Python (0 python3, 1 py -3, 2 python), `entry`
+// the dispatch.py entry. An entry outside this list starts nothing
+const PY_NAMES = ['python3', 'py', 'python']
+function runEntry($, entry, which, init) {
+  switch (entry) {
+    case 'mod-values':
+      if (which === 0) return $.process.run(['python3', 'hooks/dispatch.py', 'mod-values'], init)
+      if (which === 1) return $.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-values'], init)
+      return $.process.run(['python', 'hooks/dispatch.py', 'mod-values'], init)
+    case 'mod-reveal':
+      if (which === 0) return $.process.run(['python3', 'hooks/dispatch.py', 'mod-reveal'], init)
+      if (which === 1) return $.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-reveal'], init)
+      return $.process.run(['python', 'hooks/dispatch.py', 'mod-reveal'], init)
+    case 'mod-demo':
+      if (which === 0) return $.process.run(['python3', 'hooks/dispatch.py', 'mod-demo'], init)
+      if (which === 1) return $.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-demo'], init)
+      return $.process.run(['python', 'hooks/dispatch.py', 'mod-demo'], init)
+    case 'mod-settings':
+      if (which === 0) return $.process.run(['python3', 'hooks/dispatch.py', 'mod-settings'], init)
+      if (which === 1) return $.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-settings'], init)
+      return $.process.run(['python', 'hooks/dispatch.py', 'mod-settings'], init)
+    case 'mod-result':
+      if (which === 0) return $.process.run(['python3', 'hooks/dispatch.py', 'mod-result'], init)
+      if (which === 1) return $.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-result'], init)
+      return $.process.run(['python', 'hooks/dispatch.py', 'mod-result'], init)
+    default:
+      return Promise.reject(new Error(`maisecrets: no command for ${entry}`))
+  }
+}
+
 async function runValues($, stdin) {
   // the same Pythons as the prompt path, fixed command lines (runDispatch below)
   const init = { cwd: $.plugin.root, stdin, timeoutMs: ASK_MS, env: { PYTHONUTF8: '1' } }
-  for (const argv of [['python3', 'hooks/dispatch.py', 'mod-values'], ['py', '-3', 'hooks/dispatch.py', 'mod-values'],
-    ['python', 'hooks/dispatch.py', 'mod-values']]) {
+  for (const which of [0, 1, 2]) {  // python3, py -3, python (mod-values)
     try {
-      const r = await $.process.run(argv, init)
+      const r = await runEntry($, 'mod-values', which, init)
       if (r.exitCode === 0) return r
     } catch {
       // this Python cannot start or timed out: the next one
@@ -225,10 +255,9 @@ async function reveal($, ref) {
     const init = { cwd: $.plugin.root, stdin: JSON.stringify({ ref, session_id: id }), timeoutMs: REVEAL_MS,
       env: { PYTHONUTF8: '1' } }
     let r = null
-    for (const argv of [['python3', 'hooks/dispatch.py', 'mod-reveal'], ['py', '-3', 'hooks/dispatch.py', 'mod-reveal'],
-      ['python', 'hooks/dispatch.py', 'mod-reveal']]) {
+    for (const which of [0, 1, 2]) {  // python3, py -3, python (mod-reveal)
       try {
-        r = await $.process.run(argv, init)
+        r = await runEntry($, 'mod-reveal', which, init)
         if (r.exitCode === 0) break
       } catch { r = null }
     }
@@ -525,12 +554,11 @@ const DEMO_CMD = /^\s*(?:\/maisecrets:demo|maisecrets:\s*demo)\b/i
 async function runDemo($, stdin) {
   // one deadline for all three Pythons: a step waits at most ASK_MS, then answers itself (fail closed)
   const end = (await $.clock.now()) + ASK_MS
-  for (const argv of [['python3', 'hooks/dispatch.py', 'mod-demo'], ['py', '-3', 'hooks/dispatch.py', 'mod-demo'],
-    ['python', 'hooks/dispatch.py', 'mod-demo']]) {
+  for (const which of [0, 1, 2]) {  // python3, py -3, python (mod-demo)
     const left = end - (await $.clock.now())
     if (left <= 0) return null
     try {
-      const r = await $.process.run(argv, { cwd: $.plugin.root, stdin, timeoutMs: left, env: { PYTHONUTF8: '1' } })
+      const r = await runEntry($, 'mod-demo', which, { cwd: $.plugin.root, stdin, timeoutMs: left, env: { PYTHONUTF8: '1' } })
       if (r.exitCode === 0) return r
     } catch {
       // this Python cannot start or timed out: the next one, within the deadline
@@ -548,13 +576,12 @@ async function ownInDemo($, text, origin) {
   if (demo.get(id) === false) return null
   const end = (await $.clock.now()) + OWN_MS
   const stdin = JSON.stringify({ session_id: id, prompt: text, origin })
-  for (const argv of [['python3', 'hooks/dispatch.py', 'mod-demo'], ['py', '-3', 'hooks/dispatch.py', 'mod-demo'],
-    ['python', 'hooks/dispatch.py', 'mod-demo']]) {
+  for (const which of [0, 1, 2]) {  // python3, py -3, python (mod-demo)
     const left = end - (await $.clock.now())
     if (left <= 0) return null
     let r
     try {
-      r = await $.process.run(argv, { cwd: $.plugin.root, stdin, timeoutMs: left, env: { PYTHONUTF8: '1' } })
+      r = await runEntry($, 'mod-demo', which, { cwd: $.plugin.root, stdin, timeoutMs: left, env: { PYTHONUTF8: '1' } })
     } catch { continue }
     if (r.exitCode !== 0) continue
     let a = null
@@ -821,10 +848,9 @@ const lastToolCall = new Map()
 
 async function runSettings($, stdin, ms = ASK_MS) {
   const init = { cwd: $.plugin.root, stdin, timeoutMs: ms, env: { PYTHONUTF8: '1' } }
-  for (const argv of [['python3', 'hooks/dispatch.py', 'mod-settings'], ['py', '-3', 'hooks/dispatch.py', 'mod-settings'],
-    ['python', 'hooks/dispatch.py', 'mod-settings']]) {
+  for (const which of [0, 1, 2]) {  // python3, py -3, python (mod-settings)
     try {
-      const r = await $.process.run(argv, init)
+      const r = await runEntry($, 'mod-settings', which, init)
       if (r.exitCode === 0) return r
     } catch {
       // this Python cannot start or timed out: the next one
@@ -2033,7 +2059,7 @@ async function openMarks($) {
 }
 async function closeMarks($) {
   marksOpen = Math.max(0, marksOpen - 1)
-  if (marksOpen === 0) await $.env.set('MAISECRETS_MOD_NET', undefined)
+  if (marksOpen === 0) await $.env.set('MAISECRETS_MOD_NET', '')
 }
 async function withMarks($, run) {
   try { await openMarks($) } catch { /* no marker: the second net masks the result */ }
@@ -2075,14 +2101,13 @@ function dueBlocks(e) {
 const NO_PROGRAM = /ENOENT|not found|no such file|cannot find|is not recognized/i
 async function runResult($, stdin) {
   const init = { cwd: $.plugin.root, stdin, timeoutMs: RESULT_MS, env: { PYTHONUTF8: '1' } }
-  for (const argv of [['python3', 'hooks/dispatch.py', 'mod-result'], ['py', '-3', 'hooks/dispatch.py', 'mod-result'],
-    ['python', 'hooks/dispatch.py', 'mod-result']]) {
+  for (const which of [0, 1, 2]) {  // python3, py -3, python (mod-result)
     let r
     try {
-      r = await $.process.run(argv, init)
+      r = await runEntry($, 'mod-result', which, init)
     } catch (err) {
       const why = String(err?.code ?? err?.message ?? err).slice(0, 120)
-      try { $.ui.log(`maisecrets second net: ${argv[0]} did not run (${why})`, { to: 'debug' }) } catch { /* no log */ }
+      try { $.ui.log(`maisecrets second net: ${PY_NAMES[which]} did not run (${why})`, { to: 'debug' }) } catch { /* no log */ }
       if (NO_PROGRAM.test(why)) continue
       return null
     }
