@@ -43,36 +43,68 @@ download, no package install, no dependency outside the Python standard library.
 ## What the mod does
 
 `claude-mod/maisecrets-mod.mjs` is a mod for Claude Code 2.1.287 and later. It lets a prompt with a value go through
-with placeholders, instead of the block of the `UserPromptSubmit` hook.
+with placeholders instead of the block of the `UserPromptSubmit` hook, shows you your values on your screen (never to
+the model), masks a tool result that the result hook missed, and serves the `/maisecrets` menu. Everything it does
+goes through the Claude Code mod API; it opens no socket, no URL and no HTTP request itself.
 
-- **What it reads, and why:** it does not read other messages, files or settings.
+### The programs it starts (`$.process.run`, `$.process.spawn`)
 
-  | Data | Why `hooks/dispatch.py` needs it |
-  |---|---|
-  | the prompt you typed (or sent with Remote Control or `claude -p`) | to find the values and write the prompt with placeholders |
-  | the session id | a placeholder resolves only in the session that made it, and the transcript clean-up finds the session by it |
-  | the working directory (`session.cwd`) | to judge an `@file` mention or a relative path in the prompt |
-  | the origin of the prompt | a `{{Name}}` marker counts only in a prompt that a person typed (`composer`, `bridge`) |
+Only the plugin's own `hooks/dispatch.py`, in the plugin folder, with Python 3, as a fixed argument list (no shell):
 
-- **What it runs:** exactly one of these three commands. Each one is a fixed argument list in the source
-  (`claude-mod/maisecrets-mod.mjs`, the functions `runPython3`, `runPyLauncher` and `runPython`), not built at run
-  time and not run through a shell:
+```
+python3 hooks/dispatch.py mod-prompt     (or: py -3 ..., python ...: the name of Python differs per system)
+python3 hooks/dispatch.py mod-values     (the values of placeholders, to draw them on your screen)
+python3 hooks/dispatch.py mod-reveal     (one value you clicked, to show or copy it)
+python3 hooks/dispatch.py mod-demo       (whether this session is in the demo)
+python3 hooks/dispatch.py mod-settings   (the /maisecrets menu and its panel)
+python3 hooks/dispatch.py mod-result     (the second check of a tool result)
+```
 
-  ```
-  python3 hooks/dispatch.py mod-prompt
-  py -3 hooks/dispatch.py mod-prompt
-  python hooks/dispatch.py mod-prompt
-  ```
+The menu also runs the commands you choose in it (`hooks/dispatch.py` with that command's words, for example a login
+at your gateway); that Python process may start your browser for a login, or Docker or Podman for the local name
+service, only when you chose that command. Each run gets `PYTHONUTF8=1` and a time limit.
 
-  It tries them in this order, because the name of Python differs between macOS, Linux and Windows, and stops at the
-  first that answers. Each one runs in the plugin folder, with `PYTHONUTF8=1` so that Windows reads the prompt as
-  UTF-8, and all three together get at most 8 seconds. `hooks/dispatch.py` is readable source in the plugin folder and
-  uses the same detection as the hooks.
-- **What it sends, and where:** `$.process.run` starts a local child process on the same machine; it is not a network
-  call. The mod writes the four values above as JSON to the standard input of that process and reads the prompt with
-  placeholders from its standard output. It opens no socket, no URL and no HTTP request, and it starts no remote
-  process.
-- **When it fails:** the prompt goes on unchanged, and the `UserPromptSubmit` hook blocks it as without the mod.
+### What it sends, and where
+
+The text of the question (a prompt, a tool result, the keys to show, a menu action), with the session id and, for a
+prompt, the working directory and where the prompt came from, goes as JSON on standard input to that local Python
+process. Nothing goes over the network from the mod. The Python process sends text off this computer only to a
+service you set up: the name service of `/maisecrets ner`, or a gateway you logged in at (`/maisecrets sref login`).
+
+### The one MCP call (`$.mcp.call`)
+
+When a claude.ai connector showed Sensitive References this session, the mod calls that connector's own tool
+`sensitive_references_resource` once at the end of a turn, with no argument (to learn its gateway) or with a one-time
+nonce of the mod (to prove that the connector reaches your gateway with your account). It calls no other tool.
+
+### What it sets
+
+- `$.env.set('CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', ...)`: off while a session is in the demo (`/maisecrets demo
+  on`), back to Claude Code's default after it.
+- `$.store`: one counter, how often it showed its hint about values on the screen.
+- `$.prompt.fill`: only the login command of a gateway, into an empty input box; your Enter starts it.
+
+### The events it hooks, and what each does
+
+| Event | What the hook does |
+|---|---|
+| `prompt.submit`, `classic.UserPromptSubmit` | Replaces values in your prompt with placeholders before it is sent; shows one line when the prompt hook did not run. |
+| `tool.call` | Notes that a call started (for the second check); refuses a call that carries the mod's own pairing nonce. |
+| `tool.run` | Notes which placeholders and references a call used; changes nothing. |
+| `classic.PostToolUse`, `classic.PostToolUseFailure` | Give the result hook a one-time code of this mod and take the hook's proof line out of the output. |
+| `session.append` (tool results) | Masks a tool result the result hook did not check, before Claude Code keeps or sends it; if that fails, withholds the output. |
+| `session.append` (hook context) | Takes the proof lines of the result hook out of the context. |
+| `http.fetch` | Only in the demo: refuses every request Claude Code itself sends. Outside the demo, it changes nothing. |
+| `session.compact` | Only in the demo: skips a compaction, because it is a model request of its own. |
+| `turn.step` | Only in the demo: answers each model step with one line instead of a request. |
+| `turn.complete` | Refreshes the status line; offers a gateway login when one is due. |
+| `command.run`, `$.command.register` | The `/maisecrets` menu and the commands typed as `/maisecrets:NAME`. |
+| `ui.render`, `ui.close`, `session.start` | Draws your values (with a lock) and the menu panel on your screen; nothing of it goes to the model. |
+
+### When it fails
+
+The prompt goes on unchanged, and the `UserPromptSubmit` hook blocks it as without the mod. A tool result whose second
+check fails is withheld. In the demo, a hook that gets no answer from Python refuses the request.
 
 ## Programs the plugin starts
 
