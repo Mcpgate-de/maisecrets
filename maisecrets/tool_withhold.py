@@ -120,6 +120,7 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None,
     rules; either way its line names the share."""
     from . import remote_layer as _rl
     if not _rl.NER_DOWN.get("unchecked"):
+        _rl.NER_DOWN["band"] = None      # each result passes here (post_tool, mask_result): no band of an older one
         return result
     if codex is None or load_config is None:     # hooks._post_tool_guarded_rest: this hook's client and setting
         from .hooks import client_of, load_config as _load

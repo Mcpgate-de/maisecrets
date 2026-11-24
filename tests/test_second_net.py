@@ -20,6 +20,12 @@ from maisecrets import second_net  # noqa: E402
 NONCE = "0123456789abcdef" * 2
 
 
+def setUpModule():
+    # no band of a result that another test module checked in this process (#105, B11)
+    from maisecrets import remote_layer
+    remote_layer.NER_DOWN["band"] = None
+
+
 class MarkTests(unittest.TestCase):
     def test_the_marker_carries_the_nonce_and_for_masked_the_hash_of_the_output(self):
         self.assertEqual(second_net.mark({}, "post-tool", NONCE)["hookSpecificOutput"],
@@ -98,7 +104,10 @@ class MaskResultTests(unittest.TestCase):
         def add_note(payload, result, codex, load_config):
             return {**result, "hookSpecificOutput": {"hookEventName": "PostToolUse",
                                                      "additionalContext": "names: not checked"}}
-        with mock.patch("maisecrets.tool_withhold.with_unchecked_names", add_note):
+        from maisecrets import remote_layer
+        # a band of an earlier result in this process is not this result's (#105, B11)
+        with mock.patch("maisecrets.tool_withhold.with_unchecked_names", add_note), \
+                mock.patch.dict(remote_layer.NER_DOWN, {"band": (49, "rules")}):
             out = second_net.mask_result({"session_id": "S1", "tool_name": "Bash", "texts": ["nothing here"]})
         self.assertEqual(out, {"texts": ["nothing here"], "changed": False, "note": "names: not checked"})
 

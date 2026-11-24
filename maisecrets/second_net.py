@@ -137,6 +137,8 @@ def mask_result(payload: dict) -> dict:
                     "tool_response": list(texts)}
     from .vault import hook_deadline
     hook_deadline(WINDOW_S)
+    from .remote_layer import NER_DOWN
+    NER_DOWN["band"] = None               # the band of this result only
     try:                                  # the window holds until the answer: the store calls of the scrub too
         out = hooks.post_tool(hook_payload)
         out = with_unchecked_names(hook_payload, out if isinstance(out, dict) else {}, False, load_config)
