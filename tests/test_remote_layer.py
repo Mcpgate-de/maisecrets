@@ -575,5 +575,28 @@ class RestWithheldTests(unittest.TestCase):
         self.assertEqual(len(self.svc.received), n, "a Codex prompt goes to no name service")
 
 
+class SecondNetWindowTests(unittest.TestCase):
+    def test_the_second_net_gives_a_long_text_the_window_of_a_hook(self):
+        # #105, MR 1 note: outside a hook all pieces shared the wait of one piece and the text ended partial
+        from maisecrets import remote_layer as R, second_net, vault
+        from test_remote_detector import Scripted
+        vault.hook_deadline(None)
+        svc = Scripted([(200, None, {}, 0.4)] * 4)          # each piece 0.4 s, its own wait 1 s
+        self.addCleanup(svc.close)
+        _reset(remote_detector={"url": svc.url, "format": "hf", "max_chars": 1000, "timeout_ms": 1000,
+                                "timeout_scales": False})
+        got = second_net.mask_result({"session_id": "S1", "tool_name": "Bash", "texts": [LONG]})
+        self.assertGreaterEqual(len(svc.received), 2)
+        self.assertEqual(R.NER_DOWN["state"], "ok")
+        self.assertNotIn(NAME, got["texts"][0])
+        self.assertIsNone(vault.hook_window(), "the window ends with the call")
+
+    def test_the_window_ends_well_before_the_mod_stops_waiting(self):
+        from maisecrets import second_net
+        mod = Path(__file__).resolve().parent.parent / "claude-mod" / "maisecrets-mod.mjs"
+        result_ms = int(re.search(r"^const RESULT_MS = (\d+)$", mod.read_text(encoding="utf-8"), re.M).group(1))
+        self.assertLessEqual(second_net.WINDOW_S + 4, result_ms / 1000)
+
+
 if __name__ == "__main__":
     unittest.main()
