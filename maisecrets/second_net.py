@@ -119,22 +119,22 @@ def mask_result(payload: dict) -> dict:
                     "tool_response": list(texts)}
     from .vault import hook_deadline
     hook_deadline(WINDOW_S)
-    try:
+    try:                                  # the window holds until the answer: the store calls of the scrub too
         out = hooks.post_tool(hook_payload)
+        out = with_unchecked_names(hook_payload, out if isinstance(out, dict) else {}, False, load_config)
+        hso = out.get("hookSpecificOutput") or {}
+        new = hso.get("updatedToolOutput")
+        note = hso.get("additionalContext") if isinstance(hso.get("additionalContext"), str) else ""
+        if new is None:
+            return {"texts": texts, "changed": False, "note": note}
+        if isinstance(new, str):
+            return {"withheld": True}     # with_unchecked_names withheld it: one text in place of the result
+        if not isinstance(new, list) or len(new) != len(texts) or not all(isinstance(t, str) for t in new):
+            raise ValueError("answer")
+        _scrub_later(texts, new, session, payload.get("agent_id"))
+        return {"texts": new, "changed": new != texts, "note": note}
     finally:
         hook_deadline(None)
-    out = with_unchecked_names(hook_payload, out if isinstance(out, dict) else {}, False, load_config)
-    hso = out.get("hookSpecificOutput") or {}
-    new = hso.get("updatedToolOutput")
-    note = hso.get("additionalContext") if isinstance(hso.get("additionalContext"), str) else ""
-    if new is None:
-        return {"texts": texts, "changed": False, "note": note}
-    if isinstance(new, str):
-        return {"withheld": True}         # with_unchecked_names withheld it: one text in place of the result
-    if not isinstance(new, list) or len(new) != len(texts) or not all(isinstance(t, str) for t in new):
-        raise ValueError("answer")
-    _scrub_later(texts, new, session, payload.get("agent_id"))
-    return {"texts": new, "changed": new != texts, "note": note}
 
 
 def _scrub_later(texts: list, new: list, session: str | None, agent) -> None:

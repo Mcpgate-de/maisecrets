@@ -1,20 +1,28 @@
 """The PostToolUse answers that keep a tool result from the AI or name its unchecked names (#33). Out of hooks.py,
 which the plugin directory caps at 200,000 bytes.
 
-The unchecked rest of a result (#105, B9). With `unavailable: withhold`, a result whose name check left a rest
-(`partial`: the pieces up to `checked_to` were checked; a text in pieces whose first piece failed: none) does not pass
-that rest to the AI. Only a service that takes pieces cuts: for a source without them (the gateway until ai-gateway
-#2141) a text over max_chars stays `too_long` as before 0.9.29, not cut and not withheld, and its line says so. The walk
-of hooks.post_tool calls `cut` for each string value: `checked_to` is an offset in the joined text of
-remote_layer.prepare, and Layer.rest_of maps it to the offset in that string. The checked part goes on, masked as usual;
-the rest is replaced by one line that names it (lines, or characters for a text without a line break before the cut) and
-tells the AI to fetch it again in a narrower form. Every string keeps its place, so the result keeps its shape: Bash,
-Read, an MCP result and the texts of the mod's second net (maisecrets/second_net.py, the same number of texts) alike.
-Not cut: a key (the client checks the keys of its shape: a Bash result without `stderr` fails open). A key of a JSON
-result after the cut keeps the rules alone, so a name in such a key can reach the AI. The cut never splits a finding, a
-placeholder or a stored value (Layer.held: the exact spans of the store). Without `withhold` (the default) the rest
-keeps the rules and the share is named. A short result whose one piece got no answer is withheld whole, as before
-(`with_unchecked_names`)."""
+The unchecked rest of a result (#105, B9). With `unavailable: withhold`, a `partial` result (the pieces up to
+`checked_to` were checked) does not pass its rest to the AI. remote_layer.prepare puts the short strings of a result
+first in the joined text, so the strings of its shape (enums, MIME types, ids, urls, paths) lie in the first piece and
+the rest is the end of a long text. The walk of hooks.post_tool calls `cut` for each string value: Layer.rest_of maps
+`checked_to` to the offset in that string. The checked part goes on, masked as usual; the rest is replaced by one line
+that names it (lines, or characters for a text without a line break before the cut) and tells the AI to fetch it again
+in a narrower form. Every string keeps its place, so the result keeps its shape: Bash, Read, Grep, WebFetch, an Agent
+or an MCP result and the texts of the mod's second net (maisecrets/second_net.py, the same number of texts) alike. The
+cut never splits a finding, a placeholder or a stored value (Layer.held: the exact spans of the store).
+
+Withheld whole instead, through `withheld` (it knows the Read and Bash shapes), never string by string: a result with
+no checked part (a short text or a long one whose first piece got no answer), and a partial result whose rest would
+touch a string without white space (Layer.whole): a cut there would break the shape, and the client then sends the
+original. A source without pieces (the gateway until ai-gateway #2141) keeps `too_long` as before 0.9.29: a text over
+max_chars is not cut and not withheld, and its line says so.
+
+Not covered by the cut: a key of a JSON result keeps the rules alone (the client checks the keys of its shape: a Bash
+result without `stderr` fails open), so a name in a key after the cut can reach the AI; the folder part of an Agent's
+outputFile is redacted outside the cut (tool_output._keep; its head is no string of the join), so only Layer.whole
+covers it when a rest would touch that path; the output of a failed command without the mod (PostToolUseFailure cannot
+replace it); a resumed Codex session, which reads the raw output from its rollout. Without `withhold` (the default) the
+rest keeps the rules and the share is named (`with_unchecked_names`)."""
 from __future__ import annotations
 
 FIRST = ("[maisecrets withheld {part} from the AI: the name service did not check it ({why}), and the person keeps "
@@ -111,9 +119,10 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None,
     why = str(_rl.NER_DOWN.get("why") or "")
     conf = _rl.conf_of(load_config())
     cut_ = bool(_rl.NER_DOWN.get("cut"))
-    # a long text (pieces) whose first piece got no answer: the walk withheld each string (`cut`), not the whole
-    withhold = (conf.get("unavailable") == "withhold" and _rl.NER_DOWN.get("state") == "unavailable"
-                and not _rl.NER_DOWN.get("long"))
+    # no answer (a short text, or a long one whose first piece failed), or a rest that would touch a string of the
+    # result's shape (`whole`): the whole result, in the shape withheld() gives each tool
+    whole = bool(_rl.NER_DOWN.get("whole"))
+    withhold = conf.get("unavailable") == "withhold" and (_rl.NER_DOWN.get("state") == "unavailable" or whole)
     if withhold:
         _rl.NER_DOWN["v"] = False      # the note for the AI says the rules masked the result; none did here
     out = withheld(payload, _rl.withhold_text(why), codex) if withhold else dict(result or {})
@@ -128,7 +137,7 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None,
     lines = []
     if _rl.NER_DOWN.get("state") in ("too_long", "partial"):
         # this result alone is too long, or only a part of it was checked (#105): under each one, with the share
-        lines.append(_rl.screen_line(why, cut_, share))
+        lines.append(_rl.screen_line(why, True) if whole and withhold else _rl.screen_line(why, cut_, share))
     else:
         # a source that cannot be used: once per session with the cause and the step, again when the cause changes
         # (ner_health), withheld or not; the AI's note above still comes with each result. It replaces the
@@ -137,7 +146,7 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None,
         _rl.NER_DOWN["v"] = False
         _rl.NER_DOWN.pop("not_ours", None)
         lines.append(ner_health.result_line(load_config(), payload, why, codex))
-        if withhold or cut_:
+        if withhold:
             lines.append(_rl.screen_line(why, True))    # an act on this result: under each one
     line = " ".join(x for x in lines if x)
     if line:

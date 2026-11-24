@@ -16,6 +16,7 @@ from __future__ import annotations
 import bisect
 import contextlib
 import math
+import re
 import time
 
 from .detection import remote
@@ -130,6 +131,7 @@ class Layer:
         # the (start, end) of the stored values in each string, which a cut never splits
         self.found, self.status, self.long, self.at, self.cut = found, status, long, at or {}, cut
         self.held = held or {}
+        self.whole = False       # a partial result withheld whole: a rest would touch a string of its shape
 
     def matches(self, text: str, scan) -> list:
         got = self.found.get(text)
@@ -251,7 +253,9 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
     pieces: list = []          # (text, offset in the joined text)
     at = 0
     scan_began = time.monotonic()
-    for s in dict.fromkeys(strings):
+    # the short strings first (#105 review): the enums, MIME types, ids, urls and paths of a result's shape lie in
+    # the first piece, so a rest is the end of a long text and a cut leaves the shape whole (tool_withhold.cut)
+    for s in sorted(dict.fromkeys(strings), key=len):
         found[s] = list(scan(s))
         if s.strip():
             pieces.append((s, at))
@@ -276,9 +280,9 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
         # most its own wait, so a service that hangs holds a short result no longer than before
         deadline = tool_deadline(time.monotonic() - scan_began)
     asked_at = time.monotonic()
-    # kind: a service may give a prompt priority (#105, the gateway with ai-gateway #2141); hf only
     asks = "prompt" if kind == "prompt" else "result"
-    spans, status = ner.ask(joined, occupied, deadline if deadline is not None else asked_at + ner.timeout, asks)
+    spans, status = ner.ask(joined, occupied, deadline if deadline is not None else asked_at + ner.timeout,
+                            kind_for(cfg, ner, asks))
     if scaled:
         # a sample says how fast the service is: an answer of the whole text, or a timeout of a one-piece text that
         # its own wait ended. A timeout of the hook's budget or of a later piece says nothing of the rate
@@ -293,7 +297,7 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
         fb, _why = from_config(cfg, fallback=True)
         if fb is not None:
             spans, status = fb.ask(joined, occupied, deadline if deadline is not None and kind == "tool" else
-                                   time.monotonic() + fb.timeout, asks)
+                                   time.monotonic() + fb.timeout, kind_for(cfg, fb, asks, fallback=True))
             source, asked = "fallback", fb
     from . import ner_setup
     partial = status.state == "partial"
@@ -317,9 +321,27 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
     # no answer is withheld whole, as before (tool_withhold.with_unchecked_names). Only where the service could check
     # the text: a source without pieces (the gateway until ai-gateway #2141) keeps `too_long` as before 0.9.29, not
     # cut and not withheld, or each long result would be withheld whole
-    cut = (kind == "tool" and conf_of(cfg).get("unavailable") == "withhold"
-           and (status.state == "partial" or (status.state == "unavailable" and long)))
-    return Layer(found, status, long, {s: off for s, off in pieces}, cut, held)
+    # A long text whose first piece failed has no checked part: it is withheld whole like a short one
+    # (tool_withhold.withheld knows the Read and Bash shapes); a cut of each string would replace the strings of the
+    # shape too, and the client then sends the original (#105 review, BLOCKER)
+    cut = kind == "tool" and conf_of(cfg).get("unavailable") == "withhold" and status.state == "partial"
+    layer = Layer(found, status, long, {s: off for s, off in pieces}, cut, held)
+    if cut and any(layer.rest_of(s) is not None and not _WORDS.search(s) for s, _off in pieces):
+        # a rest would touch a string without white space (an enum, a MIME type, base64, a url, a path): its cut
+        # breaks the shape, so the whole result is withheld instead (#105 review, HIGH)
+        layer.cut, layer.whole = False, True
+    return layer
+
+
+_WORDS = re.compile(r"\s")
+
+
+def kind_for(cfg: dict, ner, kind: str, fallback: bool = False) -> str | None:
+    """`kind` only for a service known to read it (#105 review): the gateway source and the container maisecrets
+    started (it proves its secret). A url source, a container started by hand or a fallback without a secret gets no
+    `kind`: a strict server of another make may refuse a field it does not know."""
+    gateway = bool(conf_of(cfg).get("gateway")) and not fallback
+    return kind if gateway or ner.proves else None
 
 
 def _allowed() -> frozenset:
@@ -522,6 +544,7 @@ def note_result(layer) -> None:
     NER_DOWN["share"] = share(layer.status) if layer is not None and layer.status.state == "partial" else 0
     NER_DOWN["long"] = layer is not None and layer.long
     NER_DOWN["cut"] = 0          # the strings whose rest the walk withheld (tool_withhold.cut)
+    NER_DOWN["whole"] = layer is not None and layer.whole
     NER_DOWN["state"] = layer.status.state if layer is not None else ""
     NER_DOWN["not_ours"] = layer is not None and layer.status.reason == "not_ours"
     NER_DOWN["why"] = (layer.status.reason or layer.status.state) if layer is not None else ""

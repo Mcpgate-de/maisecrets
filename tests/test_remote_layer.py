@@ -294,8 +294,10 @@ class RemoteLayerTests(unittest.TestCase):
         self.assertEqual(ner_view.today_check().fact,
                          "1 of 2 texts checked by the service, 1 in part (60 % on average)")
 
-    def test_a_long_text_whose_first_piece_failed_is_withheld_string_by_string(self):
-        # #105 B9 (MR 2): `checked_to == 0` takes the path of a rest; a short one is withheld whole as before
+    def test_a_long_text_whose_first_piece_failed_is_withheld_whole_in_its_shape(self):
+        # #105 review, BLOCKER: no checked part, so the whole result is withheld through withheld(), never string by
+        # string (a cut of each string replaced the strings of the shape, and the client sent the original)
+        from maisecrets.file_reads import text_result
         from test_remote_detector import Scripted
         down = Scripted([(500, {"error": "x"}, {}, 0.0)] * 4)
         self.addCleanup(down.close)
@@ -305,13 +307,21 @@ class RemoteLayerTests(unittest.TestCase):
             return hooks._post_tool_guarded_rest({
                 "hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
                 "tool_input": {"command": "cat notes.txt"}, "tool_response": {"stdout": out, "stderr": ""}})
-        long_ = guarded("row of the log\n" * 100)
+        text = "row of the log\n" * 100
+        long_ = guarded(text)
         out = long_["hookSpecificOutput"]["updatedToolOutput"]
-        self.assertEqual(set(out), {"stdout", "stderr"}, "the Bash shape stays")
-        self.assertTrue(out["stdout"].startswith("[maisecrets withheld this text from the AI"), out["stdout"])
-        self.assertNotIn("row of the log", out["stdout"])
-        self.assertIn("did not check this tool result", long_["hookSpecificOutput"]["additionalContext"])
+        self.assertIsInstance(out, str, "the Bash answer of withheld(): one text")
+        self.assertTrue(out.startswith("[maisecrets withheld this tool result"), out)
+        self.assertNotIn("row of the log", json.dumps(long_))
+        self.assertIn("withheld this result from the AI", long_["systemMessage"])
         self.assertIn("withheld", json.dumps(guarded("a short row\n")))
+        read = _guarded("Read", text_result("/work/notes.txt", text))["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual((read["type"], set(read["file"])), ("text", set(text_result("/x", "y")["file"])),
+                         "a valid Read shape: the client takes it")
+        self.assertNotIn("row of the log", json.dumps(read))
+        mcp = _guarded("mcp__notes__get", [{"type": "text", "text": text}])["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertIsInstance(mcp, str, "an MCP result withheld as one text, as a short one is")
+        self.assertNotIn("row of the log", mcp)
 
     def test_no_test_starts_inside_a_hook_window(self):
         # review L7: tests/_isolate.py resets the window before each test
@@ -430,7 +440,7 @@ class RestWithheldTests(unittest.TestCase):
         head = text[:m.start()]
         self.assertEqual(head.count("\n") + 1, int(m.group(1)), "the line names the first line it withheld")
         self.assertEqual(int(m.group(2)), LONG.count("\n"))
-        self.assertGreater(head.count("row of the log"), 30, "the checked part goes on")
+        self.assertGreater(head.count("row of the log"), 10, "the checked part goes on")
 
     def test_bash_keeps_its_shape_and_the_rest_is_withheld(self):
         self.on()
@@ -443,7 +453,7 @@ class RestWithheldTests(unittest.TestCase):
         self.assertRegex(answer["systemMessage"], r"names \d+ % checked")
         self.assertIn("A line in the result names each withheld part",
                       answer["hookSpecificOutput"]["additionalContext"])
-        self.assertEqual([d.get("kind") for d in self.svc.received], ["result", "result"], "kind goes with each piece")
+        self.assertEqual([d.get("kind") for d in self.svc.received], [None, None], "a url source gets no kind")
 
     def test_without_withhold_nothing_changes(self):
         self.on(withhold=False)
@@ -508,13 +518,68 @@ class RestWithheldTests(unittest.TestCase):
         self.assertTrue(got["changed"])
         self.assertEqual(got["texts"][0], "exit code 1", "a text the first piece checked goes on")
         self.assert_cut(got["texts"][1])
-        self.assertEqual(got["texts"][2], "[maisecrets withheld this text: not checked by the name service]")
+        self.assertEqual(got["texts"][2], "after the output", "a short text goes first: checked")
         self.assertIn("withheld part", got["note"])
         self.svc = self.service()
         self.on(withhold=False)
         got = second_net.mask_result({"session_id": "S1", "tool_name": "Bash", "texts": texts})
         self.assertIn(LATE, got["texts"][1], "without withhold the rest keeps the rules")
         self.assertEqual(got["texts"][2], "after the output")
+
+    def test_an_mcp_image_block_keeps_its_type_data_and_mime_type(self):
+        self.on()
+        data = "iVBORw0KGgo" + "A" * 400
+        image = {"type": "image", "data": data, "mimeType": "image/png"}
+        answer = _guarded("mcp__shots__take", [{"type": "text", "text": LONG}, image])
+        out = answer["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual(out[1], image, "the short strings go first: the image block is checked, not cut")
+        self.assertEqual(out[0]["type"], "text")
+        self.assert_cut(out[0]["text"])
+
+    def test_an_agent_result_keeps_its_ids_and_output_file(self):
+        self.on()
+        response = {"status": "completed", "agentId": "a1b2c3d4e5f6", "content": [{"type": "text", "text": LONG}],
+                    "totalDurationMs": 5, "outputFile": "/work/tasks/a1b2c3d4e5f6.output"}
+        out = _guarded("Agent", response)["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual({k: out[k] for k in ("status", "agentId", "totalDurationMs")},
+                         {"status": "completed", "agentId": "a1b2c3d4e5f6", "totalDurationMs": 5})
+        self.assertTrue(out["outputFile"].endswith("a1b2c3d4e5f6.output"), out["outputFile"])
+        self.assertEqual(out["content"][0]["type"], "text")
+        self.assert_cut(out["content"][0]["text"])
+
+    def test_a_key_in_the_rest_is_not_cut(self):
+        # a key keeps the rules alone (the client checks the keys of its shape); here a long key lies in the rest
+        self.on()
+        key = "a note about the list " * 100                 # longer than LONG: after it in the joined text
+        out = _guarded("mcp__notes__get", {"count": 2, key: LONG})["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual(set(out), {"count", key}, "the key stays as it is")
+        self.assert_cut(out[key])
+
+    def test_a_rest_on_a_string_without_white_space_withholds_the_whole_result(self):
+        # #105 review, HIGH: an enum, a MIME type, base64, a url or a path is never cut; the whole result goes
+        self.on()
+        blob = "Zm9v" * 800                                   # longer than LONG: it lies in the rest
+        answer = _guarded("Bash", {"stdout": LONG, "stderr": blob})
+        out = answer["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertIsInstance(out, str)
+        self.assertTrue(out.startswith("[maisecrets withheld this tool result"), out)
+        self.assertNotIn("Zm9v", json.dumps(answer))
+        self.assertIn("withheld this result from the AI", answer["systemMessage"])
+
+    def test_kind_goes_only_to_the_gateway_and_the_container_maisecrets_started(self):
+        # #105 review, MEDIUM 2: a strict server of another make may refuse a field it does not know
+        from maisecrets import remote_layer as R
+
+        class Det:
+            def __init__(self, proves):
+                self.proves = proves
+        for conf, proves, fallback, want in (({"gateway": True}, False, False, "result"),
+                                             ({}, True, False, "result"),
+                                             ({}, False, False, None),
+                                             ({"gateway": True}, False, True, None),
+                                             ({"gateway": True}, True, True, "result")):
+            with self.subTest(conf=conf, proves=proves, fallback=fallback):
+                self.assertEqual(R.kind_for({"remote_detector": conf}, Det(proves), "result", fallback), want)
 
     def test_a_finding_or_a_placeholder_on_the_cut_moves_it_before_them(self):
         from maisecrets import remote_layer as R
@@ -562,7 +627,7 @@ class RestWithheldTests(unittest.TestCase):
                                     LONG, [], lambda: (lambda s: []), typed=True)
         self.assertEqual([m.value for m in names], [NAME], "the checked piece's name only; the prompt is not cut")
         self.assertTrue(why.startswith("partial:") and why.endswith(":timeout"), why)
-        self.assertEqual(self.svc.received[0].get("kind"), "prompt")
+        self.assertNotIn("kind", self.svc.received[0], "a url source gets no kind")
         self.assertIn("checked", R.unchecked_note("S-b10", why))
         self.svc = self.service()
         self.on()
@@ -588,11 +653,9 @@ class RestWithheldTests(unittest.TestCase):
         response = {"bytes": len(LONG), "code": 200, "codeText": "OK", "result": LONG, "durationMs": 120,
                     "url": "https://docs.example.org/list"}
         out = _guarded("WebFetch", response)["hookSpecificOutput"]["updatedToolOutput"]
-        self.assertEqual({k: v for k, v in out.items() if k not in ("result", "url")},
-                         {k: v for k, v in response.items() if k not in ("result", "url")})
+        self.assertEqual({k: v for k, v in out.items() if k != "result"},
+                         {k: v for k, v in response.items() if k != "result"}, "the url is checked first, as it is")
         self.assert_cut(out["result"])
-        # the url comes after the result in the joined text: unchecked, so it is withheld too, as a string
-        self.assertEqual(out["url"], "[maisecrets withheld this text: not checked by the name service]")
 
     def test_a_source_without_pieces_keeps_too_long_and_cuts_nothing(self):
         # the gateway until ai-gateway #2141: a text over max_chars is not sent, not cut and not withheld, as before
@@ -619,20 +682,22 @@ class RestWithheldTests(unittest.TestCase):
         self.assert_cut(answer["hookSpecificOutput"]["updatedToolOutput"]["stdout"])
 
     def test_a_stored_value_across_the_cut_is_never_split(self):
-        # one line without a space or a line break: the piece ends at 800 (1,000 less the overlap of 200), inside
-        # the stored value at 790; the cut moves before it, so no part of the value stays visible. The commas make
-        # the value a token, as the exact match of the store needs (a value glued into a longer token is not masked)
+        # one line without a space or a line break: the piece ends at 800 of the joined text (1,000 less the overlap
+        # of 200), which is 784 of this text (the keys "stdout" and "stderr" go first, 16 characters with their
+        # separators), inside the stored value at 774; the cut moves before it, so no part of the value stays
+        # visible. The commas make the value a token, as the exact match of the store needs (a value glued into a
+        # longer token is not masked)
         from maisecrets import remote_layer as R
         value = "Qz7k" + "Wm2p" + "Xv9r" + "Tb4n"
         self.on()
         Vault(load_config()).put(value, "SECRET", "manual", session="S1")
         hooks._live_cache.clear()
-        text = "x" * 789 + "," + value + "," + "y" * 700
+        text = "x" * 773 + "," + value + "," + "y" * 700 + "\nlast line"     # white space only after the cut
         out = _guarded("Bash", {"stdout": text, "stderr": ""})["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
         self.assertEqual(R.NER_DOWN["state"], "partial")
         head = out.split("\n[maisecrets withheld", 1)[0]
-        self.assertEqual(head, "x" * 789 + ",", "the cut moved before the value")
-        self.assertIn(f"characters 791 to {len(text)}", out)
+        self.assertIn(head, ("x" * 773, "x" * 773 + ","), "the cut moved before the value")
+        self.assertIn(f"characters {len(head) + 1} to {len(text)} of this text", out)
         for n in range(4, len(value)):
             self.assertNotIn(value[:n], out)
 
@@ -652,6 +717,19 @@ class SecondNetWindowTests(unittest.TestCase):
         self.assertEqual(R.NER_DOWN["state"], "ok")
         self.assertNotIn(NAME, got["texts"][0])
         self.assertIsNone(vault.hook_window(), "the window ends with the call")
+
+    def test_the_window_holds_while_the_transcript_scrub_reads_the_store(self):
+        # #105 review, LOW: the store calls of _scrub_later stay bounded by the window
+        from maisecrets import second_net, vault
+        vault.hook_deadline(None)
+        _reset()
+        seen = []
+        with mock.patch.object(second_net, "_scrub_later", lambda *a: seen.append(vault.hook_window())):
+            got = second_net.mask_result({"session_id": "S1", "tool_name": "Bash", "texts": [f"call {PHONE} now"]})
+        self.assertTrue(got["changed"], "premise: a value was masked, so the scrub runs")
+        self.assertEqual(len(seen), 1)
+        self.assertIsNotNone(seen[0], "the scrub ran inside the window")
+        self.assertIsNone(vault.hook_window(), "and the window ends with the answer")
 
     def test_the_window_ends_well_before_the_mod_stops_waiting(self):
         from maisecrets import second_net

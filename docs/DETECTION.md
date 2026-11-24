@@ -505,7 +505,7 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
   `checked_to`; none starts there.
 - **`kind`.** `ask(text, occupied, deadline, kind="prompt")` or `kind="result"` sends the field `kind` at the top of
   an `hf` request, for a service that orders its work by it; without it the request is as before. The plugin sends
-  `prompt` for a prompt and `result` for a tool result. A deadline that passes while the rules scan raises `ScanIncomplete`, as in
+  `prompt` for a prompt and `result` for a tool result, only to a gateway source and to the container it started. A deadline that passes while the rules scan raises `ScanIncomplete`, as in
   `findings()` (since 0.9.4), and the service is not asked.
 - **No network unless asked.** The URL must be a loopback address (127.0.0.0/8, `::1`, `localhost`) or a Unix socket
   (`unix:/path`), else `RemoteDetector` raises `ValueError`; `allow_network=True` allows any `http` or `https` host.

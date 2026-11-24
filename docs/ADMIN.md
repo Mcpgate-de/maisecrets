@@ -1145,20 +1145,26 @@ and keeps its other keys. Written by hand, the setting looks like this:
   `/maisecrets status` counts a text checked in part apart from the texts checked in full. When the wait or a refusal leaves a rest unchecked, the line
   under the result names the share, for example `⚠ names 70 % checked by the name service`, and the AI is told
   that the rest had the rules alone. To a gateway a text longer than `max_chars` is not sent yet: pieces would
-  spend your quota of the minute. maisecrets sends each request with `kind`: `prompt` for a prompt, `result` for a
-  tool result, so a service can give prompts priority (a gateway that does not know the field ignores it).
+  spend your quota of the minute. maisecrets sends a gateway and the container it started the field `kind`:
+  `prompt` for a prompt, `result` for a tool result, so the service can give prompts priority; a service at a `url`
+  gets no `kind`, since a strict server of another make may refuse a field it does not know.
 - With the setting `unavailable` at `withhold` (see the next item), the unchecked rest of a tool result does not
   reach the AI (since 0.9.29). The checked part goes on, masked as usual; in place of the rest the AI reads one line
   that names it (`lines 120 to 400 of this text`, or characters for a text without a line break) and tells it to
   fetch that part again in a narrower form: `sed -n` with a line range, Read with offset and limit, or the next page.
-  A narrower fetch is a tool result of its own, and the service checks it. Each string of the result keeps its
-  place, so a Bash, Read or MCP result keeps its shape. The keys of a JSON result are not cut: a key after the cut
-  keeps the rules alone, so a name in such a key can reach the AI. The cut never splits a value that the rules
-  found, a placeholder or a stored value. A long text whose first piece got no answer is all rest. A source that
-  takes no pieces (the gateway, until it shares its quota under load) cuts nothing: a text longer than it takes is
-  not checked and not withheld, and its line says so. Under the result you read `⚠ names 70 % checked by the name service; … maisecrets
-  withheld the rest of this result from the AI`. A prompt is never cut: its rest keeps the rules (a name never
-  blocks a prompt), and you read the share once per session.
+  A narrower fetch is a tool result of its own, and the service checks it. The short strings of a result are
+  checked first, and each string keeps its place, so a Bash, Read, Grep, WebFetch, Agent or MCP result keeps its
+  shape. The cut never splits a value that the rules found, a placeholder or a stored value. When a rest would touch
+  a string without white space (a type, a MIME type, base64, a url, a path), and when no part of a result was
+  checked, the whole result is withheld instead, as with a short one. A source that takes no pieces (the gateway,
+  until it shares its quota under load) cuts nothing: a text longer than it takes is not checked and not withheld,
+  and its line says so. Under the result you read `⚠ names 70 % checked by the name service; … maisecrets withheld
+  the rest of this result from the AI`. A prompt is never cut: its rest keeps the rules (a name never blocks a
+  prompt), and you read the share once per session.
+  Not covered: a key of a JSON result after the cut keeps the rules alone, so a name in such a key can reach the
+  AI; the folder part of an Agent's `outputFile` is masked by the rules, and only withheld with the whole result;
+  the output of a failed command without the mod (Claude Code does not let a hook replace it); and a resumed Codex
+  session, which reads the raw output from its own rollout file on disk.
 - When a source is set and cannot be used, you see one line with the cause and the step, for example
   `⚠️ maisecrets: names are NOT checked — the gateway ended the login → /maisecrets sref login NAME`. The session
   start checks the source (the gateway: a login in the store; a url or the local container: an answer within a
