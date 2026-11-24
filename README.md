@@ -81,6 +81,9 @@ nonce of the mod (to prove that the connector reaches your gateway with your acc
 
 - `$.env.set('CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', ...)`: off while a session is in the demo (`/maisecrets demo
   on`), back to Claude Code's default after it.
+- `$.env.set('MAISECRETS_MOD_NET', ...)`: a random value of this mod process (32 hex characters, made at its start),
+  only while the maisecrets result hooks of a tool call run, and `''` again after them. The hooks write it into their
+  answer as a proof that they checked the result; it is no credential and leaves this computer in no request.
 - `$.store`: one counter, how often it showed its hint about values on the screen.
 - `$.prompt.fill`: only the login command of a gateway, into an empty input box; your Enter starts it.
 
@@ -99,6 +102,7 @@ nonce of the mod (to prove that the connector reaches your gateway with your acc
 | `turn.step` | Only in the demo: answers each model step with one line instead of a request. |
 | `turn.complete` | Refreshes the status line; offers a gateway login when one is due. |
 | `command.run`, `$.command.register` | The `/maisecrets` menu and the commands typed as `/maisecrets:NAME`. |
+| `$.command.run` (a call, not a hook) | Runs the plugin's own entry command `/maisecrets` with the words you chose in the menu, after the hook that asked has returned. It runs no other command. |
 | `ui.render`, `ui.close`, `session.start` | Draws your values (with a lock) and the menu panel on your screen; nothing of it goes to the model. |
 
 ### When it fails
