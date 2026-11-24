@@ -84,6 +84,12 @@ mission = "M6"
 
 [[claim]]
 source = "README.md"
+quote = "**The hooks on results and prompts:**"
+kind = "promise"
+mission = "M1"
+
+[[claim]]
+source = "README.md"
 quote = "**The demo**"
 kind = "promise"
 mission = "M6"
