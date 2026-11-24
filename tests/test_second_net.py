@@ -33,6 +33,22 @@ class MarkTests(unittest.TestCase):
                          {"decision": "block", "reason": "r"}, "a Codex answer stays as it is")
         self.assertEqual(second_net.mark({}, "pre-tool", NONCE), {}, "only the tool-result events")
 
+    def test_the_marker_of_a_result_with_a_rest_carries_the_share_and_the_mode_only(self):
+        # #105, B11: the mod's band reads them; a failed call never carries a rest of an earlier result
+        from maisecrets import remote_layer
+        with mock.patch.dict(remote_layer.NER_DOWN, {"band": (70, "rules")}):
+            self.assertEqual(second_net.mark({}, "post-tool", NONCE)["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result checked {NONCE} rest 70 rules]")
+            out = {"stdout": "a"}
+            masked = second_net.mark({"hookSpecificOutput": {"updatedToolOutput": out}}, "post-tool", NONCE)
+            self.assertEqual(masked["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result masked {NONCE} {second_net.output_hash(out)} rest 70 rules]")
+            self.assertEqual(second_net.mark({}, "post-tool-failure", NONCE)["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result checked {NONCE}]")
+        with mock.patch.dict(remote_layer.NER_DOWN, {"band": None}):
+            self.assertEqual(second_net.mark({}, "post-tool", NONCE)["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result checked {NONCE}]")
+
     def test_the_hash_takes_the_strings_and_keys_in_a_fixed_order(self):
         # the mod computes the same (tests/mod.test.ts hashOf): keys sorted, each before its value, NUL between
         import hashlib

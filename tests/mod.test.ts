@@ -1925,3 +1925,74 @@ test('only a hook_additional_context row loses the marker: another attachment ro
                                      door: 'hook-context', origin: { kind: 'engine' }, uuid: 'row-ctx-15' })
   expect(r.message.content[0].text).toBe(text)
 })
+
+// ---- the band (#105, B11): the name check of the last tool result left a rest
+
+const BAND = { plugin: 'maisecrets', component: 'AbovePrompt', surface: 'terminal',
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10, bodyColumns: 120,
+           scroll: { offset: 0, bodyRows: 9 }, view: {} } }
+const bandText = async ($) => {
+  const ui = await $.ui.mount(BAND as any)
+  const t = await ui.find({ type: 'Text', text: /^maisecrets: the last result/ })
+  await ui.unmount()
+  return t?.text
+}
+const withRest = (n, rest) => `[maisecrets: result checked ${n} rest ${rest}]`
+
+test('a result whose name check left a rest shows the share and where the rest went above the prompt; the next ' +
+  'result without a rest takes the line away', async ($, on) => {
+  let answer = (n) => ({ additionalContext: [`note for the AI\n\n${withRest(n, '70 rules')}`] })
+  netWorld(on, 'band-1', () => resultAnswer({ texts: ['x'], changed: false }), { post: (n) => answer(n) })
+  const r = await post($, 'tu-band-1')
+  expect(r.additionalContext).toEqual(['note for the AI'])     // the marker with its rest never reaches the model
+  expect(await bandText($)).toBe('maisecrets: the last result was checked for names in part (70 %); ' +
+    'the rest went to the AI with the rules only')
+  answer = (n) => ({ additionalContext: [withRest(n, '40 cut')] })
+  await post($, 'tu-band-2')
+  expect(await bandText($)).toBe('maisecrets: the last result was checked for names in part (40 %); ' +
+    'the rest was withheld from the AI')
+  answer = (n) => ({ additionalContext: [CHECKED(n)] })
+  await post($, 'tu-band-3')
+  expect(await bandText($)).toBeUndefined()
+})
+
+test('the second net names the rest of the result it checked, a withheld one too', async ($, on) => {
+  let rest: any = { share: 25, mode: 'whole' }
+  netWorld(on, 'band-2', () => resultAnswer(rest.mode === 'whole' && rest.share === 0
+    ? { withheld: true, rest } : { texts: [RAW], changed: false, rest }), { post: { block: 'hook error' } })
+  await post($, 'tu-band-4')
+  await $.session.append(resultRow('tu-band-4'))
+  expect(await bandText($)).toBe('maisecrets: the last result was checked for names in part (25 %); ' +
+    'the whole result was withheld from the AI')
+  rest = { share: 0, mode: 'whole' }
+  await post($, 'tu-band-5')
+  expect(stored(await $.session.append(resultRow('tu-band-5')))).toBe(WITHHELD_TEXT)
+  expect(await bandText($)).toBe('maisecrets: the last result was not checked for names; it was withheld from the AI')
+  rest = undefined
+  await post($, 'tu-band-6')
+  await $.session.append(resultRow('tu-band-6'))
+  expect(await bandText($)).toBeUndefined()
+})
+
+test('a rest that is no share and mode of its form shows nothing, and a refused result keeps no band of its marker',
+  async ($, on) => {
+    let answer: any = (n) => ({ additionalContext: [withRest(n, '70 rules')] })
+    netWorld(on, 'band-3', () => resultAnswer({ texts: [RAW], changed: false, rest: { share: 100, mode: 'rules' } }),
+      { post: (n) => answer(n) })
+    await post($, 'tu-band-7')
+    expect(await bandText($)).toBeDefined()
+    answer = (n) => ({ additionalContext: [CHECKED(n)] })
+    await post($, 'tu-band-7b')
+    expect(await bandText($)).toBeUndefined()
+    // a marker with a rest, but the hook blocked: its rest sets no band; the second net decides, and its rest of the
+    // wrong form is none
+    answer = (n) => ({ block: 'hook error', additionalContext: [withRest(n, '70 rules')] })
+    await post($, 'tu-band-8')
+    expect(await bandText($)).toBeUndefined()
+    await $.session.append(resultRow('tu-band-8'))
+    expect(await bandText($)).toBeUndefined()
+    // a marker whose rest has another form is no marker: the result goes to the second net
+    answer = (n) => ({ additionalContext: [`[maisecrets: result checked ${n} rest 70 everything]`] })
+    await post($, 'tu-band-9')
+    expect(await bandText($)).toBeUndefined()
+  })

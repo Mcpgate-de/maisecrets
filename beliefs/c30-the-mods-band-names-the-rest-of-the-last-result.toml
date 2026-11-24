@@ -1,0 +1,11 @@
+# c30-the-mods-band-names-the-rest-of-the-last-result: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30-the-mods-band-names-the-rest-of-the-last-result"
+control = "C30"
+serves = ["M1.2"]
+statement = "With the mod, a tool result whose name check left a rest shows one line above the prompt with the checked share and where the rest went; a later result without a rest takes the line away (#105, B11). Codex has no mod: its hook line names the share."
+runner = ["tests/mod.test.ts::a result whose name check left a rest shows the share and where the rest went above the prompt; the next result without a rest takes the line away"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "      if (PASSES.has(state)) setBand($, tag.rest)\n"
+replace = "      if (PASSES.has(state)) setBand($, null)\n"

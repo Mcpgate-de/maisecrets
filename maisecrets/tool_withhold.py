@@ -104,6 +104,15 @@ def withheld(payload: dict, text: str, codex: bool) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}
 
 
+def band_of(state, share: int, cut_: bool, withhold: bool):
+    """(share, mode) for the mod's band (#105, B11), or None when no rest remained. The mode says where the rest went:
+    `rules` (to the AI, masked by the rules alone), `cut` (the walk withheld it), `whole` (the whole result was
+    withheld). A share of 0 is a result with no checked part; it has a band only when it was withheld."""
+    if state == "partial":
+        return (share, "whole" if withhold else "cut" if cut_ else "rules")
+    return (0, "whole") if withhold else None
+
+
 def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None, load_config=None) -> dict:
     """A tool result whose names the service of /maisecrets ner did not check: a note for the AI each time, a line
     for the person once per session and cause (ner_health), and with `unavailable: withhold` the result kept from the
@@ -127,6 +136,7 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None,
         _rl.NER_DOWN["v"] = False      # the note for the AI says the rules masked the result; none did here
     out = withheld(payload, _rl.withhold_text(why), codex) if withhold else dict(result or {})
     share = int(_rl.NER_DOWN.get("share") or 0)
+    _rl.NER_DOWN["band"] = band_of(_rl.NER_DOWN.get("state"), share, cut_, withhold)
     if not withhold:
         # Codex too: only additionalContext reaches its model, a systemMessage is a warning for the person
         # (docs/CLIENTS.md); next to a block's reason the output schema allows it

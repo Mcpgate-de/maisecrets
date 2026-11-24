@@ -2586,6 +2586,7 @@ def post_tool(payload: dict) -> dict:
     from . import remote_layer as _rl, tool_withhold as _tw
     _rl.NER_DOWN["v"] = False
     _rl.NER_DOWN["unchecked"] = False
+    _rl.NER_DOWN["band"] = None
     cfg = load_config()
     response = payload.get("tool_response")
     if response is None:

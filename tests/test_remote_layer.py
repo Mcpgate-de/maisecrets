@@ -508,6 +508,57 @@ class RestWithheldTests(unittest.TestCase):
         self.assertNotIn("late", answer["reason"])
         self.assertIn("[maisecrets withheld lines", answer["reason"])
 
+    def test_the_band_of_the_mod_gets_the_share_and_where_the_rest_went(self):
+        # #105, B11: the marker (second_net.mark) and the second net's answer carry the share and the mode, no text
+        from maisecrets import remote_layer as R, second_net
+        nonce = "0123456789abcdef" * 2
+        self.on()
+        answer = _guarded("Bash", {"stdout": LONG, "stderr": ""})
+        share = R.NER_DOWN["share"]
+        self.assertTrue(0 < share < 100, share)
+        self.assertEqual(R.NER_DOWN["band"], (share, "cut"))
+        self.assertTrue(second_net.mark(answer, "post-tool", nonce)["hookSpecificOutput"]["additionalContext"]
+                        .endswith(f" rest {share} cut]"))
+        for withhold, mode in ((False, "rules"), (True, "cut")):
+            with self.subTest(withhold=withhold):
+                self.svc = self.service()
+                self.on(withhold=withhold)
+                got = second_net.mask_result({"session_id": "S1", "tool_name": "Bash", "texts": [LONG]})
+                self.assertEqual(got["rest"], {"share": R.NER_DOWN["share"], "mode": mode})
+        from test_remote_detector import Scripted
+        self.svc = Scripted([(200, None, {}, 0.0)] * 4)        # every piece answers: no rest, no band
+        self.addCleanup(self.svc.close)
+        self.on()
+        _guarded("Bash", {"stdout": LONG, "stderr": ""})
+        self.assertEqual(R.NER_DOWN["state"], "ok")
+        self.assertIsNone(R.NER_DOWN["band"])
+        self.assertNotIn("rest", second_net.mask_result({"session_id": "S1", "tool_name": "Bash", "texts": [LONG]}))
+
+    def test_codex_without_a_band_gets_the_share_in_its_hook_line(self):
+        # #105, B11: Codex has no mod; the hook's line for the person (systemMessage) and the AI's note name the share
+        from maisecrets import remote_layer as R
+        self.on(withhold=False)
+        answer = _guarded("Bash", LONG, codex=True)
+        share = R.NER_DOWN["share"]
+        self.assertTrue(0 < share < 100, share)
+        self.assertNotIn("withheld", answer["reason"], "the rules masked the rest; Codex gets it as the block reason")
+        self.assertIn(f"names {share} % checked by the name service", answer["systemMessage"])
+        self.assertIn("the rules alone masked the rest of this result", answer["systemMessage"])
+        self.assertIn(f"checked only {share} %", answer["hookSpecificOutput"]["additionalContext"])
+
+    def test_a_result_withheld_whole_has_a_band_and_one_that_keeps_the_rules_has_none(self):
+        # no answer at all: withheld with `withhold` (share 0, whole); without it the session's line names the cause
+        from maisecrets import remote_layer as R
+        from test_remote_detector import Scripted
+        for withhold, band in ((True, (0, "whole")), (False, None)):
+            with self.subTest(withhold=withhold):
+                self.svc = Scripted([(503, {"error": "ner_unavailable"}, {}, 0.0)] * 4)
+                self.addCleanup(self.svc.close)
+                self.on(withhold=withhold)
+                _guarded("Bash", {"stdout": "a short text\n", "stderr": ""})
+                self.assertEqual(R.NER_DOWN["state"], "unavailable")
+                self.assertEqual(R.NER_DOWN["band"], band)
+
     def test_the_second_net_gets_the_same_number_of_texts(self):
         # a failed command (PostToolUseFailure) or a hook that did not run: the mod's second net
         from maisecrets import second_net
