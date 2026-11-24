@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.9.27] - 2026-11-24
+
+### Fixes
+
+- the version line says when the marketplace copy is old and Claude Code does not update it by itself (136ddfd)
+- when a gateway login is gone while an older maisecrets runs in another session, the warning names that session and the restart (94f2be9)
+
 ## [0.9.26] - 2026-11-24
 
 ### Features
