@@ -293,8 +293,8 @@ class RemoteLayerTests(unittest.TestCase):
         self.assertEqual(ner_view.today_check().fact,
                          "1 of 2 texts checked by the service, 1 in part (60 % on average)")
 
-    def test_a_long_text_whose_first_piece_failed_is_not_withheld(self):
-        # review L6: as a text over max_chars before 0.9.28; a short one is withheld as before
+    def test_a_long_text_whose_first_piece_failed_is_withheld_string_by_string(self):
+        # #105 B9 (MR 2): `checked_to == 0` takes the path of a rest; a short one is withheld whole as before
         from test_remote_detector import Scripted
         down = Scripted([(500, {"error": "x"}, {}, 0.0)] * 4)
         self.addCleanup(down.close)
@@ -305,8 +305,11 @@ class RemoteLayerTests(unittest.TestCase):
                 "hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
                 "tool_input": {"command": "cat notes.txt"}, "tool_response": {"stdout": out, "stderr": ""}})
         long_ = guarded("row of the log\n" * 100)
-        self.assertNotIn("withheld", json.dumps(long_))
-        self.assertIn("did not check the names", long_["hookSpecificOutput"]["additionalContext"])
+        out = long_["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual(set(out), {"stdout", "stderr"}, "the Bash shape stays")
+        self.assertTrue(out["stdout"].startswith("[maisecrets withheld this text from the AI"), out["stdout"])
+        self.assertNotIn("row of the log", out["stdout"])
+        self.assertIn("did not check this tool result", long_["hookSpecificOutput"]["additionalContext"])
         self.assertIn("withheld", json.dumps(guarded("a short row\n")))
 
     def test_no_test_starts_inside_a_hook_window(self):
@@ -331,7 +334,7 @@ class RemoteLayerTests(unittest.TestCase):
                                 "timeout_scales": False})
         text = f"ask {NAME} first\n" + "row of the log\n" * 100
 
-        def guarded(out: str) -> dict:          # the path that adds the notes (hooks._with_unchecked_names)
+        def guarded(out: str) -> dict:          # the path that adds the notes (tool_withhold.with_unchecked_names)
             return hooks._post_tool_guarded_rest({
                 "hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
                 "tool_input": {"command": "cat notes.txt"}, "tool_response": {"stdout": out, "stderr": ""}})
@@ -382,6 +385,194 @@ class WeakMarkTests(unittest.TestCase):
         (e,) = v.put_many([(OTHER, "NAME", "name-after-label")], session="S1", tool=True)
         v.put_many([(OTHER, "NAME", "remote:hf")], session="S1", tool=True)
         self.assertFalse(v._index["entries"][e.key]["weak"])
+
+
+
+def _guarded(tool: str, response, codex: bool = False) -> dict:
+    """The answer of the PostToolUse hook with its notes (tool_withhold.with_unchecked_names)."""
+    from _hygiene import CODEX
+    return hooks._post_tool_guarded_rest({
+        "hook_event_name": "PostToolUse", "tool_name": tool, "session_id": "S1", **(CODEX if codex else CLAUDE),
+        "tool_input": {"file_path": "/work/notes.txt"} if tool == "Read" else {}, "tool_response": response})
+
+
+LATE = f"late {NAME} here\n"
+LONG = f"ask {NAME} first\n" + "row of the log\n" * 100 + LATE + "tail row\n" * 5
+
+
+class RestWithheldTests(unittest.TestCase):
+    """#105, B9 with `unavailable: withhold`: the first piece answers, the second does not in time. The checked part
+    goes on masked, the rest is withheld with one line, and the result keeps its shape."""
+
+    def setUp(self):
+        from maisecrets import vault
+        vault.hook_deadline(None)
+        self.svc = self.service()
+
+    def service(self):
+        from test_remote_detector import Scripted
+        svc = Scripted([(200, None, {}, 0.0), (200, None, {}, 3.0)])
+        self.addCleanup(svc.close)
+        return svc
+
+    def on(self, withhold: bool = True) -> None:
+        _reset(remote_detector={"url": self.svc.url, "format": "hf", "max_chars": 1000, "timeout_ms": 1000,
+                                "timeout_scales": False, **({"unavailable": "withhold"} if withhold else {})})
+
+    def assert_cut(self, text: str) -> None:
+        """`text` is LONG cut at a line start: the masked first lines, then the line that names the rest."""
+        self.assertNotIn(NAME, text)
+        self.assertNotIn("late", text, "the unchecked rest never reaches the AI")
+        m = re.search(r"\[maisecrets withheld lines (\d+) to (\d+) of this text from the AI: the name service did "
+                      r"not check it \(no answer in time\).*Read with offset and limit", text)
+        self.assertTrue(m, text)
+        head = text[:m.start()]
+        self.assertEqual(head.count("\n") + 1, int(m.group(1)), "the line names the first line it withheld")
+        self.assertEqual(int(m.group(2)), LONG.count("\n"))
+        self.assertGreater(head.count("row of the log"), 30, "the checked part goes on")
+
+    def test_bash_keeps_its_shape_and_the_rest_is_withheld(self):
+        self.on()
+        answer = _guarded("Bash", {"stdout": LONG, "stderr": "", "interrupted": False})
+        out = answer["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual((set(out), out["stderr"], out["interrupted"]),
+                         ({"stdout", "stderr", "interrupted"}, "", False))
+        self.assert_cut(out["stdout"])
+        self.assertIn("maisecrets withheld the rest of this result from the AI", answer["systemMessage"])
+        self.assertRegex(answer["systemMessage"], r"names \d+ % checked")
+        self.assertIn("A line in the result names each withheld part",
+                      answer["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual([d.get("kind") for d in self.svc.received], ["result", "result"], "kind goes with each piece")
+
+    def test_without_withhold_nothing_changes(self):
+        self.on(withhold=False)
+        answer = _guarded("Bash", {"stdout": LONG, "stderr": ""})
+        out = answer["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+        self.assertIn(LATE, out, "the rest keeps the rules (MR 1)")
+        self.assertNotIn("withheld", json.dumps(answer))
+        self.assertIn("the rules alone masked the rest", answer["systemMessage"])
+
+    def test_a_result_with_no_value_to_mask_is_still_cut(self):
+        # post_tool answers {} when it masked nothing: a cut alone must replace the output (tool_withhold.rest_only)
+        self.on()
+        text = LONG.replace(f"ask {NAME} first", "ask nobody first")
+        out = _guarded("Bash", {"stdout": text, "stderr": ""})["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+        self.assertNotIn("late", out)
+        self.assertIn("[maisecrets withheld lines", out)
+
+    def test_read_keeps_its_shape(self):
+        from maisecrets.file_reads import text_result
+        self.on()
+        response = text_result("/work/notes.txt", LONG)
+        out = _guarded("Read", response)["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual(set(out), set(response))
+        self.assertEqual({k: v for k, v in out["file"].items() if k != "content"},
+                         {k: v for k, v in response["file"].items() if k != "content"})
+        self.assert_cut(out["file"]["content"])
+
+    def test_an_mcp_result_of_many_leaves_keeps_each_leaf_and_key(self):
+        self.on()
+        rows = [{"who": f"person {i:03d}", "note": f"note {i:03d} of the list"} for i in range(60)]
+        rows.append({"who": NAME, "note": "the last row"})
+        answer = _guarded("mcp__notes__list", {"rows": rows, "count": 61})
+        out = answer["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual((len(out["rows"]), out["count"]), (61, 61))
+        self.assertTrue(all(set(r) == {"who", "note"} for r in out["rows"]), "no key is cut")
+        flat = json.dumps(out)
+        self.assertNotIn(NAME, flat)
+        self.assertIn("person 000", flat, "the checked leaves go on")
+        self.assertEqual(flat.count("from the AI: the name service did not check it"), 1, "one full line")
+        self.assertIn("[maisecrets withheld this text: not checked by the name service]", flat)
+
+    def test_codex_gets_the_cut_output_as_the_reason_of_its_block(self):
+        self.on()
+        answer = _guarded("Bash", LONG, codex=True)
+        self.assertEqual(answer["decision"], "block")
+        self.assert_cut(answer["reason"].split("\n\n", 1)[1])
+        self.svc = self.service()
+        self.on()
+        text = LONG.replace(f"ask {NAME} first", "ask nobody first")     # no value to mask: the cut alone
+        answer = _guarded("Bash", text, codex=True)
+        self.assertEqual(answer["decision"], "block")
+        self.assertNotIn("late", answer["reason"])
+        self.assertIn("[maisecrets withheld lines", answer["reason"])
+
+    def test_the_second_net_gets_the_same_number_of_texts(self):
+        # a failed command (PostToolUseFailure) or a hook that did not run: the mod's second net
+        from maisecrets import second_net
+        self.on()
+        texts = ["exit code 1", LONG, "after the output"]
+        got = second_net.mask_result({"session_id": "S1", "tool_name": "Bash", "texts": texts})
+        self.assertEqual(len(got["texts"]), 3)
+        self.assertTrue(got["changed"])
+        self.assertEqual(got["texts"][0], "exit code 1", "a text the first piece checked goes on")
+        self.assert_cut(got["texts"][1])
+        self.assertEqual(got["texts"][2], "[maisecrets withheld this text: not checked by the name service]")
+        self.assertIn("withheld part", got["note"])
+        self.svc = self.service()
+        self.on(withhold=False)
+        got = second_net.mask_result({"session_id": "S1", "tool_name": "Bash", "texts": texts})
+        self.assertIn(LATE, got["texts"][1], "without withhold the rest keeps the rules")
+        self.assertEqual(got["texts"][2], "after the output")
+
+    def test_a_finding_or_a_placeholder_on_the_cut_moves_it_before_them(self):
+        from maisecrets import remote_layer as R
+        from maisecrets.detection.core import Match
+        from maisecrets.detection.remote import RemoteStatus
+        from maisecrets.tool_withhold import cut
+        ref = "⟦" + "NAME_c1" + "⟧"
+        s = "a" * 50 + "abcdefghijklmnopqrs and " + ref + " rest"       # the finding: 50 to 69, the reference: 74 to 83
+        R.NER_DOWN.update(cut=0, why="timeout")
+        for at, want in ((56, 50), (62, 50), (78, 74), (85, 84)):
+            layer = R.Layer({}, RemoteStatus(state="partial", checked_to=at, total=len(s)), at={s: 0}, cut=True)
+            found = [Match("rule", "SECRET", s[50:69], 50, 69, 1.0)]
+            head, kept, line = cut(layer, s, found)
+            self.assertEqual(len(head), want, at)
+            self.assertEqual(kept, found if want >= 69 else [])
+            self.assertIn(f"characters {want + 1} to {len(s)}", line)
+        glued = "x" * 20 + ref + "y" * 10                       # no space before the reference
+        layer = R.Layer({}, RemoteStatus(state="partial", checked_to=24, total=len(glued)), at={glued: 0}, cut=True)
+        self.assertEqual(cut(layer, glued, [])[0], "x" * 20, "a placeholder is never split")
+
+    def test_the_cut_moves_back_to_a_line_start_else_after_a_space(self):
+        from maisecrets import remote_layer as R
+        from maisecrets.detection.remote import RemoteStatus
+        from maisecrets.tool_withhold import cut
+        for s, at, head, part in (("line one\nline two\nline three", 13, "line one\n", "lines 2 to 3"),
+                                  ("one long line of words", 10, "one long ", "characters 10 to 22"),
+                                  ("x" * 40, 20, "x" * 20, "characters 21 to 40"),
+                                  ("x" * 40, 0, "", "this text")):
+            with self.subTest(s=s, at=at):
+                R.NER_DOWN.update(cut=0, why="timeout")
+                state = "partial" if at else "unavailable"
+                layer = R.Layer({}, RemoteStatus(state=state, checked_to=at, total=len(s)), at={s: 0}, cut=True)
+                got, _kept, line = cut(layer, s, [])
+                self.assertEqual(got, head)
+                self.assertIn(f"withheld {part}", line)
+        layer = R.Layer({}, RemoteStatus(state="partial", checked_to=10, total=40), at={"x" * 40: 0}, cut=False)
+        self.assertEqual(cut(layer, "x" * 40, []), ("x" * 40, [], ""), "no withhold: as it is")
+
+    def test_a_prompt_keeps_the_rules_for_its_rest_and_codex_sends_none(self):
+        # #105, B10: a name never blocks a prompt (C30), withhold or not; a Codex prompt never goes to the service
+        from maisecrets import remote_layer as R
+        self.on()
+        cfg = load_config()
+        names, why = R.prompt_names({**cfg, "remote_detector": {**cfg["remote_detector"], "prompt_timeout_ms": 1000}},
+                                    LONG, [], lambda: (lambda s: []), typed=True)
+        self.assertEqual([m.value for m in names], [NAME], "the checked piece's name only; the prompt is not cut")
+        self.assertTrue(why.startswith("partial:") and why.endswith(":timeout"), why)
+        self.assertEqual(self.svc.received[0].get("kind"), "prompt")
+        self.assertIn("checked", R.unchecked_note("S-b10", why))
+        self.svc = self.service()
+        self.on()
+        layer = R.prepare(load_config(), [LONG], lambda s: [], kind="prompt", deadline=time.monotonic() + 1.0)
+        self.assertEqual(layer.status.state, "partial", "premise: a rest")
+        self.assertFalse(layer.cut)
+        n = len(self.svc.received)
+        from _hygiene import CODEX
+        hooks.user_prompt({"hook_event_name": "UserPromptSubmit", "session_id": "S1", **CODEX,
+                           "prompt": f"please write to {NAME}"})
+        self.assertEqual(len(self.svc.received), n, "a Codex prompt goes to no name service")
 
 
 if __name__ == "__main__":

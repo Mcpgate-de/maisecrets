@@ -1,6 +1,75 @@
 """The PostToolUse answers that keep a tool result from the AI or name its unchecked names (#33). Out of hooks.py,
-which the plugin directory caps at 200,000 bytes."""
+which the plugin directory caps at 200,000 bytes.
+
+The unchecked rest of a result (#105, B9). With `unavailable: withhold`, a result whose name check left a rest
+(`partial`: the pieces up to `checked_to` were checked; `too_long`, or a text in pieces whose first piece failed: none)
+does not pass that rest to the AI. The walk of hooks.post_tool calls `cut` for each string value: `checked_to` is an
+offset in the joined text of remote_layer.prepare, and Layer.rest_of maps it to the offset in that string. The checked
+part goes on, masked as usual; the rest is replaced by one line that names it (lines, or characters for a text without
+a line break before the cut) and tells the AI to fetch it again in a narrower form. Every string keeps its place, so the
+result keeps its shape: Bash, Read, an MCP result and the texts of the mod's second net (maisecrets/second_net.py, the
+same number of texts) alike. Not cut: a key (the client checks the keys of its shape: a Bash result without `stderr`
+fails open); it keeps the rules. Without `withhold` (the default) the rest keeps the rules and the share is named.
+A short result whose one piece got no answer is withheld whole, as before (`with_unchecked_names`)."""
 from __future__ import annotations
+
+FIRST = ("[maisecrets withheld {part} from the AI: the name service did not check it ({why}), and the person keeps "
+         "such a part from you (/maisecrets ner unavailable withhold). The tool ran and finished. To see it, fetch "
+         "{it} again in a narrower form: sed -n with a line range, Read with offset and limit, or the next page.]")
+AGAIN = "[maisecrets withheld {part}: not checked by the name service]"
+
+
+def cut(layer, s: str, found: list) -> tuple:
+    """(the checked part of `s`, its findings, the line that stands for the rest), or (s, found, "") when no rest of
+    `s` is withheld. The cut moves back to a line start, else after a space (a value seldom holds one), and before any
+    finding and any placeholder it would split: no half of a value stays visible."""
+    r = layer.rest_of(s) if layer is not None else None
+    if r is None:
+        return s, found, ""
+    if r:
+        line = s.rfind("\n", 0, r)
+        space = max(s.rfind(" ", 0, r), s.rfind("\t", 0, r))
+        r = line + 1 if line >= 0 else (space + 1 if space >= 0 else r)
+    moved = True
+    while moved and r:
+        moved = False
+        for m in found:
+            if m.start < r < m.end:
+                r, moved = m.start, True
+        ref = s.rfind("⟦", 0, r)
+        if ref > s.rfind("⟧", 0, r):
+            r, moved = ref, True
+    from . import remote_layer as _rl
+    if not r:
+        part, it = "this text", "it"
+    elif s[r - 1] == "\n":
+        last = s.count("\n") + (0 if s.endswith("\n") else 1)
+        part, it = f"lines {s.count(chr(10), 0, r) + 1} to {last} of this text", "those lines"
+    else:
+        part, it = f"characters {r + 1} to {len(s)} of this text", "that part"
+    first = not _rl.NER_DOWN.get("cut")
+    _rl.NER_DOWN["cut"] = int(_rl.NER_DOWN.get("cut") or 0) + 1
+    why = _rl._TOOL_WHY.get(str(_rl.NER_DOWN.get("why") or ""), "no usable answer")
+    line = (FIRST.format(part=part, why=why, it=it) if first else AGAIN.format(part=part))
+    head = s[:r]
+    return head, [m for m in found if m.end <= r], ("\n" if head and not head.endswith("\n") else "") + line
+
+
+def rest_only(payload: dict, new_response, codex: bool | None = None) -> dict:
+    """The answer of post_tool for a result in which nothing was masked: {} unless the walk withheld a rest; then the
+    walked result in place of the output (Codex: a block whose reason is the output)."""
+    from . import remote_layer as _rl
+    if not _rl.NER_DOWN.get("cut"):
+        return {}
+    if codex is None:
+        from .hooks import client_of
+        codex = client_of(payload) == "codex"
+    if codex:
+        import json
+        text = new_response if isinstance(new_response, str) else json.dumps(new_response, ensure_ascii=False)
+        return {"decision": "block",
+                "reason": f"[maisecrets: the tool ran and finished; this is not an error.]\n\n{text}"}
+    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response}}
 
 
 def withheld(payload: dict, text: str, codex: bool) -> dict:
@@ -23,34 +92,39 @@ def withheld(payload: dict, text: str, codex: bool) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}
 
 
-def with_unchecked_names(payload: dict, result: dict, codex: bool, load_config) -> dict:
+def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None, load_config=None) -> dict:
     """A tool result whose names the service of /maisecrets ner did not check: a note for the AI each time, a line
     for the person once per session and cause (ner_health), and with `unavailable: withhold` the result kept from the
-    AI. A text over the service's max_chars is named under that result but not withheld: each long file would be."""
+    AI. A result with an unchecked rest: with `withhold` the walk already withheld the rest (`cut`), else it keeps the
+    rules; either way its line names the share."""
     from . import remote_layer as _rl
     if not _rl.NER_DOWN.get("unchecked"):
         return result
+    if codex is None or load_config is None:     # hooks._post_tool_guarded_rest: this hook's client and setting
+        from .hooks import client_of, load_config as _load
+        codex = client_of(payload) == "codex" if codex is None else codex
+        load_config = load_config or _load
     why = str(_rl.NER_DOWN.get("why") or "")
     conf = _rl.conf_of(load_config())
-    # a text of more than one piece whose first piece got no answer is not withheld, as a text over max_chars was
-    # not before 0.9.28: each long file would be. Withhold for such a text and for a partial one comes with MR 2
-    # of #105
+    cut_ = bool(_rl.NER_DOWN.get("cut"))
+    # a long text (pieces) whose first piece got no answer: the walk withheld each string (`cut`), not the whole
     withhold = (conf.get("unavailable") == "withhold" and _rl.NER_DOWN.get("state") == "unavailable"
                 and not _rl.NER_DOWN.get("long"))
     if withhold:
         _rl.NER_DOWN["v"] = False      # the note for the AI says the rules masked the result; none did here
     out = withheld(payload, _rl.withhold_text(why), codex) if withhold else dict(result or {})
+    share = int(_rl.NER_DOWN.get("share") or 0)
     if not withhold:
         # Codex too: only additionalContext reaches its model, a systemMessage is a warning for the person
         # (docs/CLIENTS.md); next to a block's reason the output schema allows it
         hso = dict(out.get("hookSpecificOutput") or {"hookEventName": "PostToolUse"})
-        note = _rl.unchecked_context(why, int(_rl.NER_DOWN.get("share") or 0))
+        note = _rl.cut_context(why, share) if cut_ else _rl.unchecked_context(why, share)
         hso["additionalContext"] = f"{hso['additionalContext']}\n\n{note}" if hso.get("additionalContext") else note
         out["hookSpecificOutput"] = hso
     lines = []
     if _rl.NER_DOWN.get("state") in ("too_long", "partial"):
         # this result alone is too long, or only a part of it was checked (#105): under each one, with the share
-        lines.append(_rl.screen_line(why, False, int(_rl.NER_DOWN.get("share") or 0)))
+        lines.append(_rl.screen_line(why, cut_, share))
     else:
         # a source that cannot be used: once per session with the cause and the step, again when the cause changes
         # (ner_health), withheld or not; the AI's note above still comes with each result. It replaces the
@@ -59,7 +133,7 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool, load_config) 
         _rl.NER_DOWN["v"] = False
         _rl.NER_DOWN.pop("not_ours", None)
         lines.append(ner_health.result_line(load_config(), payload, why, codex))
-        if withhold:
+        if withhold or cut_:
             lines.append(_rl.screen_line(why, True))    # an act on this result: under each one
     line = " ".join(x for x in lines if x)
     if line:

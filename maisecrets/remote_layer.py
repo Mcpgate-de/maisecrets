@@ -122,14 +122,27 @@ def _stored_secret(cfg: dict, url: str) -> str:
 class Layer:
     """The findings of the strings of one tool result: the rules' (as `scan` gave them) and the service's."""
 
-    def __init__(self, found: dict, status: remote.RemoteStatus, long: bool = False):
-        # long: the text went in more than one piece (#105); `unavailable: withhold` keeps such a text from the AI
-        # only in MR 2 of #105, as it never withheld a text over max_chars before
-        self.found, self.status, self.long = found, status, long
+    def __init__(self, found: dict, status: remote.RemoteStatus, long: bool = False, at: dict | None = None,
+                 cut: bool = False):
+        # long: the text went in more than one piece (#105). at: the offset of each string in the joined text. cut:
+        # `unavailable: withhold` and a rest the service did not check (partial, too_long, or a text in pieces whose
+        # first piece failed): the walk withholds the rest of each string (tool_withhold.cut, #105 B9)
+        self.found, self.status, self.long, self.at, self.cut = found, status, long, at or {}, cut
 
     def matches(self, text: str, scan) -> list:
         got = self.found.get(text)
         return scan(text) if got is None else got
+
+    def rest_of(self, text: str) -> int | None:
+        """Where the unchecked rest of `text` starts (0: all of it), or None: no rest to withhold. A string the join
+        did not hold is unchecked, unless it is blank (no name in it)."""
+        if not self.cut or not text.strip():
+            return None
+        off = self.at.get(text)
+        if off is None:
+            return 0
+        rest = self.status.checked_to - off if self.status.state == "partial" else 0
+        return None if rest >= len(text) else max(0, rest)
 
 
 def conf_of(cfg: dict) -> dict:
@@ -260,7 +273,9 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
         # most its own wait, so a service that hangs holds a short result no longer than before
         deadline = tool_deadline(time.monotonic() - scan_began)
     asked_at = time.monotonic()
-    spans, status = ner.ask(joined, occupied, deadline if deadline is not None else asked_at + ner.timeout)
+    # kind: a service may give a prompt priority (#105, the gateway with ai-gateway #2141); hf only
+    asks = "prompt" if kind == "prompt" else "result"
+    spans, status = ner.ask(joined, occupied, deadline if deadline is not None else asked_at + ner.timeout, asks)
     if scaled:
         # a sample says how fast the service is: an answer of the whole text, or a timeout of a one-piece text that
         # its own wait ended. A timeout of the hook's budget or of a later piece says nothing of the rate
@@ -275,7 +290,7 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
         fb, _why = from_config(cfg, fallback=True)
         if fb is not None:
             spans, status = fb.ask(joined, occupied, deadline if deadline is not None and kind == "tool" else
-                                   time.monotonic() + fb.timeout)
+                                   time.monotonic() + fb.timeout, asks)
             source, asked = "fallback", fb
     from . import ner_setup
     partial = status.state == "partial"
@@ -295,7 +310,11 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
                                                      b - off, score))
     for s, extra in added.items():
         found[s] = sorted(found[s] + extra, key=lambda m: (m.start, m.end))
-    return Layer(found, status, long)
+    # a prompt keeps the rules for its rest (C30: a name never blocks a prompt); a whole result whose short text got
+    # no answer is withheld whole, as before (tool_withhold.with_unchecked_names)
+    cut = (kind == "tool" and conf_of(cfg).get("unavailable") == "withhold"
+           and (status.state in ("partial", "too_long") or (status.state == "unavailable" and long)))
+    return Layer(found, status, long, {s: off for s, off in pieces}, cut)
 
 
 def _allowed() -> frozenset:
@@ -439,6 +458,9 @@ def screen_line(why: str, withheld: bool, part: int = 0) -> str:
     """The line on the person's screen for a tool result whose names the service did not check, or (`part`, the
     checked share in percent of a `partial` status) did not check in full."""
     said = _SCREEN_WHY.get(why, "gave no usable answer")
+    if part and withheld:
+        return (f"⚠ names {part} % checked by the name service; for the rest it {said}, and maisecrets withheld the "
+                "rest of this result from the AI. /maisecrets ner unavailable rules lets the rules alone mask it.")
     if part:
         return (f"⚠ names {part} % checked by the name service; for the rest it {said}, and the rules alone masked "
                 "the rest of this result.")
@@ -463,6 +485,16 @@ def unchecked_context(why: str, part: int = 0) -> str:
             "masked.")
 
 
+def cut_context(why: str, part: int = 0) -> str:
+    """The note for the AI at a tool result whose unchecked rest the walk withheld (tool_withhold.cut)."""
+    said = _TOOL_WHY.get(why, "no usable answer")
+    checked = f"checked only {part} % of this tool result" if part else "did not check this tool result"
+    return (f"maisecrets: the name service {checked} ({said}), and the person keeps an unchecked part from you "
+            "(/maisecrets ner unavailable withhold). A line in the result names each withheld part. The tool ran and "
+            "finished; to see a withheld part, fetch it again in a narrower form (sed -n with a line range, Read with "
+            "offset and limit, the next page), which the name service then checks.")
+
+
 def withhold_text(why: str) -> str:
     """What the AI reads in place of a withheld tool result."""
     said = _TOOL_WHY.get(why, "no usable answer")
@@ -484,6 +516,7 @@ def note_result(layer) -> None:
     NER_DOWN["unchecked"] = layer is not None and layer.status.state in ("unavailable", "too_long", "partial")
     NER_DOWN["share"] = share(layer.status) if layer is not None and layer.status.state == "partial" else 0
     NER_DOWN["long"] = layer is not None and layer.long
+    NER_DOWN["cut"] = 0          # the strings whose rest the walk withheld (tool_withhold.cut)
     NER_DOWN["state"] = layer.status.state if layer is not None else ""
     NER_DOWN["not_ours"] = layer is not None and layer.status.reason == "not_ours"
     NER_DOWN["why"] = (layer.status.reason or layer.status.state) if layer is not None else ""

@@ -138,7 +138,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 77 scenarios against a fake upstream (4 for the PowerShell tool of Windows, 8 in Code Mode)
 python3 harness/codex.py [--real]                      # 19 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 650 proofs: each control's test, and each path of the 18 invariant beliefs, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 651 proofs: each control's test, and each path of the 18 invariant beliefs, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1145,7 +1145,18 @@ and keeps its other keys. Written by hand, the setting looks like this:
   `/maisecrets status` counts a text checked in part apart from the texts checked in full. When the wait or a refusal leaves a rest unchecked, the line
   under the result names the share, for example `⚠ names 70 % checked by the name service`, and the AI is told
   that the rest had the rules alone. To a gateway a text longer than `max_chars` is not sent yet: pieces would
-  spend your quota of the minute.
+  spend your quota of the minute. maisecrets sends each request with `kind`: `prompt` for a prompt, `result` for a
+  tool result, so a service can give prompts priority (a gateway that does not know the field ignores it).
+- With the setting `unavailable` at `withhold` (see the next item), the unchecked rest of a tool result does not
+  reach the AI (since 0.9.28). The checked part goes on, masked as usual; in place of the rest the AI reads one line
+  that names it (`lines 120 to 400 of this text`, or characters for a text without a line break) and tells it to
+  fetch that part again in a narrower form: `sed -n` with a line range, Read with offset and limit, or the next page.
+  A narrower fetch is a tool result of its own, and the service checks it. Each string of the result keeps its
+  place, so a Bash, Read or MCP result keeps its shape; the keys of a JSON result are not cut and keep the rules.
+  The same holds for a text longer than a gateway takes, and for a long text whose first piece got no answer: all
+  of it is then the rest. Under the result you read `⚠ names 70 % checked by the name service; … maisecrets
+  withheld the rest of this result from the AI`. A prompt is never cut: its rest keeps the rules (a name never
+  blocks a prompt), and you read the share once per session.
 - When a source is set and cannot be used, you see one line with the cause and the step, for example
   `⚠️ maisecrets: names are NOT checked — the gateway ended the login → /maisecrets sref login NAME`. The session
   start checks the source (the gateway: a login in the store; a url or the local container: an answer within a
@@ -1154,8 +1165,8 @@ and keeps its other keys. Written by hand, the setting looks like this:
   are not checked". The AI is told at each such result that names may stand in clear text; a name it then
   writes in clear text came through that result; it is not made up. A text longer than the service takes still
   gets its own line under that result. With `/maisecrets ner unavailable withhold`
-  such a result does not reach the AI at all (a text longer than the service takes is named, not withheld). The
-  output of a failed command (Bash with an exit code other than 0) is neither checked by the service nor
+  such a result does not reach the AI at all (of a text longer than the service takes, only the unchecked rest is
+  withheld, see above). The output of a failed command (Bash with an exit code other than 0) is neither checked by the service nor
   withheld: Claude Code does not let a hook replace it (threat model, PostToolUseFailure).
 - **gateway**: the gateway of your `/maisecrets sref login` finds the names, when its protected resource metadata
   names `ner_endpoint` and `ner_scope`. One login asks for every scope the gateway offers, the name scope too, so

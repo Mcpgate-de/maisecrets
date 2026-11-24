@@ -1,0 +1,15 @@
+# c30-with-withhold-the-unchecked-rest-of-a-tool-result-never-reaches-the-ai: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30-with-withhold-the-unchecked-rest-of-a-tool-result-never-reaches-the-ai"
+control = "C30"
+serves = ["M1.2"]
+statement = "With unavailable withhold, the part of a tool result that the name service did not check never reaches the AI: each string value loses its unchecked rest to one line that names it, and the result keeps its shape (#105, B9)."
+runner = [
+  "tests/test_remote_layer.py::RestWithheldTests::test_bash_keeps_its_shape_and_the_rest_is_withheld",
+  "tests/test_remote_layer.py::RestWithheldTests::test_an_mcp_result_of_many_leaves_keeps_each_leaf_and_key",
+  "tests/test_remote_layer.py::RestWithheldTests::test_the_second_net_gets_the_same_number_of_texts",
+]
+
+[proof]
+file = "maisecrets/tool_withhold.py"
+find = "    r = layer.rest_of(s) if layer is not None else None\n"
+replace = "    r = None\n"
