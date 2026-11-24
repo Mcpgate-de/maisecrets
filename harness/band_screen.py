@@ -8,7 +8,8 @@ The fake model runs two commands, one per prompt:
 
 - `cat rows.log`, about 3,000 characters: the name service checks it in pieces of at most 1,000 and stalls on the
   last, so a rest remains. The band above the prompt names the share and that the rest went with the rules only;
-- `cat short.txt`, one piece the service checks: no rest, and the band goes.
+- the second prompt takes the band away (the mod clears it when the person sends a prompt), and `cat short.txt`,
+  one piece the service checks, leaves no rest, so no band comes back. tests/mod.test.ts holds each of the two alone.
 
 `claude -p` draws no band (harness/run.py ner_rest_band reads the mod's debug line instead). No request to the model
 holds the band. Exit 0 when every check holds. Each run writes into a temp folder; nothing of the person's own config
@@ -149,7 +150,8 @@ def _drive(args, env, cwd, run_dir) -> list[str]:
         if "SHORT-SHOWN" not in second:
             failures.append(f"the second turn did not end ({run_dir / 'screen-2.txt'})")
         elif BAND in second:
-            failures.append(f"the band stays after a result without a rest ({run_dir / 'screen-2.txt'})")
+            failures.append(f"the band stays after the next prompt and a result without a rest "
+                            f"({run_dir / 'screen-2.txt'})")
     finally:
         for b in (b"\x03", b"\x03"):
             try:
@@ -169,8 +171,8 @@ def main() -> int:
     for f in failures:
         print("FAIL", f)
     if not failures:
-        print("OK  a result with a rest shows the band with its share; a result without a rest takes it away; no "
-              "model request holds it")
+        print("OK  a result with a rest shows the band with its share; the next prompt and a result without a rest "
+              "leave none; no model request holds it")
     return 1 if failures else 0
 
 

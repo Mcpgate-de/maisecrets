@@ -107,10 +107,13 @@ def withheld(payload: dict, text: str, codex: bool) -> dict:
 def band_of(state, share: int, cut_: bool, withhold: bool):
     """(share, mode) for the mod's band (#105, B11), or None when no rest remained. The mode says where the rest went:
     `rules` (to the AI, masked by the rules alone), `cut` (the walk withheld it), `whole` (the whole result was
-    withheld). A share of 0 is a result with no checked part; it has a band only when it was withheld."""
+    withheld), `long` (a source without pieces took no part of a text over max_chars: the rules alone, share 0). Any
+    other result with no checked part has a band only when it was withheld."""
     if state == "partial":
         return (share, "whole" if withhold else "cut" if cut_ else "rules")
-    return (0, "whole") if withhold else None
+    if withhold:
+        return (0, "whole")
+    return (0, "long") if state == "too_long" else None
 
 
 def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None, load_config=None) -> dict:

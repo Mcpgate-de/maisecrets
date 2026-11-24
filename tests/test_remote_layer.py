@@ -726,6 +726,7 @@ class RestWithheldTests(unittest.TestCase):
         self.assertNotIn("updatedToolOutput", answer["hookSpecificOutput"], "not cut: the output passes as it is")
         self.assertNotIn("withheld", json.dumps(answer))
         self.assertIn("names not checked: the name service does not take a text this long", answer["systemMessage"])
+        self.assertEqual(R.NER_DOWN["band"], (0, "long"), "#105 B11: no part checked, a rest of 100 % for the band")
         self.svc = self.service()
         self.on()
         answer = _guarded("Bash", {"stdout": LONG, "stderr": ""})

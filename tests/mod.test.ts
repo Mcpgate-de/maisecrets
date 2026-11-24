@@ -1974,6 +1974,27 @@ test('the second net names the rest of the result it checked, a withheld one too
   expect(await bandText($)).toBeUndefined()
 })
 
+test('a result too long for a source without pieces shows the band as not checked, with the rules only',
+  async ($, on) => {
+    netWorld(on, 'band-4', () => resultAnswer({ texts: ['x'], changed: false }),
+      { post: (n) => ({ additionalContext: [withRest(n, '0 long')] }) })
+    await post($, 'tu-band-10')
+    expect(await bandText($)).toBe('maisecrets: the last result was not checked for names (too long for the name ' +
+      'service); it went to the AI with the rules only')
+  })
+
+test("the person's next prompt takes the band away; a prompt that is not the person's leaves it", async ($, on) => {
+  netWorld(on, 'band-5', () => ({ value: { exitCode: 1, stderr: 'no python here', stdout: '' } }),
+    { post: (n) => ({ additionalContext: [withRest(n, '70 rules')] }) })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await post($, 'tu-band-11')
+  expect(await bandText($)).toBeDefined()
+  await $.prompt.submit({ text: 'a note of a task', wait: false, origin: { kind: 'task-notification' } })
+  expect(await bandText($)).toBeDefined()
+  await $.prompt.submit({ text: 'the next question', wait: false, origin: { kind: 'composer' } })
+  expect(await bandText($)).toBeUndefined()
+})
+
 test('a rest that is no share and mode of its form shows nothing, and a refused result keeps no band of its marker',
   async ($, on) => {
     let answer: any = (n) => ({ additionalContext: [withRest(n, '70 rules')] })

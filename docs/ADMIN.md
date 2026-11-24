@@ -1146,8 +1146,10 @@ and keeps its other keys. Written by hand, the setting looks like this:
   under the result names the share, for example `⚠ names 70 % checked by the name service`, and the AI is told
   that the rest had the rules alone. With the mod in Claude Code, one line above the prompt says it for the last
   tool result too, for example `maisecrets: the last result was checked for names in part (70 %); the rest went to
-  the AI with the rules only` (with `withhold`: `the rest was withheld from the AI`); a later result without a rest
-  takes the line away. Codex has no such line: there the line under the result names the share. To a gateway a text longer than `max_chars` is not sent yet: pieces would
+  the AI with the rules only` (with `withhold`: `the rest was withheld from the AI`). A text that a gateway did not
+  take at all because it was too long gets `the last result was not checked for names (too long for the name
+  service); it went to the AI with the rules only`. A later result without a rest and your next prompt take the line
+  away. Codex has no such line: there the line under the result names the share. To a gateway a text longer than `max_chars` is not sent yet: pieces would
   spend your quota of the minute. maisecrets sends a gateway and the container it started the field `kind`:
   `prompt` for a prompt, `result` for a tool result, so the service can give prompts priority; a service at a `url`
   gets no `kind`, since a strict server of another make may refuse a field it does not know.

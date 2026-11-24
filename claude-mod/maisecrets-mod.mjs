@@ -1976,7 +1976,7 @@ const NET_NONCE = (() => {
 })()
 // ` rest SHARE MODE`: the name check left a rest of this result (#105, B11), for the band below; no text of the result
 const MARK_RE = new RegExp(`^\\[maisecrets: result (checked|masked) ${NET_NONCE}(?: ([0-9a-f]{16}))?` +
-  '(?: rest (\\d{1,2}) (rules|cut|whole))?\\]$')
+  '(?: rest (\\d{1,2}) (rules|cut|whole|long))?\\]$')
 const PASSES = new Set(['masked', 'checked'])
 const stages = new Map()       // tool_use_id -> 'called' (tool.call) or 'ran' (tool.run), the oldest first
 
@@ -2171,8 +2171,9 @@ async function secondNet($, e, next) {
 
 // The band (#105, B11): when the name check of the last tool result left a rest, one line above the prompt says how
 // much was checked and where the rest went. The share and the mode come from the marker of the result hook or from
-// the answer of the second net, never a text of the result. A later result without a rest takes the line away
-const BAND_MODES = new Set(['rules', 'cut', 'whole'])
+// the answer of the second net, never a text of the result. A later result without a rest takes the line away, and
+// so does the person's next prompt: a line about an old result never stands over a new question
+const BAND_MODES = new Set(['rules', 'cut', 'whole', 'long'])
 const BAND_REST = { rules: 'the rest went to the AI with the rules only', cut: 'the rest was withheld from the AI',
                     whole: 'the whole result was withheld from the AI' }
 let band = null
@@ -2181,6 +2182,10 @@ const restOf = (r) => (r && typeof r === 'object' && Number.isInteger(r.share) &
   BAND_MODES.has(r.mode)) ? { share: r.share, mode: r.mode } : null
 
 function bandLine(b) {
+  if (b.mode === 'long') {
+    return 'maisecrets: the last result was not checked for names (too long for the name service); it went to the AI ' +
+      'with the rules only'
+  }
   if (b.share > 0) return `maisecrets: the last result was checked for names in part (${b.share} %); ${BAND_REST[b.mode]}`
   return 'maisecrets: the last result was not checked for names; ' +
     (b.mode === 'rules' ? 'it went to the AI with the rules only' : 'it was withheld from the AI')
@@ -2307,6 +2312,7 @@ export function register(on) {
     // a pairing runs: its nonce in any prompt taints it (#91)
     if (pairings.size > 0) try { notePairingUse(String(e?.text ?? ''), null) } catch { /* the pairing goes on */ }
     const person = PERSON.has(e.origin?.kind)
+    if (person) setBand($, null)     // the band names the last result before this prompt, not one of its own (#105)
     // `/maisecrets demo on`, typed by the person, is `/maisecrets:demo on`: the steps below read `own`, the colon
     // form, with the person's origin as it came, so it has the same path and checks as the colon form and no more. Any
     // other origin keeps its text (the hook path, and the menu command only fills the box)
