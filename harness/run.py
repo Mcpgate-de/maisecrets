@@ -545,7 +545,7 @@ SCENARIOS = {
         # the person's line (the hook's systemMessage): -p prints only the answer, the debug log has the hook's answer
         "expect_debug": ["% checked by the name service; for the rest it did not answer in time, and the rules alone"],
         "with_mod": {"expect_debug": ["% checked by the name service; for the rest it did not answer in time",
-                                      "maisecrets band: ", "last result was checked for names in part (",
+                                      "maisecrets band: ", "result of this turn was checked for names in part (",
                                       "; the rest went to the AI with the rules only"]},
     },
     # the same with `unavailable: withhold`: the rest of the output never reaches the AI, and the band says so
@@ -561,7 +561,7 @@ SCENARIOS = {
         "expect_not_in_requests": ["row 069 of the log", "[maisecrets: result"],
         "expect_debug": ["and maisecrets withheld the rest of this result from the AI"],
         "with_mod": {"expect_debug": ["and maisecrets withheld the rest of this result from the AI",
-                                      "maisecrets band: ", "last result was checked for names in part (",
+                                      "maisecrets band: ", "result of this turn was checked for names in part (",
                                       "; the rest was withheld from the AI"]},
     },
     # every piece answers: no rest, so no band and no share
@@ -575,7 +575,7 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_in_requests": ["row 069 of the log"],
         "expect_not_in_requests": ["the name service checked only", "the name service did not check"],
-        "expect_no_debug": ["last result was checked for names", "last result was not checked for names"],
+        "expect_no_debug": ["of this turn was checked for names", "of this turn was not checked for names"],
     },
     "bash_echo": {
         "prompt": "print the env",

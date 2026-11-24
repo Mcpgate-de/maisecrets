@@ -546,11 +546,11 @@ class RestWithheldTests(unittest.TestCase):
         self.assertIn("the rules alone masked the rest of this result", answer["systemMessage"])
         self.assertIn(f"checked only {share} %", answer["hookSpecificOutput"]["additionalContext"])
 
-    def test_a_result_withheld_whole_has_a_band_and_one_that_keeps_the_rules_has_none(self):
-        # no answer at all: withheld with `withhold` (share 0, whole); without it the session's line names the cause
+    def test_a_result_with_no_answer_has_a_band_withheld_or_with_the_rules(self):
+        # no answer at all: withheld with `withhold` (share 0, whole); by default the rules alone (share 0, rules)
         from maisecrets import remote_layer as R
         from test_remote_detector import Scripted
-        for withhold, band in ((True, (0, "whole")), (False, None)):
+        for withhold, band in ((True, (0, "whole")), (False, (0, "rules"))):
             with self.subTest(withhold=withhold):
                 self.svc = Scripted([(503, {"error": "ner_unavailable"}, {}, 0.0)] * 4)
                 self.addCleanup(self.svc.close)
@@ -558,6 +558,27 @@ class RestWithheldTests(unittest.TestCase):
                 _guarded("Bash", {"stdout": "a short text\n", "stderr": ""})
                 self.assertEqual(R.NER_DOWN["state"], "unavailable")
                 self.assertEqual(R.NER_DOWN["band"], band)
+
+    def test_a_long_text_whose_first_piece_fails_under_withhold_is_withheld_whole_with_its_band(self):
+        # the gateway review of #105 asked whether band_of gives None here: it gives (0, "whole")
+        from maisecrets import remote_layer as R
+        from test_remote_detector import Scripted
+        self.svc = Scripted([(503, {"error": "ner_unavailable"}, {}, 0.0)] * 4)
+        self.addCleanup(self.svc.close)
+        self.on()
+        answer = _guarded("Bash", {"stdout": LONG, "stderr": ""})
+        self.assertNotIn(NAME, json.dumps(answer), "premise: withheld")
+        self.assertEqual(R.NER_DOWN["band"], (0, "whole"))
+
+    def test_a_watchdog_or_crash_answer_that_withholds_the_result_has_the_band_of_a_whole_withhold(self):
+        # #105 review L4: no name check ran to its end, and the result does not reach the AI
+        from maisecrets import remote_layer as R, second_net
+        R.NER_DOWN["band"] = None
+        payload = {"hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                   "tool_input": {}, "tool_response": {"stdout": "x", "stderr": ""}}
+        answer = hooks._fail_closed("post-tool", payload, "it took longer than 16s (the computer may be busy).")
+        tag = second_net.mark(answer, "post-tool", "0123456789abcdef" * 2)["hookSpecificOutput"]["additionalContext"]
+        self.assertTrue(tag.endswith(" rest 0 whole]"), tag)
 
     def test_the_second_net_gets_the_same_number_of_texts(self):
         # a failed command (PostToolUseFailure) or a hook that did not run: the mod's second net

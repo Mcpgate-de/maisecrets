@@ -40,7 +40,7 @@ from fake_ner import FakeNer
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT = 8814
-BAND = "the last result was checked for names in part ("
+BAND = "a result of this turn was checked for names in part ("
 REST = "the rest went to the AI with the rules only"
 
 

@@ -1966,8 +1966,10 @@ function registerSettingsPane(on) {
 const RESULT_MS = 20000
 const POSTS_MAX = 500
 const posts = new Map()        // tool_use_id -> state: what the tool-result hooks answered, the oldest first
-// the nonce of this mod process: the hooks put it into their marker, so no text of a tool or of another plugin's hook
-// can stand in for one (it never appears in an output: the variable is set only while the tool-result hooks run)
+// the nonce of this mod process: the hooks put it into their marker, so no text of a tool can stand in for one (it
+// never appears in an output: the variable is set only while the tool-result hooks run). Another plugin's hook that
+// runs in those moments inherits it and could write a marker: that is a program that runs as the person, the limit
+// that docs/THREAT-MODEL.md names for C2 and C30
 const NET_NONCE = (() => {
   const a = new Uint8Array(16)
   if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(a)
@@ -2153,7 +2155,7 @@ async function secondNet($, e, next) {
     const ms = Math.round((await $.clock.now()) - t0)
     $.ui.log(`maisecrets second net: ${due.length} result(s) of ${tool} checked in ${ms} ms`, { to: 'debug' })
   } catch { /* no log */ }
-  setBand($, a?.rest ?? null)
+  if (a !== null) addRest($, a.rest)
   let at = 0
   let masked = false
   due.forEach((i, n) => {
@@ -2169,35 +2171,56 @@ async function secondNet($, e, next) {
   return next({ ...e, message: { ...e.message, content } })
 }
 
-// The band (#105, B11): when the name check of the last tool result left a rest, one line above the prompt says how
-// much was checked and where the rest went. The share and the mode come from the marker of the result hook or from
-// the answer of the second net, never a text of the result. A later result without a rest takes the line away, and
-// so does the person's next prompt: a line about an old result never stands over a new question
-const BAND_MODES = new Set(['rules', 'cut', 'whole', 'long'])
+// The band (#105, B11): when the name check of a tool result of this turn (since the person's last prompt, parallel
+// calls and subagents included) left a rest, one line above the prompt says how much was checked and where the rest
+// went, for the worst such result. The share and the mode come from the marker of the result hook or from the answer
+// of the second net, never a text of the result. A result without a rest never takes the line away: only the person's
+// next prompt does, so a line about an old result never stands over a new question
+const BAND_RANK = { whole: 0, cut: 1, rules: 2, long: 3 }          // the worse first, at the same share
 const BAND_REST = { rules: 'the rest went to the AI with the rules only', cut: 'the rest was withheld from the AI',
                     whole: 'the whole result was withheld from the AI' }
-let band = null
+let band = null                // { n: results with a rest in this turn, worst: { share, mode } }
 
 const restOf = (r) => (r && typeof r === 'object' && Number.isInteger(r.share) && r.share >= 0 && r.share <= 99 &&
-  BAND_MODES.has(r.mode)) ? { share: r.share, mode: r.mode } : null
+  Object.hasOwn(BAND_RANK, r.mode)) ? { share: r.share, mode: r.mode } : null
 
-function bandLine(b) {
+const worse = (a, b) => b.share < a.share || (b.share === a.share && BAND_RANK[b.mode] < BAND_RANK[a.mode])
+
+function bandWhat(b) {
   if (b.mode === 'long') {
-    return 'maisecrets: the last result was not checked for names (too long for the name service); it went to the AI ' +
-      'with the rules only'
+    return 'was not checked for names (too long for one request to the name service); it went to the AI with the ' +
+      'rules only'
   }
-  if (b.share > 0) return `maisecrets: the last result was checked for names in part (${b.share} %); ${BAND_REST[b.mode]}`
-  return 'maisecrets: the last result was not checked for names; ' +
-    (b.mode === 'rules' ? 'it went to the AI with the rules only' : 'it was withheld from the AI')
+  if (b.share > 0) return `was checked for names in part (${b.share} %); ${BAND_REST[b.mode]}`
+  if (b.mode === 'rules') return 'was not checked for names (the name service did not answer); it went to the AI ' +
+    'with the rules only'
+  return 'was not checked for names; it was withheld from the AI'
 }
 
-function setBand($, rest) {
-  const next = restOf(rest)
-  if (next?.share === band?.share && next?.mode === band?.mode) return
-  band = next
+function bandLine(state) {
+  if (state.n === 1) return `maisecrets: a result of this turn ${bandWhat(state.worst)}`
+  return `maisecrets: ${state.n} results of this turn were not fully checked for names; the worst ${bandWhat(state.worst)}`
+}
+
+function drawBand($) {
   // the debug log too: claude -p draws no band, and the harness reads this line (harness/run.py ner_rest_*)
   try { $.ui.log(`maisecrets band: ${band ? bandLine(band) : 'none'}`, { to: 'debug' }) } catch { /* no log */ }
   try { $.ui.invalidate('ui.render') } catch { /* the next drawing shows it */ }
+}
+
+// a result of this turn: its rest counts; a result without one changes nothing
+function addRest($, rest) {
+  const r = restOf(rest)
+  if (r === null) return
+  band = band === null ? { n: 1, worst: r } : { n: band.n + 1, worst: worse(band.worst, r) ? r : band.worst }
+  drawBand($)
+}
+
+// the person's prompt: a new turn
+function clearBand($) {
+  if (band === null) return
+  band = null
+  drawBand($)
 }
 
 function registerBand(on) {
@@ -2266,7 +2289,7 @@ function registerSecondNet(on) {
       const state = await postState(tag, r)
       notePost(e, state)
       // a result that passes: its own rest, or none; any other goes to the second net, whose answer sets the band
-      if (PASSES.has(state)) setBand($, tag.rest)
+      if (PASSES.has(state)) addRest($, tag.rest)
     } catch { /* no state: the row is masked */ }
     return rest
   }).catch(relayClassic)
@@ -2312,7 +2335,7 @@ export function register(on) {
     // a pairing runs: its nonce in any prompt taints it (#91)
     if (pairings.size > 0) try { notePairingUse(String(e?.text ?? ''), null) } catch { /* the pairing goes on */ }
     const person = PERSON.has(e.origin?.kind)
-    if (person) setBand($, null)     // the band names the last result before this prompt, not one of its own (#105)
+    if (person) clearBand($)         // a new turn: the band names the results of this one only (#105)
     // `/maisecrets demo on`, typed by the person, is `/maisecrets:demo on`: the steps below read `own`, the colon
     // form, with the person's origin as it came, so it has the same path and checks as the colon form and no more. Any
     // other origin keeps its text (the hook path, and the menu command only fills the box)
