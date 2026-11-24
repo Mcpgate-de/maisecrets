@@ -1838,6 +1838,7 @@ function registerSettingsPane(on) {
   // the result before PostToolUse masked it: a reference of a server that is not bound yet is masked whole there
   // (placeholder.whole_references), and the connector that showed it must still be asked (#91)
   on('tool.run', async ($, e, next) => {
+    noteStage(e, 'ran')        // the second net: the call was allowed and runs (never raised for a refusal)
     const r = await next(e)
     try { noteReferences(e, r) } catch { /* a failure of its own never reaches the result */ }
     return r
@@ -1847,6 +1848,7 @@ function registerSettingsPane(on) {
     return next(e)
   })
   on('tool.call', async ($, e, next) => {
+    noteStage(e, 'called')     // the second net: this mod saw the call start
     // a pairing runs: its nonce in any call but the mod's own taints it, and that call never runs (#91)
     if (pairings.size > 0) {
       let hit = true
@@ -1906,7 +1908,320 @@ function registerSettingsPane(on) {
   })
 }
 
+// ---- the second net for tool results (C2) and the hooks watch (C13)
+
+// The PostToolUse hook masks a tool result. In Claude Code a PostToolUse hook that fails (crashes, times out, cannot
+// start) does not withhold the output, also with onFailure block (that counts as exit code 2), and a session whose
+// hooks never run masks nothing. The mod sees each row before it is stored and sent (session.append, the door
+// tool-result) and masks a result that no PostToolUse hook of maisecrets checked, through dispatch.py mod-result.
+//
+// It decides from positive evidence only. While the settings hooks of PostToolUse and PostToolUseFailure run, the mod
+// sets MAISECRETS_MOD_NET to NET_NONCE, a random nonce of this process; the maisecrets tool-result hook then ends its
+// additionalContext with a marker line (maisecrets/second_net.py): `masked NONCE HASH` when it replaced the output
+// (HASH: of that output's texts), else `checked NONCE`, and only after it scanned a result. The mod reads the marker in
+// the classic answer (classic.PostToolUse, which runs the settings hooks as `next`): only as the last line of an entry
+// and only with its own nonce, so a copied text or another plugin's entry cannot stand in. It takes the marker out, so
+// it never reaches the model. Per call:
+//   masked:  the masked marker, no block, and the output that reaches the mod has the hash the hook gave: as it is
+//   checked: the checked marker, no block, no replaced output: as it is, no Python
+//   every other answer is masked: no marker (no maisecrets hook ran for this call), a block (a failed hook), a replaced
+//   output with another hash or with the checked marker (another plugin's hook replaced it), PostToolUseFailure (its
+//   answer cannot replace the output, anthropics/claude-code#97278), and a call with no state at all (a mod reload, a
+//   hook of its own that threw, the REPL of Code Mode, which raises no classic hook, tool.call or tool.run here)
+//   refused: an error of a call this mod saw start (tool.call) that never ran (no tool.run, which the engine never raises
+//   for a refusal) and that raised no tool-result hook: no output of the tool, it goes on as it is. Limit: an error that
+//   another mod answers itself without `next` (its tool.call below this one, or its tool.run above it) looks like a
+//   refusal here
+//
+// Fail closed without a lock: when Python gives no well-formed answer, or this hook fails, the row is stored with the
+// text WITHHELD in place of each unchecked result. The row is always stored and the turn goes on, so the session never
+// waits on maisecrets for more than RESULT_MS, and the next call is checked again. Placeholders stay as they are:
+// Python's masking leaves them, and a result PostToolUse masked never reaches Python.
+const RESULT_MS = 20000
+const POSTS_MAX = 500
+const posts = new Map()        // tool_use_id -> state: what the tool-result hooks answered, the oldest first
+// the nonce of this mod process: the hooks put it into their marker, so no text of a tool or of another plugin's hook
+// can stand in for one (it never appears in an output: the variable is set only while the tool-result hooks run)
+const NET_NONCE = (() => {
+  const a = new Uint8Array(16)
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(a)
+  else for (let i = 0; i < 16; i++) a[i] = Math.floor(Math.random() * 256)
+  return [...a].map(n => n.toString(16).padStart(2, '0')).join('')
+})()
+const MARK_RE = new RegExp(`^\\[maisecrets: result (checked|masked) ${NET_NONCE}(?: ([0-9a-f]{16}))?\\]$`)
+const PASSES = new Set(['masked', 'checked'])
+const stages = new Map()       // tool_use_id -> 'called' (tool.call) or 'ran' (tool.run), the oldest first
+
+function noteStage(e, stage) {
+  const id = e?.tool_use_id
+  if (typeof id !== 'string' || !id) return
+  stages.delete(id)
+  stages.set(id, stage)
+  if (stages.size > POSTS_MAX) stages.delete(stages.keys().next().value)
+}
+
+const refused = (b) => b.is_error === true && stages.get(b.tool_use_id) === 'called' && !posts.has(b.tool_use_id)
+const WITHHELD = '[maisecrets: the tool ran and finished, but maisecrets could not check its output, so the output ' +
+  'is withheld. Do not run the tool again to see it; /maisecrets status shows why.]'
+const MASKED_NOTE = '[maisecrets masked values in this tool result (its result hook did not check it). The tool ran ' +
+  'and finished; use the ⟦TYPE_cN⟧ placeholders as they are.]'
+const MASKED_TOAST = 'maisecrets masked values in a tool result that its result hook did not check. ' +
+  '/maisecrets status shows why.'
+
+function notePost(e, state) {
+  const id = e?.tool_use_id
+  if (typeof id !== 'string' || !id) return
+  posts.delete(id)
+  posts.set(id, state)
+  if (posts.size > POSTS_MAX) posts.delete(posts.keys().next().value)
+}
+
+// the marker of maisecrets in a classic answer: the last line of an entry, with this process's nonce. The answer comes
+// back without it
+function readMarks(r) {
+  const ctx = r && typeof r === 'object' ? r.additionalContext : undefined
+  const list = Array.isArray(ctx) ? ctx : typeof ctx === 'string' ? [ctx] : []
+  let tag = null
+  const kept = []
+  for (const c of list) {
+    const cut = typeof c === 'string' ? c.lastIndexOf('\n') : -1
+    const line = typeof c === 'string' ? c.slice(cut + 1) : null
+    const m = line === null ? null : MARK_RE.exec(line)
+    if (!m) { kept.push(c); continue }
+    tag = tag ?? { kind: m[1], hash: m[2] ?? null }
+    const before = cut < 0 ? '' : c.slice(0, cut).replace(/\n+$/, '')
+    if (before !== '') kept.push(before)
+  }
+  if (ctx === undefined) return { tag, rest: r }
+  const rest = { ...r }
+  if (kept.length) rest.additionalContext = Array.isArray(ctx) ? kept : kept.join('\n\n')
+  else delete rest.additionalContext
+  return { tag, rest }
+}
+
+// the strings of an output in a fixed order, as maisecrets/second_net.py output_hash takes them
+function textsOf(node, out) {
+  if (typeof node === 'string') out.push(node)
+  else if (Array.isArray(node)) for (const x of node) textsOf(x, out)
+  else if (node && typeof node === 'object') {
+    for (const k of Object.keys(node).sort()) { out.push(k); textsOf(node[k], out) }
+  }
+  return out
+}
+
+async function outputHash(output) {
+  const bytes = new TextEncoder().encode(textsOf(output, []).join('\0'))
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))
+  return [...digest.slice(0, 8)].map(n => n.toString(16).padStart(2, '0')).join('')
+}
+
+// masked: the output that reaches the mod is the one the maisecrets hook made (its hash); checked: no hook replaced it
+async function postState(tag, r) {
+  if (!tag || !r || typeof r !== 'object' || r.block !== undefined) return 'unchecked'
+  const updated = r.updatedToolOutput !== undefined ? r.updatedToolOutput : r.updatedMCPToolOutput
+  if (tag.kind === 'checked') return updated === undefined ? 'checked' : 'unchecked'
+  if (updated === undefined || !tag.hash) return 'unchecked'
+  return (await outputHash(updated)) === tag.hash ? 'masked' : 'unchecked'
+}
+
+// The nonce goes to the hooks only while the settings hooks of a tool result run (calls run in parallel: it stays set
+// while any of them runs), so a command of the session started outside those moments does not inherit it
+let marksOpen = 0
+async function openMarks($) {
+  marksOpen += 1
+  if (marksOpen === 1) await $.env.set('MAISECRETS_MOD_NET', NET_NONCE)
+}
+async function closeMarks($) {
+  marksOpen = Math.max(0, marksOpen - 1)
+  if (marksOpen === 0) await $.env.set('MAISECRETS_MOD_NET', undefined)
+}
+async function withMarks($, run) {
+  try { await openMarks($) } catch { /* no marker: the second net masks the result */ }
+  try { return await run() } finally {
+    try { await closeMarks($) } catch { /* the next close tries again */ }
+  }
+}
+
+// the texts of one tool_result block, in order: its content string, or the text of each text block in it
+function resultTexts(block) {
+  if (typeof block.content === 'string') return [block.content]
+  if (!Array.isArray(block.content)) return []
+  return block.content.filter(c => c?.type === 'text' && typeof c.text === 'string').map(c => c.text)
+}
+
+function withTexts(block, texts, note) {
+  if (typeof block.content === 'string') return { ...block, content: (note ? note + '\n\n' : '') + texts[0] }
+  let i = 0
+  const content = block.content.map(c => (c?.type === 'text' && typeof c.text === 'string') ? { ...c, text: texts[i++] } : c)
+  return { ...block, content: note ? [{ type: 'text', text: note }, ...content] : content }
+}
+
+// an unchecked result: the text WITHHELD alone, its media dropped too (a media block may be dropped, not changed)
+const withheld = (block) => ({ ...block, content: WITHHELD })
+
+// the tool_result blocks of a row that must go to Python: every one but those with positive evidence
+function dueBlocks(e) {
+  const content = Array.isArray(e?.message?.content) ? e.message.content : []
+  const due = []
+  content.forEach((b, i) => {
+    if (b?.type === 'tool_result' && !PASSES.has(posts.get(b.tool_use_id)) && !refused(b)) due.push(i)
+  })
+  return due
+}
+
+// One Python start per row. The next interpreter only when this one cannot start (a rejection that names a missing
+// program), exits 3 (dispatch.py on a Python older than 3.9) or 9009 (the store alias of Windows): a timeout or another
+// failure ends the search, and the row is withheld
+const NO_PROGRAM = /ENOENT|not found|no such file|cannot find|is not recognized/i
+async function runResult($, stdin) {
+  const init = { cwd: $.plugin.root, stdin, timeoutMs: RESULT_MS, env: { PYTHONUTF8: '1' } }
+  for (const argv of [['python3', 'hooks/dispatch.py', 'mod-result'], ['py', '-3', 'hooks/dispatch.py', 'mod-result'],
+    ['python', 'hooks/dispatch.py', 'mod-result']]) {
+    let r
+    try {
+      r = await $.process.run(argv, init)
+    } catch (err) {
+      const why = String(err?.code ?? err?.message ?? err).slice(0, 120)
+      try { $.ui.log(`maisecrets second net: ${argv[0]} did not run (${why})`, { to: 'debug' }) } catch { /* no log */ }
+      if (NO_PROGRAM.test(why)) continue
+      return null
+    }
+    if (r.exitCode === 0) return r
+    if (r.exitCode !== 3 && r.exitCode !== 9009) return null
+  }
+  return null
+}
+
+// Python's answer for the texts of one row: { texts, changed, note }, 'withheld', or null (no answer)
+async function askResult($, session, cwd, tool, agent, texts) {
+  const r = await runResult($, JSON.stringify({ session_id: session, cwd, tool_name: tool, agent_id: agent, texts }))
+  let a
+  try { a = r ? JSON.parse(r.stdout) : null } catch { a = null }
+  if (!a || a.maisecrets !== 'mod-result') return null
+  if (a.withheld === true) return 'withheld'
+  if (!Array.isArray(a.texts) || a.texts.length !== texts.length || !a.texts.every(t => typeof t === 'string')) {
+    return null
+  }
+  return { texts: a.texts, changed: a.changed === true, note: typeof a.note === 'string' ? a.note : '' }
+}
+
+async function secondNet($, e, next) {
+  const due = dueBlocks(e)
+  if (!due.length) return next(e)
+  let session = null
+  try { session = await $.session.id() } catch { session = null }
+  let cwd = ''
+  try { cwd = await $.session.cwd() } catch { cwd = '' }
+  const tool = typeof e?.origin?.tool === 'string' ? e.origin.tool : 'tool'
+  const content = [...e.message.content]
+  const parts = due.map(i => resultTexts(content[i]))
+  let a = null
+  let t0 = 0
+  try { t0 = await $.clock.now() } catch { t0 = 0 }
+  try {
+    a = await askResult($, session, cwd, tool, typeof e?.agentId === 'string' ? e.agentId : null, parts.flat())
+  } catch { a = null }
+  try {
+    const ms = Math.round((await $.clock.now()) - t0)
+    $.ui.log(`maisecrets second net: ${due.length} result(s) of ${tool} checked in ${ms} ms`, { to: 'debug' })
+  } catch { /* no log */ }
+  let at = 0
+  let masked = false
+  due.forEach((i, n) => {
+    if (a === null || a === 'withheld') { content[i] = withheld(content[i]); return }
+    const texts = a.texts.slice(at, at + parts[n].length)
+    at += parts[n].length
+    const changed = texts.some((t, k) => t !== parts[n][k])
+    if (changed) masked = true
+    const note = [changed ? MASKED_NOTE : '', a.note].filter(Boolean).join('\n\n')
+    content[i] = withTexts(content[i], texts, note || null)
+  })
+  if (masked) toast($, MASKED_TOAST)
+  return next({ ...e, message: { ...e.message, content } })
+}
+
+// The hooks watch: the mod runs without the hooks. A person's prompt that the settings hooks of UserPromptSubmit let
+// through (classic.UserPromptSubmit, which runs them as `next`, so only a prompt the hook gets: no slash command the
+// hook does not see, no /clear, no prompt the mod dropped or answered) must leave a row of the prompt hook in hooks.log.
+// WATCH_MS later the mod asks Python (status_verdict.hooks_watch). No row: one line, once per session. No answer, or
+// Cowork: nothing. A session whose row came is not asked again. A row any program wrote silences the watch, never the
+// second net above: that reads the marker of the hook itself
+const WATCH_MS = 1500
+const HOOKS_LINE = 'maisecrets hooks did not run in this session: values are not protected; run /maisecrets status'
+const promptHookSeen = new Set()
+const watchTold = new Set()
+
+function watchHooks($, session, since) {
+  if (typeof session !== 'string' || !session || promptHookSeen.has(session) || watchTold.has(session)) return
+  $.clock.after(WATCH_MS, async () => {
+    const a = await askEntry($, { action: 'hooks_ran', session_id: session, since })
+    if (a?.ran === true) { promptHookSeen.add(session); return }
+    if (a?.ran !== false || watchTold.has(session)) return
+    watchTold.add(session)
+    try { $.ui.log(HOOKS_LINE) } catch { /* a line for the person only */ }
+  })
+}
+
+// A hook answer the classic chain of the mod does not see (measured on 2.1.330: in Code Mode the REPL's own
+// PostToolUse) reaches the session as a context row (door hook-context, name hook_additional_context) with the marker
+// in it: the marker line, and the label it alone filled, go out of each such row, so the model never reads it. The
+// REPL's result then has no state and is masked
+const unmarkedLine = (l) => !MARK_RE.test(l.replace(/^[^\n]{0,80} hook additional context: /, ''))
+const unmarked = (t) => {
+  if (!t.includes(NET_NONCE)) return t
+  return t.split('\n').filter(unmarkedLine).join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '')
+}
+
+function contextWithoutMarks(e, next) {
+  const content = Array.isArray(e?.message?.content) ? e.message.content : null
+  if (e?.message?.name !== 'hook_additional_context' || !content ||
+      !content.some(b => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(NET_NONCE))) {
+    return next(e)
+  }
+  const kept = content.map(b => (b?.type === 'text' && typeof b.text === 'string') ? { ...b, text: unmarked(b.text) } : b)
+  return next({ ...e, message: { ...e.message, content: kept } })
+}
+
+// a classic hook of the mod only reads: when it fails, what the settings hooks answered stands, without the marker.
+// Not called yet: the settings hooks run now, once, with the nonce; called: next(e) replays what they answered (no
+// second run). Either way the call keeps no state, so the second net masks its result
+async function relayClassic($, e, next) {
+  const r = next.called ? await next(e) : await withMarks($, () => next(e))
+  return readMarks(r).rest
+}
+
+function registerSecondNet(on) {
+  on('classic.PostToolUse', async ($, e, next) => {
+    const r = await withMarks($, () => next(e))
+    const { tag, rest } = readMarks(r)
+    try { notePost(e, await postState(tag, r)) } catch { /* no state: the row is masked */ }
+    return rest
+  }).catch(relayClassic)
+  on('classic.PostToolUseFailure', async ($, e, next) => {
+    const r = await withMarks($, () => next(e))
+    try { notePost(e, 'failure') } catch { /* no state: the row is masked */ }
+    return readMarks(r).rest
+  }).catch(relayClassic)
+  on('session.append', { door: 'tool-result' }, secondNet).catch(async ($, e, next) => {
+    // the hook threw or ran out of its budget: a row it passed on stays; one it did not goes on withheld
+    if (next.called) return next(e)
+    const content = Array.isArray(e?.message?.content) ? e.message.content : []
+    return next({ ...e, message: { ...e.message, content: content.map(b => b?.type === 'tool_result' ? withheld(b) : b) } })
+  })
+  on('session.append', { door: 'hook-context' }, async ($, e, next) => contextWithoutMarks(e, next))
+    .catch(async ($, e, next) => next(e))
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    let at = null
+    try { at = (await $.clock.now()) / 1000 } catch { at = null }
+    const r = await next(e)
+    // a blocked prompt went nowhere, and the person sees the block
+    try { if (at !== null && (!r || r.block === undefined)) watchHooks($, e?.session_id, at) } catch { /* no line */ }
+    return r
+  }).catch(relayClassic)
+}
+
 export function register(on) {
+  registerSecondNet(on)
   // a hidden command the person typed (`/maisecrets:status`, the form of 0.9.21 and before): it runs as typed
   on('command.run', async ($, e, next) => {
     const name = typeof e?.command === 'string' && e.command.startsWith('maisecrets:') ? e.command.slice(11) : ''
