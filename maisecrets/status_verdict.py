@@ -263,7 +263,7 @@ def newest(root: Path, claude_dir: Path, codex_home: Path) -> dict:
     (a time or None), where (which client fetched it)."""
     kind, market = _install_kind(root, claude_dir, codex_home)
     info = {"installed": installed_version(root), "kind": kind, "market": market, "newest": None, "fetched": None,
-            "where": None}
+            "where": None, "auto": None}
     found: list = []
     if kind == "claude":
         known = _json(claude_dir / "plugins" / "known_marketplaces.json")
@@ -276,7 +276,8 @@ def newest(root: Path, claude_dir: Path, codex_home: Path) -> dict:
             v = _checkout_version(loc)
             if v:
                 fetched = entry.get("lastUpdated")
-                found.append((v, name, fetched if isinstance(fetched, str) else None, "Claude Code"))
+                found.append((v, name, fetched if isinstance(fetched, str) else None, "Claude Code",
+                              entry.get("autoUpdate") is True))
     elif kind == "codex":
         base = codex_home / ".tmp" / "marketplaces"
         names = [market] if market else []
@@ -288,10 +289,10 @@ def newest(root: Path, claude_dir: Path, codex_home: Path) -> dict:
                     fetched = time.strftime("%Y-%m-%d %H:%M", time.localtime(loc.stat().st_mtime))
                 except OSError:
                     fetched = None
-                found.append((v, name, fetched, "Codex"))
+                found.append((v, name, fetched, "Codex", None))
     best = max(found, key=lambda f: _version_tuple(f[0]) or (0,), default=None)
     if best:
-        info.update(newest=best[0], market=best[1], fetched=best[2], where=best[3])
+        info.update(newest=best[0], market=best[1], fetched=best[2], where=best[3], auto=best[4])
     return info
 
 
@@ -309,7 +310,20 @@ def _update_short(info: dict) -> str:
     return f"codex plugin add maisecrets@{market}" if info["kind"] == "codex" else "/plugin, then update maisecrets"
 
 
-def version_verdict(info: dict) -> Check:
+STALE_DAYS = 3        # a marketplace copy without auto-update older than this may miss a release
+
+
+def _age_days(fetched, now: float | None) -> float:
+    """Days since `fetched` (Claude Code's lastUpdated, ISO time in UTC); 0 when it cannot be read."""
+    import calendar
+    try:
+        t = calendar.timegm(time.strptime(str(fetched)[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (TypeError, ValueError):
+        return 0.0
+    return ((time.time() if now is None else now) - t) / 86400
+
+
+def version_verdict(info: dict, now: float | None = None) -> Check:
     inst, new = info["installed"], info["newest"]
     if info["kind"] == "synced":
         return Check("warn", "version", "synced by your org", "ask your admin",
@@ -333,6 +347,15 @@ def version_verdict(info: dict) -> Check:
     if not b or b > a:
         return Check("warn", "version", f"{new} is newer", _update_short(info),
                      f"{inst} is installed; {new} is in {copy}; next: {update_command(info)}")
+    age = _age_days(info.get("fetched"), now)
+    if info.get("auto") is False and age > STALE_DAYS:
+        # Claude Code updates a marketplace outside Anthropic's only with autoUpdate: the copy can be weeks old, and
+        # "the newest" then says nothing (measured 2026-11-24: 0.9.22 "the newest" while 0.9.26 was released)
+        return Check("warn", "version", f"copy {int(age)} days old", "/plugin, turn on auto-update",
+                     f"{inst} is the newest in {copy}, and Claude Code does not update that copy by itself "
+                     f"(auto-update is off for this marketplace); next: claude plugin marketplace update "
+                     f"{info.get('market') or 'maisecrets'}, then {update_command(info)}, or turn on auto-update "
+                     f"in /plugin under Marketplaces")
     return Check("ok", "version", f"{inst}, the newest", None,
                  f"the newest in {copy} (that copy is only as new as its last fetch)")
 

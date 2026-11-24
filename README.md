@@ -65,7 +65,11 @@ plugin blocks every prompt and names the missing piece.
 
 ## Update and uninstall
 
+Claude Code does not update a marketplace outside Anthropic's by itself: turn on auto-update for maisecrets in
+`/plugin` under Marketplaces, or fetch it before the update.
+
 ```bash
+claude plugin marketplace update maisecrets            # fetch the newest release first
 claude plugin update maisecrets@maisecrets             # or a new session with an org-synced plugin
 claude plugin uninstall maisecrets@maisecrets
 codex plugin remove maisecrets@maisecrets
