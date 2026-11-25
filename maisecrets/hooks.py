@@ -755,7 +755,7 @@ def _verdict(text: str, cfg: dict, session: str | None, vault=None) -> tuple:
 
 
 def _wr():
-    from . import withheld_results       # #107
+    from . import withheld_results
     return withheld_results
 
 
@@ -800,10 +800,9 @@ def rewrite_prompt(payload: dict) -> dict:
     dm = demo.mod_answer(payload, cfg)          # demo.py: a demo prompt enters masked, or goes to the hook
     if dm is not None:
         return dm
-    # a report is the hook's to judge (C19); an MCP task's result is tool output, post_tool masks it (#107)
+    # C19: the hook judges a report; an MCP task's result is masked as tool output (#107)
     if "<task-notification>" in prompt:
-        from . import mcp_task_results as mt
-        return mt.rewrite(payload, session) if payload.get("origin") == "task-notification" else {}
+        return _wr().rewrite(payload, session) if payload.get("origin") == "task-notification" else {}
     # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
     if term_files.parse_command(prompt) or value_files.parse_removal(prompt) or not_a_secret.parse(prompt):
         return {}
@@ -1074,9 +1073,12 @@ def user_prompt(payload: dict) -> dict:
 
     # 2. references the human typed or pasted: this session may resolve them from now on. A message of another session
     # or a subagent's prompt admits none: a session another one controls could name a reference it never saw and let
-    # this session resolve it (C4; codex Gate A, 2026-10-22), and so does a notification: a server writes it (#107)
+    # this session resolve it (C4; codex Gate A, 2026-10-22), nor a notification (#107)
     typed = find_refs(prompt)
-    matches = _prompt_hits(prompt)
+    note = prompt.lstrip().startswith("<task-notification>")
+    matches = _wr().hits(prompt) if note else _prompt_hits(prompt)
+    if note and _wr().hidden(prompt):
+        return _wr().hidden_block(payload)
     vault = None
     if typed or matches or _has_live(cfg):
         vault = Vault(cfg)

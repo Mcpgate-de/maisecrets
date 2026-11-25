@@ -76,3 +76,36 @@ def with_note(event: str, payload: dict, obj: dict) -> dict:
     hso = dict(hso or {"hookEventName": name})
     hso["additionalContext"] = f"{hso['additionalContext']}\n\n{note}" if hso.get("additionalContext") else note
     return {**obj, "hookSpecificOutput": hso}
+
+
+def hits(prompt: str) -> list:
+    """The values of a notification the prompt hook judges (no mod, or the mod failed or ran out of time): the prompt
+    rules' findings and those of the tool channel, which a tool result gets (a password export, a card number alone).
+    A tool finding counts where no prompt finding lies (review of #107, probe B)."""
+    from . import detect
+    found = list(detect.findings(prompt))
+    for m in detect.findings(prompt, channel="tool"):
+        if all(m.end <= f.start or m.start >= f.end for f in found):
+            found.append(m)
+    return sorted(found, key=lambda m: (m.start, m.end))
+
+
+def hidden(prompt: str) -> bool:
+    """Whether a notification holds invisible characters that PostToolUse would remove (C20)."""
+    from .tool_output import strip_hidden
+    from .vault import load_config
+    return bool(load_config().get("strip_hidden_characters", True)) and strip_hidden(prompt)[1] > 0
+
+
+def hidden_block(payload: dict) -> dict:
+    out = {"decision": "block", "reason": "maisecrets kept a notification from the AI: it holds invisible characters "
+           "(Unicode tag characters or variation selectors) that can hide instructions. It was not sent."}
+    if client_of(payload) != "codex":
+        out["hookSpecificOutput"] = {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}
+    return out
+
+
+def rewrite(payload: dict, session: str) -> dict:
+    """The mod's rewrite of an MCP task's notification (mcp_task_results.rewrite); hooks.py reaches it here."""
+    from .mcp_task_results import rewrite as mt_rewrite
+    return mt_rewrite(payload, session)

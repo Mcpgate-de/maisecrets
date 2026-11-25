@@ -391,5 +391,40 @@ class NoteEdgeTests(Base):
                 p.write_text(json.dumps({"at": time.time(), "tasks": tasks}))
                 self.assertIsNone(wr.take(SESSION))
 
+class FallbackTests(Base):
+    """Review of #107, probe B: without the mod (or when it failed or ran out of time) the prompt hook judges a
+    notification as a tool result would be judged: the tool channel of the detector and the invisible characters."""
+
+    def hook(self, result: str) -> dict:
+        return hooks.user_prompt({"prompt": notification(result), "session_id": SESSION,
+                                  "transcript_path": str(self.t), **CLAUDE})
+
+    def test_a_password_export_alone_is_blocked(self):
+        out = self.hook(f"name,url,username,password\nbank,https://b.example,erika,{PASSWORD}")
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertNotIn(PASSWORD, json.dumps(out))
+        self.assertNotIn(PASSWORD, hooks.take_pending(SESSION), "/maisecrets send gets it masked")
+
+    def test_a_card_number_alone_is_blocked(self):
+        out = self.hook(CARD)
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertNotIn(CARD, json.dumps(out))
+
+    def test_the_two_channels_give_each_value_once(self):
+        found = wr.hits(notification(f"token {VALUE}\nname,url,username,password\nbank,https://b.example,erika,"
+                                     f"{PASSWORD}"))
+        spans = [(m.start, m.end) for m in found]
+        self.assertTrue(all(b1 <= a2 for (_a1, b1), (a2, _b2) in zip(spans, spans[1:])), spans)
+        self.assertEqual({m.value for m in found} >= {VALUE, PASSWORD}, True, [m.type for m in found])
+
+    def test_invisible_characters_alone_are_blocked(self):
+        out = self.hook(f"result ok {HIDDEN}")
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertIn("invisible characters", out["reason"])
+
+    def test_a_clean_notification_passes(self):
+        self.assertNotEqual(self.hook("result ok, nothing to mask").get("decision"), "block")
+
+
 if __name__ == "__main__":
     unittest.main()
