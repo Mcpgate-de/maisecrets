@@ -1863,15 +1863,12 @@ function registerSettingsPane(on) {
   // a tool call or a turn of this session runs the hooks: the open panel asks for the status again. Neither hook
   // changes the call or the answer, and a failure of its own never reaches them
   on('tool.call', async ($, e, next) => {
-    // a pairing runs: its nonce in any call but the mod's own taints it, and that call never runs (#91). The second
-    // net lets its error pass: this mod refused it itself, so no tool ran
+    try { noteCalled(e) } catch { /* no note: an error of this call is masked */ }
+    // a pairing runs: its nonce in any call but the mod's own taints it, and that call never runs (#91)
     if (pairings.size > 0) {
       let hit = true
       try { hit = notePairingUse(JSON.stringify(e ?? null), e) } catch { hit = true }
-      if (hit) {
-        try { noteRefused(e) } catch { /* no note: its error is masked */ }
-        return { deny: PAIR_DENY }
-      }
+      if (hit) return { deny: PAIR_DENY }
     }
     let start = null
     try { start = (await $.clock.now()) / 1000 } catch { start = null }
@@ -1948,10 +1945,15 @@ function registerSettingsPane(on) {
 //   output with another hash or with the checked marker (another plugin's hook replaced it), PostToolUseFailure (its
 //   answer cannot replace the output, anthropics/claude-code#97278), and a call with no state at all (a mod reload, a
 //   hook of its own that threw, the REPL of Code Mode, which raises no classic hook or tool.call here)
-//   refused: the error of a call that this mod's tool.call refused itself (a pairing nonce, #91) and that raised no
-//   tool-result hook: no tool ran, it goes on as it is. Every other error is masked, a refusal beneath this mod too (a
-//   hook, a rule or the person): its tool.call gets the same { result, isError } as a tool that ran and failed
-//   (measured with `claude plugin test`, Claude Code 2.1.331), so only the second net can tell
+//   refused: an error of a call whose start this mod saw (tool.call) and for which neither classic.PostToolUse nor
+//   classic.PostToolUseFailure came: the call never ran (a PreToolUse refusal, a rule, the person's no, the engine's
+//   onFailure block, this mod's pairing guard), so the row holds no output of a tool, and it goes on as it is (the
+//   engine's text of a moved plugin folder and the guard's reason must reach the model when no Python can run). A call
+//   that ran raises one of the two, also when the maisecrets command hooks crash, are missing or cannot start (the
+//   harness: failed_output_*); its error takes the strict path. tool.call alone cannot tell: a refusal beneath it
+//   returns the same { result, isError } as a tool that ran and failed (claude plugin test, Claude Code 2.1.331).
+//   Limit: an error that another mod answers itself in place of the tool (its tool.call or tool.run below this one)
+//   raises no classic event and passes as a refusal here
 //
 // Fail closed without a lock: when Python gives no well-formed answer, or this hook fails, the row is stored with the
 // text WITHHELD in place of each unchecked result. The row is always stored and the turn goes on, so the session never
@@ -1971,18 +1973,18 @@ const MARK_RE = /^\[maisecrets: result (checked|masked) ([0-9a-f]{32})(?: ([0-9a
 const CALL_ID = /^[A-Za-z0-9_-]{1,128}$/
 const KEY_MS = 5000
 const PASSES = new Set(['masked', 'checked'])
-// tool_use_ids of the calls this mod refused itself (tool.call), the oldest first
-const refusals = new Set()
+// tool_use_ids of the calls whose start this mod saw (tool.call), the oldest first
+const calls = new Set()
 
-function noteRefused(e) {
+function noteCalled(e) {
   const id = e?.tool_use_id
   if (typeof id !== 'string' || !id) return
-  refusals.delete(id)
-  refusals.add(id)
-  if (refusals.size > POSTS_MAX) refusals.delete(refusals.values().next().value)
+  calls.delete(id)
+  calls.add(id)
+  if (calls.size > POSTS_MAX) calls.delete(calls.values().next().value)
 }
 
-const refused = (b) => b.is_error === true && refusals.has(b.tool_use_id) && !posts.has(b.tool_use_id)
+const refused = (b) => b.is_error === true && calls.has(b.tool_use_id) && !posts.has(b.tool_use_id)
 // an error result (is_error): the call may never have run (a refusal), so its text says nothing of a run
 const WITHHELD_ERROR = '[maisecrets: the tool call ended with an error, but maisecrets could not check the error text, ' +
   'so it is withheld. /maisecrets status shows why.]'

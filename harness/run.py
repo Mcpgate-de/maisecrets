@@ -722,6 +722,54 @@ SCENARIOS = {
         # the model gets nothing, but no Python of maisecrets ran to scrub the tool's own record on disk
         "transcript_leak_is_a_known_gap": "the result hook and the mod's Python both failed",
     },
+    # A call that ran raises classic.PostToolUse or classic.PostToolUseFailure in the mod also when the maisecrets
+    # command hook of that event crashes, is not registered, or cannot start because the plugin folder moved during the
+    # call. The mod's second net passes an error unmasked only for a call that raised neither (a refusal): these four
+    # fail with LEAK if a failed command that ran were taken for one. The output of `false` is an error result
+    "failed_output_crash_mod_masks": {
+        "prompt": "print the env",
+        "plugin_copy": True, "crash_hook": "post-tool-failure",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env; false"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": [REF1],
+    },
+    "failed_output_hook_missing_mod_masks": {
+        "prompt": "print the env",
+        "plugin_copy": True, "drop_hook_event": "PostToolUseFailure",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env; false"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": [REF1],
+    },
+    # the folder moves while the command runs: PreToolUse ran, the result hook cannot start, and the mod's Python
+    # cannot start either, so the output is withheld with the text for an error (the command did run)
+    "failed_output_folder_moved_mid_call": {
+        "prompt": "print the env",
+        "plugin_copy": True,
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        # a script moves it (the client refuses a command that names the plugin folder as a sensitive file)
+        "files": {".env": f"TOKEN={MARK}\n", "move.sh": "mv ../plugin/maisecrets ../plugin/maisecrets.moved\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "bash move.sh; cat .env; false"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_in_requests": ["could not check the error text, so it is withheld"],
+        # the tool's own record on disk: no Python of maisecrets can run to scrub it
+        "transcript_leak_is_a_known_gap": "the plugin folder moved during the call",
+    },
+    # Code Mode: an inner call of the script fails and its result hook crashes; the script's output is checked
+    "code_mode_inner_failure_hook_crash": {
+        "prompt": "print the env",
+        "code_mode": True,
+        "plugin_copy": True, "crash_hook": "post-tool-failure",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "REPL", "input": {"code": "await $`cat .env; exit 3`.text(); 'unreachable'"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": ["\u27e6SECRET_c"],
+    },
     # the hooks watch of the mod: the prompt hook is not registered (a copy without it), so the prompt goes to the model
     # and leaves no row in hooks.log. The mod says it in one line. The Bash call keeps the session open past the watch
     "hooks_watch_prompt_hook_missing": {

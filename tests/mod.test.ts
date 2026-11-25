@@ -1850,47 +1850,45 @@ test('a timeout of the first Python withholds the result and starts no second on
   expect(asks(runs).length).toBe(1)
 })
 
-// tool.call gets { result, isError } for a refusal beneath it, as for a tool that ran and failed (the probe of
-// 2026-11-25): the mod cannot tell them apart there, so the second net checks the error text. Python leaves a text
-// without a value as it is, so the refusal reaches the model unchanged
-test('a call refused beneath the mod (a hook, a rule) goes to the second net, and its refusal text comes back',
-  async ($, on) => {
-    const runs: any[] = []
-    netWorld(on, 'net-10', ($, e) => {
-      runs.push(e)
-      return resultAnswer({ texts: JSON.parse(e.init.stdin).texts, changed: false })
-    })
-    on('tool.check', () => ({ decision: 'deny', reason: 'refused by a hook' }))
-    const r0 = await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-10', input: { command: 'cat .env' } } as any)
-    expect((r0 as any).isError).toBe(true)                        // no deny: an error result, as a failed run gives
-    const r = await $.session.append(resultRow('tu-net-10', 'PreToolUse:Bash hook error: refused', 'Bash', true))
-    expect(stored(r)).toBe('PreToolUse:Bash hook error: refused')
-    expect(asks(runs).length).toBe(1)
-  })
+// A call ran only if the mod saw classic.PostToolUse or classic.PostToolUseFailure for it: a refusal (a PreToolUse
+// hook, a rule, the person's no, the engine's onFailure block) raises neither, and its text must reach the model
+// also when no Python can run (harness: plugin_folder_moved, plugin_folder_moved_guarded, selftest_hooks_not_running).
+// tool.call alone cannot tell: a refusal beneath it returns { result, isError } as a failed run does (probe 2026-11-25)
+test('a call refused beneath the mod (a hook, a rule) goes on as it is, and Python is not asked', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-10', ($, e) => { runs.push(e); return { value: { exitCode: 1, stderr: '', stdout: '' } } })
+  on('tool.check', () => ({ decision: 'deny', reason: 'refused by a hook' }))
+  const r0 = await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-10', input: { command: 'cat .env' } } as any)
+  expect((r0 as any).isError).toBe(true)                        // no deny: an error result, as a failed run gives
+  const r = await $.session.append(resultRow('tu-net-10', 'PreToolUse:Bash hook error: refused', 'Bash', true))
+  expect(stored(r)).toBe('PreToolUse:Bash hook error: refused')  // also when Python cannot run (it answers nothing)
+  expect(asks(runs).length).toBe(0)
+})
 
-test('a call that ran and failed with no tool-result hook is masked: only a deny from beneath is a refusal',
+test('a call that ran and failed is masked: its PostToolUseFailure came, also when the hook beneath crashed',
   async ($, on) => {
     const runs: any[] = []
-    netWorld(on, 'net-20', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) })
-    // the tool ran and reported an error (core's { result, isError }), and no PostToolUse or PostToolUseFailure came
+    netWorld(on, 'net-20', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+      { failure: { block: 'hook error' } })
     let ran = 0
     on('tool.call', () => { ran += 1; return { result: RAW, text: RAW, isError: true } as any })
     const r = await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-20', input: { command: 'cat .env; false' } } as any)
     expect((r as any).result).toBe(RAW)                // the mod passes the result on as it is
     expect(ran).toBe(1)                                // and the tool runs once
+    await $.classic.PostToolUseFailure({ tool_name: 'Bash', tool_use_id: 'tu-net-20', tool_input: {}, error: RAW })
     expect(stored(await $.session.append(resultRow('tu-net-20', RAW, 'Bash', true)))).toContain(MASKED_TEXT)
     expect(asks(runs).length).toBe(1)
   })
 
-test("a deny of another hook beneath (it may have run the tool) is masked: only the mod's own refusal passes",
-  async ($, on) => {
-    const runs: any[] = []
-    netWorld(on, 'net-21', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) })
-    on('tool.call', () => ({ deny: 'ran, and a plugin withheld: ' + RAW }))
-    await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-21', input: { command: 'ls' } } as any).catch(() => {})
-    expect(stored(await $.session.append(resultRow('tu-net-21', RAW, 'Bash', true)))).toContain(MASKED_TEXT)
-    expect(asks(runs).length).toBe(1)
-  })
+test('an error whose call raised PostToolUse (no failure event) is masked too', async ($, on) => {
+  const runs: any[] = []
+  netWorld(on, 'net-21', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: { block: 'hook error' } })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-21', input: { command: 'ls' } } as any).catch(() => {})
+  await post($, 'tu-net-21')
+  expect(stored(await $.session.append(resultRow('tu-net-21', RAW, 'Bash', true)))).toContain(MASKED_TEXT)
+  expect(asks(runs).length).toBe(1)
+})
 
 test('a placeholder in the result stays: the texts go to Python and back in order, media blocks stay', async ($, on) => {
   const img = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }

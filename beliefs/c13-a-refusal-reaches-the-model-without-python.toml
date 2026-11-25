@@ -1,0 +1,11 @@
+# c13-a-refusal-reaches-the-model-without-python: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-a-refusal-reaches-the-model-without-python"
+control = "C13"
+serves = ["M5.2"]
+statement = "The error of a call that never ran (a PreToolUse refusal, the engine's onFailure block of a moved plugin folder, the guard's reason) passes the second net as it is, without Python, so the model reads why the call was refused also when no Python of maisecrets can run."
+runner = ["tests/mod.test.ts::a call refused beneath the mod (a hook, a rule) goes on as it is, and Python is not asked"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "const refused = (b) => b.is_error === true && calls.has(b.tool_use_id) && !posts.has(b.tool_use_id)\n"
+replace = "const refused = (b) => false && calls.has(b.tool_use_id) && !posts.has(b.tool_use_id)\n"

@@ -1,0 +1,13 @@
+# c2-a-refusal-passes-only-for-a-call-that-never-ran: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-a-refusal-passes-only-for-a-call-that-never-ran"
+control = "C2"
+serves = ["M1.2"]
+statement = "An error result passes the second net unmasked only when the mod saw the call start (tool.call) and saw neither classic.PostToolUse nor classic.PostToolUseFailure for it, so the call never ran; an error of a call that ran (also with its result hook crashed, missing or unable to start) and an error with no state are masked."
+runner = ["tests/mod.test.ts::an error with no state at all (a mod reload, a hook of its own that threw) is masked, not taken for a refusal",
+          "tests/mod.test.ts::a call that ran and failed is masked: its PostToolUseFailure came, also when the hook beneath crashed",
+          "tests/mod.test.ts::an error whose call raised PostToolUse (no failure event) is masked too"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "const refused = (b) => b.is_error === true && calls.has(b.tool_use_id) && !posts.has(b.tool_use_id)\n"
+replace = "const refused = (b) => b.is_error === true && calls.has(b.tool_use_id)\n"

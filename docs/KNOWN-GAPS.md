@@ -75,11 +75,10 @@ a to-do.
   does not keep a value in a test file as a fixture, as the hook does. Each
   result that the hook did not check costs one Python start (about 0.05 to
   0.1 s, measured on one Mac). In Code Mode the mod does not see the answer
-  of the REPL's own result hook, so each REPL result costs that start. A
-  call that a hook, a rule or you refused costs that start too: the mod
-  cannot tell it from a tool that ran and failed. While a result hook runs,
-  a command that another tool call starts at the same time inherits the
-  variable `MAISECRETS_MOD_NET=on`; it is a flag, the proof is a keyed
+  of the REPL's own result hook, so each REPL result costs that start. An
+  error that another mod answers itself, without the tool, passes as a
+  refusal. While a result hook runs, a command that another tool call
+  starts at the same time inherits the variable `MAISECRETS_MOD_NET=on`; it is a flag, the proof is a keyed
   hash, and its key stays in the maisecrets home. maisecrets refuses the
   commands that name the key and masks it in tool output, and the mod
   makes it new at each session start. An agent that hides the name of
