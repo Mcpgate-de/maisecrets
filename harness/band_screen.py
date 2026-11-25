@@ -51,7 +51,7 @@ def run() -> list[str]:
         d.mkdir()
     (cwd / "rows.log").write_text("".join(f"row {i:03d} of the log, nothing personal in it\n" for i in range(70)))
     (cwd / "short.txt").write_text("a short file\n")
-    ner = FakeNer(stall_on="row 069")
+    ner = FakeNer(stall_on="row 069", stall_s=12.0)
     (home / "config.json").write_text(json.dumps({
         "backend": "jsonfile", "allow_plaintext_store": True,
         "remote_detector": {"url": ner.url, "format": "hf", "max_chars": 1000, "timeout_ms": 1000,
