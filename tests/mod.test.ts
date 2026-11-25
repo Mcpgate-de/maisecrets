@@ -109,6 +109,49 @@ test('a prompt that is not a person\'s goes on unchanged and the launcher does n
   expect(runs).toBe(0)
 })
 
+// #107: the result of an MCP task, sent by the client as a notification: Python masks it when it proves itself
+const MCP_TASK = '<task-notification>\n<task-id>kbzci8ntb</task-id>\n<status>completed</status>\n' +
+  '<summary>MCP task kbzci8ntb (slow/lookup) completed.</summary>\n<result>\ntoken TOKENWORD\n</result>\n' +
+  '</task-notification>'
+const MCP_MASKED = MCP_TASK.replace('TOKENWORD', '⟦SECRET_' + 'c1⟧')
+
+test('an MCP task\'s result from the client goes to Python, and its answer replaces it', async ($, on) => {
+  let seen
+  common(on, ($, e) => {
+    seen = e
+    return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt',
+      text: MCP_MASKED, count: 1 }) } }
+  })
+  const r = await $.prompt.submit({ text: MCP_TASK, wait: false, origin: { kind: 'task-notification' } })
+  expect(r.text).toBe(MCP_MASKED)
+  expect(JSON.parse(seen.init.stdin)).toEqual({ prompt: MCP_TASK, session_id: 'sess-1', cwd: '/work',
+                                                 origin: 'task-notification' })
+})
+
+test('an MCP task\'s result that Python does not rewrite goes on unchanged to the settings hook', async ($, on) => {
+  const answers = [{ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt' }) } },
+    { value: { exitCode: 1, stderr: 'boom', stdout: '' } }, { deny: 'cannot start' }]
+  let i = 0
+  common(on, () => answers[Math.min(i, answers.length - 1)])
+  for (; i < answers.length; i += 1) {
+    const r = await $.prompt.submit({ text: MCP_TASK, wait: false, origin: { kind: 'task-notification' } })
+    expect(r.text).toBe(MCP_TASK)
+  }
+})
+
+test('the same text from another origin than the client\'s notification does not take the MCP task path',
+  async ($, on) => {
+    let runs = 0
+    common(on, () => {
+      runs += 1
+      return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: 'x' }) } }
+    })
+    for (const kind of ['channel', 'peer', 'scheduled-trigger', 'unclassified']) {
+      expect((await $.prompt.submit({ text: MCP_TASK, wait: false, origin: { kind } })).text).toBe(MCP_TASK)
+    }
+    expect(runs).toBe(0)
+  })
+
 const CHECKS = ['ms:(TOKENWORD)', '  Ms:(TOKENWORD', 'MS:(a)b)', '\nms:(x', 'ms: (TOKENWORD)', 'ms：（TOKENWORD）']
 
 function checkSetup(on, run) {
