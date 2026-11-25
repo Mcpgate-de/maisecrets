@@ -7,5 +7,5 @@ runner = ["tests/test_mcp_task_results.py::ModTests::test_a_person_s_prompt_of_t
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "payload.get(\"origin\") != \"task-notification\""
-replace = "False"
+find = "if payload.get(\"origin\") == \"task-notification\" else {}"
+replace = "if True else {}"

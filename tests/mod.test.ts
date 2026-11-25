@@ -152,6 +152,21 @@ test('the same text from another origin than the client\'s notification does not
     expect(runs).toBe(0)
   })
 
+test('a subagent\'s report from the client (no MCP task summary) goes on unchanged, and Python is not asked',
+  async ($, on) => {
+    let runs = 0
+    common(on, () => {
+      runs += 1
+      return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: 'x' }) } }
+    })
+    const report = '<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n' +
+      '<status>completed</status>\n<summary>Agent "read the fixture" completed</summary>\n' +
+      '<result>token TOKENWORD</result>\n</task-notification>'
+    const r = await $.prompt.submit({ text: report, wait: false, origin: { kind: 'task-notification' } })
+    expect(r.text).toBe(report)
+    expect(runs).toBe(0)
+  })
+
 const CHECKS = ['ms:(TOKENWORD)', '  Ms:(TOKENWORD', 'MS:(a)b)', '\nms:(x', 'ms: (TOKENWORD)', 'ms：（TOKENWORD）']
 
 function checkSetup(on, run) {

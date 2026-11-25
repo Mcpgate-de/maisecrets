@@ -800,11 +800,10 @@ def rewrite_prompt(payload: dict) -> dict:
     dm = demo.mod_answer(payload, cfg)          # demo.py: a demo prompt enters masked, or goes to the hook
     if dm is not None:
         return dm
-    # a subagent's report is the hook's to judge (C19); a model wrote it, so nothing is stored. An MCP task's result of
-    # this session, sent by the client, is tool output: masked as in PostToolUse (#107)
-    if "<task-notification>" in prompt and (payload.get("origin") != "task-notification"
-                                            or not mcp_tasks(prompt, demo._find_transcript(session) or "")):
-        return {}
+    # a report is the hook's to judge (C19); an MCP task's result is tool output, post_tool masks it (#107)
+    if "<task-notification>" in prompt:
+        from . import mcp_task_results as mt
+        return mt.rewrite(payload, session) if payload.get("origin") == "task-notification" else {}
     # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
     if term_files.parse_command(prompt) or value_files.parse_removal(prompt) or not_a_secret.parse(prompt):
         return {}
@@ -1075,13 +1074,13 @@ def user_prompt(payload: dict) -> dict:
 
     # 2. references the human typed or pasted: this session may resolve them from now on. A message of another session
     # or a subagent's prompt admits none: a session another one controls could name a reference it never saw and let
-    # this session resolve it (C4; codex Gate A, 2026-10-22)
+    # this session resolve it (C4; codex Gate A, 2026-10-22), and so does a notification: a server writes it (#107)
     typed = find_refs(prompt)
     matches = _prompt_hits(prompt)
     vault = None
     if typed or matches or _has_live(cfg):
         vault = Vault(cfg)
-        if settings_mod.peer_sender(prompt) is None and not payload.get("agent_id"):
+        if settings_mod.peer_sender(prompt) is None and not payload.get("agent_id") and "<task-not" not in prompt:
             for key, _s, _e in typed:
                 vault.admit(key, session)
     rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)

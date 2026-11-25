@@ -48,7 +48,10 @@ def take(session: str | None) -> str | None:
         return None
     if not isinstance(tasks, list) or not tasks:
         return None
-    named = ", ".join(f"task {t} ({n})" for t, n in tasks[:4] if isinstance(t, str) and isinstance(n, str))
+    try:
+        named = ", ".join(f"task {t} ({n})" for t, n in tasks[:4] if isinstance(t, str) and isinstance(n, str))
+    except (TypeError, ValueError):
+        return None                        # a damaged file
     return (f"maisecrets: the result of the MCP call that went to the background ({named}) held a value (a secret "
             "or personal data), so maisecrets blocked it and it did not reach you. Do not wait for it. The user can "
             "send it with placeholders: /maisecrets send. Or make the call again from a subagent (the Agent tool), "
@@ -61,6 +64,8 @@ def with_note(event: str, payload: dict, obj: dict) -> dict:
     a prompt that passes, or a tool result. Claude Code only."""
     if event not in ("user-prompt", "post-tool") or client_of(payload) != "claude" or obj.get("decision") == "block":
         return obj
+    if payload.get("agent_id"):
+        return obj          # a subagent's call: its answer reaches the subagent, not the model that waits
     name = "UserPromptSubmit" if event == "user-prompt" else "PostToolUse"
     hso = obj.get("hookSpecificOutput")
     if hso is not None and (not isinstance(hso, dict) or hso.get("hookEventName") != name):

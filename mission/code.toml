@@ -39,6 +39,7 @@
 "maisecrets/__init__.py" = { none = "the package's version, read from the plugin manifest" }
 "maisecrets/agent_reports.py" = { controls = ["C19"] }
 "maisecrets/withheld_results.py" = { controls = ["C19"] }
+"maisecrets/mcp_task_results.py" = { controls = ["C19"] }
 "maisecrets/check_value.py" = { controls = ["C29"] }
 "maisecrets/checksums.py" = { none = "an old module name: the same module object as maisecrets/detection/checksums.py, whose entry declares its controls" }
 "maisecrets/cli.py" = { controls = ["C13", "C22", "C24", "C31"] }
