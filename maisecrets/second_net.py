@@ -188,6 +188,14 @@ def hide_key(text: str, forms: list[str]) -> tuple[str, list[str]]:
     return text, found
 
 
+def hide_counted(text: str, forms: list[str], hit: dict, values: list) -> str:
+    """hide_key for hooks.post_tool: each spelling found counts as a hit and goes to the transcript scrub."""
+    text, found = hide_key(text, forms)
+    hit["n"] += len(found)
+    values.extend(found)
+    return text
+
+
 def mac(key: bytes, kind: str, call_id: str, digest: str, rest: str) -> str:
     """The proof of a marker: the first 32 hex digits of HMAC-SHA256(key, kind, tool_use_id, output hash, rest), one
     line each. The mod computes the same (claude-mod/maisecrets-mod.mjs, markMac)."""

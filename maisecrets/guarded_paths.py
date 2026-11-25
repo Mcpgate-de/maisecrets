@@ -169,3 +169,19 @@ def _in_the_home(path: str, cwd: str) -> bool:
     except (OSError, ValueError):
         inside = False
     return inside or ".maisecrets" in path.lower() or "maisecrets-guard.py" in path.lower()
+
+
+def _uri_path(v: str) -> str:
+    """The local path of a `file:` URI (`file:///p`, `file://localhost/p`, percent-encoded), else the string.
+    An MCP file server takes a URI where a path is expected; `file:///…/vault.json` passed the path check
+    (invariant I3, 2026-09-28)."""
+    if v[:5].lower() != "file:":
+        return v
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+    u = urlparse(v)
+    if u.netloc not in ("", "localhost"):
+        return v
+    # url2pathname decodes and, on Windows, turns `/C:/Users/…` into `C:\\Users\\…`: an unquoted
+    # `/C:/…` named no store on the Windows runner (2026-09-28)
+    return url2pathname(u.path)

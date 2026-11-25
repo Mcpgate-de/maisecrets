@@ -7,5 +7,5 @@ runner = ["tests/test_second_net.py::KeyTests::test_post_tool_masks_the_key_of_t
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "        if net_forms:\n"
+find = "        if net:\n"
 replace = "        if False:\n"
