@@ -13,11 +13,12 @@ import time
 import urllib.parse
 from pathlib import Path
 
+from . import links
 from .home import HOME
 
 EVENTS = HOME / "events.log"
 KEEP = 200
-ISSUES_URL = "https://github.com/Mcpgate-de/maisecrets/issues/new"
+ISSUES_URL = links.NEW_ISSUE_URL
 
 
 def plugin_version() -> str:
