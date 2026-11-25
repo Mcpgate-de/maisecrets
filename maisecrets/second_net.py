@@ -34,7 +34,7 @@ _EVENTS = {"post-tool": "PostToolUse", "post-tool-failure": "PostToolUseFailure"
 _KEY = re.compile("\u27e6(" + KEY_RE + ")(?::[^\u27e7\n]{0,80})?\u27e7")
 _AGENT = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # The mod waits RESULT_MS (20 s) for mask_result (claude-mod/maisecrets-mod.mjs). Inside it the name check of a tool
-# result gets the window of a hook (remote_layer.tool_deadline: min(8 s, half the window), #105): without one, all
+# result gets the window of a hook (remote_layer.tool_deadline: 10 s of the 16 s window, #105): without one, all
 # pieces of a long text shared the wait of one piece and the text ended `partial` after the first. 16 s leaves 4 s for
 # the Python start, the masking and the answer; the store calls end a second before the window (vault.hook_deadline)
 WINDOW_S = 16.0
