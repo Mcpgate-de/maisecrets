@@ -1,0 +1,11 @@
+# c30-a-spent-quota-keeps-a-long-result-with-the-rules: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30-a-spent-quota-keeps-a-long-result-with-the-rules"
+control = "C30"
+serves = ["M1.2"]
+statement = "A long tool result whose pieces stopped at rate_limited (the person's quota of the minute is spent) gets no further piece, keeps the rules for its rest and is named under the result and in the band, and is not withheld under unavailable: withhold, as a too_long text before pieces (#105 review)."
+runner = ["tests/test_ner_gateway.py::GatewaySourceTests::test_a_spent_quota_keeps_a_long_gateway_result_with_the_rules_under_withhold"]
+
+[proof]
+file = "maisecrets/remote_layer.py"
+find = "    quota = kind == \"tool\" and long and status.reason == \"rate_limited\"\n"
+replace = "    quota = False\n"

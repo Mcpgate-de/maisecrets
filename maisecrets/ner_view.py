@@ -139,6 +139,16 @@ def _gateway_checks(f: dict, client) -> list:
     if login != "ok":
         return [Check("FAIL", "gateway", str(f.get("why") or "not asked")[:FACT_MAX], "/maisecrets ner all", None)]
     checks = [Check("ok", "login", "has the name scope", None, None)]
+    if f.get("pieces") is True:
+        checks.append(Check("ok", "long texts", "checked in pieces", None, None))
+    elif f.get("pieces") is False:
+        checks.append(Check("n/a", "long texts", f"over {f.get('max_chars') or 0:,} chars: rules alone", None, None))
+    if f.get("own_wait"):
+        own, gw = f["own_wait"]
+        # a wait shorter than the gateway's deadline closes the connection before its answer or its 504
+        short = own < gw
+        checks.append(Check("warn" if short else "ok", "wait", f"timeout_ms {own:,.0f} ms, gateway {gw:,}",
+                            "remove timeout_ms" if short else None, None))
     doc = f.get("status") if isinstance(f.get("status"), dict) else {}
     q = doc.get("quota") if isinstance(doc.get("quota"), dict) else {}
     from .ner_gateway import _int

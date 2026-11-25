@@ -103,6 +103,33 @@ class ViewTests(unittest.TestCase):
             "all details: /maisecrets ner all"])
         self.assertTrue(all(len(x) <= 80 for x in lines))
 
+    def test_the_gateway_row_says_whether_long_texts_go_in_pieces(self):
+        # #105: the gateway announces `ner_pieces`; an older gateway keeps the rules alone above max_chars
+        conf = ner_setup.updated({}, "gateway:" + GW + "/mcp")
+        for pieces, row in ((True, " \u2713 long texts  checked in pieces"),
+                            (False, " \u2013 long texts  over 20,000 chars: rules alone")):
+            with self.subTest(pieces=pieces):
+                a, b, c = _gateway()
+                det = a.kwargs["return_value"][0]
+                det.pieces, det.max_chars, det.timeout = pieces, 20000, 3.0
+                with a, b, c:
+                    _code, lines = self.render(conf)
+                self.assertEqual(lines[4], row, lines)
+                self.assertTrue(all(len(x) <= 80 for x in lines))
+
+    def test_the_view_says_when_the_persons_timeout_replaces_the_gateways_deadline(self):
+        conf = {**ner_setup.updated({}, "gateway:" + GW + "/mcp"), "timeout_ms": 900}
+        for announced, row in ((5400, " ! wait        timeout_ms 900 ms, gateway 5,400  \u2192  remove timeout_ms"),
+                               (600, " \u2713 wait        timeout_ms 900 ms, gateway 600"), (None, None)):
+            with self.subTest(announced=announced):
+                a, b, c = _gateway()
+                det = a.kwargs["return_value"][0]
+                det.pieces, det.max_chars, det.timeout, det.gateway_deadline_ms = True, 20000, 0.9, announced
+                with a, b, c:
+                    _code, lines = self.render(conf)
+                waits = [x for x in lines if "wait " in x]
+                self.assertEqual(waits, [row] if row else [], lines)
+
     def test_a_gateway_without_the_name_scope_exits_4_and_names_the_login(self):
         conf = ner_setup.updated({}, "gateway:" + GW)
         a, b, c = _gateway(why="the login lacks the name scope; the person runs /maisecrets:sref login once more")

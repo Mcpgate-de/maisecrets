@@ -173,6 +173,10 @@ def discover(cfg: dict, mcp_url: str, deadline: float | None = None, patient: bo
         # its load and the person's quota, read with the same token (counts no quota)
         if origin_of(block.get("ner_status_endpoint")) == origin:
             ner["status"] = block["ner_status_endpoint"]
+        # #105, ai-gateway #2141: the gateway admits a long text in pieces, and its own wait per request
+        from .ner_gateway import deadline_ms_of, takes_pieces
+        ner["pieces"] = takes_pieces(block.get("ner_pieces"))
+        ner["deadline_ms"] = deadline_ms_of(block.get("ner_deadline_ms"))
     scope = login_scope(resolve_scope, process_scope, display_scope=display_scope)
     if ner and ner["scope"] not in scope.split():
         scope += " " + ner["scope"]
