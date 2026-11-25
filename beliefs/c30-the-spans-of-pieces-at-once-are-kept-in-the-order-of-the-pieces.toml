@@ -1,0 +1,37 @@
+# c30-the-spans-of-pieces-at-once-are-kept-in-the-order-of-the-pieces: an invariant belief. One goal, several paths; each mutation removes one and must turn at least one owning test red, and each owning test must be red under at least one mutation.
+belief = "c30-the-spans-of-pieces-at-once-are-kept-in-the-order-of-the-pieces"
+kind = "invariant"
+control = "C30"
+serves = ["M1.3"]
+statement = "When pieces of one text are in flight at once, their spans are kept in the order of the pieces and checked_to is the end of the pieces checked without a gap: a piece that ends early neither wins a name on a cut nor moves checked_to, no piece starts after rate_limited or after the deadline, and a piece behind a failed one sends no further request (#105)."
+runner = [
+  "tests/test_remote_detector.py::ParallelPiecesTests::test_spans_are_kept_in_the_order_of_the_pieces_when_they_end_out_of_order",
+  "tests/test_remote_detector.py::ParallelPiecesTests::test_a_later_piece_that_ends_first_does_not_move_checked_to",
+  "tests/test_remote_detector.py::ParallelPiecesTests::test_rate_limited_starts_no_further_piece",
+  "tests/test_remote_detector.py::ParallelPiecesTests::test_the_deadline_stops_the_pieces_in_flight_and_in_the_queue",
+  "tests/test_remote_detector.py::ParallelPiecesTests::test_a_piece_behind_a_failed_one_sends_no_further_request",
+]
+
+[[proof]]
+path = "the spans are kept in the order the pieces end"
+file = "maisecrets/detection/remote.py"
+find = "                    while kept_to in done:\n                        found, piece_cap = done.pop(kept_to)\n                        p, c0, c1, _e = plan[kept_to]\n"
+replace = "                    for k in list(done):\n                        found, piece_cap = done.pop(k)\n                        p, c0, c1, _e = plan[k]\n"
+
+[[proof]]
+path = "a piece starts after rate_limited"
+file = "maisecrets/detection/remote.py"
+find = "started < len(plan) and not failed and"
+replace = "started < len(plan) and True and"
+
+[[proof]]
+path = "a piece of the queue starts after the deadline"
+file = "maisecrets/detection/remote.py"
+find = "                            not gate[\"cancelled\"]:\n"
+replace = "                            True:\n"
+
+[[proof]]
+path = "a piece behind a failed one sends again after its Retry-After"
+file = "maisecrets/detection/remote.py"
+find = "                        if first is not None and first < n:\n                            raise _Skipped\n"
+replace = "                        if False:\n                            raise _Skipped\n"

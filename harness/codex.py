@@ -121,7 +121,7 @@ SCENARIOS = {
     # share the AI reads; tests/test_remote_layer.py holds the line of the Codex answer
     "ner_rest_line": {
         "prompt": "Run the shell command `cat rows.log` and say how many rows it has.",
-        "fake_ner": {"stall_on": "row 069"},
+        "fake_ner": {"stall_on": "row 069", "stall_s": 12.0},
         "config": {"remote_detector": {"url": "{ner}", "format": "hf", "max_chars": 1000, "timeout_ms": 1000,
                                        "timeout_scales": False}},
         "files": {"rows.log": "".join(f"row {i:03d} of the log, nothing personal in it\n" for i in range(70))},

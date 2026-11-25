@@ -116,6 +116,11 @@ class ViewTests(unittest.TestCase):
                     _code, lines = self.render(conf)
                 self.assertEqual(lines[4], row, lines)
                 self.assertTrue(all(len(x) <= 80 for x in lines))
+        # #105: more than one piece at once is named; one is the row of before
+        self.assertEqual(ner_view._gateway_checks({"login": "ok", "pieces": True, "parallel": 2}, "claude")[1].fact,
+                         "checked in pieces, 2 at once")
+        self.assertEqual(ner_view._gateway_checks({"login": "ok", "pieces": True, "parallel": 1}, "claude")[1].fact,
+                         "checked in pieces")
 
     def test_the_view_says_when_the_persons_timeout_replaces_the_gateways_deadline(self):
         conf = {**ner_setup.updated({}, "gateway:" + GW + "/mcp"), "timeout_ms": 900}

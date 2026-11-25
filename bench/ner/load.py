@@ -106,12 +106,16 @@ def worker(args) -> int:
     plan = {"pieces": 1}
     real_request, real_ask = remote.RemoteDetector._request, remote.RemoteDetector.ask
 
+    lock = threading.Lock()              # the pieces of one text go in threads of their own (#105)
+
     def request(self, body, deadline, gate=None):
-        count["requests"] += 1
+        with lock:
+            count["requests"] += 1
         try:
             return real_request(self, body, deadline, gate)
         except remote._HttpStatus as exc:
-            count["refused"][remote._why(exc)] += 1
+            with lock:
+                count["refused"][remote._why(exc)] += 1
             raise
 
     def ask(self, text, occupied, deadline=None, kind=None):
@@ -119,6 +123,7 @@ def worker(args) -> int:
         plan["pieces"] = len(remote.plan_pieces(plain, self.max_chars)) if self.pieces else 1
         plan["max_chars"], plan["takes_pieces"] = self.max_chars, bool(self.pieces)
         plan["deadline_ms"] = getattr(self, "gateway_deadline_ms", None)
+        plan["parallel"] = getattr(self, "parallel", 1)
         return real_ask(self, text, occupied, deadline, kind)
 
     remote.RemoteDetector._request, remote.RemoteDetector.ask = request, ask
@@ -152,7 +157,7 @@ def worker(args) -> int:
             "state": st.state, "reason": st.reason, "rest": st.state != "ok",
             "refused": dict(count["refused"] - refused_before), "ner_ms": round(st.ms, 1), "wall_ms": round(wall, 1),
             "max_chars": plan.get("max_chars"), "takes_pieces": plan.get("takes_pieces"),
-            "deadline_ms": plan.get("deadline_ms")}), flush=True)
+            "deadline_ms": plan.get("deadline_ms"), "parallel": plan.get("parallel")}), flush=True)
         done += 1
         if args.pause > 0:
             time.sleep(args.pause)
@@ -190,9 +195,9 @@ def markdown(meta: dict, s: dict) -> str:
         + f", a pause of {meta['pause_s']} s after each result, seed {meta['seed']}.",
         f"- Results of {MIN_CHARS:,} to {MAX_CHARS:,} characters (synthetic, bench/gatewaygen.py), Bash and MCP in "
         f"turn, through remote_layer.for_tool_result in the window of a PostToolUse hook.",
-        f"- The source: max_chars {meta.get('max_chars')}, pieces {meta.get('takes_pieces')}, the gateway's "
-        f"deadline {meta.get('deadline_ms')} ms. Load average before {meta['load_before']}, at most "
-        f"{meta['load_max']} during the run.",
+        f"- The source: max_chars {meta.get('max_chars')}, pieces {meta.get('takes_pieces')}, "
+        f"{meta.get('parallel')} at once, the gateway's deadline {meta.get('deadline_ms')} ms. Load average before "
+        f"{meta['load_before']}, at most {meta['load_max']} during the run.",
         "",
         "| Results | With a rest | Share | Limit | Verdict | Wall p50 | Wall p95 | Wall max |",
         "|---:|---:|---:|---:|---|---:|---:|---:|",
@@ -309,7 +314,8 @@ def driver(args) -> int:
     first = rows[0] if rows else {}
     loads = [x for x in seen + [meta["load_before"]] if x is not None]
     meta.update(load_max=round(max(loads), 2) if loads else None, max_chars=first.get("max_chars"),
-                takes_pieces=first.get("takes_pieces"), deadline_ms=first.get("deadline_ms"))
+                takes_pieces=first.get("takes_pieces"), deadline_ms=first.get("deadline_ms"),
+                parallel=first.get("parallel"))
     summary = summarize(rows, meta)
     (out / "load.json").write_text(json.dumps({"meta": meta, "summary": summary, "rows": rows}, indent=1) + "\n",
                                    encoding="utf-8")

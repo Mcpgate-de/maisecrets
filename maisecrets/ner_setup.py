@@ -928,6 +928,12 @@ def _gateway_report(conf: dict, lines: list, facts: dict) -> tuple[int, list]:
                      f"request waits up to {det.timeout * 1000:,.0f} ms" if pieces else
                      f"long texts: over {det.max_chars:,} characters the rules alone (this gateway takes no pieces); "
                      f"each request waits up to {det.timeout * 1000:,.0f} ms")
+        at_once = getattr(det, "parallel", None)
+        if pieces and isinstance(at_once, int) and not isinstance(at_once, bool):
+            # #105: the pieces of one text in flight at once (`ner_parallel` of the gateway, 1 without it)
+            facts["parallel"] = at_once
+            lines.append(f"at once: {at_once} piece{'s' if at_once != 1 else ''} of one text (the gateway's "
+                         f"ner_parallel{'' if at_once != 1 else ', or none announced'})")
         announced = getattr(det, "gateway_deadline_ms", None)
         if isinstance(announced, int) and "timeout_ms" in conf:
             # the person's timeout_ms wins over the gateway's deadline (remote_layer.from_config): say so

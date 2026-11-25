@@ -571,7 +571,7 @@ SCENARIOS = {
     # where the client redacts the word after "maisecrets:", and harness/screen.py shows the band in a terminal)
     "ner_rest_band": {
         "prompt": "print the log",
-        "fake_ner": {"stall_on": "row 069"},
+        "fake_ner": {"stall_on": "row 069", "stall_s": 12.0},
         "config": {"remote_detector": {"url": "{ner}", "format": "hf", "max_chars": 1000, "timeout_ms": 1000,
                                        "timeout_scales": False}},
         "files": {"rows.log": "".join(f"row {i:03d} of the log, nothing personal in it\n" for i in range(70))},
@@ -588,7 +588,7 @@ SCENARIOS = {
     # the same with `unavailable: withhold`: the rest of the output never reaches the AI, and the band says so
     "ner_rest_band_withhold": {
         "prompt": "print the log",
-        "fake_ner": {"stall_on": "row 069"},
+        "fake_ner": {"stall_on": "row 069", "stall_s": 12.0},
         "config": {"remote_detector": {"url": "{ner}", "format": "hf", "max_chars": 1000, "timeout_ms": 1000,
                                        "timeout_scales": False, "unavailable": "withhold"}},
         "files": {"rows.log": "".join(f"row {i:03d} of the log, nothing personal in it\n" for i in range(70))},
