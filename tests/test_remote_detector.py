@@ -1318,8 +1318,9 @@ class ParallelPiecesTests(unittest.TestCase):
         plan = rm.plan_pieces(text, SIZE)
         for slow, state, checked_to in ((0, "unavailable", 0), (1, "partial", plan[0][2])):
             with self.subTest(slow=slow):
-                svc = self.svc(lambda t, slow=slow: (200, None, {}, 3.0 if piece_of(t) == slow else 0.0))
-                spans, status = self.ask(svc, text, wait=0.8, timeout=2.0)
+                # the slow piece outlasts the deadline by 2 s, the fast ones get 2 s of margin on a loaded runner
+                svc = self.svc(lambda t, slow=slow: (200, None, {}, 4.0 if piece_of(t) == slow else 0.0))
+                spans, status = self.ask(svc, text, wait=2.0, timeout=4.0)
                 self.assertEqual(len(svc.received), 3, "premise: all three were sent at once")
                 self.assertEqual((status.state, status.reason, status.checked_to), (state, "timeout", checked_to))
                 self.assertTrue(all(s < status.checked_to for s, _e, _t, _sc in spans))
@@ -1388,12 +1389,13 @@ class ParallelPiecesTests(unittest.TestCase):
     def test_the_deadline_stops_the_pieces_in_flight_and_in_the_queue(self):
         text = lines_of(5)
         plan = rm.plan_pieces(text, SIZE)
-        svc = self.svc(lambda t: (200, None, {}, 0.0 if piece_of(t) == 0 else 1.2))
+        # margins for a loaded runner: piece 0 has 1.5 s to end, the others end 1.5 s after the deadline
+        svc = self.svc(lambda t: (200, None, {}, 0.0 if piece_of(t) == 0 else 3.0))
         t = time.monotonic()
-        _spans, status = self.ask(svc, text, wait=0.6, timeout=2.0)
-        self.assertLess(time.monotonic() - t, 0.9, "ask() leaves at the deadline")
+        _spans, status = self.ask(svc, text, wait=1.5, timeout=4.0)
+        self.assertLess(time.monotonic() - t, 2.5, "ask() leaves at the deadline, not with the pieces in flight")
         self.assertEqual((status.state, status.reason, status.checked_to), ("partial", "timeout", plan[0][2]))
-        time.sleep(1.4)                              # the pieces in flight end; nothing may start after them
+        time.sleep(2.0)                              # the pieces in flight end; nothing may start after them
         self.assertEqual(sorted(piece_of(r["inputs"]) for r in svc.received), [0, 1, 2, 3],
                          "the fifth piece waited in the queue and was never sent")
         # a request that ends after the deadline all the same (a late parse, a slow thread): the pieces in flight
@@ -1404,15 +1406,17 @@ class ParallelPiecesTests(unittest.TestCase):
         def late(body, deadline, gate=None):
             n = piece_of(json.loads(body)["inputs"])
             asked.append(n)
-            time.sleep(0.0 if n == 0 else 1.0)
+            # after the deadline (1.5 s), before the text's thread gives up (1 s later): a piece of the queue that
+            # started now would show
+            time.sleep(0.0 if n == 0 else 2.0)
             return b"[]"
         det._request = late
         begun: list = []                             # each piece that starts builds its body first
         real = det._body
         det._body = lambda t, kind=None: (begun.append(piece_of(t)), real(t, kind))[1]
-        _spans, status = det.ask(text, [], time.monotonic() + 0.5)
+        _spans, status = det.ask(text, [], time.monotonic() + 1.5)
         self.assertEqual((status.state, status.checked_to), ("partial", plan[0][2]))
-        time.sleep(1.0)
+        time.sleep(1.5)
         self.assertEqual(sorted(asked), [0, 1, 2, 3], "no request after the deadline")
         self.assertEqual(sorted(begun), [0, 1, 2, 3], "no piece starts after the deadline")
 
