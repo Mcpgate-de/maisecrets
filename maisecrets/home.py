@@ -53,7 +53,6 @@ def _check_home() -> None:
 
 DEFAULT_CONFIG = {
     "backend": "keychain",          # keychain (macOS) | windows-vault | encrypted-file (Linux) | jsonfile (test)
-    "report_url": "https://github.com/Mcpgate-de/maisecrets/issues",   # shown in the block notice
     "ttl_seconds": {"default": 86400, "CARD": 3600},
     "max_ttl_seconds": 30 * 86400,
     "renew_on_use": True,

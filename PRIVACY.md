@@ -139,4 +139,4 @@ only the gateway's own scrubber protects it; a stored value never goes into a co
 ## Who processes what
 
 The plugin has no server and no telemetry. mcpgate (the publisher) receives no data from
-it. The source is public at https://github.com/Mcpgate-de/maisecrets under Apache-2.0.
+it. The source is public on GitHub, in the repository `Mcpgate-de/maisecrets`, under Apache-2.0.

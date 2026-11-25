@@ -101,6 +101,7 @@
 "maisecrets/incidents.py" = { controls = ["C24"] }
 "maisecrets/json_lines.py" = { controls = ["C3"] }
 "maisecrets/lazy_regex.py" = { none = "an old module name: the same module object as maisecrets/detection/lazy_regex.py" }
+"maisecrets/links.py" = { none = "the web addresses that maisecrets shows to a person, as text; it reads nothing and connects nowhere" }
 "maisecrets/ner_gateway.py" = { controls = ["C30a"] }
 "maisecrets/ner_health.py" = { controls = ["C30a"] }
 "maisecrets/ner_metrics.py" = { controls = ["C30"] }
@@ -151,6 +152,7 @@
 "maisecrets/verdict.py" = { controls = ["C29"] }
 "skills/secret-hygiene/scripts/_detector.py" = { none = "finds the detector for the skill scripts and runs it; what each script prints is the script's own rule (C17)" }
 "skills/secret-hygiene/scripts/_fast.py" = { none = "the fast tier of the session audit: it picks the lines the detector reads and prints nothing; what it can miss is named in its docstring, and --full reads every line" }
+"skills/secret-hygiene/scripts/_links.py" = { none = "the repository addresses that protection_status.py prints, as text; it reads nothing and connects nowhere" }
 "skills/secret-hygiene/scripts/audit_approvals.py" = { controls = ["C17"] }
 "skills/secret-hygiene/scripts/audit_transcripts.py" = { controls = ["C17"] }
 "skills/secret-hygiene/scripts/protection_status.py" = { controls = ["C17"] }
