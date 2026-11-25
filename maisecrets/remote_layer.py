@@ -299,9 +299,11 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
                             kind_for(cfg, ner, asks))
     if scaled:
         # a sample says how fast the service is: an answer of the whole text, or a timeout of a one-piece text that
-        # its own wait ended. A timeout of the hook's budget or of a later piece says nothing of the rate
+        # its own wait ended. A timeout of the hook's budget or of a later piece says nothing of the rate, and nor
+        # does a long text whose pieces went at once: its time is not the sum of its pieces (#105)
         budget = deadline is not None and deadline - asked_at < ner.timeout
-        if status.available or (not long and not budget and status.state == "unavailable"):
+        at_once = long and getattr(ner, "parallel", 1) > 1
+        if (status.available and not at_once) or (not long and not budget and status.state == "unavailable"):
             note_rate(len(joined), status)
     source = "gateway" if conf_of(cfg).get("gateway") else ("local" if remote.is_local(ner.url) else "url")
     asked = ner

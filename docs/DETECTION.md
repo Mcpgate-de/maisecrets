@@ -495,7 +495,10 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
   from its start (the first one from the start of `ask`, the proof of the secret included), so a one-piece text
   waits as before 0.9.29 and a service that hangs holds a short text no longer. A `deadline` that the caller gives
   can only shorten this: it is the one end of all pieces and retries of the text. Without a deadline the whole text
-  gets `timeout`, as before. A 504 of the service (the gateway's own deadline) is the reason `timeout`.
+  gets `timeout`, as before. With pieces at once (`parallel` above 1 and more than one piece), each request waits
+  to the deadline of the text instead: the pieces queue in the service behind each other and behind other sessions,
+  and a later one would pass its own `timeout` long before the deadline. A long text whose pieces went at once
+  gives no sample of the rate (`remote_layer.note_rate`): its time is not the sum of its pieces. A 504 of the service (the gateway's own deadline) is the reason `timeout`.
 - **Retry-After once per piece.** A 429 or 503 that names `busy` (or a 503 without an `error`, an older gateway's
   busy slot) and a time to come back (the header `Retry-After`
   in seconds, or the body field `retry_after`) is sent again once, when the wait and the expected time of the piece

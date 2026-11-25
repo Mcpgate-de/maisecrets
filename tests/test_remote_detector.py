@@ -1434,6 +1434,30 @@ class ParallelPiecesTests(unittest.TestCase):
         mine[0].join(2.0)
         self.assertFalse(mine[0].is_alive(), "it ended about one second after the deadline")
 
+    def test_a_piece_that_waits_in_the_queue_of_the_service_waits_to_the_deadline(self):
+        # netcup, 85fa9339: three pieces at once queue in the container; the third answer comes after one piece's
+        # timeout, but well before the hook's deadline. With pieces at once it is waited for, so the text is checked
+        # whole; one after the other each request still waits only `timeout`
+        text = lines_of(3)
+        for parallel, state in ((3, "ok"), (1, "partial")):
+            with self.subTest(parallel=parallel):
+                arrived = {"n": 0}
+                lock = threading.Lock()
+
+                def answer(t):
+                    with lock:
+                        arrived["n"] += 1
+                        nth = arrived["n"]
+                    return (200, [], {}, 0.6 if nth == 3 else 0.05)
+                svc = self.svc(answer)
+                _spans, status = self.ask(svc, text, wait=2.0, parallel=parallel, timeout=0.3)
+                self.assertEqual(len(svc.received), 3)
+                self.assertEqual(status.state, state, status)
+                if state == "ok":
+                    self.assertEqual(status.checked_to, len(text), "the whole text was checked")
+                else:
+                    self.assertEqual(status.reason, "timeout")
+
     def test_a_text_of_one_piece_is_asked_in_the_thread_of_ask_as_before(self):
         svc = self.svc(lambda t: (200, None, {}, 0.0))
         det = rm.RemoteDetector(svc.url, max_chars=SIZE, parallel=3)

@@ -464,6 +464,10 @@ class RemoteDetector:
                 keeper = _Keeper(plain, occ)
                 mapped: list = []
                 plan = plan_pieces(plain, self.max_chars)
+                # pieces at once wait in the service's queue behind each other (and behind other sessions): each one
+                # waits to the deadline of the whole text, which the hook bounds. One piece, or one after the other,
+                # waits `timeout` per request as before
+                to_deadline = self.parallel > 1 and len(plan) > 1
                 # the measured seconds of the piece of this text that ended last. Several piece threads write it: a
                 # retry's estimate comes from whichever piece ended last, not from the piece before it in the text
                 last = {"took": None}
@@ -475,7 +479,7 @@ class RemoteDetector:
                     body = self._body(sent_text[p:e], kind)
                     began, retried = time.monotonic(), False
                     # the first piece waits from the start of ask() (the proof included), each other from its start
-                    piece_cap = cap if n == 0 else min(deadline, began + self.timeout)
+                    piece_cap = deadline if to_deadline else cap if n == 0 else min(deadline, began + self.timeout)
                     while True:
                         # no request after the deadline, and none for a piece behind a failed one: it cannot move
                         # checked_to. A piece before the failed one still runs, as it would one after the other
@@ -501,7 +505,8 @@ class RemoteDetector:
                             retried = True
                             time.sleep(wait)
                             began = time.monotonic()
-                            piece_cap = min(deadline, began + self.timeout)   # the second request waits its own time
+                            # the second request waits its own time
+                            piece_cap = deadline if to_deadline else min(deadline, began + self.timeout)
                     found = self._parse(raw, e - p)
                     last["took"] = time.monotonic() - began
                     return found, piece_cap

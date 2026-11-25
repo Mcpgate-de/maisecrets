@@ -279,6 +279,15 @@ class RemoteLayerTests(unittest.TestCase):
                                 "max_chars": 500})
         _post({"stdout": text, "stderr": ""})
         self.assertEqual(R._samples(), [], "a text in pieces that timed out: no sample")
+        # #105: a text whose pieces went at once and were all answered: its time is not the sum of its pieces
+        fast = Scripted()
+        self.addCleanup(fast.close)
+        _reset(remote_detector={"url": fast.url, "format": "hf", "timeout_ms": 1000, "max_timeout_ms": 3000,
+                                "max_chars": 500})
+        _post({"stdout": text, "stderr": ""})
+        self.assertEqual(R.NER_DOWN["state"], "ok", "premise: every piece answered")
+        self.assertGreater(len(fast.received), 1, "premise: more than one piece")
+        self.assertEqual(R._samples(), [], "pieces at once: no sample")
 
     def test_pieces_only_where_the_text_stays_on_this_computer(self):
         # review M2: the url source and the fallback get pieces only for a loopback or Unix-socket service
