@@ -58,7 +58,7 @@ from .tool_output import (  # noqa: F401
 )
 from .guarded_paths import (  # noqa: F401
     _is_ssh_config_path, _names_a_guarded_file, _holds_a_guarded_folder, _a_guarded_path, _identity, _abs,
-    _touches_store, _hardlinked_into, _in_the_home,
+    _touches_store, _hardlinked_into, _in_the_home, _uri_path,
 )
 from .json_lines import _mask_digits_in_strings
 from .server_values import _all_refs, _elsewhere_reason, _server_fetch, _server_limit_keys, \
@@ -2142,22 +2142,6 @@ _PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root"
 _MCP_RESOURCE_TOOLS = ("ReadMcpResourceTool", "ReadMcpResourceDirTool")
 
 
-def _uri_path(v: str) -> str:
-    """The local path of a `file:` URI (`file:///p`, `file://localhost/p`, percent-encoded), else the string.
-    An MCP file server takes a URI where a path is expected; `file:///…/vault.json` passed the path check
-    (invariant I3, 2026-09-28)."""
-    if v[:5].lower() != "file:":
-        return v
-    from urllib.parse import urlparse
-    from urllib.request import url2pathname
-    u = urlparse(v)
-    if u.netloc not in ("", "localhost"):
-        return v
-    # url2pathname decodes and, on Windows, turns `/C:/Users/…` into `C:\\Users\\…`: an unquoted
-    # `/C:/…` named no store on the Windows runner (2026-09-28)
-    return url2pathname(u.path)
-
-
 def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
     """Refuse a read tool, or an MCP argument, that names a path in the vault home or the run directory.
     A path is only what the field names: a Grep pattern or a free text is not read as a path."""
@@ -2583,7 +2567,7 @@ def _remote_layer(cfg: dict, response, binary, strip: bool, scan_tool, session: 
 
 
 def post_tool(payload: dict) -> dict:
-    from . import remote_layer as _rl, tool_withhold as _tw
+    from . import remote_layer as _rl, second_net as _sn, tool_withhold as _tw
     _rl.NER_DOWN["v"] = False
     _rl.NER_DOWN["unchecked"] = False
     cfg = load_config()
@@ -2627,8 +2611,12 @@ def post_tool(payload: dict) -> dict:
     layer = _remote_layer(cfg, response, binary, strip, scan_tool, payload.get("session_id"))
     _rl.note_result(layer)
 
+    net = _sn.key_forms()
+
     def redact(s: str, rest: bool = False) -> str:
         nonlocal vault, resolved, short_server
+        if net:
+            s = _sn.hide_counted(s, net, hit, values)
         if strip:
             # before the detector: a value spelled in tag characters goes with them, and no shape spans a gap
             s, gone, runs = strip_hidden(s)

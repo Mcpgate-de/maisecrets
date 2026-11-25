@@ -138,7 +138,10 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None,
     # no answer (a short text, or a long one whose first piece failed), or a rest that would touch a string of the
     # result's shape (`whole`): the whole result, in the shape withheld() gives each tool
     whole = bool(_rl.NER_DOWN.get("whole"))
-    withhold = conf.get("unavailable") == "withhold" and (_rl.NER_DOWN.get("state") == "unavailable" or whole)
+    # a long text stopped by a spent quota keeps the rules, as a too_long text (Layer.quota)
+    quota = bool(_rl.NER_DOWN.get("quota"))
+    withhold = (conf.get("unavailable") == "withhold" and (_rl.NER_DOWN.get("state") == "unavailable" or whole)
+                and not quota)
     if withhold:
         _rl.NER_DOWN["v"] = False      # the note for the AI says the rules masked the result; none did here
     out = withheld(payload, _rl.withhold_text(why), codex) if withhold else dict(result or {})
@@ -152,7 +155,7 @@ def with_unchecked_names(payload: dict, result: dict, codex: bool | None = None,
         hso["additionalContext"] = f"{hso['additionalContext']}\n\n{note}" if hso.get("additionalContext") else note
         out["hookSpecificOutput"] = hso
     lines = []
-    if _rl.NER_DOWN.get("state") in ("too_long", "partial"):
+    if _rl.NER_DOWN.get("state") in ("too_long", "partial") or quota:
         # this result alone is too long, or only a part of it was checked (#105): under each one, with the share
         lines.append(_rl.screen_line(why, True) if whole and withhold else _rl.screen_line(why, cut_, share))
     else:

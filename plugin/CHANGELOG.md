@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [0.9.31] - 2026-11-25
+
+### Features
+
+- /maisecrets ner says when your timeout_ms replaces the gateway's deadline (a10221b)
+- the gateway checks a long tool result in pieces as soon as it announces that it takes them (16bb52a)
+
+### Fixes
+
+- a refused tool call shows the model why again, also when the plugin folder moved (c6504f5)
+- a spent quota of the name gateway no longer withholds a long tool result (451ef78)
+
+### Security
+
+- no command of the agent reads the key of the second net, and each session start makes a new one (9553b84)
+- the hooks prove that they checked a tool result with a keyed hash, and the mod uses only events the plugin directory knows (63eff7b)
+
 ## [0.9.30] - 2026-11-24
 
 ### Features
