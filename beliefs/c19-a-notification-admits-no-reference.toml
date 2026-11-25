@@ -7,5 +7,5 @@ runner = ["tests/test_mcp_task_results.py::AdmitTests::test_the_mod_path_admits_
 
 [proof]
 file = "maisecrets/hooks.py"
-find = " and \"<task-not\" not in prompt:"
-replace = ":"
+find = " and not payload.get(\"agent_id\") and not note:"
+replace = " and not payload.get(\"agent_id\"):"

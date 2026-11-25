@@ -1082,7 +1082,7 @@ def user_prompt(payload: dict) -> dict:
     vault = None
     if typed or matches or _has_live(cfg):
         vault = Vault(cfg)
-        if settings_mod.peer_sender(prompt) is None and not payload.get("agent_id") and "<task-not" not in prompt:
+        if settings_mod.peer_sender(prompt) is None and not payload.get("agent_id") and not note:
             for key, _s, _e in typed:
                 vault.admit(key, session)
     rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)

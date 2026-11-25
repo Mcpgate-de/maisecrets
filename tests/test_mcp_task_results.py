@@ -369,6 +369,11 @@ class AdmitTests(Base):
                                    "transcript_path": str(self.t), **CLAUDE})
                 self.assertNotEqual(Vault().get(self.key, session=SESSION)[1], "ok")
 
+    def test_a_typed_prompt_that_quotes_the_tag_still_admits_its_key(self):
+        hooks.user_prompt({"prompt": f"why does <task-notification> fail here? use {self.ph}", "session_id": SESSION,
+                           "transcript_path": str(self.t), **CLAUDE})
+        self.assertEqual(Vault().get(self.key, session=SESSION)[1], "ok", "only a prompt that is a notification")
+
     def test_a_typed_prompt_still_admits_its_key(self):
         hooks.user_prompt({"prompt": f"use {self.ph}", "session_id": SESSION, "transcript_path": str(self.t),
                            **CLAUDE})
