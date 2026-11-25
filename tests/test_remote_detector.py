@@ -1139,6 +1139,27 @@ class PiecesTests(unittest.TestCase):
         _spans, status = self.ask(svc, f"ask {NAME} now", wait=1.0)
         self.assertEqual((status.reason, len(svc.received)), ("busy", 1), "no Retry-After: no retry")
 
+    def test_a_smaller_retry_after_in_the_body_wins_over_the_whole_seconds_of_the_header(self):
+        # ai-gateway #2141: the header holds whole seconds (1), the body the queue's estimate (0.2). A retry after the
+        # header's 1 s would not fit this 0.6 s deadline; after the body's 0.2 s it does
+        both = (429, {"error": "busy", "retry_after": 0.2}, {"Retry-After": "1"}, 0.0)
+        svc = self.svc([both])
+        spans, status = self.ask(svc, f"ask {NAME} now", wait=0.6)
+        self.assertEqual((status.state, len(spans), len(svc.received)), ("ok", 1, 2))
+        # a larger body, a 0 and a body that is no number leave the header's 1 s: no retry fits 0.6 s
+        for body in (5, 0, "soon", None):
+            with self.subTest(body=body):
+                svc = self.svc([(429, {"error": "busy", "retry_after": body}, {"Retry-After": "1"}, 0.0)])
+                _spans, status = self.ask(svc, f"ask {NAME} now", wait=0.6)
+                self.assertEqual((status.reason, len(svc.received)), ("busy", 1))
+        # a tiny body waits at least RETRY_MIN_S
+        from maisecrets.detection import remote
+        svc = self.svc([(429, {"error": "busy", "retry_after": 0.001}, {}, 0.0)])
+        t0 = time.monotonic()
+        _spans, status = self.ask(svc, f"ask {NAME} now", wait=1.0)
+        self.assertEqual(status.state, "ok")
+        self.assertGreaterEqual(time.monotonic() - t0, remote.RETRY_MIN_S)
+
     def test_no_piece_and_no_retry_after_rate_limited(self):
         text = J([dots(700), "\n", dots(700), "\n", dots(700)])
         self.assertGreaterEqual(len(rm.plan_pieces(text, SIZE)), 3)

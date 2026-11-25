@@ -52,6 +52,7 @@ OVERLAP = 200                # characters a piece reads past each cut, so a name
 # the time a piece is expected to take before one of the same text was measured: 60 ms per 1,000 characters (the
 # reference host, docs/NER-EXPERIMENT.md "The wait grows with the text") times 1.5; it decides whether a retry fits
 ESTIMATE_MS_PER_1000, ESTIMATE_SAFETY = 60.0, 1.5
+RETRY_MIN_S = 0.05            # the shortest wait a refusal's Retry-After can ask for
 # the most requests of one text a detector sends at once (#105): a service on this computer takes 3 (the container
 # runs 4 workers; one stays for the prompt and the other sessions); a gateway says its own number (`ner_parallel`)
 PARALLEL_MAX = 3
@@ -356,8 +357,11 @@ class RemoteDetector:
                     try:
                         doc = json.loads(resp.read(4096).decode("utf-8"))
                         error = str(doc.get("error") or "") if isinstance(doc, dict) else ""
-                        if wait is None and isinstance(doc, dict):
-                            wait = _seconds(doc.get("retry_after"))    # the gateway's body: {"retry_after": 1}
+                        body = _seconds(doc.get("retry_after")) if isinstance(doc, dict) else None
+                        # the body's estimate in a fraction of a second (ai-gateway #2141): a header holds whole seconds
+                        # only, so a smaller body wins; never below RETRY_MIN_S, so a 0 does not hammer the gateway
+                        if body is not None and body > 0 and (wait is None or body < wait):
+                            wait = max(body, RETRY_MIN_S)
                     except (OSError, ValueError, UnicodeError):
                         error = ""
                 refused = _HttpStatus(resp.status, error)
