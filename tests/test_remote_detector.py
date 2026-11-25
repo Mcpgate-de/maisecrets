@@ -1152,13 +1152,15 @@ class PiecesTests(unittest.TestCase):
                 svc = self.svc([(429, {"error": "busy", "retry_after": body}, {"Retry-After": "1"}, 0.0)])
                 _spans, status = self.ask(svc, f"ask {NAME} now", wait=0.6)
                 self.assertEqual((status.reason, len(svc.received)), ("busy", 1))
-        # a tiny body waits at least RETRY_MIN_S
+        # a tiny body waits at least RETRY_MIN_S: the wait the retry asks for, not the clock (Windows ticks in 15 ms)
+        from unittest import mock
         from maisecrets.detection import remote
+        real_sleep, waits = time.sleep, []
         svc = self.svc([(429, {"error": "busy", "retry_after": 0.001}, {}, 0.0)])
-        t0 = time.monotonic()
-        _spans, status = self.ask(svc, f"ask {NAME} now", wait=1.0)
+        with mock.patch.object(remote.time, "sleep", side_effect=lambda s: (waits.append(s), real_sleep(s))[1]):
+            _spans, status = self.ask(svc, f"ask {NAME} now", wait=1.0)
         self.assertEqual(status.state, "ok")
-        self.assertGreaterEqual(time.monotonic() - t0, remote.RETRY_MIN_S)
+        self.assertIn(remote.RETRY_MIN_S, waits)
 
     def test_no_piece_and_no_retry_after_rate_limited(self):
         text = J([dots(700), "\n", dots(700), "\n", dots(700)])
