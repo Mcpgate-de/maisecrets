@@ -1121,8 +1121,8 @@ and keeps its other keys. Written by hand, the setting looks like this:
   from its last answers; 60 until it has five, the rate of the reference setup) per 1,000
   characters, at most `max_timeout_ms` (3000 by default, at most 5000). `"timeout_scales": false`
   keeps the fixed `timeout_ms`. This wait holds for each piece of a long text (below). Since 0.9.29, in a hook
-  the pieces of one tool result end together at the latest at the smaller of 8 s and half the watchdog (8 s of
-  the 16 s of `PostToolUse`) from the start of the hook, less the time the rules' scan of the result took (at least
+  the pieces of one tool result end together at the latest 10 s after the start of the hook (since 0.9.33; 8 s
+  before; with a shorter watchdog the larger of its half and the watchdog less 6 s), less the time the rules' scan of the result took (at least
   0.5 s): the watchdog never fires because of the name check, and a short result waits as before. `ner.log` names the reason of each result that the rules took
   alone (timeout, too_long, refused …), and `/maisecrets ner` counts the reasons. A prompt waits
   `prompt_timeout_ms` (1000 by default for a service on this computer, never less than its `timeout_ms`;
