@@ -358,7 +358,7 @@ class RemoteDetector:
                         doc = json.loads(resp.read(4096).decode("utf-8"))
                         error = str(doc.get("error") or "") if isinstance(doc, dict) else ""
                         body = _seconds(doc.get("retry_after")) if isinstance(doc, dict) else None
-                        # the body's estimate in tenths of a second (ai-gateway #2141): a header holds whole seconds
+                        # the body's estimate in a fraction of a second (ai-gateway #2141): a header holds whole seconds
                         # only, so a smaller body wins; never below RETRY_MIN_S, so a 0 does not hammer the gateway
                         if body is not None and body > 0 and (wait is None or body < wait):
                             wait = max(body, RETRY_MIN_S)
