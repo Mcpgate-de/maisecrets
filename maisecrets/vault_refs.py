@@ -167,7 +167,7 @@ def profile() -> str:
 
 
 def origin_of(url: object) -> str | None:
-    """`https://host[:port]` of an https URL with a host, in lower case and without the default port."""
+    """The origin of an https URL with a host: the scheme, the host and a port other than 443, in lower case."""
     if not isinstance(url, str):
         return None
     try:
