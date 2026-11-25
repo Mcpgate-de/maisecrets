@@ -138,7 +138,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 80 scenarios against a fake upstream (4 for the PowerShell tool of Windows, 8 in Code Mode)
 python3 harness/codex.py [--real]                      # 20 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 655 proofs: each control's test, and each path of the 18 invariant beliefs, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 656 proofs: each control's test, and each path of the 18 invariant beliefs, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1152,7 +1152,9 @@ and keeps its other keys. Written by hand, the setting looks like this:
   for gets `(the name service did not answer)`. Your next prompt takes the line away. Codex has no such line: there the line under the result names the share. A gateway gets a text longer than
   `max_chars` in pieces only when its metadata says `ner_pieces: true` (ai-gateway #2141; each piece counts against
   your quota of the minute). An older gateway does not get such a text: it stays `too_long`. `/maisecrets ner`
-  shows which of the two holds (`long texts`). maisecrets sends a gateway and the container it started the field `kind`:
+  shows which of the two holds (`long texts`). When a piece answers `rate_limited` (your quota of the minute is
+  spent), no further piece of that text goes out, and the text is handled as a `too_long` one: the rules mask the
+  rest, a line under the result and the band name it, and `withhold` does not withhold it. maisecrets sends a gateway and the container it started the field `kind`:
   `prompt` for a prompt, `result` for a tool result, so the service can give prompts priority; a service at a `url`
   gets no `kind`, since a strict server of another make may refuse a field it does not know.
 - With the setting `unavailable` at `withhold` (see the next item), the unchecked rest of a tool result does not
@@ -1193,8 +1195,9 @@ and keeps its other keys. Written by hand, the setting looks like this:
   name detection off (404 `ner_not_enabled`), the rules mask alone, and the status says that the gateway offers no
   name detection; a new login does not help there. The text goes over https with your access token, the rules' findings as filler.
   A request waits the gateway's own deadline plus 500 ms when its metadata names `ner_deadline_ms` (an integer from
-  500 to 60,000; the gateway answers 504 after it), at most 8,000 ms; else 3,000 ms. Your own `timeout_ms` wins over
-  both. Measured from a laptop against the reference gateway:
+  500 to 60,000: its longest time from the arrival of a request to its answer, a 504 at the latest), at most
+  8,000 ms; else 3,000 ms. Your own `timeout_ms` wins over both, and `/maisecrets ner` then shows a `wait` row (a
+  warning when it is shorter than the gateway's deadline). Measured from a laptop against the reference gateway:
   p50 160 ms for 200 characters and 740 ms for 10,000; with 8 sessions at once p95 600 ms. The gateway's wait
   does not grow with the length of the text, and its answers do not change the rate of this computer
   (`ner-rate.json`). A prompt waits 2,000 ms by default; only a prompt you type goes there, never one of
