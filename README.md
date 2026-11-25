@@ -81,9 +81,11 @@ nonce of the mod (to prove that the connector reaches your gateway with your acc
 
 - `$.env.set('CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION', ...)`: off while a session is in the demo (`/maisecrets demo
   on`), back to Claude Code's default after it.
-- `$.env.set('MAISECRETS_MOD_NET', ...)`: a random value of this mod process (32 hex characters, made at its start),
-  only while the maisecrets result hooks of a tool call run, and `''` again after them. The hooks write it into their
-  answer as a proof that they checked the result; it is no credential and leaves this computer in no request.
+- `$.env.set('MAISECRETS_MOD_NET', 'on')`: a fixed flag, only while the maisecrets result hooks of a tool call run,
+  and `''` again after them. With it the hooks end their answer with a proof line that they checked the result: an
+  HMAC-SHA256 over the call, keyed with 32 random bytes in the maisecrets home (`second_net.key`, mode 600). The mod
+  gets a new key from the plugin's own Python (`dispatch.py mod-result`) at each session start; it goes to no log,
+  no request and no text of the model.
 - `$.store`: one counter, how often it showed its hint about values on the screen.
 - `$.prompt.fill`: only the login command of a gateway, into an empty input box; your Enter starts it.
 
@@ -92,9 +94,8 @@ nonce of the mod (to prove that the connector reaches your gateway with your acc
 | Event | What the hook does |
 |---|---|
 | `prompt.submit`, `classic.UserPromptSubmit` | Replaces values in your prompt with placeholders before it is sent; shows one line when the prompt hook did not run. |
-| `tool.call` | Notes that a call started (for the second check); refuses a call that carries the mod's own pairing nonce. |
-| `tool.run` | Notes which placeholders and references a call used; changes nothing. |
-| `classic.PostToolUse`, `classic.PostToolUseFailure` | Give the result hook a one-time code of this mod and take the hook's proof line out of the output. |
+| `tool.call` | Refuses a call that carries the mod's own pairing nonce; notes which references a call's result used; changes nothing else. |
+| `classic.PostToolUse`, `classic.PostToolUseFailure` | Set the flag for the result hook, check the hook's proof line and take it out of the output; note which references the result showed before the hook masked it. |
 | `session.append` (tool results) | Masks a tool result the result hook did not check, before Claude Code keeps or sends it; if that fails, withholds the output. |
 | `session.append` (hook context) | Takes the proof lines of the result hook out of the context. |
 | `http.fetch` | Only in the demo: refuses every request Claude Code itself sends. Outside the demo, it changes nothing. |
@@ -103,7 +104,7 @@ nonce of the mod (to prove that the connector reaches your gateway with your acc
 | `turn.complete` | Refreshes the status line; offers a gateway login when one is due. |
 | `command.run`, `$.command.register` | The `/maisecrets` menu and the commands typed as `/maisecrets:NAME`. |
 | `$.command.run` (a call, not a hook) | Runs the plugin's own entry command `/maisecrets` with the words you chose in the menu, after the hook that asked has returned. It runs no other command. |
-| `ui.render`, `ui.close`, `session.start` | Draws your values (with a lock) and the menu panel on your screen, and one line above the prompt when the name service checked a tool result of this turn only in part or not at all (the worst share, and where the rest went), until your next prompt; nothing of it goes to the model. |
+| `ui.render`, `ui.close`, `session.start` | Draws your values (with a lock) and the menu panel on your screen, and one line above the prompt when the name service checked a tool result of this turn only in part or not at all (the worst share, and where the rest went), until your next prompt; nothing of it goes to the model. At `session.start` it also asks the plugin's Python for a new key of the result hooks' proof line. |
 
 ### When it fails
 
