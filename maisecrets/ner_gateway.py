@@ -25,9 +25,10 @@ CACHE_S = 3600
 # over 2 s (README "Names from a service")
 DEFAULT_TIMEOUT_MS = 3000
 # #105, ai-gateway #2141 slice 4: `ner_pieces` true lets a text over max_chars go in pieces (each one counts against
-# the person's quota); `ner_deadline_ms` is the gateway's own wait for one request (DEADLINE_S, 5 s), after which it
-# answers 504. A request then waits that plus DEADLINE_MARGIN_MS for the network, so the client sees the 504 and does
-# not close the connection while the service still works for it. Any other value is ignored
+# the person's quota); `ner_deadline_ms` is the gateway's longest time from the arrival of a request to its answer
+# (a 504 at the latest; about 5,400 ms). A request then waits that plus DEADLINE_MARGIN_MS for the network, so the
+# client sees the 504 and does not close the connection while the service still works for it. Any other value is
+# ignored
 DEADLINE_MS_MIN, DEADLINE_MS_MAX = 500, 60000
 DEADLINE_MARGIN_MS = 500
 
@@ -105,6 +106,8 @@ def found_for(cfg: dict, origin: str, url: str, deadline: float) -> dict | None:
     """The discovery of the gateway at `url` (sref_client.discover), from the cache while it is fresh."""
     from . import sref_client
     got = _cached(origin, url)
+    if got is not None and isinstance(got.get("ner"), dict) and "pieces" not in got["ner"]:
+        got = None      # a record of a version before #105 knows no ner_pieces: ask the gateway again, not in an hour
     if got is None:
         got = sref_client.discover(cfg, url, deadline)
         if got:

@@ -101,6 +101,7 @@ class SrefServer:
         self.ner_word = "Okafor"         # the endpoint finds this word as a person
         self.ner_delay = 0.0             # seconds the endpoint waits before it answers
         self.ner_meta: dict = {}         # more fields of the name block (#105: ner_pieces, ner_deadline_ms), as given
+        self.ner_queue: list = []        # each request takes the first item: (status, body) to answer, None as usual
         # RESOLVER-PROFILE 12.4 (SC-28): a success names the audit event of the release; a refusal never does. "auto":
         # a new id per success (kept in `audit_ids`); None: no field, as an older gateway; anything else as it is
         self.audit_id: object = "auto"
@@ -338,6 +339,10 @@ class SrefServer:
                     return self._send(403, {"error": "insufficient_scope"})
                 if server.ner_answer is not None:
                     return self._send(*server.ner_answer)
+                queued = server.ner_queue.pop(0) if server.ner_queue else None
+                if queued is not None:
+                    server.ner_texts.append(json.loads(raw or b"{}").get("inputs", ""))
+                    return self._send(*queued)
                 text = json.loads(raw or b"{}").get("inputs", "")
                 server.ner_texts.append(text)
                 time.sleep(server.ner_delay)
