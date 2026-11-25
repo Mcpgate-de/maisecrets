@@ -73,7 +73,8 @@ def from_config(cfg: dict, fallback: bool = False, deadline: float | None = None
     if gateway:
         from . import ner_gateway
 
-        def make(endpoint: str, token: str, max_chars: int, pieces: bool = False, deadline_ms: int | None = None):
+        def make(endpoint: str, token: str, max_chars: int, pieces: bool = False, deadline_ms: int | None = None,
+                 parallel: int = 1):
             # one request waits the person's timeout_ms; without one, the gateway's own deadline plus a margin (it
             # answers 504 then, ai-gateway #2141), never above the hook's budget for a tool result; else 3,000 ms
             wait = (min(ms, 5000) if "timeout_ms" in conf or deadline_ms is None else
@@ -86,8 +87,8 @@ def from_config(cfg: dict, fallback: bool = False, deadline: float | None = None
                 cafile=str(cfg.get("client_vault_cafile") or ""),
                 # a long text in pieces spends the person's quota of the minute at the gateway: only when the
                 # gateway admits them (`ner_pieces`, ai-gateway #2141 slice 4); else a text over max_chars stays
-                # too_long there
-                pieces=bool(pieces))
+                # too_long there. Its pieces go at once only as far as it says (`ner_parallel`, 1 without it)
+                pieces=bool(pieces), parallel=parallel)
             det.gateway_deadline_ms = deadline_ms      # /maisecrets ner names it when timeout_ms replaces it
             return det
         try:
@@ -104,7 +105,10 @@ def from_config(cfg: dict, fallback: bool = False, deadline: float | None = None
             mask=mask, ask_labels=conf.get("ask_labels") is True, private_http_only=True, secret=secret,
             # pieces only where the text stays on this computer (the url source and the fallback alike); a service
             # on the network may count each piece against a quota, as the gateway does
-            pieces=remote.is_local(url)), ""
+            pieces=remote.is_local(url),
+            # a service on this computer takes PARALLEL_MAX pieces of one text at once (#105: a result of 100,000
+            # characters in pieces one after the other does not fit the hook's wait)
+            parallel=remote.PARALLEL_MAX if remote.is_local(url) else 1), ""
     except (ValueError, TypeError, AttributeError) as exc:
         return None, str(exc)
 

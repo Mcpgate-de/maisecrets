@@ -1,0 +1,13 @@
+# c30a-a-gateway-gets-no-more-pieces-at-once-than-it-announces: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-a-gateway-gets-no-more-pieces-at-once-than-it-announces"
+control = "C30a"
+serves = ["M6.4"]
+statement = "A gateway source gets at most as many pieces of one text at once as its metadata says in ner_parallel, never more than 3; no field or a value that is no integer gives 1, one piece after the other, from a fresh discovery and from the cached one (#105)."
+runner = [
+  "tests/test_ner_gateway.py::GatewaySourceTests::test_the_pieces_at_once_are_the_gateways_ner_parallel_from_1_to_3_and_1_without_it",
+]
+
+[proof]
+file = "maisecrets/ner_gateway.py"
+find = "        return max(1, min(PARALLEL_MAX, v))\n"
+replace = "        return max(1, v)\n"

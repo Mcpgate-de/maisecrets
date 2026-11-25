@@ -483,9 +483,14 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
   a line break, else at a space, else where the size ends, and each piece reads 200 characters (a quarter of
   `max_chars` at most) past its core on each side. A span belongs to the piece whose core holds its start (the rule
   of the mcpgate gateway), so a name on a cut is found once and whole; spans widen to whole words on the whole text,
-  and the findings of the rules go out as filler in each piece they reach. The pieces go one after the other until
-  the deadline; the secret of a container (`secret=`) is proven once per text. `pieces=False` keeps the old rule: a
-  text longer than `max_chars` is not sent (`too_long`).
+  and the findings of the rules go out as filler in each piece they reach. Up to `parallel` pieces of one text are in
+  flight at once (1 by default, at most `remote.PARALLEL_MAX`, 3): they start in order, and when one ends the next
+  one starts, until the deadline. The spans are kept in the order of the pieces, whatever order they end in, so a
+  name on a cut is decided as with one piece after the other; a piece that ends before the pieces in front of it
+  waits for them. After a failed piece (or `rate_limited`, or the deadline) no further piece starts. The secret of a
+  container (`secret=`) is proven once per text, before the first piece. `pieces=False` keeps the old rule: a text
+  longer than `max_chars` is not sent (`too_long`). The plugin sends 3 pieces at once to a service on this computer,
+  and to a gateway as many as its `ner_parallel` says (1 to 3; 1 without it).
 - **Each piece waits at most `timeout`; the deadline ends the whole text.** Each request waits at most `timeout`
   from its start (the first one from the start of `ask`, the proof of the secret included), so a one-piece text
   waits as before 0.9.29 and a service that hangs holds a short text no longer. A `deadline` that the caller gives
@@ -502,7 +507,8 @@ response = contract.result_response(detector, result)    # the same as JSON (mai
   unchecked character stands, `total` its length; both are 0 in a status made without them. The state is `partial`
   when `0 < checked_to < total`: the spans of the checked pieces are kept, `reason` says why the rest was not
   checked, and the text from `checked_to` on got the rules alone. A span of a checked piece can end after
-  `checked_to`; none starts there.
+  `checked_to`; none starts there. With pieces at once, `checked_to` is the end of the pieces checked without a gap:
+  a later piece that ended before an earlier one failed or timed out does not move it, and its spans are dropped.
 - **`kind`.** `ask(text, occupied, deadline, kind="prompt")` or `kind="result"` sends the field `kind` at the top of
   an `hf` request, for a service that orders its work by it; without it the request is as before. The plugin sends
   `prompt` for a prompt and `result` for a tool result, only to a gateway source and to the container it started. A deadline that passes while the rules scan raises `ScanIncomplete`, as in

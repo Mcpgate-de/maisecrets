@@ -49,6 +49,8 @@ class NerLoadTests(unittest.TestCase):
             self.assertEqual(r["checked_pct"], 100.0)
         self.assertEqual({r["shape"] for r in rows} - {"bash", "mcp"}, set())
         self.assertTrue(data["meta"]["takes_pieces"])
+        self.assertEqual(data["meta"]["parallel"], 3, "a service on this computer: three pieces at once (#105)")
+        self.assertIn("3 at once", readme)
         self.assertIn("PASS", readme)
         self.assertIn("PASS:", said.getvalue())
 

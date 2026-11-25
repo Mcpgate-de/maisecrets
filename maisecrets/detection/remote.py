@@ -33,6 +33,7 @@ import http.client
 import ipaddress
 import json
 import math
+import queue
 import re
 import secrets
 import socket
@@ -51,6 +52,9 @@ OVERLAP = 200                # characters a piece reads past each cut, so a name
 # the time a piece is expected to take before one of the same text was measured: 60 ms per 1,000 characters (the
 # reference host, docs/NER-EXPERIMENT.md "The wait grows with the text") times 1.5; it decides whether a retry fits
 ESTIMATE_MS_PER_1000, ESTIMATE_SAFETY = 60.0, 1.5
+# the most requests of one text a detector sends at once (#105): a service on this computer takes 3 (the container
+# runs 4 workers; one stays for the prompt and the other sessions); a gateway says its own number (`ner_parallel`)
+PARALLEL_MAX = 3
 KINDS = ("prompt", "result")  # the optional `kind` of a request (hf): a service may give prompts priority
 MAX_ANSWER_BYTES = 4 * 1024 * 1024
 _LOOPBACK_NAMES = ("localhost", "localhost.")
@@ -177,13 +181,14 @@ class RemoteDetector:
     64 lowercase hex characters); it goes out as `Authorization: Bearer` and is never in a status, a reason, repr, a
     log line or an error text. The object keeps it, as any client keeps its token. `pieces=False` keeps a text over
     `max_chars` from the service (`too_long`), as before 0.9.29: for a service whose quota a long text would spend
-    (the gateway, until it shares its quota under load)."""
+    (the gateway, until it shares its quota under load). `parallel`: how many pieces of one text are in flight at once
+    (1 to PARALLEL_MAX); they start in order, and the status counts only the pieces checked without a gap."""
 
     def __init__(self, url: str, format: str = "hf", model: str = "", classes: dict | None = None,
                  min_score: dict | None = None, timeout: float = 0.3, max_chars: int = 20000,
                  language: str = "en", allow_network: bool = False, mask: bool = True, ask_labels: bool = False,
                  private_http_only: bool = False, bearer: str = "", secret: str = "", token: str = "",
-                 cafile: str = "", pieces: bool = True):
+                 cafile: str = "", pieces: bool = True, parallel: int = 1):
         if format not in FORMATS:
             raise ValueError(f"format must be one of {', '.join(FORMATS)}")
         parts = urlsplit(url)
@@ -243,6 +248,10 @@ class RemoteDetector:
         # a CA file to trust besides the system's (a company CA, the test gateway): client_vault_cafile, as the login
         self.cafile = str(cafile or "")
         self.pieces = pieces is not False
+        # how many pieces of one text are in flight at once: 1 (one after the other, the default) to PARALLEL_MAX
+        if not (isinstance(parallel, int) and not isinstance(parallel, bool) and 1 <= parallel <= PARALLEL_MAX):
+            raise ValueError(f"parallel is a whole number from 1 to {PARALLEL_MAX}")
+        self.parallel = parallel
 
     def status(self, state: str, reason: str = "", added: int = 0, ms: float = 0.0, checked_to: int = 0,
                total: int = 0) -> RemoteStatus:
@@ -454,21 +463,25 @@ class RemoteDetector:
                         raise TimeoutError     # a proof after the deadline: the caller was told "timeout"
                 keeper = _Keeper(plain, occ)
                 mapped: list = []
-                took = None                    # the measured seconds of the last piece of this text
-                for n, (p, c0, c1, e) in enumerate(plan_pieces(plain, self.max_chars)):
+                plan = plan_pieces(plain, self.max_chars)
+                last = {"took": None}          # the measured seconds of the piece of this text that ended last
+
+                def piece(n: int, p: int, e: int) -> tuple:
+                    """(the spans of the service in the offsets of the piece, its cap) for piece n, or an exception."""
                     body = self._body(sent_text[p:e], kind)
                     began, retried = time.monotonic(), False
-                    if n:
-                        cap = min(deadline, began + self.timeout)
+                    # the first piece waits from the start of ask() (the proof included), each other from its start
+                    piece_cap = cap if n == 0 else min(deadline, began + self.timeout)
                     while True:
                         try:
-                            raw = self._request(body, cap, gate)
+                            raw = self._request(body, piece_cap, gate)
                             break
                         except _HttpStatus as exc:
                             # Retry-After once per piece, only for `busy` (the one client slot frees in a second;
                             # after `rate_limited` the quota of the minute is spent: no further piece), and only when
                             # the wait and the piece fit the deadline
                             wait = exc.retry_after
+                            took = last["took"]
                             guess = took if took is not None else \
                                 ESTIMATE_SAFETY * ESTIMATE_MS_PER_1000 * (e - p) / 1000 / 1000
                             if retried or _why(exc) != "busy" or wait is None or \
@@ -477,16 +490,60 @@ class RemoteDetector:
                             retried = True
                             time.sleep(wait)
                             began = time.monotonic()
-                            cap = min(deadline, began + self.timeout)     # the second request waits its own time
+                            piece_cap = min(deadline, began + self.timeout)   # the second request waits its own time
                     found = self._parse(raw, e - p)
-                    # a span belongs to the piece whose core (the part without the overlap) holds its start. Each piece
-                    # reads `overlap` characters past its core on both sides, so a name that starts in a core lies
-                    # whole in that piece, and a name on a cut is taken once, whole
-                    new = keeper.add([(p + s, p + t, ty, sc) for s, t, ty, sc in found if c0 <= p + s < c1], cap)
-                    mapped += new if starts is None else [(starts[a], ends[b - 1], ty, sc) for a, b, ty, sc in new]
-                    took = time.monotonic() - began
-                    box["progress"] = (tuple(mapped), total if c1 >= len(plain) else
-                                       (c1 if starts is None else starts[c1]))
+                    last["took"] = time.monotonic() - began
+                    return found, piece_cap
+
+                # up to `parallel` pieces of this text in flight; they start in order, and when one ends the next one
+                # starts. The spans are kept in the order of the pieces, so a piece that ends early waits for the
+                # pieces before it: checked_to stays the end of the pieces checked without a gap, and _Keeper sees
+                # the spans in the same order as one piece after the other
+                ended: queue.Queue = queue.Queue()
+                done: dict = {}                # piece -> (spans, cap) of a piece that ended before its turn
+                failed: dict = {}              # piece -> its exception
+                started = kept_to = running = 0
+
+                def run(n: int, p: int, e: int) -> None:
+                    try:
+                        ended.put((n, True, piece(n, p, e)))
+                    except BaseException as exc:  # noqa: BLE001 - handed to the caller as it is
+                        ended.put((n, False, exc))
+
+                while True:
+                    while running < self.parallel and started < len(plan) and not failed and \
+                            not gate["cancelled"]:
+                        p, _c0, _c1, e = plan[started]
+                        if self.parallel == 1 or len(plan) == 1:
+                            run(started, p, e)          # one at a time: in this thread, as before
+                        else:
+                            threading.Thread(target=run, args=(started, p, e), name="maisecrets-remote-piece",
+                                             daemon=True).start()
+                        started += 1
+                        running += 1
+                    if running == 0:
+                        break
+                    n, ok, got = ended.get()
+                    running -= 1
+                    (done if ok else failed)[n] = got
+                    while kept_to in done:
+                        found, piece_cap = done.pop(kept_to)
+                        p, c0, c1, _e = plan[kept_to]
+                        # a span belongs to the piece whose core (the part without the overlap) holds its start. Each
+                        # piece reads `overlap` characters past its core on both sides, so a name that starts in a
+                        # core lies whole in that piece, and a name on a cut is taken once, whole
+                        new = keeper.add([(p + s, p + t, ty, sc) for s, t, ty, sc in found if c0 <= p + s < c1],
+                                         piece_cap)
+                        mapped += new if starts is None else [(starts[a], ends[b - 1], ty, sc) for a, b, ty, sc in new]
+                        box["progress"] = (tuple(mapped), total if c1 >= len(plain) else
+                                           (c1 if starts is None else starts[c1]))
+                        kept_to += 1
+                    if failed and kept_to >= min(failed):
+                        break                  # the pieces after a failed one cannot move checked_to
+                if failed:
+                    raise failed[min(failed)]
+                if gate["cancelled"]:
+                    raise TimeoutError
             except BaseException as exc:  # noqa: BLE001 - handed to the caller as it is
                 box["error"] = exc
         t = threading.Thread(target=work, name="maisecrets-remote", daemon=True)
