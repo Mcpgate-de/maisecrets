@@ -1353,10 +1353,15 @@ class ParallelPiecesTests(unittest.TestCase):
         plan = rm.plan_pieces(text, SIZE)
         limited = (429, {"error": "rate_limited", "retry_after": 0.05}, {}, 0.0)
         svc = self.svc(lambda t: limited if piece_of(t) == 1 else (200, [], {}, 0.3))
-        _spans, status = self.ask(svc, text, timeout=2.0)
+        det = rm.RemoteDetector(svc.url, max_chars=SIZE, parallel=3, timeout=2.0)
+        begun: list = []                             # each piece that starts builds its body first
+        real = det._body
+        det._body = lambda text, kind=None: (begun.append(piece_of(text)), real(text, kind))[1]
+        _spans, status = det.ask(text, [], time.monotonic() + 3.0)
         time.sleep(0.3)                              # a piece started late would arrive now
         self.assertEqual(sorted(piece_of(r["inputs"]) for r in svc.received), [0, 1, 2],
                          "the three in flight; no piece after rate_limited")
+        self.assertEqual(sorted(begun), [0, 1, 2], "no piece even starts after rate_limited")
         self.assertEqual((status.state, status.reason, status.checked_to), ("partial", "rate_limited", plan[0][2]))
 
     def test_the_deadline_stops_the_pieces_in_flight_and_in_the_queue(self):
@@ -1381,10 +1386,53 @@ class ParallelPiecesTests(unittest.TestCase):
             time.sleep(0.0 if n == 0 else 1.0)
             return b"[]"
         det._request = late
+        begun: list = []                             # each piece that starts builds its body first
+        real = det._body
+        det._body = lambda t, kind=None: (begun.append(piece_of(t)), real(t, kind))[1]
         _spans, status = det.ask(text, [], time.monotonic() + 0.5)
         self.assertEqual((status.state, status.checked_to), ("partial", plan[0][2]))
         time.sleep(1.0)
-        self.assertEqual(sorted(asked), [0, 1, 2, 3], "no piece starts after the deadline")
+        self.assertEqual(sorted(asked), [0, 1, 2, 3], "no request after the deadline")
+        self.assertEqual(sorted(begun), [0, 1, 2, 3], "no piece starts after the deadline")
+
+    def test_a_piece_behind_a_failed_one_sends_no_further_request(self):
+        # piece 2 waits for its Retry-After while piece 1 fails with rate_limited: it does not send again. Piece 0,
+        # in front of the failed one, still ends and is checked
+        text = lines_of(4)
+        plan = rm.plan_pieces(text, SIZE)
+        seen: dict = {}
+
+        def answer(t):
+            n = piece_of(t)
+            seen[n] = seen.get(n, 0) + 1
+            if n == 1:
+                return (429, {"error": "rate_limited", "retry_after": 30}, {}, 0.1)
+            if n == 2 and seen[n] == 1:
+                return (429, {"error": "busy", "retry_after": 0.3}, {}, 0.0)
+            return (200, [], {}, 0.6 if n == 0 else 0.0)
+        svc = self.svc(answer)
+        _spans, status = self.ask(svc, text, wait=3.0, timeout=2.0)
+        time.sleep(0.4)                              # a retry of piece 2 would arrive by now
+        self.assertEqual((status.state, status.reason, status.checked_to), ("partial", "rate_limited", plan[0][2]))
+        self.assertEqual(seen, {0: 1, 1: 1, 2: 1}, "piece 2 sent once, piece 3 never")
+
+    def test_a_request_that_hangs_past_its_cap_does_not_hold_the_text_thread(self):
+        # a request that ignores its deadline (a name lookup that hangs): the thread of ask() ends one second after
+        # the deadline, not when the request ends
+        text = lines_of(4)
+        det = rm.RemoteDetector("http://127.0.0.1:1/", max_chars=SIZE, parallel=3, timeout=2.0)
+
+        def hang(body, deadline, gate=None):
+            time.sleep(0.0 if piece_of(json.loads(body)["inputs"]) == 0 else 4.0)
+            return b"[]"
+        det._request = hang
+        before = {t for t in threading.enumerate() if t.name == "maisecrets-remote"}
+        _spans, status = det.ask(text, [], time.monotonic() + 0.4)
+        mine = [t for t in threading.enumerate() if t.name == "maisecrets-remote" and t not in before]
+        self.assertEqual((status.state, status.reason), ("partial", "timeout"))
+        self.assertEqual(len(mine), 1, "premise: the thread of this text runs on after ask() returned")
+        mine[0].join(2.0)
+        self.assertFalse(mine[0].is_alive(), "it ended about one second after the deadline")
 
     def test_a_text_of_one_piece_is_asked_in_the_thread_of_ask_as_before(self):
         svc = self.svc(lambda t: (200, None, {}, 0.0))

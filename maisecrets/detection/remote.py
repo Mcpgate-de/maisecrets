@@ -464,7 +464,11 @@ class RemoteDetector:
                 keeper = _Keeper(plain, occ)
                 mapped: list = []
                 plan = plan_pieces(plain, self.max_chars)
-                last = {"took": None}          # the measured seconds of the piece of this text that ended last
+                # the measured seconds of the piece of this text that ended last. Several piece threads write it: a
+                # retry's estimate comes from whichever piece ended last, not from the piece before it in the text
+                last = {"took": None}
+                halt = {"first": None}         # the lowest piece that failed so far: no later piece sends after it
+                halt_lock = threading.Lock()
 
                 def piece(n: int, p: int, e: int) -> tuple:
                     """(the spans of the service in the offsets of the piece, its cap) for piece n, or an exception."""
@@ -473,6 +477,13 @@ class RemoteDetector:
                     # the first piece waits from the start of ask() (the proof included), each other from its start
                     piece_cap = cap if n == 0 else min(deadline, began + self.timeout)
                     while True:
+                        # no request after the deadline, and none for a piece behind a failed one: it cannot move
+                        # checked_to. A piece before the failed one still runs, as it would one after the other
+                        if gate["cancelled"]:
+                            raise TimeoutError
+                        first = halt["first"]
+                        if first is not None and first < n:
+                            raise _Skipped
                         try:
                             raw = self._request(body, piece_cap, gate)
                             break
@@ -508,6 +519,9 @@ class RemoteDetector:
                     try:
                         ended.put((n, True, piece(n, p, e)))
                     except BaseException as exc:  # noqa: BLE001 - handed to the caller as it is
+                        with halt_lock:
+                            if halt["first"] is None or n < halt["first"]:
+                                halt["first"] = n
                         ended.put((n, False, exc))
 
                 while True:
@@ -523,7 +537,11 @@ class RemoteDetector:
                         running += 1
                     if running == 0:
                         break
-                    n, ok, got = ended.get()
+                    try:
+                        # a request that hangs past its cap (a name lookup) must not hold this thread for good
+                        n, ok, got = ended.get(timeout=max(0.0, deadline - time.monotonic()) + 1.0)
+                    except queue.Empty:
+                        raise TimeoutError from None
                     running -= 1
                     (done if ok else failed)[n] = got
                     while kept_to in done:
@@ -976,6 +994,10 @@ def is_company_name(text: str, start: int, end: int) -> bool:
 
 class _HttpStatus(Exception):
     retry_after: float | None = None       # seconds from Retry-After or the body's retry_after, when given
+
+
+class _Skipped(Exception):
+    """A piece that sent no request because a piece before it failed (#105): never the reason of a status."""
 
 
 class _NotOurs(Exception):
