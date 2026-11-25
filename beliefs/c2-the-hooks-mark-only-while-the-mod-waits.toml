@@ -1,0 +1,11 @@
+# c2-the-hooks-mark-only-while-the-mod-waits: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-hooks-mark-only-while-the-mod-waits"
+control = "C2"
+serves = ["M1.2"]
+statement = "The tool-result hooks write the marker only while MAISECRETS_MOD_NET is the literal `on` that the mod sets around them, so without the mod no marker text reaches the model."
+runner = ["tests/test_second_net.py::MarkAnswersTests::test_only_the_mod_switches_the_marker_on_with_its_literal_value"]
+
+[proof]
+file = "maisecrets/second_net.py"
+find = "    if os.environ.get(ENV) != ON or event not in _EVENTS:\n"
+replace = "    if event not in _EVENTS:\n"

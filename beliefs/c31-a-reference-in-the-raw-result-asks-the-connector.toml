@@ -1,0 +1,11 @@
+# c31-a-reference-in-the-raw-result-asks-the-connector: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c31-a-reference-in-the-raw-result-asks-the-connector"
+control = "C31"
+serves = []
+statement = "The mod reads the result as the tool gave it (the payload of classic.PostToolUse and PostToolUseFailure, before the result hook masks a reference whole), so a claude.ai connector that showed a reference is asked for its gateway at the end of the turn (#91)."
+runner = ["tests/hub.test.ts::a connector reference that only the raw result shows (classic.PostToolUse) asks the connector once"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "    referencesOf(e, e?.tool_response)\n"
+replace = "\n"

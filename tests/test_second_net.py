@@ -17,7 +17,8 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 from maisecrets import second_net  # noqa: E402
 
 
-NONCE = "0123456789abcdef" * 2
+KEY = bytes(range(32))          # a synthetic key of the marker; the real one lies in the home (net_key)
+CALL = "toolu_01Synthetic"      # a tool_use_id of the form Claude Code gives
 
 
 def setUpModule():
@@ -26,34 +27,62 @@ def setUpModule():
     remote_layer.NER_DOWN["band"] = None
 
 
+def mac(kind, digest="", rest="", call=CALL, key=KEY):
+    """The MAC as the mod computes it (claude-mod/maisecrets-mod.mjs markMac), written out here on its own."""
+    import hashlib
+    import hmac
+    return hmac.new(key, "\n".join((kind, call, digest, rest)).encode(), hashlib.sha256).hexdigest()[:32]
+
+
 class MarkTests(unittest.TestCase):
-    def test_the_marker_carries_the_nonce_and_for_masked_the_hash_of_the_output(self):
-        self.assertEqual(second_net.mark({}, "post-tool", NONCE)["hookSpecificOutput"],
-                         {"hookEventName": "PostToolUse", "additionalContext": f"[maisecrets: result checked {NONCE}]"})
+    def test_the_marker_carries_the_mac_of_the_call_and_for_masked_the_hash_of_the_output(self):
+        self.assertEqual(second_net.mark({}, "post-tool", KEY, CALL)["hookSpecificOutput"],
+                         {"hookEventName": "PostToolUse",
+                          "additionalContext": f"[maisecrets: result checked {mac('checked')}]"})
         out = {"stdout": "a", "stderr": ""}
+        h = second_net.output_hash(out)
         masked = second_net.mark({"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": out,
-                                                         "additionalContext": "note"}}, "post-tool", NONCE)
+                                                         "additionalContext": "note"}}, "post-tool", KEY, CALL)
         self.assertEqual(masked["hookSpecificOutput"]["additionalContext"],
-                         f"note\n\n[maisecrets: result masked {NONCE} {second_net.output_hash(out)}]")
-        self.assertEqual(second_net.mark({"decision": "block", "reason": "r"}, "post-tool", NONCE),
+                         f"note\n\n[maisecrets: result masked {mac('masked', h)} {h}]")
+        self.assertEqual(second_net.mark({"decision": "block", "reason": "r"}, "post-tool", KEY, CALL),
                          {"decision": "block", "reason": "r"}, "a Codex answer stays as it is")
-        self.assertEqual(second_net.mark({}, "pre-tool", NONCE), {}, "only the tool-result events")
+        self.assertEqual(second_net.mark({}, "pre-tool", KEY, CALL), {}, "only the tool-result events")
+
+    def test_the_mac_binds_the_key_the_call_the_kind_and_the_hash(self):
+        # a marker of another call, another key or another kind is another MAC: the mod counts it as none
+        line = second_net.mark({}, "post-tool", KEY, CALL)["hookSpecificOutput"]["additionalContext"]
+        for other in (second_net.mark({}, "post-tool", KEY, "toolu_01Other"),
+                      second_net.mark({}, "post-tool", bytes(32), CALL)):
+            self.assertNotEqual(other["hookSpecificOutput"]["additionalContext"], line)
+        # the fixed vector of tests/mod.test.ts (PY_VECTOR): the mod's WebCrypto HMAC gives the same
+        self.assertEqual(second_net.mac(KEY, "checked", CALL, "", ""), "43b2b70e03ea8ac3e769b2f0310bc432")
+        self.assertNotEqual(mac("checked"), mac("masked"))
+        self.assertNotEqual(mac("masked", "0" * 16), mac("masked", "1" * 16))
+        self.assertNotIn(KEY.hex(), line)
+        self.assertNotIn(KEY.hex()[:32], line)
+
+    def test_a_call_without_a_well_formed_id_gets_no_marker(self):
+        for call in (None, "", 7, "toolu_1\nchecked", "x" * 129, "toolu 1"):
+            with self.subTest(call=call):
+                self.assertEqual(second_net.mark({}, "post-tool", KEY, call), {})
 
     def test_the_marker_of_a_result_with_a_rest_carries_the_share_and_the_mode_only(self):
         # #105, B11: the mod's band reads them; a failed call never carries a rest of an earlier result
         from maisecrets import remote_layer
         with mock.patch.dict(remote_layer.NER_DOWN, {"band": (70, "rules")}):
-            self.assertEqual(second_net.mark({}, "post-tool", NONCE)["hookSpecificOutput"]["additionalContext"],
-                             f"[maisecrets: result checked {NONCE} rest 70 rules]")
+            self.assertEqual(second_net.mark({}, "post-tool", KEY, CALL)["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result checked {mac('checked', '', '70 rules')} rest 70 rules]")
             out = {"stdout": "a"}
-            masked = second_net.mark({"hookSpecificOutput": {"updatedToolOutput": out}}, "post-tool", NONCE)
+            h = second_net.output_hash(out)
+            masked = second_net.mark({"hookSpecificOutput": {"updatedToolOutput": out}}, "post-tool", KEY, CALL)
             self.assertEqual(masked["hookSpecificOutput"]["additionalContext"],
-                             f"[maisecrets: result masked {NONCE} {second_net.output_hash(out)} rest 70 rules]")
-            self.assertEqual(second_net.mark({}, "post-tool-failure", NONCE)["hookSpecificOutput"]["additionalContext"],
-                             f"[maisecrets: result checked {NONCE}]")
+                             f"[maisecrets: result masked {mac('masked', h, '70 rules')} {h} rest 70 rules]")
+            self.assertEqual(second_net.mark({}, "post-tool-failure", KEY, CALL)["hookSpecificOutput"]
+                             ["additionalContext"], f"[maisecrets: result checked {mac('checked')}]")
         with mock.patch.dict(remote_layer.NER_DOWN, {"band": None}):
-            self.assertEqual(second_net.mark({}, "post-tool", NONCE)["hookSpecificOutput"]["additionalContext"],
-                             f"[maisecrets: result checked {NONCE}]")
+            self.assertEqual(second_net.mark({}, "post-tool", KEY, CALL)["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result checked {mac('checked')}]")
 
     def test_the_hash_takes_the_strings_and_keys_in_a_fixed_order(self):
         # the mod computes the same (tests/mod.test.ts hashOf): keys sorted, each before its value, NUL between
@@ -61,6 +90,117 @@ class MarkTests(unittest.TestCase):
         want = hashlib.sha256("a\0x\0b\0y".encode()).hexdigest()[:16]
         self.assertEqual(second_net.output_hash({"b": "y", "a": ["x", 1, None]}), want)
         self.assertNotEqual(second_net.output_hash("x"), second_net.output_hash("y"))
+
+
+class KeyTests(unittest.TestCase):
+    """net_key: 32 random bytes in the maisecrets home, mode 600, made at the first use, never in a log."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.home = Path(tempfile.mkdtemp(prefix="ms-net-key-"))
+        patcher = mock.patch("maisecrets.home.HOME", self.home)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        import shutil
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.path = self.home / second_net.KEY_NAME
+
+    def test_the_first_use_makes_the_key_with_mode_600_and_later_uses_read_the_same(self):
+        key = second_net.net_key()
+        self.assertEqual(len(key), 32)
+        self.assertTrue(self.path.is_file())
+        if os.name == "posix":
+            self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(second_net.net_key(), key)
+        self.assertEqual([p.name for p in self.home.iterdir()], [second_net.KEY_NAME], "no temp file stays")
+
+    def test_two_homes_get_two_keys(self):
+        first = second_net.net_key()
+        self.path.unlink()
+        self.assertNotEqual(second_net.net_key(), first, "a new key is random, not derived")
+
+    @unittest.skipUnless(os.name == "posix", "file modes")
+    def test_a_key_file_that_others_may_read_gets_mode_600_again(self):
+        second_net.net_key()
+        os.chmod(self.path, 0o644)
+        second_net.net_key()
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    def test_a_damaged_key_file_is_made_anew(self):
+        self.home.mkdir(exist_ok=True)
+        self.path.write_text("not a key\n", encoding="ascii")
+        key = second_net.net_key()
+        self.assertEqual(len(key), 32)
+        self.assertEqual(self.path.read_text(encoding="ascii").strip(), key.hex())
+
+    @unittest.skipUnless(os.name == "posix", "symbolic links")
+    def test_a_link_in_place_of_the_key_file_is_not_followed(self):
+        self.home.mkdir(exist_ok=True)
+        target = self.home / "elsewhere"
+        target.write_text("ab" * 32 + "\n", encoding="ascii")
+        self.path.symlink_to(target)
+        with self.assertRaises(OSError):
+            second_net.net_key()
+
+    def test_the_key_goes_into_no_answer_of_a_hook(self):
+        # the hooks write the MAC only; mod-result gives the key on stdout to the mod alone. That no log holds it is
+        # checked where real hooks write their logs: test_cli_matrix (the dispatcher) and the harness (hooks.log, the
+        # client's debug log, every request body)
+        key = second_net.net_key()
+        with mock.patch.dict(os.environ, {second_net.ENV: second_net.ON}):
+            h = MarkAnswersTests.hooks(None)
+            second_net.mark_answers(h, "post-tool")
+            h.post_tool({"tool_response": "x", "tool_use_id": CALL})
+        text = repr(h.seen)
+        self.assertIn("[maisecrets: result checked", text)
+        self.assertNotIn(key.hex(), text)
+        self.assertNotIn(key.hex()[:32], text)
+
+    def test_a_new_key_replaces_the_old_one(self):
+        # the mod asks for a new key at each session start: a key that leaked into the last session counts no more
+        old = second_net.net_key()
+        new = second_net.new_net_key()
+        self.assertNotEqual(new, old)
+        self.assertEqual(second_net.net_key(), new)
+        if os.name == "posix":
+            self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFOs")
+    def test_a_fifo_in_place_of_the_key_file_is_refused_at_once(self):
+        # O_NONBLOCK: the open does not wait for a writer; S_ISREG: only a regular file is a key
+        self.home.mkdir(exist_ok=True)
+        os.mkfifo(self.path)
+        import time
+        t0 = time.monotonic()
+        with self.assertRaises(OSError):
+            second_net.net_key()
+        self.assertLess(time.monotonic() - t0, 2.0)
+        self.assertEqual(second_net.key_forms(), [])
+
+    def test_the_result_hook_masks_the_key_in_each_spelling(self):
+        import base64
+        key = second_net.net_key()
+        forms = second_net.key_forms()
+        self.assertEqual(forms[0], key.hex())
+        for shown in (key.hex(), key.hex().upper(), base64.b64encode(key).decode(),
+                      base64.urlsafe_b64encode(key).decode().rstrip("=")):
+            with self.subTest(shown=shown[:6]):
+                text, found = second_net.hide_key(f"key: {shown} end", forms)
+                self.assertEqual(text, f"key: {second_net.KEY_WITHHELD} end")
+                self.assertTrue(found)
+        self.assertEqual(second_net.hide_key("nothing here", forms), ("nothing here", []))
+
+    def test_post_tool_masks_the_key_of_the_home_in_a_tool_result(self):
+        # the route of a command that read the key anyway (an evasion of the refusal, C22): the model never sees it
+        from maisecrets import hooks
+        key = second_net.net_key().hex()
+        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
+                               "tool_input": {"command": "x"},
+                               "tool_response": {"stdout": f"{key}\n", "stderr": key.upper()}})
+        text = repr(out)
+        self.assertNotIn(key, text.lower())
+        self.assertIn(second_net.KEY_WITHHELD, out["hookSpecificOutput"]["updatedToolOutput"]["stdout"])
 
 
 class MarkAnswersTests(unittest.TestCase):
@@ -78,25 +218,56 @@ class MarkAnswersTests(unittest.TestCase):
                 return {}
         return Hooks
 
-    def test_only_the_mod_switches_the_marker_on_with_a_nonce_of_its_form(self):
-        for value in ("", "1", "zz" * 16):
-            with self.subTest(value=value), mock.patch.dict(os.environ, {second_net.ENV: value}):
+    def test_only_the_mod_switches_the_marker_on_with_its_literal_value(self):
+        for value in ("", "1", "ON", "zz" * 16, "0123456789abcdef" * 2):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {second_net.ENV: value}), \
+                    mock.patch.object(second_net, "net_key", return_value=KEY):
                 h = self.hooks()
                 second_net.mark_answers(h, "post-tool")
-                h.post_tool({"tool_response": "x"})
+                h.post_tool({"tool_response": "x", "tool_use_id": CALL})
                 self.assertEqual(h.seen, [{}])
 
-    def test_a_payload_with_no_result_gets_no_marker(self):
-        with mock.patch.dict(os.environ, {second_net.ENV: NONCE}):
+    def test_a_payload_with_no_result_or_no_id_gets_no_marker(self):
+        with mock.patch.dict(os.environ, {second_net.ENV: second_net.ON}), \
+                mock.patch.object(second_net, "net_key", return_value=KEY):
             empty = self.hooks()
             second_net.mark_answers(empty, "post-tool")
-            empty.post_tool({"session_id": "S1"})
+            empty.post_tool({"session_id": "S1", "tool_use_id": CALL})
             self.assertEqual(empty.seen, [{}], "no tool_response: nothing was scanned")
+            no_id = self.hooks()
+            second_net.mark_answers(no_id, "post-tool")
+            no_id.post_tool({"tool_response": "x"})
+            self.assertEqual(no_id.seen, [{}], "no tool_use_id: no call to bind the MAC to")
             full = self.hooks()
             second_net.mark_answers(full, "post-tool")
-            full.post_tool({"tool_response": "x"})
+            full.post_tool({"tool_response": "x", "tool_use_id": CALL})
             self.assertEqual(full.seen[0]["hookSpecificOutput"]["additionalContext"],
-                             f"[maisecrets: result checked {NONCE}]")
+                             f"[maisecrets: result checked {mac('checked')}]")
+
+    def test_the_key_is_read_before_the_handler_runs_never_at_the_answer(self):
+        # the watchdog's answer and a crash's do no file work: the key is read once, when the hook process starts
+        calls = []
+
+        def key():
+            calls.append(1)
+            return KEY
+        with mock.patch.dict(os.environ, {second_net.ENV: second_net.ON}), \
+                mock.patch.object(second_net, "net_key", side_effect=key):
+            h = self.hooks()
+            second_net.mark_answers(h, "post-tool")
+            self.assertEqual(len(calls), 1)
+            with mock.patch.object(second_net, "net_key", side_effect=AssertionError("file work at the answer")):
+                h.post_tool({"tool_response": "x", "tool_use_id": CALL})
+            self.assertEqual(h.seen[0]["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result checked {mac('checked')}]")
+
+    def test_no_key_means_no_marker(self):
+        with mock.patch.dict(os.environ, {second_net.ENV: second_net.ON}), \
+                mock.patch.object(second_net, "net_key", side_effect=OSError("no home")):
+            h = self.hooks()
+            second_net.mark_answers(h, "post-tool")
+            h.post_tool({"tool_response": "x", "tool_use_id": CALL})
+            self.assertEqual(h.seen, [{}])
 
 
 class MaskResultTests(unittest.TestCase):

@@ -518,28 +518,66 @@ test('a claude.ai connector that showed a reference is asked for its gateway by 
   })
 
 // field case 2026-11-22: PostToolUse masks a reference of a connector that is not bound yet as a whole, so the mod
-// also reads the result at tool.run, before PostToolUse (the types: "read before any PostToolUse hook has had it").
-// This harness gives tool.call the same raw result, so the test shows only that both reads ask the connector once;
-// the order against PostToolUse is the engine's, measured live
-test('a connector reference that the mod reads at tool.run and at tool.call asks the connector once', async ($, on) => {
-  const calls: any[] = []
-  const asked: any[] = []
+// also reads the result as the tool gave it: the payload of classic.PostToolUse (tool_response, or error for a failed
+// call), before the settings hooks beneath mask it. Here tool.call answers only the masked text, so the connector is
+// asked only because the mod read the raw result there; a result without a reference, or of a tool that is no MCP
+// tool, asks nothing
+const rawRef = () => String.fromCharCode(0x27e6) + 'sr' + 'ef:secret:' + 'Qm7Rv2Kd9T'.repeat(3) + 'ab' +
+  String.fromCharCode(0x27e7)
+function rawWorld(on, calls, asked) {
   filled.length = 0
-  const raw = String.fromCharCode(0x27e6) + 'sr' + 'ef:secret:' + 'Qm7Rv2Kd9T'.repeat(3) + 'ab' +
-    String.fromCharCode(0x27e7)
   engine(on, calls, { placed: true }, { connector: { fill: '/maisecrets:sref login Team_GW', note: 'n' } })
   on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
   on('mcp.call', ($, e) => {
     asked.push(e)
     return { value: { content: [{ type: 'text', text: '{"resource": "https://gw.example/mcp"}' }] } }
   })
-  on('tool.run', () => ({ result: { content: [{ type: 'text', text: 'api_key: ' + raw }] } }))
+  on('tool.call', () => ({ result: { content: [{ type: 'text', text: 'api_key: [masked whole]' }] } }))
+  on('classic.PostToolUse', () => ({ updatedMCPToolOutput: [{ type: 'text', text: 'api_key: [masked whole]' }] }))
+  on('classic.PostToolUseFailure', () => ({}))
   on('turn.complete', ($, e) => ({ text: e.answer }))
-  await $.tool.call({ tool: 'mcp__claude_ai_Team_GW__gitlab_read_actions', action: 'get' } as any)
+}
+
+test('a connector reference that only the raw result shows (classic.PostToolUse) asks the connector once',
+  async ($, on) => {
+    const calls: any[] = []
+    const asked: any[] = []
+    rawWorld(on, calls, asked)
+    const tool = 'mcp__claude_ai_Team_GW__gitlab_read_actions'
+    await $.tool.call({ tool, action: 'get' } as any)
+    const answer = await $.classic.PostToolUse({ tool_name: tool, tool_use_id: 'tu-raw-1', tool_input: {},
+      tool_response: [{ type: 'text', text: 'api_key: ' + rawRef() }] } as any)
+    expect(JSON.stringify(answer)).not.toContain('sref')            // the mod changes nothing of the answer
+    await $.turn.complete({ answer: 'done', reason: 'answer' } as any)
+    await settle()
+    expect(asked.map(a => [a.server, a.tool])).toEqual([['claude_ai_Team_GW', 'sensitive_references_resource']])
+    expect(filled).toEqual(['/maisecrets:sref login Team_GW'])
+  })
+
+test('a connector reference in the error of a failed call (classic.PostToolUseFailure) asks the connector too',
+  async ($, on) => {
+    const calls: any[] = []
+    const asked: any[] = []
+    rawWorld(on, calls, asked)
+    const tool = 'mcp__claude_ai_Team_GW__gitlab_read_actions'
+    await $.classic.PostToolUseFailure({ tool_name: tool, tool_use_id: 'tu-raw-2', tool_input: {},
+      error: 'failed for ' + rawRef() } as any)
+    await $.turn.complete({ answer: 'done', reason: 'answer' } as any)
+    await settle()
+    expect(asked.length).toBe(1)
+  })
+
+test('a raw result without a reference, or of a tool that is no MCP tool, asks no connector', async ($, on) => {
+  const calls: any[] = []
+  const asked: any[] = []
+  rawWorld(on, calls, asked)
+  await $.classic.PostToolUse({ tool_name: 'Bash', tool_use_id: 'tu-raw-3', tool_input: {},
+    tool_response: { stdout: 'api_key: ' + rawRef() } } as any)
+  await $.classic.PostToolUse({ tool_name: 'mcp__claude_ai_Team_GW__gitlab_read_actions', tool_use_id: 'tu-raw-4',
+    tool_input: { note: rawRef() }, tool_response: [{ type: 'text', text: 'nothing' }] } as any)
   await $.turn.complete({ answer: 'done', reason: 'answer' } as any)
   await settle()
-  expect(asked.map(a => [a.server, a.tool])).toEqual([['claude_ai_Team_GW', 'sensitive_references_resource']])
-  expect(filled).toEqual(['/maisecrets:sref login Team_GW'])
+  expect(asked.length).toBe(0)
 })
 
 test('a closed panel asks nothing after a tool call', async ($, on) => {
