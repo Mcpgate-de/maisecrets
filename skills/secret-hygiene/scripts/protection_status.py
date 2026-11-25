@@ -27,13 +27,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _links  # noqa: E402
+
 RECENT_SECONDS = 30
 OFFER = ("Before I start: maisecrets protection is off. A password or key that you type here goes to the "
          "AI provider. I can install maisecrets now. It is free and open source "
-         "(github.com/Mcpgate-de/maisecrets), it runs only on this computer, and it stops such messages "
+         f"({_links.REPOSITORY}), it runs only on this computer, and it stops such messages "
          "before they leave. After the install, you do one step and open a new chat. Shall I install it? "
          "You can say no; I will do your task without it.")
-CODEX_SOURCE = "https://github.com/Mcpgate-de/maisecrets.git"
+CODEX_SOURCE = _links.CODEX_SOURCE
 CLAUDE_SOURCE = "Mcpgate-de/maisecrets"
 # the order of hooks/run.sh: the hooks run with the first of these that is 3.9 or newer
 PYTHONS = ["python3", "python", "py -3", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10",

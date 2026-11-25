@@ -23,6 +23,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host, under `rehydration: automatic` (cases 0a to 0f) and `confirm` |
 | false alarms in a real tree | `python3 scripts/measure_false_alarms.py <dir> [--samples]` | by hand after a detector change: the hits a Read would act on, per rule, with the shape of each value and never the value; the regression corpus of normal work is `tests/fp_corpus.py` (`tests/test_fp_corpus.py`), a night of autonomous work is `tests/test_night_run.py` |
 | false alarms in seven public trees | `python3 scripts/measure_fp_bank.py fetch <cache>`, then `measure <cache> --json <out>` before and after, then `compare <before> <after>` | by hand after a detector change: the Python standard library, detect-secrets, ferret-scan, Preserve, GitHub's starter workflows, Docker's compose samples and the tldr pages on fixed commits; `compare` names each rule whose acted count changed; it exits 2 when a tree is missing or at another commit and 1 when the total of acted hits rose. `fetch` makes each clone new; in a directory it did not make, it only reads refs and objects and compares each file with the commit. The fetch needs the network, so it is not a CI job |
+| the name check under load (#105) | `python3 bench/ner/load.py --url URL \| --home TEMP_HOME \| --dry-run --out DIR` | by hand on the reference host, before and after ai-gateway #2141 (section "The load test of the name check"): N sessions send tool results of 20,000 to 100,000 characters through the plugin path; `PASS` when at most 1 % of them keep a rest. `tests/test_bench_ner_load.py` runs the dry run in the suite |
 | Benchmark V1 | `python3 bench/run.py --scanner S --source X --split dev --out <file>`, then `python3 bench/report.py <files>`; `python3 bench/bank/make_bank.py --check` | by hand before and after a detector change and for each release: maisecrets and four other scanners on the same cases, scored by span (full, partial, missed), per class and family, with the false alarms per 1,000 negative cases. `tests/test_bench.py` checks the case format and the metric in the suite. `docs/BENCHMARK-V1.md` has the method and the commands |
 | Holdout V2 | `python3 bench/holdout_v2.py check\|generate\|seal\|verify …`, then `bench/run.py --source holdout-v2 --release-candidate` | by hand, on a release candidate only, after the seal (docs/BENCHMARK-V2.md, "Holdout V2"). No template exists yet |
 | library outside the plugin | `python3 scripts/library_smoke.py [<checkout>]` | by hand before a change of the library API, with the newest Python and with `/usr/bin/python3` (3.9): copies only `maisecrets/__init__.py` and `maisecrets/detection/` into a new virtual environment with no site packages and a home folder that does not exist, builds a `Detector` with all four arguments, and scans a text. It fails when a module of the plugin is imported, the home folder is created, or the token, the e-mail address or the IBAN is not found |
@@ -154,6 +155,65 @@ variable, and only its owner can read the file.
 
 With CredData and 6 workers a run takes about 4 minutes on an M-series laptop, the recording included.
 `tests/test_detection_fingerprint.py` checks that two runs give the same bytes and that a moved hit changes them.
+
+## The load test of the name check
+
+`bench/ner/load.py` is step 4 of the order of #105. It starts N sessions at once (`--sessions`, 2 by default). Each
+session is a process of its own and sends tool results of 20,000 to 100,000 characters through
+`remote_layer.for_tool_result`. The text is synthetic (`bench/gatewaygen.py`), in the shapes of a Bash output and an
+MCP result. Each result gets the window of a PostToolUse hook (`vault.hook_deadline` with the watchdog of 16 s), so
+it waits as long as the hook lets it wait, and it goes in pieces where the source takes them.
+
+The run writes `load.json` (the run, the summary, one row per result, no text) and `README.md` into `--out`. A row
+holds the length, the pieces, the requests, the checked share, the state (`ok`, `partial`, `unavailable`,
+`too_long`), the reason (`busy`, `rate_limited`, `timeout` …), the refused requests and the wall time. The summary
+holds the share of results with a rest, the median and the 95th percentile of the wall time, and the refusals by
+reason. The last line is `PASS` or `FAIL` against "Done when" of #105: at most 1 % of the results with a rest. The
+exit code is 0 for `PASS`, 1 for `FAIL` and 2 when a session cannot start.
+
+`python3 bench/ner/load.py --dry-run --duration 5 --out DIR` runs against `harness/fake_ner.py` on this computer.
+`tests/test_bench_ner_load.py` runs it for 3 s and checks the fields.
+
+The script never uses the person's own store. With `--url` and `--dry-run` it makes a temp home with the file
+store and deletes it after the run. With `--home` it uses a temp home that the operator prepared, and it refuses
+`~/.maisecrets`.
+
+### On the reference host
+
+Run it only on the reference host (netcup RS 2000 G12, `docs/NER-EXPERIMENT.md`, "The wait grows with the text"),
+alone and on a quiet host. `--wait-quiet` waits for the rule of `bench/ner/quiet_bench.sh`: no build container
+(`runner-…`) and a load average below 0.5, three times 20 s apart. The README names the load before and the highest
+load during the run.
+
+**A local NER container**, with the production limits (`--cpus 4 --memory 1536m`) and the image pin of
+`SECRET_IMAGE` in `maisecrets/ner_setup.py`:
+
+```bash
+docker run -d --name ner-load --cpus 4 --memory 1536m -p 127.0.0.1:8766:8765 \
+  mcpgate/ner:v2.0.3916@sha256:cde7bdb1d2dc753f41fbf6dd5179af56a570f62804bdc8d0da1021b83ae18a4b
+python3 bench/ner/load.py --url http://127.0.0.1:8766 --wait-quiet --duration 600 \
+  --out bench/results/<date>-ner-load-local
+docker rm -f ner-load
+```
+
+**The gateway.** The script uses the gateway source of a temp home with a normal maisecrets login:
+
+1. On a computer with a browser, make a temp home: `T=$(mktemp -d)`, and write
+   `{"backend": "jsonfile", "allow_plaintext_store": true}` into `$T/config.json`.
+2. Start Claude Code with `MAISECRETS_HOME=$T`. Send `/maisecrets sref login NAME`, then
+   `/maisecrets ner gateway URL`. `/maisecrets ner` must name the gateway as the source.
+3. Copy `$T` to the reference host. **Warning:** the directory holds the refresh token of the login in clear text.
+   After the run, delete it on both computers.
+4. Run `python3 bench/ner/load.py --home $T --wait-quiet --duration 600 --out bench/results/<date>-ner-load-gateway`.
+5. For the same time window, record the gateway side: `ai_gateway_sref_ner_seconds{outcome}` and the service
+   counters of ai-gateway !3700. The README gives the start; the window is the start plus `--duration`.
+
+Run the gateway test before and after ai-gateway #2141 (slices 2 and 4). Before #2141 the gateway announces no
+`ner_pieces`, so the README says `pieces False` and each result above 20,000 characters ends `too_long`. That
+`FAIL` is no failure of #105. After #2141 the README must say `pieces True` and the gateway's deadline.
+
+`--pause 0` (the default) is the hard case: each session sends its next result at once. A real session waits for
+the model between two tool results. Give the pause in the results README when it is not 0.
 
 ## Coverage
 

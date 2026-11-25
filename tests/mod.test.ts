@@ -109,6 +109,64 @@ test('a prompt that is not a person\'s goes on unchanged and the launcher does n
   expect(runs).toBe(0)
 })
 
+// #107: the result of an MCP task, sent by the client as a notification: Python masks it when it proves itself
+const MCP_TASK = '<task-notification>\n<task-id>kbzci8ntb</task-id>\n<status>completed</status>\n' +
+  '<summary>MCP task kbzci8ntb (slow/lookup) completed.</summary>\n<result>\ntoken TOKENWORD\n</result>\n' +
+  '</task-notification>'
+const MCP_MASKED = MCP_TASK.replace('TOKENWORD', '⟦SECRET_' + 'c1⟧')
+
+test('an MCP task\'s result from the client goes to Python, and its answer replaces it', async ($, on) => {
+  let seen
+  common(on, ($, e) => {
+    seen = e
+    return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt',
+      text: MCP_MASKED, count: 1 }) } }
+  })
+  const r = await $.prompt.submit({ text: MCP_TASK, wait: false, origin: { kind: 'task-notification' } })
+  expect(r.text).toBe(MCP_MASKED)
+  expect(JSON.parse(seen.init.stdin)).toEqual({ prompt: MCP_TASK, session_id: 'sess-1', cwd: '/work',
+                                                 origin: 'task-notification' })
+})
+
+test('an MCP task\'s result that Python does not rewrite goes on unchanged to the settings hook', async ($, on) => {
+  const answers = [{ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt' }) } },
+    { value: { exitCode: 1, stderr: 'boom', stdout: '' } }, { deny: 'cannot start' }]
+  let i = 0
+  common(on, () => answers[Math.min(i, answers.length - 1)])
+  for (; i < answers.length; i += 1) {
+    const r = await $.prompt.submit({ text: MCP_TASK, wait: false, origin: { kind: 'task-notification' } })
+    expect(r.text).toBe(MCP_TASK)
+  }
+})
+
+test('the same text from another origin than the client\'s notification does not take the MCP task path',
+  async ($, on) => {
+    let runs = 0
+    common(on, () => {
+      runs += 1
+      return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: 'x' }) } }
+    })
+    for (const kind of ['channel', 'peer', 'scheduled-trigger', 'unclassified']) {
+      expect((await $.prompt.submit({ text: MCP_TASK, wait: false, origin: { kind } })).text).toBe(MCP_TASK)
+    }
+    expect(runs).toBe(0)
+  })
+
+test('a subagent\'s report from the client (no MCP task summary) goes on unchanged, and Python is not asked',
+  async ($, on) => {
+    let runs = 0
+    common(on, () => {
+      runs += 1
+      return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: 'x' }) } }
+    })
+    const report = '<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n' +
+      '<status>completed</status>\n<summary>Agent "read the fixture" completed</summary>\n' +
+      '<result>token TOKENWORD</result>\n</task-notification>'
+    const r = await $.prompt.submit({ text: report, wait: false, origin: { kind: 'task-notification' } })
+    expect(r.text).toBe(report)
+    expect(runs).toBe(0)
+  })
+
 const CHECKS = ['ms:(TOKENWORD)', '  Ms:(TOKENWORD', 'MS:(a)b)', '\nms:(x', 'ms: (TOKENWORD)', 'ms：（TOKENWORD）']
 
 function checkSetup(on, run) {
@@ -1279,23 +1337,58 @@ test('where no panel is placed the entry alone runs the overview, and nothing go
   expect(st.fills.filter(f => f)).toEqual([])
 })
 
-test('a command that needs the model is dropped, and the entry command file runs it after the hook', async ($, on) => {
-  const answer = { now: { entry: 'status test' } as any }
-  const st = runSetup(on, { answer: () => answer.now })
-  const r = await $.prompt.submit({ text: '/maisecrets status test', wait: false, origin: { kind: 'composer' } })
-  expect(r.drop).toBe('maisecrets: /maisecrets status needs the AI; it runs now.')
-  expect(st.spawns.length).toBe(0)
-  expect(st.downstream).toBe(0)
-  // the entry starts after a wait, so it does not wait on the turn that this hook holds (the other wait empties the box)
-  expect(st.afters.filter(ms => ms !== 1000)).toEqual([60, 60])     // 1000: the note of the session (noteSession)
-  // words that name no command, a second line or no text start nothing: the prompt goes on as typed
-  for (const entry of ['bogus words', 'status\ntest', 12]) {
-    answer.now = { entry }
-    st.afters.length = 0
-    const p = await $.prompt.submit({ text: '/maisecrets status test', wait: false, origin: { kind: 'composer' } })
-    expect(p.drop).toBeUndefined()
-    expect(st.afters).toEqual([])
+test('a command that needs the model waits in the box as the entry file line; the mod runs no command itself',
+  async ($, on) => {
+    const answer = { now: { entry: 'status test' } as any }
+    const st = runSetup(on, { answer: () => answer.now })
+    let ran = 0
+    on('command.run', () => { ran += 1; return { text: 'engine' } })
+    const r = await $.prompt.submit({ text: 'maisecrets: status test', wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBe('maisecrets: /maisecrets status needs the AI. It is in your input box: press Enter to run it.')
+    expect(st.spawns.length).toBe(0)
+    expect(st.downstream).toBe(0)
+    // one wait: the box gets /maisecrets:maisecrets status test once the drop landed (1000: noteSession)
+    expect(st.afters.filter(ms => ms !== 1000)).toEqual([60])
+    expect(ran).toBe(0)
+    // words that name no command, a second line or no text put nothing there: the prompt goes on as typed
+    for (const entry of ['bogus words', 'status\ntest', 12]) {
+      answer.now = { entry }
+      st.afters.length = 0
+      const p = await $.prompt.submit({ text: 'maisecrets: status test', wait: false, origin: { kind: 'composer' } })
+      expect(p.drop).toBeUndefined()
+      expect(st.afters).toEqual([])
+    }
+    expect(ran).toBe(0)
+  })
+
+test('the entry file line itself goes on as typed: its command file runs it, the prompt hook decides', async ($, on) => {
+  const st = runSetup(on, { answer: { entry: 'status test' } })
+  for (const text of ['/maisecrets:maisecrets status test', '/ms status test', '/maisecrets:ms status test']) {
+    const before = st.downstream
+    const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBeUndefined()
+    expect(r.text).toBe(text)
+    expect(st.downstream).toBe(before + 1)
   }
+  expect(st.afters.filter(ms => ms !== 1000)).toEqual([])
+  expect(st.spawns.length).toBe(0)
+})
+
+test('from the command.run route the entry file line goes into an empty box only', async ($, on) => {
+  let box = ''
+  const st = runSetup(on, { answer: { entry: 'status test' } })
+  on('prompt.read', () => ({ value: { text: box, cursor: 0 } }))
+  let ran = 0
+  on('command.run', () => { ran += 1; return { text: 'engine' } })
+  let r = await $.command.run({ command: 'maisecrets', args: 'status test', origin: { kind: 'composer' } } as any)
+  expect(st.fills).toEqual(['/maisecrets:maisecrets status test'])
+  expect(r.text).toBe('I put /maisecrets:maisecrets status test into the input box. Press Enter to run it, or clear ' +
+    'the box.')
+  box = 'my draft'
+  r = await $.command.run({ command: 'maisecrets:status', args: 'test', origin: { kind: 'composer' } } as any)
+  expect(st.fills.length).toBe(1)
+  expect(r.text).toBe('/maisecrets status needs the AI. Send /maisecrets:maisecrets status test to run it.')
+  expect(ran).toBe(0)
 })
 
 test('the space form with no answer from Python goes on as typed, and the hook decides it', async ($, on) => {
