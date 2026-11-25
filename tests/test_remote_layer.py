@@ -511,13 +511,13 @@ class RestWithheldTests(unittest.TestCase):
     def test_the_band_of_the_mod_gets_the_share_and_where_the_rest_went(self):
         # #105, B11: the marker (second_net.mark) and the second net's answer carry the share and the mode, no text
         from maisecrets import remote_layer as R, second_net
-        nonce = "0123456789abcdef" * 2
         self.on()
         answer = _guarded("Bash", {"stdout": LONG, "stderr": ""})
         share = R.NER_DOWN["share"]
         self.assertTrue(0 < share < 100, share)
         self.assertEqual(R.NER_DOWN["band"], (share, "cut"))
-        self.assertTrue(second_net.mark(answer, "post-tool", nonce)["hookSpecificOutput"]["additionalContext"]
+        self.assertTrue(second_net.mark(answer, "post-tool", bytes(32), "toolu_01Band")["hookSpecificOutput"]
+                        ["additionalContext"]
                         .endswith(f" rest {share} cut]"))
         for withhold, mode in ((False, "rules"), (True, "cut")):
             with self.subTest(withhold=withhold):
@@ -577,7 +577,7 @@ class RestWithheldTests(unittest.TestCase):
         payload = {"hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
                    "tool_input": {}, "tool_response": {"stdout": "x", "stderr": ""}}
         answer = hooks._fail_closed("post-tool", payload, "it took longer than 16s (the computer may be busy).")
-        tag = second_net.mark(answer, "post-tool", "0123456789abcdef" * 2)["hookSpecificOutput"]["additionalContext"]
+        tag = second_net.mark(answer, "post-tool", bytes(32), "toolu_01Band")["hookSpecificOutput"]["additionalContext"]
         self.assertTrue(tag.endswith(" rest 0 whole]"), tag)
 
     def test_the_second_net_gets_the_same_number_of_texts(self):

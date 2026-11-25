@@ -1,0 +1,11 @@
+# c2-the-result-hook-masks-the-key-of-the-second-net: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-result-hook-masks-the-key-of-the-second-net"
+control = "C2"
+serves = ["M1.2"]
+statement = "The tool-result hook replaces the key of the second net (hex in any case, base64, base64url) wherever a tool result shows it, so a command that read the key past the refusal shows the model no key."
+runner = ["tests/test_second_net.py::KeyTests::test_post_tool_masks_the_key_of_the_home_in_a_tool_result"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        if net:\n"
+replace = "        if False:\n"

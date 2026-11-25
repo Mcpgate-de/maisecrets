@@ -1,0 +1,12 @@
+# c2-the-marker-key-is-the-homes-own-and-only-its-owner-reads-it: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-marker-key-is-the-homes-own-and-only-its-owner-reads-it"
+control = "C2"
+serves = ["M1.2"]
+statement = "The key of the marker is 32 random bytes in the maisecrets home with mode 600, made at the first use and kept after it, never derived and never written into an answer of a hook or a log."
+runner = ["tests/test_second_net.py::KeyTests::test_the_first_use_makes_the_key_with_mode_600_and_later_uses_read_the_same",
+          "tests/test_second_net.py::KeyTests::test_two_homes_get_two_keys"]
+
+[proof]
+file = "maisecrets/second_net.py"
+find = "        os.write(fd, (secrets.token_hex(32) + \"\\n\").encode(\"ascii\"))\n"
+replace = "        os.write(fd, (\"ab\" * 32 + \"\\n\").encode(\"ascii\"))\n"

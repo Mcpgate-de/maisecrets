@@ -73,16 +73,23 @@ def from_config(cfg: dict, fallback: bool = False, deadline: float | None = None
     if gateway:
         from . import ner_gateway
 
-        def make(endpoint: str, token: str, max_chars: int):
-            return remote.RemoteDetector(
+        def make(endpoint: str, token: str, max_chars: int, pieces: bool = False, deadline_ms: int | None = None):
+            # one request waits the person's timeout_ms; without one, the gateway's own deadline plus a margin (it
+            # answers 504 then, ai-gateway #2141), never above the hook's budget for a tool result; else 3,000 ms
+            wait = (min(ms, 5000) if "timeout_ms" in conf or deadline_ms is None else
+                    min(deadline_ms + ner_gateway.DEADLINE_MARGIN_MS, TOOL_WAIT_MAX_S * 1000))
+            det = remote.RemoteDetector(
                 endpoint, format="hf", classes=conf.get("classes"), min_score=conf.get("min_score"),
-                timeout=min(ms, 5000) / 1000, max_chars=min(int(conf.get("max_chars", max_chars)), max_chars),
+                timeout=wait / 1000, max_chars=min(int(conf.get("max_chars", max_chars)), max_chars),
                 language=str(conf.get("language", "en")), allow_network=True, mask=True,
                 ask_labels=conf.get("ask_labels") is True, private_http_only=True, token=token,
                 cafile=str(cfg.get("client_vault_cafile") or ""),
-                # a long text in pieces spends the person's quota of the minute at the gateway: off until the
-                # gateway shares its quota under load (ai-gateway #2141); a text over max_chars stays too_long there
-                pieces=False)
+                # a long text in pieces spends the person's quota of the minute at the gateway: only when the
+                # gateway admits them (`ner_pieces`, ai-gateway #2141 slice 4); else a text over max_chars stays
+                # too_long there
+                pieces=bool(pieces))
+            det.gateway_deadline_ms = deadline_ms      # /maisecrets ner names it when timeout_ms replaces it
+            return det
         try:
             return ner_gateway.detector(cfg, conf, make, deadline)
         except (ValueError, TypeError, AttributeError, OSError) as exc:
@@ -132,6 +139,9 @@ class Layer:
         self.found, self.status, self.long, self.at, self.cut = found, status, long, at or {}, cut
         self.held = held or {}
         self.whole = False       # a partial result withheld whole: a rest would touch a string of its shape
+        # a long text whose pieces stopped at `rate_limited` (the person's quota of the minute is spent): as a
+        # too_long text, the rules and the line, never cut or withheld for it (#105 review)
+        self.quota = False
 
     def matches(self, text: str, scan) -> list:
         got = self.found.get(text)
@@ -324,8 +334,14 @@ def prepare(cfg: dict, strings: list, scan, protect=None, use_fallback: bool = T
     # A long text whose first piece failed has no checked part: it is withheld whole like a short one
     # (tool_withhold.withheld knows the Read and Bash shapes); a cut of each string would replace the strings of the
     # shape too, and the client then sends the original (#105 review, BLOCKER)
-    cut = kind == "tool" and conf_of(cfg).get("unavailable") == "withhold" and status.state == "partial"
+    # A long text whose pieces stopped at `rate_limited` is a spent quota, not a service that failed: it keeps the
+    # rules for its rest as a too_long text did before pieces, so a gateway that admits pieces does not withhold
+    # each long result of a busy minute (#105 review, MEDIUM). ask() sends no further piece of that text
+    quota = kind == "tool" and long and status.reason == "rate_limited"
+    cut = (kind == "tool" and conf_of(cfg).get("unavailable") == "withhold" and status.state == "partial"
+           and not quota)
     layer = Layer(found, status, long, {s: off for s, off in pieces}, cut, held)
+    layer.quota = quota
     if cut and any(layer.rest_of(s) is not None and not _WORDS.search(s) for s, _off in pieces):
         # a rest would touch a string without white space (an enum, a MIME type, base64, a url, a path): its cut
         # breaks the shape, so the whole result is withheld instead (#105 review, HIGH)
@@ -537,7 +553,8 @@ NER_DOWN = {"v": False}
 
 
 def note_result(layer) -> None:
-    NER_DOWN["v"] = layer is not None and layer.status.state == "unavailable"
+    # a spent quota of a long text is named under the result, as a too_long text, not once per session (Layer.quota)
+    NER_DOWN["v"] = layer is not None and layer.status.state == "unavailable" and not getattr(layer, "quota", False)
     # the names were not checked: the service gave no answer, or the text was longer than it takes; or (partial) the
     # service checked only a part of the text, `share` percent of it
     NER_DOWN["unchecked"] = layer is not None and layer.status.state in ("unavailable", "too_long", "partial")
@@ -545,6 +562,7 @@ def note_result(layer) -> None:
     NER_DOWN["long"] = layer is not None and layer.long
     NER_DOWN["cut"] = 0          # the strings whose rest the walk withheld (tool_withhold.cut)
     NER_DOWN["whole"] = layer is not None and layer.whole
+    NER_DOWN["quota"] = layer is not None and getattr(layer, "quota", False)
     NER_DOWN["state"] = layer.status.state if layer is not None else ""
     NER_DOWN["not_ours"] = layer is not None and layer.status.reason == "not_ours"
     NER_DOWN["why"] = (layer.status.reason or layer.status.state) if layer is not None else ""

@@ -1,0 +1,11 @@
+# c2-the-hook-reads-the-key-before-the-handler-runs: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-hook-reads-the-key-before-the-handler-runs"
+control = "C2"
+serves = []
+statement = "The tool-result hook reads the key of the marker when it starts, before its handler, so the answer of the watchdog or of a crash does no file work."
+runner = ["tests/test_second_net.py::MarkAnswersTests::test_the_key_is_read_before_the_handler_runs_never_at_the_answer"]
+
+[proof]
+file = "maisecrets/second_net.py"
+find = "            return mark(obj, event, key, scanned[\"id\"])\n"
+replace = "            return mark(obj, event, net_key(), scanned[\"id\"])\n"

@@ -1,0 +1,12 @@
+# c2-the-mod-takes-the-marker-only-with-the-mac-of-the-call: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-the-mod-takes-the-marker-only-with-the-mac-of-the-call"
+control = "C2"
+serves = ["M1.2"]
+statement = "The mod accepts the marker of the tool-result hook only as the last line of an entry and only with the HMAC that it computes for that call (the key of the maisecrets home, the kind, the tool_use_id, the hash and the rest): a marker text that a tool printed, another plugin's hook copied, or that was made for another call or under another key counts as no marker."
+runner = ["tests/mod.test.ts::scenario A: a copied marker text in another entry, or one without the MAC of the call, counts as no marker",
+          "tests/mod.test.ts::a forged marker: a MAC under another key, of another call, or of another kind counts as no marker"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "  if (want === m[2]) return true\n"
+replace = "  if (want === m[2] || m[2]) return true\n"

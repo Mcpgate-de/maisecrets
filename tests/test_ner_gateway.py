@@ -294,12 +294,186 @@ class GatewaySourceTests(unittest.TestCase):
         self.assertEqual(self.srv.ner_texts, [TEXT])
 
     def test_a_text_over_max_chars_is_not_sent_in_pieces_to_the_gateway(self):
-        # #105: pieces would spend the person's quota of the minute; off until the gateway shares it (ai-gateway #2141)
+        # #105: pieces spend the person's quota of the minute; off while the gateway does not announce `ner_pieces`
         self.login(self.cfg)
         det, _why = remote_layer.from_config(self.cfg)
         self.assertFalse(det.pieces)
         spans, status = det.ask("a" * (det.max_chars + 1), [])
         self.assertEqual((spans, status.state, self.srv.ner_texts), ([], "too_long", []))
+
+    def fresh(self, **meta) -> object:
+        """The detector after a fresh discovery of a gateway whose name block carries `meta` (#105)."""
+        self.srv.ner_meta = meta
+        ner_gateway.CACHE.unlink(missing_ok=True)
+        det, why = remote_layer.from_config(self.cfg)
+        self.assertIsNotNone(det, why)
+        return det
+
+    def test_pieces_go_to_the_gateway_only_when_it_announces_a_json_true(self):
+        # #105, ai-gateway #2141 slice 4: `ner_pieces` switches pieces on; a string, a number or no field does not
+        self.login(self.cfg)
+        for meta, want in (({"ner_pieces": True}, True), ({"ner_pieces": False}, False), ({}, False),
+                           ({"ner_pieces": "true"}, False), ({"ner_pieces": 1}, False), ({"ner_pieces": None}, False)):
+            with self.subTest(meta=meta):
+                self.assertIs(self.fresh(**meta).pieces, want)
+                self.assertIs(S.discover(self.cfg, self.srv.url + "/mcp")["ner"]["pieces"], want)
+
+    def test_a_request_waits_the_gateways_deadline_plus_a_margin_when_it_announces_one(self):
+        self.login(self.cfg)
+        for meta, want in (({"ner_deadline_ms": 5000}, 5.5), ({}, 3.0), ({"ner_deadline_ms": 499}, 3.0),
+                           ({"ner_deadline_ms": 60001}, 3.0), ({"ner_deadline_ms": True}, 3.0),
+                           ({"ner_deadline_ms": 5000.0}, 3.0), ({"ner_deadline_ms": "5000"}, 3.0),
+                           ({"ner_deadline_ms": 500}, 1.0),
+                           # never above the hook's budget for a tool result (remote_layer.TOOL_WAIT_MAX_S)
+                           ({"ner_deadline_ms": 60000}, remote_layer.TOOL_WAIT_MAX_S)):
+            with self.subTest(meta=meta):
+                self.assertAlmostEqual(self.fresh(**meta).timeout, want)
+        # the person's own timeout_ms of this source wins
+        self.srv.ner_meta = {"ner_deadline_ms": 5000}
+        ner_gateway.CACHE.unlink(missing_ok=True)
+        det, _why = remote_layer.from_config({**self.cfg, "remote_detector": {**self.cfg["remote_detector"],
+                                                                               "timeout_ms": 900}})
+        self.assertAlmostEqual(det.timeout, 0.9)
+
+    def test_the_cached_metadata_keeps_both_fields_and_is_checked_again(self):
+        self.login(self.cfg)
+        det = self.fresh(ner_pieces=True, ner_deadline_ms=5000)
+        self.assertEqual((det.pieces, det.timeout), (True, 5.5))
+        gets = self.srv.discovery_gets
+        self.srv.ner_meta = {}                       # the gateway changes; the cache of an hour still holds
+        det, _why = remote_layer.from_config(self.cfg)
+        self.assertEqual((det.pieces, det.timeout, self.srv.discovery_gets), (True, 5.5, gets),
+                         "from the cache, no new discovery")
+        # a record edited by hand (or of an older version) gives no switch it does not hold strictly
+        data = json.loads(ner_gateway.CACHE.read_text(encoding="utf-8"))
+        for ner, want in (({"pieces": "true", "deadline_ms": 99}, (False, 3.0)),
+                          ({"pieces": 1, "deadline_ms": False}, (False, 3.0))):
+            with self.subTest(ner=ner):
+                rec = data[self.origin]["found"]["ner"]
+                for k in ("pieces", "deadline_ms"):
+                    rec.pop(k, None)
+                rec.update(ner)
+                ner_gateway.CACHE.write_text(json.dumps(data), encoding="utf-8")
+                det, _why = remote_layer.from_config(self.cfg)
+                self.assertEqual((det.pieces, det.timeout), want)
+        self.assertEqual(self.srv.discovery_gets, gets)
+
+    def test_a_cached_record_from_before_the_pieces_field_is_discovered_again(self):
+        # a record of a version before #105 has no `pieces` key: one discovery more, not an hour without pieces
+        self.login(self.cfg)
+        self.fresh(ner_pieces=True, ner_deadline_ms=5000)
+        data = json.loads(ner_gateway.CACHE.read_text(encoding="utf-8"))
+        for k in ("pieces", "deadline_ms"):
+            data[self.origin]["found"]["ner"].pop(k)
+        ner_gateway.CACHE.write_text(json.dumps(data), encoding="utf-8")
+        gets = self.srv.discovery_gets
+        det, _why = remote_layer.from_config(self.cfg)
+        self.assertEqual((det.pieces, det.timeout, self.srv.discovery_gets), (True, 5.5, gets + 1))
+        kept = json.loads(ner_gateway.CACHE.read_text(encoding="utf-8"))[self.origin]["found"]["ner"]
+        self.assertEqual((kept["pieces"], kept["deadline_ms"]), (True, 5000), "the new record is kept")
+        remote_layer.from_config(self.cfg)
+        self.assertEqual(self.srv.discovery_gets, gets + 1, "and read from the cache after that")
+
+    def test_a_request_really_waits_the_gateways_deadline(self):
+        # a gateway that answers after 4 s: within 5,000 + 500 ms it is an answer; with today's 3 s a timeout
+        self.login(self.cfg)
+        self.srv.ner_delay = 4.0
+        for meta, state in (({"ner_deadline_ms": 5000}, "ok"), ({}, "unavailable")):
+            with self.subTest(meta=meta):
+                spans, status = self.fresh(**meta).ask(TEXT, [])
+                self.assertEqual(status.state, state, status)
+                if state == "ok":
+                    self.assertEqual([TEXT[s:e] for s, e, _t, _sc in spans], ["Okafor"])
+                else:
+                    self.assertEqual(status.reason, "timeout")
+
+    def long_result(self) -> str:
+        return TEXT + "\n" + ("lorem ipsum dolor " * 1200) + "\n" + TEXT
+
+    def test_a_long_gateway_result_goes_in_pieces_inside_the_hook_window(self):
+        from maisecrets import vault
+        self.login(self.cfg)
+        self.srv.ner_meta = {"ner_pieces": True, "ner_deadline_ms": 5000}
+        ner_gateway.CACHE.unlink(missing_ok=True)
+        self.addCleanup(vault.hook_deadline, None)
+        vault.hook_deadline(16.0)
+        out = self.post_tool(self.cfg["remote_detector"], stdout=self.long_result())
+        self.assertEqual(remote_layer.NER_DOWN["state"], "ok")
+        self.assertEqual(len(self.srv.ner_texts), 2, "two pieces")
+        self.assertNotIn("Okafor", json.dumps(out), "both names masked, the second one by the second piece")
+        self.assertIsNone(remote_layer.NER_DOWN.get("band"))
+
+    def test_a_spent_quota_keeps_a_long_gateway_result_with_the_rules_under_withhold(self):
+        # #105 review, MEDIUM: a gateway that announced pieces answers rate_limited (its quota change not yet on, or
+        # a rollback within the cache's hour). The result is not withheld for it: the rules, the line and the band,
+        # as a too_long text before pieces; and no further piece of that text goes out
+        self.login(self.cfg)
+        self.srv.ner_meta = {"ner_pieces": True}
+        conf = ner_setup.updated(self.cfg["remote_detector"], "unavailable:withhold")
+        limit = (429, {"error": "rate_limited", "retry_after": 40})
+        long = self.long_result()
+        for queue, sent, band in (([limit], 1, (0, "rules")), ([None, limit], 2, None)):
+            with self.subTest(first_piece_refused=len(queue) == 1):
+                ner_gateway.CACHE.unlink(missing_ok=True)
+                self.srv.ner_texts.clear()
+                self.srv.ner_queue = list(queue)
+                out = self.post_tool(conf, stdout=long)
+                self.assertEqual(len(self.srv.ner_texts), sent, "no piece after rate_limited")
+                self.assertEqual(remote_layer.NER_DOWN["state"], "unavailable" if sent == 1 else "partial")
+                said = json.dumps(out)
+                self.assertNotIn("withheld", said, "not withheld, not cut")
+                shown = json.dumps(out["hookSpecificOutput"].get("updatedToolOutput", long))   # none: as it is
+                self.assertIn("lorem ipsum dolor " * 50, shown, "the result reaches the AI, masked by the rules")
+                self.assertIn("reached its limit per minute", out.get("systemMessage", ""), "a line under it")
+                got = remote_layer.NER_DOWN["band"]
+                self.assertEqual(got[1], "rules", "the band: the rest went to the AI with the rules")
+                if band is not None:
+                    self.assertEqual(got, band)
+        # the control: a first piece that fails for another reason withholds the long result whole, as before
+        ner_gateway.CACHE.unlink(missing_ok=True)
+        self.srv.ner_queue = [(503, {"error": "busy"})]
+        out = self.post_tool(conf, stdout=long)
+        self.assertIn("withheld", json.dumps(out))
+        self.assertNotIn("lorem ipsum dolor " * 50, json.dumps(out))
+
+    def test_a_gateway_text_over_max_chars_goes_in_pieces_only_with_the_field(self):
+        self.login(self.cfg)
+        long = TEXT + "\n" + ("lorem ipsum dolor " * 1200) + "\n" + TEXT
+        for meta, state in (({}, "too_long"), ({"ner_pieces": True}, "ok")):
+            with self.subTest(meta=meta):
+                det = self.fresh(**meta)
+                self.assertGreater(len(long), det.max_chars)
+                self.srv.ner_texts.clear()
+                spans, status = det.ask(long, [], time.monotonic() + 20)
+                self.assertEqual(status.state, state, status)
+                if state == "too_long":
+                    self.assertEqual((spans, self.srv.ner_texts), ([], []))
+                else:
+                    self.assertEqual(len(self.srv.ner_texts), 2, "two pieces")
+                    self.assertTrue(all(len(t) <= det.max_chars for t in self.srv.ner_texts))
+                    self.assertEqual([long[s:e] for s, e, _t, _sc in spans], ["Okafor", "Okafor"])
+
+    def test_the_status_says_whether_the_gateway_takes_pieces(self):
+        import json as _json
+        from maisecrets.home import CONFIG
+        old = CONFIG.read_text(encoding="utf-8") if CONFIG.exists() else None
+        self.addCleanup(lambda: CONFIG.write_text(old, encoding="utf-8") if old is not None
+                        else CONFIG.unlink(missing_ok=True))
+        CONFIG.write_text(_json.dumps(self.cfg), encoding="utf-8")
+        self.login(self.cfg)
+        for meta, want in (({}, "long texts: over 20,000 characters the rules alone (this gateway takes no pieces); "
+                                "each request waits up to 3,000 ms"),
+                           ({"ner_pieces": True, "ner_deadline_ms": 5000},
+                            "long texts: in pieces of 20,000 characters (the gateway admits pieces); each request "
+                            "waits up to 5,500 ms")):
+            with self.subTest(meta=meta):
+                self.srv.ner_meta = meta
+                ner_gateway.CACHE.unlink(missing_ok=True)
+                facts: dict = {}
+                code, lines = ner_setup.report(self.cfg["remote_detector"], 0.0, facts)
+                self.assertEqual(code, 0, lines)
+                self.assertIn(want, lines)
+                self.assertIs(facts["pieces"], bool(meta))
 
     def test_a_login_without_the_name_scope_gives_the_reason_and_sends_nothing(self):
         self.older_login()
@@ -472,7 +646,7 @@ class GatewaySourceTests(unittest.TestCase):
         for text in ("/maisecrets:ner prompts on", "/maisecrets:ner prompts off"):
             self.assertEqual(ner_setup.parse(text), "other:" + text[16:])
 
-    def post_tool(self, conf: dict, tool: str = "Bash", **extra) -> dict:
+    def post_tool(self, conf: dict, tool: str = "Bash", stdout: str = TEXT, **extra) -> dict:
         import json
         from maisecrets import hooks
         from maisecrets.home import CONFIG
@@ -480,7 +654,7 @@ class GatewaySourceTests(unittest.TestCase):
         self.addCleanup(lambda: CONFIG.write_text(old, encoding="utf-8") if old is not None
                         else CONFIG.unlink(missing_ok=True))
         CONFIG.write_text(json.dumps({**self.cfg, "remote_detector": conf}), encoding="utf-8")
-        response = ({"stdout": TEXT, "stderr": "", "interrupted": False, "isImage": False} if tool == "Bash"
+        response = ({"stdout": stdout, "stderr": "", "interrupted": False, "isImage": False} if tool == "Bash"
                     else {"type": "text", "file": {"filePath": "/w/notes.txt", "content": TEXT}})
         return hooks._post_tool_guarded_rest({"hook_event_name": "PostToolUse", "session_id": "s-ner-gw",
                                                "tool_name": tool, "tool_input": {"command": "cat notes.txt"},

@@ -722,6 +722,54 @@ SCENARIOS = {
         # the model gets nothing, but no Python of maisecrets ran to scrub the tool's own record on disk
         "transcript_leak_is_a_known_gap": "the result hook and the mod's Python both failed",
     },
+    # A call that ran raises classic.PostToolUse or classic.PostToolUseFailure in the mod also when the maisecrets
+    # command hook of that event crashes, is not registered, or cannot start because the plugin folder moved during the
+    # call. The mod's second net passes an error unmasked only for a call that raised neither (a refusal): these four
+    # fail with LEAK if a failed command that ran were taken for one. The output of `false` is an error result
+    "failed_output_crash_mod_masks": {
+        "prompt": "print the env",
+        "plugin_copy": True, "crash_hook": "post-tool-failure",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env; false"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": [REF1],
+    },
+    "failed_output_hook_missing_mod_masks": {
+        "prompt": "print the env",
+        "plugin_copy": True, "drop_hook_event": "PostToolUseFailure",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env; false"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": [REF1],
+    },
+    # the folder moves while the command runs: PreToolUse ran, the result hook cannot start, and the mod's Python
+    # cannot start either, so the output is withheld with the text for an error (the command did run)
+    "failed_output_folder_moved_mid_call": {
+        "prompt": "print the env",
+        "plugin_copy": True,
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        # a script moves it (the client refuses a command that names the plugin folder as a sensitive file)
+        "files": {".env": f"TOKEN={MARK}\n", "move.sh": "mv ../plugin/maisecrets ../plugin/maisecrets.moved\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "bash move.sh; cat .env; false"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_in_requests": ["could not check the error text, so it is withheld"],
+        # the tool's own record on disk: no Python of maisecrets can run to scrub it
+        "transcript_leak_is_a_known_gap": "the plugin folder moved during the call",
+    },
+    # Code Mode: an inner call of the script fails and its result hook crashes; the script's output is checked
+    "code_mode_inner_failure_hook_crash": {
+        "prompt": "print the env",
+        "code_mode": True,
+        "plugin_copy": True, "crash_hook": "post-tool-failure",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "REPL", "input": {"code": "await $`cat .env; exit 3`.text(); 'unreachable'"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": ["\u27e6SECRET_c"],
+    },
     # the hooks watch of the mod: the prompt hook is not registered (a copy without it), so the prompt goes to the model
     # and leaves no row in hooks.log. The mod says it in one line. The Bash call keeps the session open past the watch
     "hooks_watch_prompt_hook_missing": {
@@ -1305,10 +1353,28 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # the client masks a failed output now: the workaround for this gap is dead weight (maisecrets/exit_wrap.py)
         fails.append(f"gap closed ({sc['upstream_leak_is_a_known_gap']}): the client replaces a failed output now; "
                      "drop the exit-0 wrap (maisecrets/exit_wrap.py) and update CLAUDE.md, the watch list")
-    for mark in ("[maisecrets: result checked]", "[maisecrets: result masked]"):
-        # the marker of the tool-result hook is the mod's alone (maisecrets/second_net.py): the mod takes it out
-        if mark in joined:
-            fails.append(f"the marker {mark!r} reached the model")
+    # the marker of the tool-result hook is the mod's alone (maisecrets/second_net.py): the mod takes it out
+    if re.search(r"\[maisecrets: result (?:checked|masked) [0-9a-f]{32}", joined):
+        fails.append("a marker of the result hook reached the model")
+    # the key of the marker goes to the mod alone: never into a request, hooks.log or the debug log of the client
+    key_file = home / "second_net.key"
+    if mod_loaded and any(dump.glob("*PostToolUse*.json")) and not key_file.exists() \
+            and sc.get("env", {}).get("MAISECRETS_TEST_FAULT") != "mod-result":
+        # the mod asks for a new key at its session start, and a marking hook makes one: a mod run whose result hooks
+        # ran leaves the key in the home, so the checks below never pass by skipping (not where the scenario breaks
+        # the mod's Python and the result hook on purpose)
+        fails.append("no key of the second net in the home, although the mod and a result hook ran")
+    if key_file.exists():
+        key = key_file.read_text(encoding="ascii", errors="replace").strip()
+        if os.name == "posix" and key_file.stat().st_mode & 0o077:
+            fails.append("the key of the marker is readable by others")
+        logs = [home / "hooks.log", *work.rglob("*.log"), *(Path(env["CLAUDE_CONFIG_DIR"]).rglob("*.txt")
+                                                           if env.get("CLAUDE_CONFIG_DIR") else [])]
+        seen = [str(f) for f in logs if f.is_file() and key and key in f.read_text(errors="ignore")]
+        if key and key in joined:
+            fails.append("the key of the marker reached the model")
+        if seen:
+            fails.append(f"the key of the marker stands in {seen}")
     if sc.get("report_sizes"):
         # what the hook got against what the model got (#105): measured, printed, not judged
         hook = [len(json.dumps(json.loads(pf.read_text(errors="ignore")).get("tool_response", "")))

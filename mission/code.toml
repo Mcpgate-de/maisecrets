@@ -128,7 +128,7 @@
 "maisecrets/server_values.py" = { controls = ["C27", "C31"] }
 "maisecrets/session_end.py" = { controls = ["C27"] }
 "maisecrets/settings.py" = { controls = ["C22", "C25"] }
-"maisecrets/shell_commands.py" = { controls = ["C6", "C18", "C22", "C27", "C32", "I3"] }
+"maisecrets/shell_commands.py" = { controls = ["C6", "C8", "C18", "C22", "C27", "C32", "I3"] }
 "maisecrets/show_values.py" = { controls = ["C32"] }
 "maisecrets/sources.py" = { controls = ["C26"] }
 "maisecrets/sref_client.py" = { controls = ["C31"] }

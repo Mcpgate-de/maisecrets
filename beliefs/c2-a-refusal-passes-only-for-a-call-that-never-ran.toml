@@ -2,10 +2,12 @@
 belief = "c2-a-refusal-passes-only-for-a-call-that-never-ran"
 control = "C2"
 serves = ["M1.2"]
-statement = "An error result passes the second net as a refusal only when the mod saw the call start and the call never ran (no tool.run) and no tool-result hook event came; an error with no such evidence is masked."
-runner = ["tests/mod.test.ts::an error with no state at all (a mod reload, a hook of its own that threw) is masked, not taken for a refusal"]
+statement = "An error result passes the second net unmasked only when the mod saw the call start (tool.call) and saw neither classic.PostToolUse nor classic.PostToolUseFailure for it, so the call never ran; an error of a call that ran (also with its result hook crashed, missing or unable to start) and an error with no state are masked."
+runner = ["tests/mod.test.ts::an error with no state at all (a mod reload, a hook of its own that threw) is masked, not taken for a refusal",
+          "tests/mod.test.ts::a call that ran and failed is masked: its PostToolUseFailure came, also when the hook beneath crashed",
+          "tests/mod.test.ts::an error whose call raised PostToolUse (no failure event) is masked too"]
 
 [proof]
 file = "claude-mod/maisecrets-mod.mjs"
-find = "const refused = (b) => b.is_error === true && stages.get(b.tool_use_id) === 'called' && !posts.has(b.tool_use_id)\n"
-replace = "const refused = (b) => b.is_error === true\n"
+find = "const refused = (b) => b.is_error === true && calls.has(b.tool_use_id) && !posts.has(b.tool_use_id)\n"
+replace = "const refused = (b) => b.is_error === true && calls.has(b.tool_use_id)\n"

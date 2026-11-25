@@ -1,0 +1,14 @@
+# c30a-a-gateway-gets-pieces-only-when-it-announces-them: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c30a-a-gateway-gets-pieces-only-when-it-announces-them"
+control = "C30a"
+serves = ["M6.4"]
+statement = "A gateway source gets a text longer than max_chars in pieces only when its metadata says ner_pieces as a JSON true; a string, a number or no field keeps such a text too_long and sends nothing, from a fresh discovery and from the cached one (#105)."
+runner = [
+  "tests/test_ner_gateway.py::GatewaySourceTests::test_pieces_go_to_the_gateway_only_when_it_announces_a_json_true",
+  "tests/test_ner_gateway.py::GatewaySourceTests::test_the_cached_metadata_keeps_both_fields_and_is_checked_again",
+]
+
+[proof]
+file = "maisecrets/ner_gateway.py"
+find = "    return v is True\n"
+replace = "    return bool(v)\n"
