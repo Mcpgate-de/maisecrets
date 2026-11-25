@@ -2627,8 +2627,16 @@ def post_tool(payload: dict) -> dict:
     layer = _remote_layer(cfg, response, binary, strip, scan_tool, payload.get("session_id"))
     _rl.note_result(layer)
 
+    from .second_net import hide_key, key_forms
+    net_forms = key_forms()
+
     def redact(s: str, rest: bool = False) -> str:
         nonlocal vault, resolved, short_server
+        if net_forms:
+            # the key of the mod's second net (second_net.key): a command that read it shows no key to the model
+            s, gone = hide_key(s, net_forms)
+            hit["n"] += len(gone)
+            values.extend(gone)
         if strip:
             # before the detector: a value spelled in tag characters goes with them, and no shape spans a gap
             s, gone, runs = strip_hidden(s)

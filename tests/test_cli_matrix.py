@@ -1396,8 +1396,24 @@ class HookEventTests(unittest.TestCase):
             self.assertEqual((self.sb.home / KEY_NAME).stat().st_mode & 0o777, 0o600)
         again = json.loads(self.sb.run("mod-result", stdin=json.dumps({"net_key": True})).stdout)
         self.assertEqual(again["net_key"], out["net_key"])
+        # a session start of the mod: a new key, which the hooks then use
+        new = json.loads(self.sb.run("mod-result", stdin=json.dumps({"net_key": "new"})).stdout)["net_key"]
+        self.assertNotEqual(new, out["net_key"])
+        self.assertEqual((self.sb.home / KEY_NAME).read_text().strip(), new)
+        # the result hook masks the key where a tool result shows it, with or without the mod
+        payload = {"tool_name": "Bash", "session_id": "S1", "prompt_id": "p", "tool_input": {"command": "x"},
+                   "tool_use_id": "toolu_01Key", "tool_response": {"stdout": f"k={new}", "stderr": ""}}
+        for env in (None, self.sb.env(MAISECRETS_MOD_NET="on")):
+            r = self.sb.run("post-tool", stdin=json.dumps(payload), env=env)
+            self.assertNotIn(new, r.stdout.lower() + r.stderr.lower())
+            self.assertIn("withheld", json.loads(r.stdout)["hookSpecificOutput"]["updatedToolOutput"]["stdout"])
+        log = self.sb.home / "hooks.log"
+        self.assertTrue(log.exists(), "the hook wrote its row, so the check below reads a real log")
+        for path in self.sb.home.rglob("*"):
+            if path.is_file() and path.name != KEY_NAME:
+                self.assertNotIn(new, path.read_text(encoding="utf-8", errors="replace").lower(), path.name)
         # only the literal true asks for the key: anything else is a masking question
-        for q in ({"net_key": 1}, {"net_key": "true"}):
+        for q in ({"net_key": 1}, {"net_key": "true"}, {"net_key": "NEW"}):
             with self.subTest(q=q):
                 self.assertNotIn(out["net_key"], self.sb.run("mod-result", stdin=json.dumps(q)).stdout)
 

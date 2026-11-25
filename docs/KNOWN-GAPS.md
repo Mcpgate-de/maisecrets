@@ -80,7 +80,10 @@ a to-do.
   cannot tell it from a tool that ran and failed. While a result hook runs,
   a command that another tool call starts at the same time inherits the
   variable `MAISECRETS_MOD_NET=on`; it is a flag, the proof is a keyed
-  hash, and its key stays in the maisecrets home.
+  hash, and its key stays in the maisecrets home. maisecrets refuses the
+  commands that name the key and masks it in tool output, and the mod
+  makes it new at each session start. An agent that hides the name of
+  the command on purpose can still read it and then write a proof line.
 - **The hooks watch tells, it does not block.** It needs the mod. When the
   hook cannot write `hooks.log` (a full disk, a home it cannot write), the
   line says that the hooks did not run although they did. Any program of yours

@@ -38,6 +38,11 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
                          r"mod-(?:values|reveal|settings|demo)\b"),
     # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
     ("the maisecrets guard", r"maisecrets-guard\.py"),     # guard.json sits in the home, covered above
+    # the key of the mod's second net (second_net.py): with it a command could write a marker that passes. Its file
+    # sits in the home (covered above); these are the routes through Python: net_key(), the module by any import
+    ("the key of the second net", r"\bnet_key\b|(?<![\w-])second_net\.key\b|\bmaisecrets\s*\.\s*second_net\b"
+                                  r"|\bimport\s+second_net\b|\bfrom\s+\.?\s*second_net\b"
+                                  r"|\bfrom\s+maisecrets\s+import\b[^\n;]*\bsecond_net\b"),
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]

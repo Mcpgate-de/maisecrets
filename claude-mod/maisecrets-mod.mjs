@@ -393,6 +393,7 @@ const lineAsMarkdown = (l) => l.split(/(⟦[^⟧\n]{1,140}⟧)/).map((part, i) =
 
 function registerShowValues(on) {
   on('session.start', async ($, e, next) => {
+    try { void renewKey($) } catch { /* the first marker asks for the key */ }
     try {
       try { noted.add(await $.session.id()) } catch { /* the first prompt asks */ }
       if (await askValues($, [])) $.ui.invalidate('ui.render')
@@ -1959,11 +1960,12 @@ function registerSettingsPane(on) {
 const RESULT_MS = 20000
 const POSTS_MAX = 500
 const posts = new Map()        // tool_use_id -> state: what the tool-result hooks answered, the oldest first
-// The form of a marker line; it counts only with the MAC of the call (verifyMark). The key lies in the maisecrets home,
-// which a Read tool or a Bash command of the session may not read (C8), and only the mod gets it from mod-result (a tool
-// call that names the entry is refused), so no text of a tool can carry a valid marker. Another plugin's hook that
-// runs as the person can read the home too and could write one: that is a program that runs as the person, the limit
-// that docs/THREAT-MODEL.md names for C2 and C30.
+// The form of a marker line; it counts only with the MAC of the call (verifyMark). The key lies in the maisecrets home
+// and is made anew at each start of the mod. The hooks refuse a tool call that names the home, the key, its module or
+// mod-result (C8, C22), and the result hook masks the key wherever it stands in a tool result, so a tool's text that
+// an ordinary agent caused carries no valid marker. Limits (docs/THREAT-MODEL.md, C2 and C22): an agent that evades
+// on purpose (a name built at run time, `M=mod-result; dispatch.py $M`) can read the key, and so can another plugin's
+// hook, a program that runs as the person; either could then write a marker that passes.
 // ` rest SHARE MODE`: the name check left a rest of this result (#105, B11), for the band below; no text of the result
 const MARK_RE = /^\[maisecrets: result (checked|masked) ([0-9a-f]{32})(?: ([0-9a-f]{16}))?(?: rest (\d{1,2}) (rules|cut|whole|long))?\]$/
 const CALL_ID = /^[A-Za-z0-9_-]{1,128}$/
@@ -1981,6 +1983,9 @@ function noteRefused(e) {
 }
 
 const refused = (b) => b.is_error === true && refusals.has(b.tool_use_id) && !posts.has(b.tool_use_id)
+// an error result (is_error): the call may never have run (a refusal), so its text says nothing of a run
+const WITHHELD_ERROR = '[maisecrets: the tool call ended with an error, but maisecrets could not check the error text, ' +
+  'so it is withheld. /maisecrets status shows why.]'
 const WITHHELD = '[maisecrets: the tool ran and finished, but maisecrets could not check its output, so the output ' +
   'is withheld. Do not run the tool again to see it; /maisecrets status shows why.]'
 const MASKED_NOTE = '[maisecrets masked values in this tool result (its result hook did not check it). The tool ran ' +
@@ -1996,13 +2001,14 @@ function notePost(e, state) {
   if (posts.size > POSTS_MAX) posts.delete(posts.keys().next().value)
 }
 
-// The key of the marker: once per mod process from Python (mod-result, the request {"net_key": true}), 32 bytes. It
-// stays in this process: no log, no state, no text of the model. No answer: null, and the next marker asks again
-// (until then every result goes to the second net)
+// The key of the marker: from Python (mod-result), 32 bytes. At each session start the mod asks for a new one
+// (renewKey, the request {"net_key": "new"}), then for the current one ({"net_key": true}) when a marker does not
+// verify. It stays in this process: no log, no state, no text of the model. No answer: null, and the next marker asks
+// again (until then every result goes to the second net)
 let netKey = null              // a promise of the key bytes or null
-async function fetchKey($) {
+async function fetchKey($, fresh = false) {
   try {
-    const r = await runResult($, JSON.stringify({ net_key: true }), KEY_MS)
+    const r = await runResult($, JSON.stringify({ net_key: fresh ? 'new' : true }), KEY_MS)
     const a = r ? JSON.parse(r.stdout) : null
     if (!a || a.maisecrets !== 'mod-result' || typeof a.net_key !== 'string' || !/^[0-9a-f]{64}$/.test(a.net_key)) {
       return null
@@ -2016,6 +2022,11 @@ async function fetchKey($) {
 }
 function keyOf($) {
   if (netKey === null) netKey = fetchKey($)
+  return netKey
+}
+// a session starts: the key of the last one goes, so a key that stood in its output is worth nothing now
+function renewKey($) {
+  netKey = fetchKey($, true)
   return netKey
 }
 
@@ -2107,7 +2118,7 @@ async function postState(tag, r) {
 }
 
 // `on` goes to the hooks only while the settings hooks of a tool result run (calls run in parallel: it stays set while
-// any of them runs). It is a flag only: the proof is the MAC, whose key no command of the session can read
+// any of them runs). It is a flag only: the proof is the MAC under the key of the home (see MARK_RE for its limits)
 let marksOpen = 0
 async function openMarks($) {
   marksOpen += 1
@@ -2140,7 +2151,7 @@ function withTexts(block, texts, note) {
 }
 
 // an unchecked result: the text WITHHELD alone, its media dropped too (a media block may be dropped, not changed)
-const withheld = (block) => ({ ...block, content: WITHHELD })
+const withheld = (block) => ({ ...block, content: block?.is_error === true ? WITHHELD_ERROR : WITHHELD })
 
 // the tool_result blocks of a row that must go to Python: every one but those with positive evidence
 function dueBlocks(e) {

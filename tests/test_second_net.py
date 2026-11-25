@@ -143,8 +143,10 @@ class KeyTests(unittest.TestCase):
         with self.assertRaises(OSError):
             second_net.net_key()
 
-    def test_the_key_goes_into_no_answer_of_a_hook_and_no_log(self):
-        # the hooks write the MAC only; mod-result gives the key on stdout to the mod alone
+    def test_the_key_goes_into_no_answer_of_a_hook(self):
+        # the hooks write the MAC only; mod-result gives the key on stdout to the mod alone. That no log holds it is
+        # checked where real hooks write their logs: test_cli_matrix (the dispatcher) and the harness (hooks.log, the
+        # client's debug log, every request body)
         key = second_net.net_key()
         with mock.patch.dict(os.environ, {second_net.ENV: second_net.ON}):
             h = MarkAnswersTests.hooks(None)
@@ -154,9 +156,51 @@ class KeyTests(unittest.TestCase):
         self.assertIn("[maisecrets: result checked", text)
         self.assertNotIn(key.hex(), text)
         self.assertNotIn(key.hex()[:32], text)
-        for p in self.home.iterdir():
-            if p.name != second_net.KEY_NAME:
-                self.assertNotIn(key.hex(), p.read_text(encoding="utf-8", errors="replace"), p.name)
+
+    def test_a_new_key_replaces_the_old_one(self):
+        # the mod asks for a new key at each session start: a key that leaked into the last session counts no more
+        old = second_net.net_key()
+        new = second_net.new_net_key()
+        self.assertNotEqual(new, old)
+        self.assertEqual(second_net.net_key(), new)
+        if os.name == "posix":
+            self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFOs")
+    def test_a_fifo_in_place_of_the_key_file_is_refused_at_once(self):
+        # O_NONBLOCK: the open does not wait for a writer; S_ISREG: only a regular file is a key
+        self.home.mkdir(exist_ok=True)
+        os.mkfifo(self.path)
+        import time
+        t0 = time.monotonic()
+        with self.assertRaises(OSError):
+            second_net.net_key()
+        self.assertLess(time.monotonic() - t0, 2.0)
+        self.assertEqual(second_net.key_forms(), [])
+
+    def test_the_result_hook_masks_the_key_in_each_spelling(self):
+        import base64
+        key = second_net.net_key()
+        forms = second_net.key_forms()
+        self.assertEqual(forms[0], key.hex())
+        for shown in (key.hex(), key.hex().upper(), base64.b64encode(key).decode(),
+                      base64.urlsafe_b64encode(key).decode().rstrip("=")):
+            with self.subTest(shown=shown[:6]):
+                text, found = second_net.hide_key(f"key: {shown} end", forms)
+                self.assertEqual(text, f"key: {second_net.KEY_WITHHELD} end")
+                self.assertTrue(found)
+        self.assertEqual(second_net.hide_key("nothing here", forms), ("nothing here", []))
+
+    def test_post_tool_masks_the_key_of_the_home_in_a_tool_result(self):
+        # the route of a command that read the key anyway (an evasion of the refusal, C22): the model never sees it
+        from maisecrets import hooks
+        key = second_net.net_key().hex()
+        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
+                               "tool_input": {"command": "x"},
+                               "tool_response": {"stdout": f"{key}\n", "stderr": key.upper()}})
+        text = repr(out)
+        self.assertNotIn(key, text.lower())
+        self.assertIn(second_net.KEY_WITHHELD, out["hookSpecificOutput"]["updatedToolOutput"]["stdout"])
 
 
 class MarkAnswersTests(unittest.TestCase):
@@ -198,6 +242,23 @@ class MarkAnswersTests(unittest.TestCase):
             second_net.mark_answers(full, "post-tool")
             full.post_tool({"tool_response": "x", "tool_use_id": CALL})
             self.assertEqual(full.seen[0]["hookSpecificOutput"]["additionalContext"],
+                             f"[maisecrets: result checked {mac('checked')}]")
+
+    def test_the_key_is_read_before_the_handler_runs_never_at_the_answer(self):
+        # the watchdog's answer and a crash's do no file work: the key is read once, when the hook process starts
+        calls = []
+
+        def key():
+            calls.append(1)
+            return KEY
+        with mock.patch.dict(os.environ, {second_net.ENV: second_net.ON}), \
+                mock.patch.object(second_net, "net_key", side_effect=key):
+            h = self.hooks()
+            second_net.mark_answers(h, "post-tool")
+            self.assertEqual(len(calls), 1)
+            with mock.patch.object(second_net, "net_key", side_effect=AssertionError("file work at the answer")):
+                h.post_tool({"tool_response": "x", "tool_use_id": CALL})
+            self.assertEqual(h.seen[0]["hookSpecificOutput"]["additionalContext"],
                              f"[maisecrets: result checked {mac('checked')}]")
 
     def test_no_key_means_no_marker(self):

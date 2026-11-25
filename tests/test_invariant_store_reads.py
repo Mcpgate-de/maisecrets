@@ -336,10 +336,19 @@ class PopulationTests(unittest.TestCase):
         for tool, tool_input in (("Bash", {"command": "cat ~/.maisecrets/" + KEY_NAME}),
                                  ("Bash", {"command": "cat $MAISECRETS_HOME/" + KEY_NAME}),
                                  ("Bash", {"command": "cat " + key}),
+                                 # the routes through Python (security review, M1): the function and the module
+                                 ("Bash", {"command": 'python3 -c "from maisecrets.second_net import net_key; '
+                                                      'print(net_key().hex())"'}),
+                                 ("Bash", {"command": "python3 -c 'import maisecrets.second_net as s; s.net_key()'"}),
+                                 ("Bash", {"command": "python3 -c 'from maisecrets import second_net'"}),
+                                 ("Bash", {"command": "cd plugin && python3 -c 'import second_net'"}),
+                                 ("PowerShell", {"command": "py -3 -c \"from maisecrets.second_net import net_key\""}),
                                  ("Read", {"file_path": key}),
                                  ("Grep", {"pattern": "a", "path": key})):
             with self.subTest(tool=tool, tool_input=tool_input):
                 self.assertTrue(deny(pre(tool, tool_input, "/tmp")), f"{tool}: {tool_input}")
+        # the tests of the module itself run: the module's test file is no route to the key
+        self.assertFalse(deny(pre("Bash", {"command": "python3 -m unittest tests.test_second_net"}, "/tmp")))
 
     def test_every_tool_that_reads_a_path_is_in_the_matcher(self):
         hooks_json = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))

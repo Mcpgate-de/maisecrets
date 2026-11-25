@@ -15,11 +15,13 @@ without such a marker goes to mask_result (`hooks/dispatch.py mod-result`).
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import os
 import re
 import secrets
+import stat
 
 from .placeholder import KEY_RE
 
@@ -104,24 +106,42 @@ def _make_key(path, replace: bool) -> None:
 
 
 def _read_key(path) -> str:
-    """The text of the key file, no link followed; a key file that others may read gets mode 600 again."""
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    """The text of the key file: no link followed, no wait on a FIFO or a device (O_NONBLOCK), a regular file only. A
+    key file that others may read gets mode 600 again."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
-        if os.name == "posix" and os.fstat(fd).st_mode & 0o077:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError("the key of the second net is no regular file")
+        if os.name == "posix" and st.st_mode & 0o077:
             os.fchmod(fd, 0o600)
         return os.read(fd, 256).decode("ascii", "replace").strip()
     finally:
         os.close(fd)
 
 
-def net_key() -> bytes:
-    """The key of the marker: 32 random bytes in the maisecrets home (KEY_NAME, mode 600), made at the first use. A
-    damaged key file is made anew (the mod then asks for the key again: a marker with the old key counts as none).
-    Raises when the key can neither be read nor made: the hook then writes no marker, and the mod masks the result.
-    The key goes to no log, no answer of a hook and no text of the model: only to the mod, on stdout of mod-result."""
+def _key_path():
     from .home import HOME, _check_home
     _check_home()
-    path = HOME / KEY_NAME
+    return HOME / KEY_NAME
+
+
+def new_net_key() -> bytes:
+    """A new key in place of the old one: the mod asks for it at each session start (mod-result, {"net_key": "new"}),
+    so a key that leaked into a session's output is worth nothing in the next one. A hook that marks with the old key
+    at that moment gives a marker that counts as none: the mod masks that result and asks for the key again."""
+    _make_key(_key_path(), replace=True)
+    return net_key()
+
+
+def net_key() -> bytes:
+    """The key of the marker: 32 random bytes in the maisecrets home (KEY_NAME, mode 600), made at the first use and
+    anew at each start of the mod (new_net_key). A damaged key file is made anew (the mod then asks for the key again:
+    a marker with the old key counts as none). Raises when the key can neither be read nor made: the hook then writes
+    no marker, and the mod masks the result. The key goes to no log and no answer of a hook: only to the mod, on stdout
+    of mod-result. A command of the agent that names it is refused (shell_commands, "the key of the second net"), and
+    the result hook masks it wherever it stands in a tool result (hide_key)."""
+    path = _key_path()
     for replace in (False, True):
         try:
             text = _read_key(path)
@@ -133,6 +153,39 @@ def net_key() -> bytes:
         if not replace:
             _make_key(path, replace=True)
     raise ValueError("second net key")
+
+
+KEY_WITHHELD = "[maisecrets: the key of its second net, withheld]"
+
+
+def key_forms() -> list[str]:
+    """The spellings of the current key that a tool result could show: hex (either case: the replace ignores case),
+    base64 and base64url without padding. Read only when the file exists, never made here; [] on any failure."""
+    try:
+        path = _key_path()
+        if not os.path.lexists(path):
+            return []
+        text = _read_key(path)
+    except Exception:  # noqa: BLE001 - no key: nothing to hide
+        return []
+    if not _KEY_HEX.fullmatch(text):
+        return []
+    raw = bytes.fromhex(text)
+    return [text, base64.b64encode(raw).decode("ascii").rstrip("="),
+            base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")]
+
+
+def hide_key(text: str, forms: list[str]) -> tuple[str, list[str]]:
+    """``text`` with each spelling of the key (key_forms) replaced by KEY_WITHHELD, and the spellings it held (for the
+    transcript scrub, as a stored value's). The hex is matched in any case."""
+    found = []
+    for form in forms:
+        # base64 with its padding, if any
+        rx = re.compile(re.escape(form), re.IGNORECASE) if form == forms[0] else re.compile(re.escape(form) + "=*")
+        if rx.search(text):
+            found.extend(dict.fromkeys(m.group(0) for m in rx.finditer(text)))
+            text = rx.sub(KEY_WITHHELD, text)
+    return text, found
 
 
 def mac(key: bytes, kind: str, call_id: str, digest: str, rest: str) -> str:
@@ -169,6 +222,12 @@ def mark_answers(hooks_module, event: str) -> None:
     no marker, and so does every answer when the key cannot be read: the mod then masks the result."""
     if os.environ.get(ENV) != ON or event not in _EVENTS:
         return
+    # the key is read here, before the handler runs and outside the lock of the answer: the watchdog's answer and a
+    # crash's do no file work. No key: no marker
+    try:
+        key = net_key()
+    except Exception:  # noqa: BLE001 - no key: no marker, and the mod masks the result
+        return
     scanned = {"v": False, "id": None}
     name = "post_tool" if event == "post-tool" else "post_tool_failure"
     handler = getattr(hooks_module, name)
@@ -186,8 +245,8 @@ def mark_answers(hooks_module, event: str) -> None:
         if not scanned["v"]:
             return obj
         try:
-            return mark(obj, event, net_key(), scanned["id"])
-        except Exception:  # noqa: BLE001 - no key: no marker, and the mod masks the result
+            return mark(obj, event, key, scanned["id"])
+        except Exception:  # noqa: BLE001 - no marker, and the mod masks the result
             return obj
     hooks_module._out = lambda obj: write(marked(obj))
 

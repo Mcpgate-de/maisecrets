@@ -1,0 +1,11 @@
+# c2-each-session-start-makes-a-new-key: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-each-session-start-makes-a-new-key"
+control = "C2"
+serves = ["M1.2"]
+statement = "At each session start the mod asks Python for a new key of the marker, so a key that stood in the output of an earlier session makes no marker pass in this one."
+runner = ["tests/mod.test.ts::the key is asked for once per mod process, and a key the home made anew is asked for again"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "    try { void renewKey($) } catch { /* the first marker asks for the key */ }\n"
+replace = "\n"

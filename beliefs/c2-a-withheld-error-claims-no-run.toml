@@ -1,0 +1,11 @@
+# c2-a-withheld-error-claims-no-run: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-a-withheld-error-claims-no-run"
+control = "C2"
+serves = []
+statement = "When the second net cannot check an error result, it withholds it with a text for an error, which does not say that the tool ran: the call may have been refused."
+runner = ["tests/mod.test.ts::an error result that Python could not check is withheld with a text that claims no run"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "const withheld = (block) => ({ ...block, content: block?.is_error === true ? WITHHELD_ERROR : WITHHELD })\n"
+replace = "const withheld = (block) => ({ ...block, content: WITHHELD })\n"

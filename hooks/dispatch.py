@@ -165,11 +165,12 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-result":
     try:
         if os.environ.get("MAISECRETS_TEST_FAULT") == "mod-result":   # harness: post_tool_crash_mod_fails
             raise RuntimeError("fault injected for the harness")
-        from maisecrets.second_net import mask_result, net_key  # noqa: E402
+        from maisecrets.second_net import mask_result, net_key, new_net_key  # noqa: E402
         payload = json.load(sys.stdin)
-        if isinstance(payload, dict) and payload.get("net_key") is True:
-            # the key of the hooks' marker, for the mod alone (the same refusal keeps a tool call from this entry)
-            answer = {"net_key": net_key().hex()}
+        if isinstance(payload, dict) and payload.get("net_key") in (True, "new"):
+            # the key of the hooks' marker, for the mod alone (the same refusal keeps a tool call from this entry);
+            # "new": the mod starts, and the key of the last session goes
+            answer = {"net_key": (new_net_key() if payload["net_key"] == "new" else net_key()).hex()}
         else:
             answer = mask_result(payload if isinstance(payload, dict) else {})
     except Exception:  # noqa: BLE001 - no traceback, no value in an error text

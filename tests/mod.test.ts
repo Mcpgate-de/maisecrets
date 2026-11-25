@@ -1664,8 +1664,8 @@ function netWorld(on, session, run, opts: any = {}) {
   on('process.run', ($, e) => {
     let q: any = null
     try { q = e.argv.includes('mod-result') ? JSON.parse(e.init.stdin) : null } catch { q = null }
-    if (q?.net_key === true) {
-      opts.keyAsks?.push(e)
+    if (q?.net_key === true || q?.net_key === 'new') {
+      opts.keyAsks?.push(q.net_key)
       if (home.key === null) return { value: { exitCode: 1, stderr: '', stdout: '' } }
       return resultAnswer({ net_key: hexOf(home.key) })
     }
@@ -1788,6 +1788,16 @@ test('no answer from Python withholds the result, and the row is still stored: t
   await post($, 'tu-net-4')
   const r = await $.session.append(resultRow('tu-net-4', [{ type: 'text', text: RAW }]))
   expect(stored(r)).toBe(WITHHELD_TEXT)
+})
+
+test('an error result that Python could not check is withheld with a text that claims no run', async ($, on) => {
+  // the call may never have run (a refusal beneath the mod): "the tool ran and finished" would be wrong
+  netWorld(on, 'net-4b', () => ({ value: { exitCode: 1, stderr: 'boom', stdout: '' } }))
+  const r = await $.session.append(resultRow('tu-net-4b', 'PreToolUse:Bash hook error: refused', 'Bash', true))
+  expect(stored(r)).toBe('[maisecrets: the tool call ended with an error, but maisecrets could not check the error ' +
+    'text, so it is withheld. /maisecrets status shows why.]')
+  expect(stored(r)).not.toContain('ran and finished')
+  expect(r.message.content[0].is_error).toBe(true)
 })
 
 test('an answer of the wrong length withholds the result', async ($, on) => {
@@ -2012,21 +2022,26 @@ test('the key is asked for once per mod process, and a key the home made anew is
   const home: any = { key: KEY_A }
   netWorld(on, 'net-18', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
     { post: (n) => ({ additionalContext: [CHECKED(n)] }), home, keyAsks })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', () => ({ value: undefined }))
+  // a session start drops the key the mod held (from an earlier test too) and asks for a new one
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true } as any)
+  expect(keyAsks).toEqual(['new'])
   await post($, 'tu-net-18-1')
   await post($, 'tu-net-18-2')
   expect(stored(await $.session.append(resultRow('tu-net-18-2')))).toBe(RAW)
-  const before = keyAsks.length
-  expect(before).toBeLessThanOrEqual(1)                 // one ask (a mod that knew the key from an earlier test: none)
+  expect(keyAsks).toEqual(['new'])                      // the markers of the session use the key it got
   // the home's key is made anew (a damaged file): the hook signs with the new key, the mod still holds the old one
   home.key = KEY_B
   await post($, 'tu-net-18-3')
   expect(stored(await $.session.append(resultRow('tu-net-18-3')))).toContain(MASKED_TEXT)   // the stale key: masked
   await post($, 'tu-net-18-4')
   expect(stored(await $.session.append(resultRow('tu-net-18-4')))).toBe(RAW)               // asked again: it passes
-  expect(keyAsks.length).toBe(before + 1)
+  expect(keyAsks).toEqual(['new', true])
   expect(asks(runs).length).toBe(1)
   home.key = KEY_A
-  await post($, 'tu-net-18-5')                                                            // back for the next tests
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true } as any)   // for the next tests
+  expect(keyAsks).toEqual(['new', true, 'new'])
 })
 
 test('no key from Python: every result goes to the second net, and the key is asked for again', async ($, on) => {

@@ -1310,6 +1310,12 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         fails.append("a marker of the result hook reached the model")
     # the key of the marker goes to the mod alone: never into a request, hooks.log or the debug log of the client
     key_file = home / "second_net.key"
+    if mod_loaded and any(dump.glob("*PostToolUse*.json")) and not key_file.exists() \
+            and sc.get("env", {}).get("MAISECRETS_TEST_FAULT") != "mod-result":
+        # the mod asks for a new key at its session start, and a marking hook makes one: a mod run whose result hooks
+        # ran leaves the key in the home, so the checks below never pass by skipping (not where the scenario breaks
+        # the mod's Python and the result hook on purpose)
+        fails.append("no key of the second net in the home, although the mod and a result hook ran")
     if key_file.exists():
         key = key_file.read_text(encoding="ascii", errors="replace").strip()
         if os.name == "posix" and key_file.stat().st_mode & 0o077:

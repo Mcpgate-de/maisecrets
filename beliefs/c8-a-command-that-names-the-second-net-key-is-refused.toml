@@ -1,0 +1,11 @@
+# c8-a-command-that-names-the-second-net-key-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c8-a-command-that-names-the-second-net-key-is-refused"
+control = "C8"
+serves = ["M4.1"]
+statement = "A shell command that names the key of the second net, the function net_key or the module second_net (python3 -c 'from maisecrets.second_net import net_key' and its spellings) is refused, so an ordinary agent cannot read the key that makes a marker pass."
+runner = ["tests/test_invariant_store_reads.py::PopulationTests::test_the_key_of_the_second_net_marker_is_refused_to_every_read_of_the_agent"]
+
+[proof]
+file = "maisecrets/shell_commands.py"
+find = "    (\"the key of the second net\", r\"\\bnet_key\\b|(?<![\\w-])second_net\\.key\\b|\\bmaisecrets\\s*\\.\\s*second_net\\b\"\n"
+replace = "    (\"the key of the second net\", r\"(?!x)x\"\n"
