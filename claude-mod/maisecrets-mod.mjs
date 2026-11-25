@@ -393,6 +393,7 @@ const lineAsMarkdown = (l) => l.split(/(⟦[^⟧\n]{1,140}⟧)/).map((part, i) =
 
 function registerShowValues(on) {
   on('session.start', async ($, e, next) => {
+    try { void renewKey($) } catch { /* the first marker asks for the key */ }
     try {
       try { noted.add(await $.session.id()) } catch { /* the first prompt asks */ }
       if (await askValues($, [])) $.ui.invalidate('ui.render')
@@ -1861,20 +1862,8 @@ function registerSettingsPane(on) {
   })
   // a tool call or a turn of this session runs the hooks: the open panel asks for the status again. Neither hook
   // changes the call or the answer, and a failure of its own never reaches them
-  // the result before PostToolUse masked it: a reference of a server that is not bound yet is masked whole there
-  // (placeholder.whole_references), and the connector that showed it must still be asked (#91)
-  on('tool.run', async ($, e, next) => {
-    noteStage(e, 'ran')        // the second net: the call was allowed and runs (never raised for a refusal)
-    const r = await next(e)
-    try { noteReferences(e, r) } catch { /* a failure of its own never reaches the result */ }
-    return r
-  }).catch(async ($, e, next) => {
-    // the tool ran and failed: its failure stands, the tool never runs a second time
-    if (next.called) throw next.error ?? new Error('maisecrets: the tool failed')
-    return next(e)
-  })
   on('tool.call', async ($, e, next) => {
-    noteStage(e, 'called')     // the second net: this mod saw the call start
+    try { noteCalled(e) } catch { /* no note: an error of this call is masked */ }
     // a pairing runs: its nonce in any call but the mod's own taints it, and that call never runs (#91)
     if (pairings.size > 0) {
       let hit = true
@@ -1886,7 +1875,7 @@ function registerSettingsPane(on) {
     const r = await next(e)
     // the nonce in the result of any call but the mod's own taints the pairing too (a connector that echoes it)
     if (pairings.size > 0) try { notePairingUse(JSON.stringify(r ?? null), e) } catch { /* see the call above */ }
-    noteReferences(e, r)
+    try { noteReferences(e, r) } catch { /* a failure of its own never reaches the result */ }
     try {
       // a call another hook refused may not have reached PreToolUse: it is not kept
       if (start !== null && (!r || r.deny === undefined)) {
@@ -1942,22 +1931,29 @@ function registerSettingsPane(on) {
 // tool-result) and masks a result that no PostToolUse hook of maisecrets checked, through dispatch.py mod-result.
 //
 // It decides from positive evidence only. While the settings hooks of PostToolUse and PostToolUseFailure run, the mod
-// sets MAISECRETS_MOD_NET to NET_NONCE, a random nonce of this process; the maisecrets tool-result hook then ends its
-// additionalContext with a marker line (maisecrets/second_net.py): `masked NONCE HASH` when it replaced the output
-// (HASH: of that output's texts), else `checked NONCE`, and only after it scanned a result. The mod reads the marker in
-// the classic answer (classic.PostToolUse, which runs the settings hooks as `next`): only as the last line of an entry
-// and only with its own nonce, so a copied text or another plugin's entry cannot stand in. It takes the marker out, so
-// it never reaches the model. Per call:
+// sets MAISECRETS_MOD_NET to `on`; the maisecrets tool-result hook then ends its additionalContext with a marker line
+// (maisecrets/second_net.py): `masked MAC HASH` when it replaced the output (HASH: of that output's texts), else
+// `checked MAC`, and only after it scanned a result. MAC is an HMAC-SHA256 with the key of the maisecrets home
+// (second_net.net_key, mode 600; the mod gets it once from mod-result) over the kind, the call's tool_use_id, the hash
+// and the rest. The mod reads the marker in the classic answer (classic.PostToolUse, which runs the settings hooks as
+// `next`): only as the last line of an entry and only with the MAC it computes for that call, so a copied text, a
+// marker of another call or another plugin's entry cannot stand in. It takes every marker line out, so none reaches
+// the model. Per call:
 //   masked:  the masked marker, no block, and the output that reaches the mod has the hash the hook gave: as it is
 //   checked: the checked marker, no block, no replaced output: as it is, no Python
 //   every other answer is masked: no marker (no maisecrets hook ran for this call), a block (a failed hook), a replaced
 //   output with another hash or with the checked marker (another plugin's hook replaced it), PostToolUseFailure (its
 //   answer cannot replace the output, anthropics/claude-code#97278), and a call with no state at all (a mod reload, a
-//   hook of its own that threw, the REPL of Code Mode, which raises no classic hook, tool.call or tool.run here)
-//   refused: an error of a call this mod saw start (tool.call) that never ran (no tool.run, which the engine never raises
-//   for a refusal) and that raised no tool-result hook: no output of the tool, it goes on as it is. Limit: an error that
-//   another mod answers itself without `next` (its tool.call below this one, or its tool.run above it) looks like a
-//   refusal here
+//   hook of its own that threw, the REPL of Code Mode, which raises no classic hook or tool.call here)
+//   refused: an error of a call whose start this mod saw (tool.call) and for which neither classic.PostToolUse nor
+//   classic.PostToolUseFailure came: the call never ran (a PreToolUse refusal, a rule, the person's no, the engine's
+//   onFailure block, this mod's pairing guard), so the row holds no output of a tool, and it goes on as it is (the
+//   engine's text of a moved plugin folder and the guard's reason must reach the model when no Python can run). A call
+//   that ran raises one of the two, also when the maisecrets command hooks crash, are missing or cannot start (the
+//   harness: failed_output_*); its error takes the strict path. tool.call alone cannot tell: a refusal beneath it
+//   returns the same { result, isError } as a tool that ran and failed (claude plugin test, Claude Code 2.1.331).
+//   Limit: an error that another mod answers itself in place of the tool (its tool.call or tool.run below this one)
+//   raises no classic event and passes as a refusal here
 //
 // Fail closed without a lock: when Python gives no well-formed answer, or this hook fails, the row is stored with the
 // text WITHHELD in place of each unchecked result. The row is always stored and the turn goes on, so the session never
@@ -1966,31 +1962,32 @@ function registerSettingsPane(on) {
 const RESULT_MS = 20000
 const POSTS_MAX = 500
 const posts = new Map()        // tool_use_id -> state: what the tool-result hooks answered, the oldest first
-// the nonce of this mod process: the hooks put it into their marker, so no text of a tool can stand in for one (it
-// never appears in an output: the variable is set only while the tool-result hooks run). Another plugin's hook that
-// runs in those moments inherits it and could write a marker: that is a program that runs as the person, the limit
-// that docs/THREAT-MODEL.md names for C2 and C30
-const NET_NONCE = (() => {
-  const a = new Uint8Array(16)
-  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(a)
-  else for (let i = 0; i < 16; i++) a[i] = Math.floor(Math.random() * 256)
-  return [...a].map(n => n.toString(16).padStart(2, '0')).join('')
-})()
+// The form of a marker line; it counts only with the MAC of the call (verifyMark). The key lies in the maisecrets home
+// and is made anew at each start of the mod. The hooks refuse a tool call that names the home, the key, its module or
+// mod-result (C8, C22), and the result hook masks the key wherever it stands in a tool result, so a tool's text that
+// an ordinary agent caused carries no valid marker. Limits (docs/THREAT-MODEL.md, C2 and C22): an agent that evades
+// on purpose (a name built at run time, `M=mod-result; dispatch.py $M`) can read the key, and so can another plugin's
+// hook, a program that runs as the person; either could then write a marker that passes.
 // ` rest SHARE MODE`: the name check left a rest of this result (#105, B11), for the band below; no text of the result
-const MARK_RE = new RegExp(`^\\[maisecrets: result (checked|masked) ${NET_NONCE}(?: ([0-9a-f]{16}))?` +
-  '(?: rest (\\d{1,2}) (rules|cut|whole|long))?\\]$')
+const MARK_RE = /^\[maisecrets: result (checked|masked) ([0-9a-f]{32})(?: ([0-9a-f]{16}))?(?: rest (\d{1,2}) (rules|cut|whole|long))?\]$/
+const CALL_ID = /^[A-Za-z0-9_-]{1,128}$/
+const KEY_MS = 5000
 const PASSES = new Set(['masked', 'checked'])
-const stages = new Map()       // tool_use_id -> 'called' (tool.call) or 'ran' (tool.run), the oldest first
+// tool_use_ids of the calls whose start this mod saw (tool.call), the oldest first
+const calls = new Set()
 
-function noteStage(e, stage) {
+function noteCalled(e) {
   const id = e?.tool_use_id
   if (typeof id !== 'string' || !id) return
-  stages.delete(id)
-  stages.set(id, stage)
-  if (stages.size > POSTS_MAX) stages.delete(stages.keys().next().value)
+  calls.delete(id)
+  calls.add(id)
+  if (calls.size > POSTS_MAX) calls.delete(calls.values().next().value)
 }
 
-const refused = (b) => b.is_error === true && stages.get(b.tool_use_id) === 'called' && !posts.has(b.tool_use_id)
+const refused = (b) => b.is_error === true && calls.has(b.tool_use_id) && !posts.has(b.tool_use_id)
+// an error result (is_error): the call may never have run (a refusal), so its text says nothing of a run
+const WITHHELD_ERROR = '[maisecrets: the tool call ended with an error, but maisecrets could not check the error text, ' +
+  'so it is withheld. /maisecrets status shows why.]'
 const WITHHELD = '[maisecrets: the tool ran and finished, but maisecrets could not check its output, so the output ' +
   'is withheld. Do not run the tool again to see it; /maisecrets status shows why.]'
 const MASKED_NOTE = '[maisecrets masked values in this tool result (its result hook did not check it). The tool ran ' +
@@ -2006,9 +2003,75 @@ function notePost(e, state) {
   if (posts.size > POSTS_MAX) posts.delete(posts.keys().next().value)
 }
 
-// the marker of maisecrets in a classic answer: the last line of an entry, with this process's nonce. The answer comes
-// back without it
-function readMarks(r) {
+// The key of the marker: from Python (mod-result), 32 bytes. At each session start the mod asks for a new one
+// (renewKey, the request {"net_key": "new"}), then for the current one ({"net_key": true}) when a marker does not
+// verify. It stays in this process: no log, no state, no text of the model. No answer: null, and the next marker asks
+// again (until then every result goes to the second net)
+let netKey = null              // a promise of the key bytes or null
+async function fetchKey($, fresh = false) {
+  try {
+    const r = await runResult($, JSON.stringify({ net_key: fresh ? 'new' : true }), KEY_MS)
+    const a = r ? JSON.parse(r.stdout) : null
+    if (!a || a.maisecrets !== 'mod-result' || typeof a.net_key !== 'string' || !/^[0-9a-f]{64}$/.test(a.net_key)) {
+      return null
+    }
+    const raw = new Uint8Array(32)
+    for (let i = 0; i < 32; i++) raw[i] = parseInt(a.net_key.slice(2 * i, 2 * i + 2), 16)
+    return raw
+  } catch {
+    return null
+  }
+}
+function keyOf($) {
+  if (netKey === null) netKey = fetchKey($)
+  return netKey
+}
+// a session starts: the key of the last one goes, so a key that stood in its output is worth nothing now
+function renewKey($) {
+  netKey = fetchKey($, true)
+  return netKey
+}
+
+// HMAC-SHA256 (RFC 2104) from SHA-256 alone: a hooks module has crypto.subtle.digest, no importKey or sign. The key
+// has 32 bytes, less than the block of 64
+const sha256 = async (bytes) => new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))
+async function hmacSha256(key, message) {
+  const inner = new Uint8Array(64 + message.length)
+  const outer = new Uint8Array(64 + 32)
+  for (let i = 0; i < 64; i++) {
+    inner[i] = (key[i] ?? 0) ^ 0x36
+    outer[i] = (key[i] ?? 0) ^ 0x5c
+  }
+  inner.set(message, 64)
+  outer.set(await sha256(inner), 64)
+  return sha256(outer)
+}
+
+// maisecrets/second_net.py mac: the first 32 hex digits of HMAC-SHA256(key, kind, tool_use_id, hash, rest), one line each
+async function markMac(key, kind, id, hash, rest) {
+  const sig = await hmacSha256(key, new TextEncoder().encode([kind, id, hash, rest].join('\n')))
+  return [...sig.slice(0, 16)].map(n => n.toString(16).padStart(2, '0')).join('')
+}
+
+// a marker line (MARK_RE's match) of the call `id`: true only with the MAC of that call under the key of the home. A
+// wrong MAC drops the key of this process, so a key the home made anew is asked for again at the next marker
+async function verifyMark($, id, m) {
+  if (typeof id !== 'string' || !CALL_ID.test(id)) return false
+  const p = keyOf($)
+  const key = await p
+  if (!key) {
+    if (netKey === p) netKey = null     // no answer: the next marker asks again
+    return false
+  }
+  const want = await markMac(key, m[1], id, m[3] ?? '', m[4] === undefined ? '' : `${m[4]} ${m[5]}`)
+  if (want === m[2]) return true
+  if (netKey === p) netKey = null
+  return false
+}
+
+// the marker of maisecrets in a classic answer: the last line of an entry that `verify` accepts (the MAC of this call).
+// Every marker line goes out of the answer, a forged one too, so none reaches the model; only a verified one counts
+async function readMarks(r, verify) {
   const ctx = r && typeof r === 'object' ? r.additionalContext : undefined
   const list = Array.isArray(ctx) ? ctx : typeof ctx === 'string' ? [ctx] : []
   let tag = null
@@ -2018,7 +2081,9 @@ function readMarks(r) {
     const line = typeof c === 'string' ? c.slice(cut + 1) : null
     const m = line === null ? null : MARK_RE.exec(line)
     if (!m) { kept.push(c); continue }
-    tag = tag ?? { kind: m[1], hash: m[2] ?? null, rest: m[3] === undefined ? null : { share: Number(m[3]), mode: m[4] } }
+    let ok = false
+    try { ok = tag === null && verify !== null && await verify(m) } catch { ok = false }
+    if (ok) tag = { kind: m[1], hash: m[3] ?? null, rest: m[4] === undefined ? null : { share: Number(m[4]), mode: m[5] } }
     const before = cut < 0 ? '' : c.slice(0, cut).replace(/\n+$/, '')
     if (before !== '') kept.push(before)
   }
@@ -2054,12 +2119,13 @@ async function postState(tag, r) {
   return (await outputHash(updated)) === tag.hash ? 'masked' : 'unchecked'
 }
 
-// The nonce goes to the hooks only while the settings hooks of a tool result run (calls run in parallel: it stays set
-// while any of them runs), so a command of the session started outside those moments does not inherit it
+// `on` goes to the hooks only while the settings hooks of a tool result run (calls run in parallel: it stays set while
+// any of them runs). It is a flag only: the proof is the MAC under the key of the home (see MARK_RE for its limits)
 let marksOpen = 0
 async function openMarks($) {
   marksOpen += 1
-  if (marksOpen === 1) await $.env.set('MAISECRETS_MOD_NET', NET_NONCE)
+  try { void keyOf($) } catch { /* asked again at the marker */ }
+  if (marksOpen === 1) await $.env.set('MAISECRETS_MOD_NET', 'on')
 }
 async function closeMarks($) {
   marksOpen = Math.max(0, marksOpen - 1)
@@ -2087,7 +2153,7 @@ function withTexts(block, texts, note) {
 }
 
 // an unchecked result: the text WITHHELD alone, its media dropped too (a media block may be dropped, not changed)
-const withheld = (block) => ({ ...block, content: WITHHELD })
+const withheld = (block) => ({ ...block, content: block?.is_error === true ? WITHHELD_ERROR : WITHHELD })
 
 // the tool_result blocks of a row that must go to Python: every one but those with positive evidence
 function dueBlocks(e) {
@@ -2103,8 +2169,8 @@ function dueBlocks(e) {
 // program), exits 3 (dispatch.py on a Python older than 3.9) or 9009 (the store alias of Windows): a timeout or another
 // failure ends the search, and the row is withheld
 const NO_PROGRAM = /ENOENT|not found|no such file|cannot find|is not recognized/i
-async function runResult($, stdin) {
-  const init = { cwd: $.plugin.root, stdin, timeoutMs: RESULT_MS, env: { PYTHONUTF8: '1' } }
+async function runResult($, stdin, ms = RESULT_MS) {
+  const init = { cwd: $.plugin.root, stdin, timeoutMs: ms, env: { PYTHONUTF8: '1' } }
   for (const which of [0, 1, 2]) {  // python3, py -3, python (mod-result)
     let r
     try {
@@ -2258,15 +2324,16 @@ function watchHooks($, session, since) {
 // in it: the marker line, and the label it alone filled, go out of each such row, so the model never reads it. The
 // REPL's result then has no state and is masked
 const unmarkedLine = (l) => !MARK_RE.test(l.replace(/^[^\n]{0,80} hook additional context: /, ''))
+const hasMark = (t) => t.includes('[maisecrets: result ') && !t.split('\n').every(unmarkedLine)
 const unmarked = (t) => {
-  if (!t.includes(NET_NONCE)) return t
+  if (!hasMark(t)) return t
   return t.split('\n').filter(unmarkedLine).join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '')
 }
 
 function contextWithoutMarks(e, next) {
   const content = Array.isArray(e?.message?.content) ? e.message.content : null
   if (e?.message?.name !== 'hook_additional_context' || !content ||
-      !content.some(b => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(NET_NONCE))) {
+      !content.some(b => b?.type === 'text' && typeof b.text === 'string' && hasMark(b.text))) {
     return next(e)
   }
   const kept = content.map(b => (b?.type === 'text' && typeof b.text === 'string') ? { ...b, text: unmarked(b.text) } : b)
@@ -2274,17 +2341,25 @@ function contextWithoutMarks(e, next) {
 }
 
 // a classic hook of the mod only reads: when it fails, what the settings hooks answered stands, without the marker.
-// Not called yet: the settings hooks run now, once, with the nonce; called: next(e) replays what they answered (no
+// Not called yet: the settings hooks run now, once, with the flag; called: next(e) replays what they answered (no
 // second run). Either way the call keeps no state, so the second net masks its result
 async function relayClassic($, e, next) {
   const r = next.called ? await next(e) : await withMarks($, () => next(e))
-  return readMarks(r).rest
+  return (await readMarks(r, null)).rest
+}
+
+// the result as the tool gave it, before the maisecrets hook masked it: a reference of a server that is not bound yet
+// is masked whole there (placeholder.whole_references), and the connector that showed it must still be asked (#91).
+// A string test only; a failure of its own never reaches the answer
+function referencesOf(e, output) {
+  try { noteReferences({ tool: e?.tool_name }, output) } catch { /* no offer */ }
 }
 
 function registerSecondNet(on) {
   on('classic.PostToolUse', async ($, e, next) => {
+    referencesOf(e, e?.tool_response)
     const r = await withMarks($, () => next(e))
-    const { tag, rest } = readMarks(r)
+    const { tag, rest } = await readMarks(r, (m) => verifyMark($, e?.tool_use_id, m))
     try {
       const state = await postState(tag, r)
       notePost(e, state)
@@ -2294,9 +2369,10 @@ function registerSecondNet(on) {
     return rest
   }).catch(relayClassic)
   on('classic.PostToolUseFailure', async ($, e, next) => {
+    referencesOf(e, e?.error)
     const r = await withMarks($, () => next(e))
     try { notePost(e, 'failure') } catch { /* no state: the row is masked */ }
-    return readMarks(r).rest
+    return (await readMarks(r, null)).rest
   }).catch(relayClassic)
   on('session.append', { door: 'tool-result' }, secondNet).catch(async ($, e, next) => {
     // the hook threw or ran out of its budget: a row it passed on stays; one it did not goes on withheld

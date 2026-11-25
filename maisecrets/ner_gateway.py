@@ -2,13 +2,14 @@
 
 /maisecrets ner gateway URL sets the source: `remote_detector` gets {"gateway": <origin>, "url": <origin>,
 "allow_network": true}. At each tool result, from_config() asks here for the gateway's name endpoint (its protected
-resource metadata names `ner_endpoint`, `ner_scope` and `ner_max_chars`; kept for an hour in ner-gateway.json, never
-a token; /maisecrets sref uses an older record of the same MCP URL when the gateway does not answer) and for an
-access token of the login (sref_client, refreshed under its lock). The login must hold the name scope. One login
-asks for every scope the gateway offers (sref_client.discover), so this source needs no second consent; a login of
-0.9.24 or older, or one made while the gateway offered no name detection, needs one new consent (NO_SCOPE). A
-typed prompt goes to this source too, as to any source that is set (C30a: remote_layer.prompt_names); the rules'
-findings and the stored values go there as filler, as for a tool result.
+resource metadata names `ner_endpoint`, `ner_scope`, `ner_max_chars`, and since #105 `ner_pieces` and
+`ner_deadline_ms`; kept for an hour in ner-gateway.json, never a token; /maisecrets sref uses an older record of the
+same MCP URL when the gateway does not answer) and for an access token of the login (sref_client, refreshed under
+its lock). The login must hold the name scope. One login asks for every scope the gateway offers
+(sref_client.discover), so this source needs no second consent; a login of 0.9.24 or older, or one made while the
+gateway offered no name detection, needs one new consent (NO_SCOPE). A typed prompt goes to this source too, as to
+any source that is set (C30a: remote_layer.prompt_names); the rules' findings and the stored values go there as
+filler, as for a tool result.
 """
 from __future__ import annotations
 
@@ -23,6 +24,25 @@ CACHE_S = 3600
 # the person's timeout_ms of this source wins. Measured: p95 600 ms with 8 sessions at once, and 2 of 45 requests
 # over 2 s (README "Names from a service")
 DEFAULT_TIMEOUT_MS = 3000
+# #105, ai-gateway #2141 slice 4: `ner_pieces` true lets a text over max_chars go in pieces (each one counts against
+# the person's quota); `ner_deadline_ms` is the gateway's longest time from the arrival of a request to its answer
+# (a 504 at the latest; about 5,400 ms). A request then waits that plus DEADLINE_MARGIN_MS for the network, so the
+# client sees the 504 and does not close the connection while the service still works for it. Any other value is
+# ignored
+DEADLINE_MS_MIN, DEADLINE_MS_MAX = 500, 60000
+DEADLINE_MARGIN_MS = 500
+
+
+def takes_pieces(v) -> bool:
+    """Only a JSON true: a string "true" or a number is no switch."""
+    return v is True
+
+
+def deadline_ms_of(v) -> int | None:
+    """The gateway's wait for one request in ms: an integer in DEADLINE_MS_MIN..DEADLINE_MS_MAX, else None."""
+    if isinstance(v, int) and not isinstance(v, bool) and DEADLINE_MS_MIN <= v <= DEADLINE_MS_MAX:
+        return v
+    return None
 # the reason for a login without the name scope: it says why one new consent is needed
 NO_SCOPE = ("the login lacks the name scope: a login of maisecrets 0.9.24 or older, or one made while the gateway "
             "offered no name detection, did not ask for it; the person runs /maisecrets sref login once more and "
@@ -86,6 +106,8 @@ def found_for(cfg: dict, origin: str, url: str, deadline: float) -> dict | None:
     """The discovery of the gateway at `url` (sref_client.discover), from the cache while it is fresh."""
     from . import sref_client
     got = _cached(origin, url)
+    if got is not None and isinstance(got.get("ner"), dict) and "pieces" not in got["ner"]:
+        got = None      # a record of a version before #105 knows no ner_pieces: ask the gateway again, not in an hour
     if got is None:
         got = sref_client.discover(cfg, url, deadline)
         if got:
@@ -160,7 +182,8 @@ def status_line(doc) -> str:
 
 
 def detector(cfg: dict, conf: dict, make, deadline: float | None = None) -> tuple:
-    """(RemoteDetector or None, why not). `make(url, token, max_chars)` builds the detector with the person's tuning.
+    """(RemoteDetector or None, why not). `make(url, token, max_chars, pieces=, deadline_ms=)` builds the detector
+    with the person's tuning and what the gateway announces.
     No login, no name endpoint or a login without the name scope: no detector, and the rules alone, with the reason.
     `deadline`: the end of the whole prompt wait (remote_layer.prompt_names); the discovery and the token take their
     time from it, and the request gets what is left. Without one (a tool result) they take up to 2 s."""
@@ -207,4 +230,7 @@ def detector(cfg: dict, conf: dict, make, deadline: float | None = None) -> tupl
                          if isinstance(exc, sref_client._Revoked) else
                          "no_login" if "not logged in" in str(exc) else "other")
         return None, str(exc)
-    return make(found["ner"]["endpoint"], token, int(found["ner"].get("max_chars") or 20000)), ""
+    # the cached record is checked again: a file of an older version has no such field, one edited by hand no other
+    ner = found["ner"]
+    return make(ner["endpoint"], token, int(ner.get("max_chars") or 20000), pieces=takes_pieces(ner.get("pieces")),
+                deadline_ms=deadline_ms_of(ner.get("deadline_ms"))), ""

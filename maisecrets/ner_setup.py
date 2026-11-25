@@ -920,6 +920,20 @@ def _gateway_report(conf: dict, lines: list, facts: dict) -> tuple[int, list]:
             return 4, lines
         return 1, lines
     facts["login"] = "ok"
+    pieces = getattr(det, "pieces", None)
+    if isinstance(pieces, bool):
+        # #105: whether the gateway announces `ner_pieces`; without it a text over max_chars gets the rules alone
+        facts["pieces"], facts["max_chars"] = pieces, det.max_chars
+        lines.append(f"long texts: in pieces of {det.max_chars:,} characters (the gateway admits pieces); each "
+                     f"request waits up to {det.timeout * 1000:,.0f} ms" if pieces else
+                     f"long texts: over {det.max_chars:,} characters the rules alone (this gateway takes no pieces); "
+                     f"each request waits up to {det.timeout * 1000:,.0f} ms")
+        announced = getattr(det, "gateway_deadline_ms", None)
+        if isinstance(announced, int) and "timeout_ms" in conf:
+            # the person's timeout_ms wins over the gateway's deadline (remote_layer.from_config): say so
+            facts["own_wait"] = (det.timeout * 1000, announced)
+            lines.append(f"wait: your timeout_ms ({det.timeout * 1000:,.0f} ms) replaces the gateway's deadline "
+                         f"({announced:,} ms); remove timeout_ms to wait as the gateway says")
     _spans, st = det.ask("A check of the name service.", [])
     from . import ner_gateway
     doc, why_none = ner_gateway.status({**load_config(), "remote_detector": conf}, conf)
