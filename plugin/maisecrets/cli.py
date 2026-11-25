@@ -7,7 +7,7 @@ import os
 import sys
 import time
 
-from . import detect
+from . import detect, links
 from .hooks import NOTHING_WAITING, TWO_WAITING, main as hook_main
 from .vault import ConfigError, Vault, load_config
 
@@ -360,7 +360,7 @@ def cmd_report(args: list[str]) -> int:
     return rc
 
 
-TEST_DATA_URL = "https://github.com/Mcpgate-de/maisecrets/blob/main/docs/USING.md#test-data-that-maisecrets-leaves-alone"
+TEST_DATA_URL = links.TEST_DATA_URL
 
 
 def _forget_the_false_positive(ev: dict) -> None:
