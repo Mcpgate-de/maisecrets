@@ -347,8 +347,9 @@ def mod_command(payload: dict) -> dict | None:
     """The mod's answer to the person's own maisecrets command in Claude Code, so that none reaches the model and none
     reads as a block (night UX test, findings C and F): {"drop": answer} for a command the prompt hook answers (the
     same call, hooks.user_prompt) and for a Codex form that runs without the model (demo.own_answer); {"run": plan}
-    for a command the mod runs itself (run_plan); {"entry": words} for a command that needs the model, which the mod
-    runs through the entry command file. None for every other prompt, and for a prompt the person did not type (the
+    for a command the mod runs itself (run_plan); {"entry": words} for a command that needs the model, which the entry
+    command file runs: the mod passes a line of that file on, or puts it into the box for the person's Enter. None
+    for every other prompt, and for a prompt the person did not type (the
     hook path stays as it is: Codex, claude -p, a client without the mod)."""
     from . import hooks as h
     if payload.get("origin") == COMMAND_ROUTE:
@@ -403,8 +404,8 @@ def mod_command(payload: dict) -> dict | None:
                                                    or demo.active(payload.get("session_id"))):
         # in the demo a form that needs the model gets the demo's line that it did not run (demo.own_answer)
         return {"drop": demo.own_answer(prompt, payload.get("session_id"))}
-    # a command that needs the model (`status test`, the Codex form of a command): the mod runs the entry command file
-    # with these words (commands/maisecrets.md), as the person's Enter would; the single command files are hidden
+    # a command that needs the model (`status test`, the Codex form of a command): the entry command file runs it with
+    # these words (commands/maisecrets.md), after the person's Enter on its line; the single command files are hidden
     entry = None if plan is not None else _entry_words(prompt, m)
     if not slash and entry is None:
         # the skill (maisecrets: secret-hygiene): its slash form goes into the box, and the person's Enter starts it
