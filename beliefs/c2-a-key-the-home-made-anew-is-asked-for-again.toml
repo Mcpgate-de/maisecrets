@@ -1,0 +1,11 @@
+# c2-a-key-the-home-made-anew-is-asked-for-again: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-a-key-the-home-made-anew-is-asked-for-again"
+control = "C2"
+serves = ["M1.2"]
+statement = "When a marker does not verify, the mod drops the key it holds and asks Python for the key again at the next marker, so a key the home made anew costs one masked result, not every result of the session."
+runner = ["tests/mod.test.ts::the key is asked for once per mod process, and a key the home made anew is asked for again"]
+
+[proof]
+file = "claude-mod/maisecrets-mod.mjs"
+find = "  if (want === m[2]) return true\n  if (netKey === p) netKey = null\n"
+replace = "  if (want === m[2]) return true\n"

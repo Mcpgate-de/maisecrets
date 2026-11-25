@@ -1305,10 +1305,22 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # the client masks a failed output now: the workaround for this gap is dead weight (maisecrets/exit_wrap.py)
         fails.append(f"gap closed ({sc['upstream_leak_is_a_known_gap']}): the client replaces a failed output now; "
                      "drop the exit-0 wrap (maisecrets/exit_wrap.py) and update CLAUDE.md, the watch list")
-    for mark in ("[maisecrets: result checked]", "[maisecrets: result masked]"):
-        # the marker of the tool-result hook is the mod's alone (maisecrets/second_net.py): the mod takes it out
-        if mark in joined:
-            fails.append(f"the marker {mark!r} reached the model")
+    # the marker of the tool-result hook is the mod's alone (maisecrets/second_net.py): the mod takes it out
+    if re.search(r"\[maisecrets: result (?:checked|masked) [0-9a-f]{32}", joined):
+        fails.append("a marker of the result hook reached the model")
+    # the key of the marker goes to the mod alone: never into a request, hooks.log or the debug log of the client
+    key_file = home / "second_net.key"
+    if key_file.exists():
+        key = key_file.read_text(encoding="ascii", errors="replace").strip()
+        if os.name == "posix" and key_file.stat().st_mode & 0o077:
+            fails.append("the key of the marker is readable by others")
+        logs = [home / "hooks.log", *work.rglob("*.log"), *(Path(env["CLAUDE_CONFIG_DIR"]).rglob("*.txt")
+                                                           if env.get("CLAUDE_CONFIG_DIR") else [])]
+        seen = [str(f) for f in logs if f.is_file() and key and key in f.read_text(errors="ignore")]
+        if key and key in joined:
+            fails.append("the key of the marker reached the model")
+        if seen:
+            fails.append(f"the key of the marker stands in {seen}")
     if sc.get("report_sizes"):
         # what the hook got against what the model got (#105): measured, printed, not judged
         hook = [len(json.dumps(json.loads(pf.read_text(errors="ignore")).get("tool_response", "")))

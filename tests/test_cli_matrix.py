@@ -1340,35 +1340,66 @@ class HookEventTests(unittest.TestCase):
         self.assertEqual((r.returncode, r.stdout), (1, ""))
 
     def test_the_tool_result_hooks_mark_their_answer_only_for_the_mod(self):
-        """With MAISECRETS_MOD_NET set to the mod's nonce each answer of the tool-result hooks that scanned a result
-        ends with the marker line: masked with the hash of the replaced output, checked else, the failure event too.
-        Without the nonce, or for a payload with no result, the answer carries none."""
-        from maisecrets.second_net import output_hash
-        nonce = "0123456789abcdef" * 2
+        """With MAISECRETS_MOD_NET set to `on` each answer of the tool-result hooks that scanned a result ends with the
+        marker line: masked with the hash of the replaced output, checked else, the failure event too, each with the
+        HMAC of the key in the home over the kind, the tool_use_id, the hash and the rest. Without `on`, or for a
+        payload with no result, the answer carries none; the key itself is in no answer and no log."""
+        import hashlib
+        import hmac
+        from maisecrets.second_net import KEY_NAME, output_hash
         value = fake_value("Sm")
         self.sb.run("mod-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1"}))
         clean = {"tool_name": "Bash", "session_id": "S1", "prompt_id": "p", "tool_input": {"command": "ls"},
-                 "tool_response": {"stdout": "nothing here", "stderr": ""}}
-        hit = {**clean, "tool_response": {"stdout": f"out {value}", "stderr": ""}}
+                 "tool_use_id": "toolu_01Clean", "tool_response": {"stdout": "nothing here", "stderr": ""}}
+        hit = {**clean, "tool_use_id": "toolu_01Hit", "tool_response": {"stdout": f"out {value}", "stderr": ""}}
         failed = {"tool_name": "Bash", "session_id": "S1", "prompt_id": "p", "tool_input": {"command": "false"},
-                  "error": "Exit code 1 nothing here"}
-        on = self.sb.env(MAISECRETS_MOD_NET=nonce)
+                  "tool_use_id": "toolu_01Failed", "error": "Exit code 1 nothing here"}
+        on = self.sb.env(MAISECRETS_MOD_NET="on")
         for event, payload, kind in (("post-tool", clean, "checked"), ("post-tool", hit, "masked"),
                                      ("post-tool-failure", failed, "checked")):
             with self.subTest(event=event, kind=kind):
                 r = self.sb.run(event, stdin=json.dumps(payload), env=on)
                 hso = json.loads(r.stdout)["hookSpecificOutput"]
                 last = hso["additionalContext"].split("\n")[-1]
-                want = (f"[maisecrets: result masked {nonce} {output_hash(hso['updatedToolOutput'])}]"
-                        if kind == "masked" else f"[maisecrets: result checked {nonce}]")
+                key = bytes.fromhex((self.sb.home / KEY_NAME).read_text().strip())
+                digest = output_hash(hso["updatedToolOutput"]) if kind == "masked" else ""
+                proof = hmac.new(key, "\n".join((kind, payload["tool_use_id"], digest, "")).encode(),
+                                 hashlib.sha256).hexdigest()[:32]
+                want = (f"[maisecrets: result masked {proof} {digest}]" if kind == "masked"
+                        else f"[maisecrets: result checked {proof}]")
                 self.assertEqual(last, want)
                 self.assertEqual(hso["hookEventName"], "PostToolUse" if event == "post-tool" else "PostToolUseFailure")
                 self.assertNotIn(value, r.stdout)
+                self.assertNotIn(key.hex(), r.stdout + r.stderr)
                 off = self.sb.run(event, stdin=json.dumps(payload))
                 self.assertNotIn("[maisecrets: result", off.stdout)
-        empty = self.sb.run("post-tool", stdin=json.dumps({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p"}),
-                            env=on)
+                nonce = self.sb.run(event, stdin=json.dumps(payload), env=self.sb.env(MAISECRETS_MOD_NET="ab" * 16))
+                self.assertNotIn("[maisecrets: result", nonce.stdout, "only the literal `on` switches it on")
+        empty = self.sb.run("post-tool", stdin=json.dumps({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
+                                                           "tool_use_id": "toolu_01Empty"}), env=on)
         self.assertNotIn("[maisecrets: result", empty.stdout, "no result was scanned")
+        key = (self.sb.home / KEY_NAME).read_text().strip()
+        for path in self.sb.home.rglob("*"):
+            if path.is_file() and path.name != KEY_NAME:
+                self.assertNotIn(key, path.read_text(encoding="utf-8", errors="replace"), path.name)
+
+    def test_the_mod_gets_the_key_of_the_marker_from_mod_result_alone(self):
+        """`mod-result` with the request {"net_key": true} answers the key of the home (made at the first use, mode
+        600); the same key the hooks use. A tool call that names the entry is refused (tests of shell_commands)."""
+        from maisecrets.second_net import KEY_NAME
+        r = self.sb.run("mod-result", stdin=json.dumps({"net_key": True}))
+        out = json.loads(r.stdout)
+        self.assertEqual((r.returncode, out["maisecrets"]), (0, "mod-result"), r.stderr)
+        self.assertRegex(out["net_key"], r"^[0-9a-f]{64}$")
+        self.assertEqual((self.sb.home / KEY_NAME).read_text().strip(), out["net_key"])
+        if os.name == "posix":
+            self.assertEqual((self.sb.home / KEY_NAME).stat().st_mode & 0o777, 0o600)
+        again = json.loads(self.sb.run("mod-result", stdin=json.dumps({"net_key": True})).stdout)
+        self.assertEqual(again["net_key"], out["net_key"])
+        # only the literal true asks for the key: anything else is a masking question
+        for q in ({"net_key": 1}, {"net_key": "true"}):
+            with self.subTest(q=q):
+                self.assertNotIn(out["net_key"], self.sb.run("mod-result", stdin=json.dumps(q)).stdout)
 
     def test_session_end_answers_nothing_through_the_dispatcher(self):
         r = self.sb.run("session-end", stdin=json.dumps({"session_id": "S1", "reason": "logout"}))

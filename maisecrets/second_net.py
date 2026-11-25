@@ -4,23 +4,30 @@ In Claude Code a PostToolUse hook that fails does not withhold the output, and a
 PostToolUseFailure path, whose answer cannot replace it. The mod sees each row before the client stores and sends it.
 
 The mod decides from positive evidence only. While the settings hooks of a tool result run, the mod sets
-MAISECRETS_MOD_NET to a random nonce of its process, and the tool-result hooks then end their additionalContext with a
-marker line (mark_answers): `[maisecrets: result masked NONCE HASH]` when the answer replaces the output (HASH: of the
-texts of that output, output_hash), else `[maisecrets: result checked NONCE]`, and only after the handler scanned a
-result. The mod accepts the marker only as the last line of an entry, with its own nonce, and `masked` only when the
-output that reaches it has the same hash; it takes the marker out, so it never reaches the model. A result without such
-a marker goes to mask_result (`hooks/dispatch.py mod-result`).
+MAISECRETS_MOD_NET to `on`, and the tool-result hooks then end their additionalContext with a marker line
+(mark_answers): `[maisecrets: result masked MAC HASH]` when the answer replaces the output (HASH: of the texts of that
+output, output_hash), else `[maisecrets: result checked MAC]`, and only after the handler scanned a result. MAC is an
+HMAC-SHA256 (net_key: a key of 32 random bytes in the maisecrets home, mode 600) of the kind, the call's tool_use_id,
+the hash and the rest. The mod gets the key once from `hooks/dispatch.py mod-result` (the request `{"net_key": true}`)
+and accepts the marker only as the last line of an entry with the MAC it computes for that call, and `masked` only
+when the output that reaches it has the same hash; it takes the marker out, so it never reaches the model. A result
+without such a marker goes to mask_result (`hooks/dispatch.py mod-result`).
 """
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import re
+import secrets
 
 from .placeholder import KEY_RE
 
 ENV = "MAISECRETS_MOD_NET"
-_NONCE = re.compile(r"[0-9a-f]{32}")
+ON = "on"                    # the mod's literal value while the tool-result hooks run (no other value counts)
+KEY_NAME = "second_net.key"  # in the maisecrets home: a Read tool or a Bash command that names it is refused (C8)
+_KEY_HEX = re.compile(r"[0-9a-f]{64}")
+_CALL_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _EVENTS = {"post-tool": "PostToolUse", "post-tool-failure": "PostToolUseFailure"}
 _KEY = re.compile("\u27e6(" + KEY_RE + ")(?::[^\u27e7\n]{0,80})?\u27e7")
 _AGENT = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -68,18 +75,88 @@ def _rest() -> str:
     return f" rest {b['share']} {b['mode']}" if b else ""
 
 
-def mark(obj: dict, event: str, nonce: str) -> dict:
-    """The answer of a tool-result hook with the marker line of maisecrets at the end of its additionalContext. A Codex
-    answer (a decision) and an event that is no tool-result event stay as they are. Holds no value."""
+def _make_key(path, replace: bool) -> None:
+    """A new key file, mode 600, written whole before it gets its name: a hook that reads at the same moment finds no
+    file or a whole one. Without ``replace`` an existing key stays (of two first hooks at once, the first one wins)."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = path.with_name(f".{KEY_NAME}.{os.getpid()}.{secrets.token_hex(4)}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        os.write(fd, (secrets.token_hex(32) + "\n").encode("ascii"))
+    finally:
+        os.close(fd)
+    try:
+        if replace:
+            os.replace(tmp, path)
+        else:
+            try:
+                os.link(tmp, path)
+            except FileExistsError:
+                pass
+            except OSError:              # a file system without hard links
+                if not os.path.lexists(path):
+                    os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _read_key(path) -> str:
+    """The text of the key file, no link followed; a key file that others may read gets mode 600 again."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        if os.name == "posix" and os.fstat(fd).st_mode & 0o077:
+            os.fchmod(fd, 0o600)
+        return os.read(fd, 256).decode("ascii", "replace").strip()
+    finally:
+        os.close(fd)
+
+
+def net_key() -> bytes:
+    """The key of the marker: 32 random bytes in the maisecrets home (KEY_NAME, mode 600), made at the first use. A
+    damaged key file is made anew (the mod then asks for the key again: a marker with the old key counts as none).
+    Raises when the key can neither be read nor made: the hook then writes no marker, and the mod masks the result.
+    The key goes to no log, no answer of a hook and no text of the model: only to the mod, on stdout of mod-result."""
+    from .home import HOME, _check_home
+    _check_home()
+    path = HOME / KEY_NAME
+    for replace in (False, True):
+        try:
+            text = _read_key(path)
+        except FileNotFoundError:
+            _make_key(path, replace=False)
+            text = _read_key(path)
+        if _KEY_HEX.fullmatch(text):
+            return bytes.fromhex(text)
+        if not replace:
+            _make_key(path, replace=True)
+    raise ValueError("second net key")
+
+
+def mac(key: bytes, kind: str, call_id: str, digest: str, rest: str) -> str:
+    """The proof of a marker: the first 32 hex digits of HMAC-SHA256(key, kind, tool_use_id, output hash, rest), one
+    line each. The mod computes the same (claude-mod/maisecrets-mod.mjs, markMac)."""
+    text = "\n".join((kind, call_id, digest, rest))
+    return hmac.new(key, text.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def mark(obj: dict, event: str, key: bytes, call_id) -> dict:
+    """The answer of a tool-result hook with the marker line of maisecrets at the end of its additionalContext, its MAC
+    bound to this call (``call_id``: the payload's tool_use_id). A Codex answer (a decision), an event that is no
+    tool-result event and a call without a well-formed id stay as they are. Holds no value and not the key."""
     name = _EVENTS.get(event)
-    if not name or not isinstance(obj, dict) or "decision" in obj:
+    if not name or not isinstance(obj, dict) or "decision" in obj or not isinstance(call_id, str) \
+            or not _CALL_ID.fullmatch(call_id):
         return obj
     hso = dict(obj.get("hookSpecificOutput") or {})
     hso["hookEventName"] = name
-    key = next((k for k in ("updatedToolOutput", "updatedMCPToolOutput") if k in hso), None)
+    out = next((k for k in ("updatedToolOutput", "updatedMCPToolOutput") if k in hso), None)
     rest = _rest() if event == "post-tool" else ""
-    tag = (f"[maisecrets: result masked {nonce} {output_hash(hso[key])}{rest}]" if key
-           else f"[maisecrets: result checked {nonce}{rest}]")
+    kind, digest = ("masked", output_hash(hso[out])) if out else ("checked", "")
+    proof = mac(key, kind, call_id, digest, rest[len(" rest "):])
+    tag = f"[maisecrets: result {kind} {proof}{' ' + digest if digest else ''}{rest}]"
     ctx = hso.get("additionalContext")
     hso["additionalContext"] = f"{ctx}\n\n{tag}" if isinstance(ctx, str) and ctx else tag
     return {**obj, "hookSpecificOutput": hso}
@@ -87,12 +164,12 @@ def mark(obj: dict, event: str, nonce: str) -> dict:
 
 def mark_answers(hooks_module, event: str) -> None:
     """Every answer this hook process writes after its handler scanned a result (the handler's, the watchdog's, a
-    crash's) carries the marker: they all go out through hooks._out. Only when the mod gave its nonce (ENV): without the
-    mod the text would reach the model. A payload with no result to scan gets no marker, so the mod masks it."""
-    nonce = os.environ.get(ENV) or ""
-    if not _NONCE.fullmatch(nonce) or event not in _EVENTS:
+    crash's) carries the marker: they all go out through hooks._out. Only while the mod waits for it (ENV is `on`):
+    without the mod the text would reach the model. A payload with no result to scan or without a tool_use_id gets
+    no marker, and so does every answer when the key cannot be read: the mod then masks the result."""
+    if os.environ.get(ENV) != ON or event not in _EVENTS:
         return
-    scanned = {"v": False}
+    scanned = {"v": False, "id": None}
     name = "post_tool" if event == "post-tool" else "post_tool_failure"
     handler = getattr(hooks_module, name)
 
@@ -100,10 +177,19 @@ def mark_answers(hooks_module, event: str) -> None:
         if isinstance(payload, dict) and (payload.get("tool_response") is not None if event == "post-tool" else
                                           isinstance(payload.get("error"), str) and payload.get("error")):
             scanned["v"] = True
+            scanned["id"] = payload.get("tool_use_id")
         return handler(payload, *args, **kwargs)
     setattr(hooks_module, name, watched)
     write = hooks_module._out
-    hooks_module._out = lambda obj: write(mark(obj, event, nonce) if scanned["v"] else obj)
+
+    def marked(obj):
+        if not scanned["v"]:
+            return obj
+        try:
+            return mark(obj, event, net_key(), scanned["id"])
+        except Exception:  # noqa: BLE001 - no key: no marker, and the mod masks the result
+            return obj
+    hooks_module._out = lambda obj: write(marked(obj))
 
 
 def _keys(text: str) -> set:

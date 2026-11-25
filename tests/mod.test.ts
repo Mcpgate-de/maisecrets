@@ -1594,9 +1594,38 @@ test('each new session id is noted once, also for a slash line and a prompt not 
 const ph = (key: string) => String.fromCodePoint(0x27e6) + key + String.fromCodePoint(0x27e7)
 const RAW = 'out TOKENWORD end'
 const MASKED_TEXT = `out ${ph('SECRET' + '_c9')} end`
-// the marker lines of the tool-result hook (maisecrets/second_net.py): the nonce is the one the mod gave the hooks
+// the marker lines of the tool-result hook (maisecrets/second_net.py). `n` is SIGN while the mod's flag is `on`: the
+// fake settings hook of netWorld then puts in the MAC the Python hook computes (HMAC-SHA256 with the key of the home
+// over the kind, the call's tool_use_id, the hash and the rest); any other text there stays as written (a forgery)
+const SIGN = 's'.repeat(32)
+// HMAC-SHA256(bytes 0..31, 'checked\ntoolu_01Synthetic\n\n')[:32], as Python computes it (tests/test_second_net.py)
+const PY_VECTOR = '43b2b70e03ea8ac3e769b2f0310bc432'
 const CHECKED = (n) => `[maisecrets: result checked ${n}]`
 const MASKED_MARK = (n, hash) => `[maisecrets: result masked ${n} ${hash}]`
+// the synthetic key of a home (32 bytes 0..31, as tests/test_second_net.py KEY) and a second one (a key made anew)
+const KEY_A = Array.from({ length: 32 }, (_, i) => i)
+const KEY_B = Array.from({ length: 32 }, (_, i) => 255 - i)
+const hexOf = (bytes) => bytes.map(n => n.toString(16).padStart(2, '0')).join('')
+// HMAC-SHA256 written out here on its own (the environment has crypto.subtle.digest only); PY_VECTOR ties it to Python
+async function macOf(keyBytes, kind, id, hash = '', rest = '') {
+  const H = async (b) => new Uint8Array(await crypto.subtle.digest('SHA-256', b))
+  const k = new Uint8Array(64)
+  k.set(keyBytes)
+  const msg = new TextEncoder().encode([kind, id, hash, rest].join('\n'))
+  const inner = new Uint8Array([...k.map(b => b ^ 0x36), ...msg])
+  const outer = new Uint8Array([...k.map(b => b ^ 0x5c), ...(await H(inner))])
+  return [...(await H(outer)).slice(0, 16)].map(n => n.toString(16).padStart(2, '0')).join('')
+}
+// what the Python hook does with a marker line it writes: the MAC of this call in place of SIGN
+async function signed(answer, id, keyBytes) {
+  if (!answer || !Array.isArray(answer.additionalContext)) return answer
+  const out: string[] = []
+  for (const c of answer.additionalContext) {
+    const m = /\[maisecrets: result (checked|masked) s{32}(?: ([0-9a-f]{16}))?(?: rest (\d+ \w+))?\]$/.exec(c)
+    out.push(m ? c.replace(SIGN, await macOf(keyBytes, m[1], id, m[2] ?? '', m[3] ?? '')) : c)
+  }
+  return { ...answer, additionalContext: out }
+}
 // maisecrets/second_net.py output_hash: the strings of an output (keys sorted, each before its value), NUL between them
 const textsOf = (v, out: string[] = []) => {
   if (typeof v === 'string') out.push(v)
@@ -1618,21 +1647,36 @@ function netWorld(on, session, run, opts: any = {}) {
   on('session.id', () => ({ value: session }))
   on('session.cwd', () => ({ value: '/work' }))
   on('env.get', () => { throw new Error('the mod read an environment variable') })
-  // the nonce the mod gives the hooks while they run: a settings hook of the test reads it as a hook process would
-  const st = { nonce: undefined as string | undefined }
+  // the flag the mod sets while the hooks run: a settings hook of the test reads it as a hook process would, and marks
+  // only then (SIGN, signed with the key of the home: opts.home.key, KEY_A unless a test changes it)
+  const st = { on: false }
+  const home = opts.home ?? { key: KEY_A }
   on('env.set', ($, e) => {
     opts.env?.push([e.name, e.value])
-    if (e.name === 'MAISECRETS_MOD_NET') st.nonce = e.value
+    if (e.name === 'MAISECRETS_MOD_NET') st.on = e.value === 'on'
     return { value: {} }
   })
   on('ui.log', ($, e) => { opts.logs?.push(String(e.text)); return { value: undefined } })
   on('ui.toast', ($, e) => { opts.toasts?.push(String(e.text)); return { value: undefined } })
   on('ui.invalidate', () => ({ value: undefined }))
-  on('process.run', run)
+  // mod-result with {"net_key": true}: the key of the home (opts.keyAsks counts them; home.key null: no answer). Any
+  // other run goes to the test's own handler
+  on('process.run', ($, e) => {
+    let q: any = null
+    try { q = e.argv.includes('mod-result') ? JSON.parse(e.init.stdin) : null } catch { q = null }
+    if (q?.net_key === true) {
+      opts.keyAsks?.push(e)
+      if (home.key === null) return { value: { exitCode: 1, stderr: '', stdout: '' } }
+      return resultAnswer({ net_key: hexOf(home.key) })
+    }
+    return run($, e)
+  })
   // the settings hooks beneath: what PostToolUse and UserPromptSubmit answered
-  on('classic.PostToolUse', async () => (typeof opts.post === 'function' ? await opts.post(st.nonce) : opts.post) ?? {})
-  on('classic.PostToolUseFailure', async () => (typeof opts.failure === 'function' ? await opts.failure(st.nonce)
-    : opts.failure) ?? {})
+  const sign = (n) => (st.on ? n : undefined)
+  on('classic.PostToolUse', async ($, e) => signed((typeof opts.post === 'function' ? await opts.post(sign(SIGN))
+    : opts.post) ?? {}, e.tool_use_id, home.hookKey ?? home.key ?? KEY_A))
+  on('classic.PostToolUseFailure', async ($, e) => signed((typeof opts.failure === 'function'
+    ? await opts.failure(sign(SIGN)) : opts.failure) ?? {}, e.tool_use_id, home.hookKey ?? home.key ?? KEY_A))
   on('classic.UserPromptSubmit', () => opts.prompt ?? {})
 }
 
@@ -1657,10 +1701,8 @@ test('a result the maisecrets hook masked goes on as it is, its marker is taken 
         env })
     const answer = await post($, 'tu-net-1')
     expect(answer.additionalContext).toEqual(['maisecrets masked 1 value(s).'])     // the model never reads the marker
-    // the nonce goes to the hooks only while they run: set before, taken back after
-    expect(env.map(([k]) => k)).toEqual(['MAISECRETS_MOD_NET', 'MAISECRETS_MOD_NET'])
-    expect(env[0][1]).toMatch(/^[0-9a-f]{32}$/)
-    expect(env[1][1]).toBe('')
+    // the flag goes to the hooks only while they run: set before, taken back after; a literal, never a secret
+    expect(env).toEqual([['MAISECRETS_MOD_NET', 'on'], ['MAISECRETS_MOD_NET', '']])
     const r = await $.session.append(resultRow('tu-net-1', MASKED_TEXT))
     expect(stored(r)).toBe(MASKED_TEXT)
     expect(asks(runs).length).toBe(0)
@@ -1798,15 +1840,47 @@ test('a timeout of the first Python withholds the result and starts no second on
   expect(asks(runs).length).toBe(1)
 })
 
-test('a refused call (an error of a call that never ran) goes on as it is, and Python is not asked', async ($, on) => {
-  const runs: any[] = []
-  netWorld(on, 'net-10', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) })
-  on('tool.check', () => ({ decision: 'deny', reason: 'refused by a hook' }))
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-10', input: { command: 'cat .env' } }).catch(() => {})
-  const r = await $.session.append(resultRow('tu-net-10', 'PreToolUse:Bash hook error: refused', 'Bash', true))
-  expect(stored(r)).toBe('PreToolUse:Bash hook error: refused')
-  expect(asks(runs).length).toBe(0)
-})
+// tool.call gets { result, isError } for a refusal beneath it, as for a tool that ran and failed (the probe of
+// 2026-11-25): the mod cannot tell them apart there, so the second net checks the error text. Python leaves a text
+// without a value as it is, so the refusal reaches the model unchanged
+test('a call refused beneath the mod (a hook, a rule) goes to the second net, and its refusal text comes back',
+  async ($, on) => {
+    const runs: any[] = []
+    netWorld(on, 'net-10', ($, e) => {
+      runs.push(e)
+      return resultAnswer({ texts: JSON.parse(e.init.stdin).texts, changed: false })
+    })
+    on('tool.check', () => ({ decision: 'deny', reason: 'refused by a hook' }))
+    const r0 = await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-10', input: { command: 'cat .env' } } as any)
+    expect((r0 as any).isError).toBe(true)                        // no deny: an error result, as a failed run gives
+    const r = await $.session.append(resultRow('tu-net-10', 'PreToolUse:Bash hook error: refused', 'Bash', true))
+    expect(stored(r)).toBe('PreToolUse:Bash hook error: refused')
+    expect(asks(runs).length).toBe(1)
+  })
+
+test('a call that ran and failed with no tool-result hook is masked: only a deny from beneath is a refusal',
+  async ($, on) => {
+    const runs: any[] = []
+    netWorld(on, 'net-20', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) })
+    // the tool ran and reported an error (core's { result, isError }), and no PostToolUse or PostToolUseFailure came
+    let ran = 0
+    on('tool.call', () => { ran += 1; return { result: RAW, text: RAW, isError: true } as any })
+    const r = await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-20', input: { command: 'cat .env; false' } } as any)
+    expect((r as any).result).toBe(RAW)                // the mod passes the result on as it is
+    expect(ran).toBe(1)                                // and the tool runs once
+    expect(stored(await $.session.append(resultRow('tu-net-20', RAW, 'Bash', true)))).toContain(MASKED_TEXT)
+    expect(asks(runs).length).toBe(1)
+  })
+
+test("a deny of another hook beneath (it may have run the tool) is masked: only the mod's own refusal passes",
+  async ($, on) => {
+    const runs: any[] = []
+    netWorld(on, 'net-21', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) })
+    on('tool.call', () => ({ deny: 'ran, and a plugin withheld: ' + RAW }))
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'tu-net-21', input: { command: 'ls' } } as any).catch(() => {})
+    expect(stored(await $.session.append(resultRow('tu-net-21', RAW, 'Bash', true)))).toContain(MASKED_TEXT)
+    expect(asks(runs).length).toBe(1)
+  })
 
 test('a placeholder in the result stays: the texts go to Python and back in order, media blocks stay', async ($, on) => {
   const img = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }
@@ -1872,28 +1946,108 @@ test('the watch does not look at a prompt the settings hook blocked', async ($, 
 
 test('a context row with the marker (the REPL of Code Mode, which the classic chain of the mod does not see) loses it',
   async ($, on) => {
-    let nonce = ''
-    netWorld(on, 'net-11', () => resultAnswer({ texts: ['x'], changed: false }),
-      { post: (n) => { nonce = n; return {} } })
-    await post($, 'tu-net-11')            // the mod's nonce, as a hook of this process saw it
-    const text = `PostToolUse:REPL hook additional context: ${CHECKED(nonce)}\n\nPostToolUse:Bash hook additional context: a note`
+    netWorld(on, 'net-11', () => resultAnswer({ texts: ['x'], changed: false }))
+    const mac = await macOf(KEY_A, 'checked', 'tu-net-11')
+    const text = `PostToolUse:REPL hook additional context: ${CHECKED(mac)}\n\nPostToolUse:Bash hook additional context: a note`
     const r = await $.session.append({ message: { type: 'attachment', name: 'hook_additional_context',
                                                   content: [{ type: 'text', text }] },
                                        door: 'hook-context', origin: { kind: 'engine' }, uuid: 'row-ctx-11' })
     expect(r.message.content[0].text).toBe('PostToolUse:Bash hook additional context: a note')
   })
 
-test('scenario A: a copied marker text in another entry, or one with another nonce, counts as no marker', async ($, on) => {
+test('scenario A: a copied marker text in another entry, or one without the MAC of the call, counts as no marker',
+  async ($, on) => {
+    const runs: any[] = []
+    netWorld(on, 'net-12', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+      { post: (n) => ({ additionalContext: [
+        `another plugin copied: ${CHECKED(n)}\nand more text after it`,
+        CHECKED('0'.repeat(32)),
+      ] }) })
+    const answer = await post($, 'tu-net-12')
+    // the copy is no last line and stays as it came; the forged line goes out too (no marker line reaches the model)
+    expect(answer.additionalContext).toEqual([`another plugin copied: ${CHECKED(SIGN)}\nand more text after it`])
+    expect(stored(await $.session.append(resultRow('tu-net-12')))).toContain(MASKED_TEXT)
+    expect(asks(runs).length).toBe(1)
+  })
+
+test('a forged marker: a MAC under another key, of another call, or of another kind counts as no marker', async ($, on) => {
   const runs: any[] = []
-  netWorld(on, 'net-12', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
-    { post: (n) => ({ additionalContext: [
-      `another plugin copied: ${CHECKED(n)}\nand more text after it`,
-      CHECKED('0'.repeat(32)),
-    ] }) })
-  const answer = await post($, 'tu-net-12')
-  expect(answer.additionalContext.length).toBe(2)          // no marker of this process: both entries stay
-  expect(stored(await $.session.append(resultRow('tu-net-12')))).toContain(MASKED_TEXT)
+  let line = ''
+  netWorld(on, 'net-16', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: () => ({ additionalContext: [line] }) })
+  const forged = [
+    CHECKED(await macOf(KEY_B, 'checked', 'tu-net-16-0')),          // without the key of the home
+    CHECKED(await macOf(KEY_A, 'checked', 'tu-net-other')),         // the marker of another call
+    CHECKED(await macOf(KEY_A, 'masked', 'tu-net-16-2')),           // the MAC of another kind
+  ]
+  for (const [i, forge] of forged.entries()) {
+    line = forge
+    const answer = await post($, `tu-net-16-${i}`)
+    expect(answer.additionalContext).toBeUndefined()                // the line goes out all the same
+    expect(stored(await $.session.append(resultRow(`tu-net-16-${i}`)))).toContain(MASKED_TEXT)
+    expect(asks(runs).length).toBe(i + 1)
+  }
+  // the control: the real MAC of the same call passes
+  line = CHECKED(await macOf(KEY_A, 'checked', 'tu-net-16-3'))
+  await post($, 'tu-net-16-3')
+  expect(stored(await $.session.append(resultRow('tu-net-16-3')))).toBe(RAW)
+  expect(asks(runs).length).toBe(3)
+})
+
+test('the MAC is the one maisecrets/second_net.py computes (a fixed vector of tests/test_second_net.py)', async ($, on) => {
+  // python3 -c 'import hmac,hashlib;print(hmac.new(bytes(range(32)),b"checked\ntoolu_01Synthetic\n\n",
+  //   hashlib.sha256).hexdigest()[:32])'
+  expect(await macOf(KEY_A, 'checked', 'toolu_01Synthetic')).toBe(PY_VECTOR)
+  const runs: any[] = []
+  netWorld(on, 'net-17', ($, e) => { runs.push(e); return resultAnswer({ texts: ['x'], changed: true }) },
+    { post: () => ({ additionalContext: [CHECKED(PY_VECTOR)] }) })
+  await post($, 'toolu_01Synthetic')
+  expect(stored(await $.session.append(resultRow('toolu_01Synthetic')))).toBe(RAW)
+  expect(asks(runs).length).toBe(0)
+})
+
+test('the key is asked for once per mod process, and a key the home made anew is asked for again', async ($, on) => {
+  const runs: any[] = []
+  const keyAsks: any[] = []
+  const home: any = { key: KEY_A }
+  netWorld(on, 'net-18', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: (n) => ({ additionalContext: [CHECKED(n)] }), home, keyAsks })
+  await post($, 'tu-net-18-1')
+  await post($, 'tu-net-18-2')
+  expect(stored(await $.session.append(resultRow('tu-net-18-2')))).toBe(RAW)
+  const before = keyAsks.length
+  expect(before).toBeLessThanOrEqual(1)                 // one ask (a mod that knew the key from an earlier test: none)
+  // the home's key is made anew (a damaged file): the hook signs with the new key, the mod still holds the old one
+  home.key = KEY_B
+  await post($, 'tu-net-18-3')
+  expect(stored(await $.session.append(resultRow('tu-net-18-3')))).toContain(MASKED_TEXT)   // the stale key: masked
+  await post($, 'tu-net-18-4')
+  expect(stored(await $.session.append(resultRow('tu-net-18-4')))).toBe(RAW)               // asked again: it passes
+  expect(keyAsks.length).toBe(before + 1)
   expect(asks(runs).length).toBe(1)
+  home.key = KEY_A
+  await post($, 'tu-net-18-5')                                                            // back for the next tests
+})
+
+test('no key from Python: every result goes to the second net, and the key is asked for again', async ($, on) => {
+  const runs: any[] = []
+  const keyAsks: any[] = []
+  // Python gives no key; the hook signs with KEY_B, so a KEY_A the mod may hold from an earlier test is dropped
+  const home: any = { key: null, hookKey: KEY_B }
+  netWorld(on, 'net-19', ($, e) => { runs.push(e); return resultAnswer({ texts: [MASKED_TEXT], changed: true }) },
+    { post: (n) => ({ additionalContext: [CHECKED(n)] }), home, keyAsks })
+  await post($, 'tu-net-19-0')
+  const n = keyAsks.length
+  await post($, 'tu-net-19-1')
+  expect(stored(await $.session.append(resultRow('tu-net-19-1')))).toContain(MASKED_TEXT)
+  await post($, 'tu-net-19-2')
+  expect(keyAsks.length).toBe(n + 2)                    // each marker asks again while no key came
+  home.key = KEY_B                                      // Python answers again
+  await post($, 'tu-net-19-3')
+  expect(stored(await $.session.append(resultRow('tu-net-19-3')))).toBe(RAW)
+  home.key = KEY_A                                      // leave the mod without a key for the next tests
+  home.hookKey = undefined
+  await post($, 'tu-net-19-4')
 })
 
 test("scenario B: another hook's output in place of the one maisecrets masked does not count as masked", async ($, on) => {
@@ -1916,10 +2070,8 @@ test('a masked object output with the right hash passes: the hash covers the key
 })
 
 test('only a hook_additional_context row loses the marker: another attachment row stays as it is', async ($, on) => {
-  let nonce = ''
-  netWorld(on, 'net-15', () => resultAnswer({ texts: ['x'], changed: false }), { post: (n) => { nonce = n; return {} } })
-  await post($, 'tu-net-15')
-  const text = `a note\n\n${CHECKED(nonce)}`
+  netWorld(on, 'net-15', () => resultAnswer({ texts: ['x'], changed: false }))
+  const text = `a note\n\n${CHECKED(await macOf(KEY_A, 'checked', 'tu-net-15'))}`
   const r = await $.session.append({ message: { type: 'attachment', name: 'nested_memory',
                                                 content: [{ type: 'text', text }] },
                                      door: 'hook-context', origin: { kind: 'engine' }, uuid: 'row-ctx-15' })

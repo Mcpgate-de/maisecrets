@@ -167,8 +167,9 @@ In Claude Code, maisecrets also loads a mod, `claude-mod/maisecrets-mod.mjs`. Th
   [What the plugin runs, sends and fetches](docs/HOW-IT-WORKS.md#what-the-plugin-runs-sends-and-fetches).
 - **The hooks on results and prompts:** `session.append` masks a tool result that the maisecrets result hook did
   not check, before Claude Code keeps it; if that fails, it withholds the output. `classic.PostToolUse` and
-  `classic.PostToolUseFailure` give that hook a one-time code and take its proof line out. `tool.run` notes the
-  references a call used. `classic.UserPromptSubmit` shows a line when the prompt hook did not run.
+  `classic.PostToolUseFailure` ask that hook for a proof line (a keyed hash of the call, the key in the maisecrets
+  home), check it and take it out, and note the references a result showed. `classic.UserPromptSubmit` shows a
+  line when the prompt hook did not run.
 - **The demo** (`/maisecrets demo on`): in a session in the demo, the `http.fetch` hook refuses every request that
   Claude Code itself sends (the turns, and side requests such as the title or the next-prompt guess), and each model
   step gets one line from the mod instead of a request. The `session.compact` hook skips a compaction in that

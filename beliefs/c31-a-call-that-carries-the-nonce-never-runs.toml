@@ -7,5 +7,7 @@ runner = ["tests/mod.test.ts::the nonce in a command while the pairing runs bind
 
 [proof]
 file = "claude-mod/maisecrets-mod.mjs"
-find = '''      if (hit) return { deny: PAIR_DENY }'''
-replace = '''      if (false) return { deny: PAIR_DENY }'''
+find = '''      if (hit) {
+        try { noteRefused(e) }'''
+replace = '''      if (false) {
+        try { noteRefused(e) }'''

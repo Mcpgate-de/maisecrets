@@ -327,6 +327,20 @@ class PopulationTests(unittest.TestCase):
                 with self.subTest(tool=tool, cmd=cmd):
                     self.assertTrue(deny(pre(tool, {"command": cmd}, "/tmp")), f"{tool}: {cmd}")
 
+    def test_the_key_of_the_second_net_marker_is_refused_to_every_read_of_the_agent(self):
+        # the mod's marker counts only with an HMAC under this key (maisecrets/second_net.py): a command or a Read of
+        # the agent that got it could write a marker that passes
+        from maisecrets.second_net import KEY_NAME, net_key
+        net_key()
+        key = str(HOME / KEY_NAME)
+        for tool, tool_input in (("Bash", {"command": "cat ~/.maisecrets/" + KEY_NAME}),
+                                 ("Bash", {"command": "cat $MAISECRETS_HOME/" + KEY_NAME}),
+                                 ("Bash", {"command": "cat " + key}),
+                                 ("Read", {"file_path": key}),
+                                 ("Grep", {"pattern": "a", "path": key})):
+            with self.subTest(tool=tool, tool_input=tool_input):
+                self.assertTrue(deny(pre(tool, tool_input, "/tmp")), f"{tool}: {tool_input}")
+
     def test_every_tool_that_reads_a_path_is_in_the_matcher(self):
         hooks_json = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         matchers = [m.get("matcher", "") for m in hooks_json["hooks"]["PreToolUse"]]
