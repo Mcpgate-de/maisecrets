@@ -12,8 +12,6 @@ import os
 import time
 from pathlib import Path
 
-from . import links
-
 HOME = Path(os.environ.get("MAISECRETS_HOME") or Path.home() / ".maisecrets")   # empty: the default, as in run.sh
 CONFIG = HOME / "config.json"
 _DEFAULT_HOME = Path.home() / ".maisecrets"
@@ -55,7 +53,6 @@ def _check_home() -> None:
 
 DEFAULT_CONFIG = {
     "backend": "keychain",          # keychain (macOS) | windows-vault | encrypted-file (Linux) | jsonfile (test)
-    "report_url": links.ISSUES_URL,   # shown in the block notice
     "ttl_seconds": {"default": 86400, "CARD": 3600},
     "max_ttl_seconds": 30 * 86400,
     "renew_on_use": True,
