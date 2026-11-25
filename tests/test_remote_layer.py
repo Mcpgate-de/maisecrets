@@ -210,15 +210,18 @@ class RemoteLayerTests(unittest.TestCase):
         self.assertIn("rules 2 (too_long 1, timeout 1)", ner_setup.counts_line())
 
     def test_a_tool_result_in_a_hook_waits_from_the_watchdog_start_not_the_cap(self):
-        # #105, B8: min(8 s, half the watchdog) from its start, less the reserve, bounds the pieces together; each
-        # piece still waits at most its own wait (review H1); outside a hook the text gets one wait
+        # #105, B8: min(10 s, the larger of half the watchdog and the watchdog less 6 s) from its start, less the
+        # reserve, bounds the pieces together; each piece still waits at most its own wait (review H1); outside a hook
+        # the text gets one wait
         from maisecrets import remote_layer, vault
         from test_remote_detector import Scripted
         self.addCleanup(vault.hook_deadline, None)
         vault.hook_deadline(16.0)
         start = vault.hook_window()[0]
-        self.assertAlmostEqual(remote_layer.tool_deadline(0.0), start + 8.0 - remote_layer.RESERVE_MIN_S)
-        self.assertAlmostEqual(remote_layer.tool_deadline(1.5), start + 8.0 - 1.5, msg="a slow scan: its own time")
+        self.assertAlmostEqual(remote_layer.tool_deadline(0.0), start + 10.0 - remote_layer.RESERVE_MIN_S)
+        self.assertAlmostEqual(remote_layer.tool_deadline(1.5), start + 10.0 - 1.5, msg="a slow scan: its own time")
+        self.assertGreaterEqual(start + 16.0 - remote_layer.tool_deadline(0.0), remote_layer.TOOL_WORK_S,
+                                "the work after the name check keeps its 6 s of the watchdog")
         # six pieces, three at once (#105): two rounds of 0.6 s fit the hook's 2.5 s, not one wait of 1 s
         text = f"ask {NAME}\n" + "row of the log\n" * 300
         conf = {"format": "hf", "max_chars": 1000, "timeout_ms": 1000, "timeout_scales": False}

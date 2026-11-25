@@ -30,11 +30,17 @@ SEPARATOR = "\n\n"       # between the strings of one tool result: a line break 
 DEFAULT_RATE = 60.0      # netcup RS 2000 G12 (AMD EPYC 9645, Zen 5), --cpus 4 --memory 1536m: 54 to 64, median 57
 SAFETY = 1.5
 MAX_TIMEOUT_MS = 3000    # the default cap; the setting may raise it to 5,000 (the hook's watchdog is 16 s)
-# In a hook (#105, B8) a tool result waits from the start of the hook's watchdog: min(TOOL_WAIT_MAX_S, half the
-# watchdog), less a reserve for the work after the name check (the redaction, a store for each new name). The reserve
-# is the time the rules' scan of this result took, at least RESERVE_MIN_S: the walk after the check goes over the
-# same text. The watchdog must never fire because of the name check; its other half stays for that work.
-TOOL_WAIT_MAX_S = 8.0
+# In a hook (#105, B8) a tool result waits from the start of the hook's watchdog: min(TOOL_WAIT_MAX_S, the larger of
+# half the watchdog and the watchdog less TOOL_WORK_S), less a reserve for the work after the name check (the
+# redaction, a store for each new name). The reserve is the time the rules' scan of this result took, at least
+# RESERVE_MIN_S: the walk after the check goes over the same text. The watchdog must never fire because of the name
+# check. With the 16 s of PostToolUse that is 10 s, and 6 s stay for that work: the whole hook without a name service
+# took at most 1.0 s for 100,000 characters on an M-series laptop and 0.63 s on the reference host (AMD EPYC 9645),
+# 2026-11-25, so a computer 6 times slower still fits. On a slower one the watchdog fires and the whole result is
+# withheld (fail closed) instead of a rest. 8 s left 5 % of the results of 60,000 to 100,000 characters a rest against
+# the gateway at the field peak (bench/ner/load.py on the reference host, 2026-11-25).
+TOOL_WAIT_MAX_S = 10.0
+TOOL_WORK_S = 6.0
 RESERVE_MIN_S = 0.5
 RATE_SAMPLES, RATE_MIN, RATE_MIN_CHARS = 40, 5, 500
 
@@ -222,13 +228,14 @@ def note_rate(chars: int, status) -> None:
 
 def tool_deadline(reserve_s: float) -> float | None:
     """The end of a tool result's wait for the name service in a hook: from the start of its watchdog,
-    min(TOOL_WAIT_MAX_S, half the watchdog), less `reserve_s` (at least RESERVE_MIN_S). None outside a hook."""
+    min(TOOL_WAIT_MAX_S, the larger of half the watchdog and the watchdog less TOOL_WORK_S), less `reserve_s` (at
+    least RESERVE_MIN_S). None outside a hook."""
     from .vault import hook_window
     window = hook_window()
     if window is None:
         return None
     start, seconds = window
-    return start + min(TOOL_WAIT_MAX_S, seconds / 2) - max(RESERVE_MIN_S, reserve_s)
+    return start + min(TOOL_WAIT_MAX_S, max(seconds / 2, seconds - TOOL_WORK_S)) - max(RESERVE_MIN_S, reserve_s)
 
 
 def share(status) -> int:
