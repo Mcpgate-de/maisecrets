@@ -2,7 +2,7 @@
 
 It is a server's output, as in PostToolUse: with the mod it enters masked (hooks.rewrite_prompt), when it proves itself
 as the task of an MCP call of this transcript (agent_reports.mcp_tasks). Without the mod the hook blocks it, and
-the next hook answer that reaches the model says so (hooks._with_withheld_note). The fixtures have the shape that
+the next hook answer that reaches the model says so (withheld_results). The fixtures have the shape that
 Claude Code 2.1.332 wrote in harness/run.py mcp_task_result (2026-11-25), with synthetic values.
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ Path(_isolate.HOME).mkdir(parents=True, exist_ok=True)
 Path(_isolate.HOME, "config.json").write_text(CONFIG)
 
 from maisecrets import hooks  # noqa: E402
+from maisecrets import withheld_results as wr  # noqa: E402
 from maisecrets.agent_reports import mcp_tasks  # noqa: E402
 from maisecrets.vault import Vault  # noqa: E402
 import _hygiene  # noqa: E402
@@ -231,46 +232,47 @@ class HookTests(Base):
     def test_the_next_answer_that_reaches_the_model_names_the_withheld_result_once(self):
         self.prompt(notification(self.result))
         payload = {"session_id": SESSION, **CLAUDE}
-        out = hooks._with_withheld_note("user-prompt", payload, {})
+        out = wr.with_note("user-prompt", payload, {})
         note = out["hookSpecificOutput"]["additionalContext"]
         self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
         self.assertIn(f"task {TASK} ({NAME})", note)
         self.assertIn("/maisecrets send", note)
         self.assertNotIn(VALUE, note)
-        self.assertEqual(hooks._with_withheld_note("user-prompt", payload, {}), {}, "once")
+        self.assertEqual(wr.with_note("user-prompt", payload, {}), {}, "once")
 
     def test_a_tool_result_carries_the_note_after_its_own_context(self):
         self.prompt(notification(self.result))
         obj = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "own"}}
-        out = hooks._with_withheld_note("post-tool", {"session_id": SESSION, **CLAUDE}, obj)
+        out = wr.with_note("post-tool", {"session_id": SESSION, **CLAUDE}, obj)
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertTrue(ctx.startswith("own\n\nmaisecrets: the result of the MCP call"), ctx)
 
     def test_a_block_and_codex_keep_the_note_for_later(self):
         self.prompt(notification(self.result))
         block = {"decision": "block", "reason": "r"}
-        self.assertEqual(hooks._with_withheld_note("user-prompt", {"session_id": SESSION, **CLAUDE}, block), block)
+        self.assertEqual(wr.with_note("user-prompt", {"session_id": SESSION, **CLAUDE}, block), block)
         codex = {"session_id": SESSION, "turn_id": "t1", "model": "m"}
-        self.assertEqual(hooks._with_withheld_note("post-tool", codex, {}), {})
-        self.assertEqual(hooks._with_withheld_note("pre-tool", {"session_id": SESSION, **CLAUDE}, {}), {})
-        self.assertIsNotNone(hooks.withheld_note(SESSION), "still there for the next answer")
+        self.assertEqual(wr.with_note("post-tool", codex, {}), {})
+        self.assertEqual(wr.with_note("pre-tool", {"session_id": SESSION, **CLAUDE}, {}), {})
+        self.assertIsNotNone(wr.take(SESSION), "still there for the next answer")
 
     def test_an_old_note_is_dropped(self):
-        hooks._note_withheld(SESSION, [[TASK, NAME]])
-        p = hooks._withheld_path(SESSION)
-        p.write_text(json.dumps({"at": time.time() - hooks._WITHHELD_SECONDS - 5, "tasks": [[TASK, NAME]]}))
-        self.assertIsNone(hooks.withheld_note(SESSION))
+        wr.note(SESSION, [[TASK, NAME]])
+        p = wr.path_of(SESSION)
+        p.write_text(json.dumps({"at": time.time() - wr.SECONDS - 5, "tasks": [[TASK, NAME]]}))
+        self.assertIsNone(wr.take(SESSION))
         self.assertFalse(p.exists())
 
     def test_a_notification_that_proves_nothing_is_blocked_without_a_note(self):
         out = self.prompt(notification(self.result, task="zzzzzz123"))
         self.assertEqual(out.get("decision"), "block")
-        self.assertIsNone(hooks.withheld_note(SESSION))
+        self.assertFalse(wr.path_of(SESSION).exists(), "no note file for a notification that proves nothing")
+        self.assertIsNone(wr.take(SESSION))
 
     def test_the_main_path_adds_the_note(self):
         """Through hooks.main: the answer to a clean prompt carries the note."""
         import io
-        hooks._note_withheld(SESSION, [[TASK, NAME]])
+        wr.note(SESSION, [[TASK, NAME]])
         payload = {"prompt": "what happened to the lookup?", "session_id": SESSION,
                    "transcript_path": str(self.t), **CLAUDE}
         out = io.StringIO()

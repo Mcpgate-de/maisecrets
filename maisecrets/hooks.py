@@ -571,71 +571,6 @@ def agent_report(payload: dict, prompt: str) -> bool:
     return True
 
 
-# #107: an MCP task's result that the hook blocked (no mod) never reaches the model, and the model waits for it. The
-# next hook answer that reaches the model (a prompt that passes, a tool result) carries this note once. A block's own
-# additionalContext does not reach the model (measured on Claude Code 2.1.332)
-_WITHHELD_SECONDS = 3600
-
-
-def _withheld_path(session: str):
-    from .vault import HOME
-    return HOME / "withheld" / f"{session}.json"
-
-
-def _note_withheld(session: str | None, tasks: list) -> None:
-    if not session or not _SESSION_ID_RE.fullmatch(session):
-        return
-    try:
-        p = _withheld_path(session)
-        p.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"at": time.time(), "tasks": tasks}, f)
-    except OSError as exc:
-        incidents.note("prompt.withheld", exc)
-
-
-def withheld_note(session: str | None) -> str | None:
-    """The note for the model on the MCP results the hook withheld in this session, once; None without one."""
-    if not session or not _SESSION_ID_RE.fullmatch(session):
-        return None
-    p = _withheld_path(session)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        p.unlink()
-    except (OSError, ValueError):
-        return None
-    try:
-        tasks = data["tasks"] if time.time() - float(data["at"]) <= _WITHHELD_SECONDS else None
-    except (KeyError, TypeError, ValueError):
-        return None
-    if not isinstance(tasks, list) or not tasks:
-        return None
-    named = ", ".join(f"task {t} ({n})" for t, n in tasks[:4] if isinstance(t, str) and isinstance(n, str))
-    return (f"maisecrets: the result of the MCP call that went to the background ({named}) held a value (a secret "
-            "or personal data), so maisecrets blocked it and it did not reach you. Do not wait for it. The user can "
-            "send it with placeholders: /maisecrets send. Or make the call again from a subagent (the Agent tool), "
-            "where it runs in the foreground and maisecrets masks its result; first check whether the call already "
-            "did its work.")
-
-
-def _with_withheld_note(event: str, payload: dict, obj: dict) -> dict:
-    """`obj` with the withheld note (withheld_note) as additionalContext, when it is an answer that reaches the model:
-    a prompt that passes, or a tool result. Claude Code only."""
-    if event not in ("user-prompt", "post-tool") or client_of(payload) != "claude" or obj.get("decision") == "block":
-        return obj
-    name = "UserPromptSubmit" if event == "user-prompt" else "PostToolUse"
-    hso = obj.get("hookSpecificOutput")
-    if hso is not None and (not isinstance(hso, dict) or hso.get("hookEventName") != name):
-        return obj
-    note = withheld_note(payload.get("session_id"))
-    if note is None:
-        return obj
-    hso = dict(hso or {"hookEventName": name})
-    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{note}" if hso.get("additionalContext") else note
-    return {**obj, "hookSpecificOutput": hso}
-
-
 def _blocking_mention(prompt: str, cwd: str, cfg: dict) -> str | None:
     """The first @mention of a file that exists, which the hook blocks before it stores anything."""
     if not cfg.get("block_at_mentions", True):
@@ -819,6 +754,11 @@ def _verdict(text: str, cfg: dict, session: str | None, vault=None) -> tuple:
     return entries, matches, stored["n"], values
 
 
+def _wr():
+    from . import withheld_results       # #107
+    return withheld_results
+
+
 def _pc():
     """maisecrets/prompt_commands.py: the ms:(…) check, ms:(value) inside a prompt, the mod's own commands."""
     from . import prompt_commands
@@ -860,9 +800,8 @@ def rewrite_prompt(payload: dict) -> dict:
     dm = demo.mod_answer(payload, cfg)          # demo.py: a demo prompt enters masked, or goes to the hook
     if dm is not None:
         return dm
-    # a subagent's report is the hook's to judge (C19); a model wrote it, so nothing of it is stored. The result of an
-    # MCP task of this session is a tool's output (#107): masked as PostToolUse masks it, only when the client sent it
-    # as a notification (the origin) and it proves itself
+    # a subagent's report is the hook's to judge (C19); a model wrote it, so nothing is stored. An MCP task's result of
+    # this session, sent by the client, is tool output: masked as in PostToolUse (#107)
     if "<task-notification>" in prompt and (payload.get("origin") != "task-notification"
                                             or not mcp_tasks(prompt, demo._find_transcript(session) or "")):
         return {}
@@ -1162,9 +1101,7 @@ def user_prompt(payload: dict) -> dict:
     # a blocked report is passed on with /ms; the person's clipboard stays theirs
     report = None if peer or client_of(payload) != "claude" else report_kind(prompt)
     if report == "an MCP tool's background result":
-        tasks = mcp_tasks(prompt, str(payload.get("transcript_path") or ""))
-        if tasks:
-            _note_withheld(session, tasks)
+        _wr().note(session, mcp_tasks(prompt, str(payload.get("transcript_path") or "")))
     copied = False if peer or report else _clipboard(rewritten)
     if not peer:
         _save_pending(rewritten, session)
@@ -3560,7 +3497,7 @@ def main(argv: list[str]) -> int:
     _record(incidents.discard)
     _record(functools.partial(incidents.set_context, _EVENT_NAMES[event], tool_class, client))
     try:
-        won = answer(_with_withheld_note(event, payload, HANDLERS[event](payload)), "ok")
+        won = answer(_wr().with_note(event, payload, HANDLERS[event](payload)), "ok")
         return 0
     except ConfigError as exc:
         # the policy file is wrong: fail closed, and say which key (its message never carries
