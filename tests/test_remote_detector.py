@@ -915,21 +915,33 @@ class JsonEscapedTextTests(unittest.TestCase):
 
 class Scripted:
     """A fake service whose answers follow a script, one entry per POST: (status, body, headers, delay); past the
-    script it finds each NAME in the piece it got. `received` keeps each request body."""
+    script it finds each NAME in the piece it got. `received` keeps each request body. `by_text(inputs)`, when given,
+    gives the entry of a request by its text instead: pieces in flight at once arrive in no fixed order (#105).
+    `in_flight` and `most_at_once` count the requests the service holds at the same time."""
 
-    def __init__(self, script=(), secret: str = "", answer=None):
+    def __init__(self, script=(), secret: str = "", answer=None, by_text=None):
         self.script, self.received, self.challenges, self.secret = list(script), [], [], secret
-        self.answer = answer
+        self.answer, self.by_text = answer, by_text
+        self.in_flight = self.most_at_once = 0
+        self.lock = threading.Lock()
         svc = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802 - http.server API
                 doc = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
-                n = len(svc.received)
-                svc.received.append(doc)
-                status, body, headers, delay = svc.script[n] if n < len(svc.script) else (200, None, {}, 0.0)
-                if delay:
-                    time.sleep(delay)
+                with svc.lock:
+                    n = len(svc.received)
+                    svc.received.append(doc)
+                    svc.in_flight += 1
+                    svc.most_at_once = max(svc.most_at_once, svc.in_flight)
+                try:
+                    status, body, headers, delay = svc.by_text(doc["inputs"]) if svc.by_text else \
+                        svc.script[n] if n < len(svc.script) else (200, None, {}, 0.0)
+                    if delay:
+                        time.sleep(delay)
+                finally:
+                    with svc.lock:
+                        svc.in_flight -= 1
                 if body is None and svc.answer is not None:
                     body = svc.answer(doc["inputs"])
                 if body is None:
@@ -1235,6 +1247,233 @@ class PiecesTests(unittest.TestCase):
         self.assertEqual(problems(doc, schema), [])
         self.assertEqual((doc["engine"]["remote"]["checked_to"], doc["engine"]["remote"]["total"]), (10, 40))
         self.assertEqual(rm.RemoteStatus().checked_to, 0, "an older caller's status keeps working")
+
+
+
+def lines_of(n: int) -> str:
+    """n lines of 500 characters, each with its number at the start (L0, L1, …): one piece per line at SIZE."""
+    return J(f"L{i}" + dots(497) + "\n" for i in range(n))
+
+
+def piece_of(text: str) -> int:
+    """The number of the piece a request holds: its first line marker (each piece reads the next line's start)."""
+    return min(int(m) for m in re.findall(r"L(\d)", text))
+
+
+class ParallelPiecesTests(unittest.TestCase):
+    """#105: up to `parallel` pieces of one text in flight at once. They start in order; checked_to stays the end of
+    the pieces checked without a gap; the spans are kept in the order of the pieces, whatever order they end in."""
+
+    def svc(self, by_text) -> Scripted:
+        s = Scripted(by_text=by_text)
+        self.addCleanup(s.close)
+        return s
+
+    def ask(self, svc, text, wait=3.0, parallel=3, **kw):
+        det = rm.RemoteDetector(svc.url, max_chars=SIZE, parallel=parallel, **kw)
+        return det.ask(text, [], time.monotonic() + wait)
+
+    def test_five_pieces_take_the_time_of_two_and_at_most_three_are_in_flight(self):
+        text = lines_of(5)
+        self.assertEqual(len(rm.plan_pieces(text, SIZE)), 5, "premise: five pieces")
+        svc = self.svc(lambda t: (200, [], {}, 0.4))
+        t = time.monotonic()
+        _spans, status = self.ask(svc, text, wait=3.0, timeout=2.0)
+        took = time.monotonic() - t
+        self.assertEqual((status.state, status.checked_to, len(svc.received)), ("ok", len(text), 5))
+        self.assertLess(took, 2 * 0.4 + 0.35, "two rounds of 0.4 s, not five")
+        self.assertEqual(svc.most_at_once, 3, "at most three requests of one text at once")
+        self.assertEqual(sorted(piece_of(r["inputs"]) for r in svc.received), [0, 1, 2, 3, 4])
+        svc = self.svc(lambda t: (200, [], {}, 0.2))
+        _spans, status = self.ask(svc, text, parallel=2, timeout=2.0)
+        self.assertEqual((status.state, svc.most_at_once), ("ok", 2), "parallel=2: two at once")
+        svc = self.svc(lambda t: (200, [], {}, 0.1))
+        _spans, status = self.ask(svc, text, parallel=1, timeout=2.0)
+        self.assertEqual((status.state, svc.most_at_once), ("ok", 1), "parallel=1: one after the other")
+        self.assertEqual([piece_of(r["inputs"]) for r in svc.received], [0, 1, 2, 3, 4], "in order")
+
+    def test_a_later_piece_that_ends_first_does_not_move_checked_to(self):
+        text = lines_of(3)
+        plan = rm.plan_pieces(text, SIZE)
+        for slow, state, checked_to in ((0, "unavailable", 0), (1, "partial", plan[0][2])):
+            with self.subTest(slow=slow):
+                svc = self.svc(lambda t, slow=slow: (200, None, {}, 3.0 if piece_of(t) == slow else 0.0))
+                spans, status = self.ask(svc, text, wait=0.8, timeout=2.0)
+                self.assertEqual(len(svc.received), 3, "premise: all three were sent at once")
+                self.assertEqual((status.state, status.reason, status.checked_to), (state, "timeout", checked_to))
+                self.assertTrue(all(s < status.checked_to for s, _e, _t, _sc in spans))
+
+    def test_spans_are_kept_in_the_order_of_the_pieces_when_they_end_out_of_order(self):
+        # the cut falls on the space inside the name: the first piece reads it whole, the second piece reads it
+        # whole too and (a model at a cut) gives the surname alone, which starts in its own core. One after the
+        # other, the whole name of the first piece is kept and the surname drops. Here the second piece ends first:
+        # kept in the order they end, the surname would win and the given name would stay in clear text
+        text = J([dots(780), NAME, dots(900)])
+        plan = rm.plan_pieces(text, SIZE)
+        at, sur = text.index(NAME), text.index(NAME) + NAME.rindex(" ") + 1
+        self.assertEqual(plan[0][2], sur, "premise: the second core starts at the surname")
+        surname = NAME[NAME.rindex(" ") + 1:]
+
+        def answer(t):
+            spans = [{"entity_group": "PER", "start": m.start(), "end": m.end(), "score": 0.97}
+                     for m in re.finditer(re.escape(NAME), t)]
+            if NAME in t and not t.startswith(dots(700)):    # every later piece: the surname alone, too
+                i = t.index(NAME) + NAME.rindex(" ") + 1
+                spans.append({"entity_group": "PER", "start": i, "end": i + len(surname), "score": 0.9})
+            return (200, spans, {}, 0.5 if t.startswith(dots(700)) else 0.0)
+        svc = self.svc(answer)
+        spans, status = self.ask(svc, text, timeout=2.0)
+        self.assertEqual(status.state, "ok")
+        self.assertEqual([(s, e) for s, e, _t, _sc in spans], [(at, at + len(NAME))], "once, whole")
+
+    def test_busy_with_retry_after_on_one_piece_is_sent_again_once(self):
+        text = lines_of(4)
+        seen: dict = {}
+
+        def answer(t):
+            n = piece_of(t)
+            seen[n] = seen.get(n, 0) + 1
+            if n == 2 and seen[n] == 1:
+                return (429, {"error": "busy", "retry_after": 0.2}, {}, 0.0)
+            return (200, [], {}, 0.1)
+        svc = self.svc(answer)
+        _spans, status = self.ask(svc, text, timeout=2.0)
+        self.assertEqual((status.state, status.checked_to), ("ok", len(text)))
+        self.assertEqual(seen, {0: 1, 1: 1, 2: 2, 3: 1}, "the busy piece twice, every other once")
+        seen.clear()
+        svc = self.svc(lambda t: (429, {"error": "busy", "retry_after": 0.1}, {}, 0.0) if piece_of(t) == 1 else
+                       (200, [], {}, 0.0))
+        _spans, status = self.ask(svc, text, timeout=2.0)
+        self.assertEqual((status.state, status.reason, status.checked_to),
+                         ("partial", "busy", rm.plan_pieces(text, SIZE)[0][2]), "a second busy: no second retry")
+        self.assertEqual(sum(piece_of(r["inputs"]) == 1 for r in svc.received), 2)
+
+    def test_rate_limited_starts_no_further_piece(self):
+        text = lines_of(5)
+        plan = rm.plan_pieces(text, SIZE)
+        limited = (429, {"error": "rate_limited", "retry_after": 0.05}, {}, 0.0)
+        svc = self.svc(lambda t: limited if piece_of(t) == 1 else (200, [], {}, 0.3))
+        det = rm.RemoteDetector(svc.url, max_chars=SIZE, parallel=3, timeout=2.0)
+        begun: list = []                             # each piece that starts builds its body first
+        real = det._body
+        det._body = lambda text, kind=None: (begun.append(piece_of(text)), real(text, kind))[1]
+        _spans, status = det.ask(text, [], time.monotonic() + 3.0)
+        time.sleep(0.3)                              # a piece started late would arrive now
+        self.assertEqual(sorted(piece_of(r["inputs"]) for r in svc.received), [0, 1, 2],
+                         "the three in flight; no piece after rate_limited")
+        self.assertEqual(sorted(begun), [0, 1, 2], "no piece even starts after rate_limited")
+        self.assertEqual((status.state, status.reason, status.checked_to), ("partial", "rate_limited", plan[0][2]))
+
+    def test_the_deadline_stops_the_pieces_in_flight_and_in_the_queue(self):
+        text = lines_of(5)
+        plan = rm.plan_pieces(text, SIZE)
+        svc = self.svc(lambda t: (200, None, {}, 0.0 if piece_of(t) == 0 else 1.2))
+        t = time.monotonic()
+        _spans, status = self.ask(svc, text, wait=0.6, timeout=2.0)
+        self.assertLess(time.monotonic() - t, 0.9, "ask() leaves at the deadline")
+        self.assertEqual((status.state, status.reason, status.checked_to), ("partial", "timeout", plan[0][2]))
+        time.sleep(1.4)                              # the pieces in flight end; nothing may start after them
+        self.assertEqual(sorted(piece_of(r["inputs"]) for r in svc.received), [0, 1, 2, 3],
+                         "the fifth piece waited in the queue and was never sent")
+        # a request that ends after the deadline all the same (a late parse, a slow thread): the pieces in flight
+        # end without an error, and still no piece of the queue starts after ask() gave up
+        det = rm.RemoteDetector("http://127.0.0.1:1/", max_chars=SIZE, parallel=3, timeout=2.0)
+        asked: list = []
+
+        def late(body, deadline, gate=None):
+            n = piece_of(json.loads(body)["inputs"])
+            asked.append(n)
+            time.sleep(0.0 if n == 0 else 1.0)
+            return b"[]"
+        det._request = late
+        begun: list = []                             # each piece that starts builds its body first
+        real = det._body
+        det._body = lambda t, kind=None: (begun.append(piece_of(t)), real(t, kind))[1]
+        _spans, status = det.ask(text, [], time.monotonic() + 0.5)
+        self.assertEqual((status.state, status.checked_to), ("partial", plan[0][2]))
+        time.sleep(1.0)
+        self.assertEqual(sorted(asked), [0, 1, 2, 3], "no request after the deadline")
+        self.assertEqual(sorted(begun), [0, 1, 2, 3], "no piece starts after the deadline")
+
+    def test_a_piece_behind_a_failed_one_sends_no_further_request(self):
+        # piece 2 waits for its Retry-After while piece 1 fails with rate_limited: it does not send again. Piece 0,
+        # in front of the failed one, still ends and is checked
+        text = lines_of(4)
+        plan = rm.plan_pieces(text, SIZE)
+        seen: dict = {}
+
+        def answer(t):
+            n = piece_of(t)
+            seen[n] = seen.get(n, 0) + 1
+            if n == 1:
+                return (429, {"error": "rate_limited", "retry_after": 30}, {}, 0.1)
+            if n == 2 and seen[n] == 1:
+                return (429, {"error": "busy", "retry_after": 0.3}, {}, 0.0)
+            return (200, [], {}, 0.6 if n == 0 else 0.0)
+        svc = self.svc(answer)
+        _spans, status = self.ask(svc, text, wait=3.0, timeout=2.0)
+        time.sleep(0.4)                              # a retry of piece 2 would arrive by now
+        self.assertEqual((status.state, status.reason, status.checked_to), ("partial", "rate_limited", plan[0][2]))
+        self.assertEqual(seen, {0: 1, 1: 1, 2: 1}, "piece 2 sent once, piece 3 never")
+
+    def test_a_request_that_hangs_past_its_cap_does_not_hold_the_text_thread(self):
+        # a request that ignores its deadline (a name lookup that hangs): the thread of ask() ends one second after
+        # the deadline, not when the request ends
+        text = lines_of(4)
+        det = rm.RemoteDetector("http://127.0.0.1:1/", max_chars=SIZE, parallel=3, timeout=2.0)
+
+        def hang(body, deadline, gate=None):
+            time.sleep(0.0 if piece_of(json.loads(body)["inputs"]) == 0 else 4.0)
+            return b"[]"
+        det._request = hang
+        before = {t for t in threading.enumerate() if t.name == "maisecrets-remote"}
+        _spans, status = det.ask(text, [], time.monotonic() + 0.4)
+        mine = [t for t in threading.enumerate() if t.name == "maisecrets-remote" and t not in before]
+        self.assertEqual((status.state, status.reason), ("partial", "timeout"))
+        self.assertEqual(len(mine), 1, "premise: the thread of this text runs on after ask() returned")
+        mine[0].join(2.0)
+        self.assertFalse(mine[0].is_alive(), "it ended about one second after the deadline")
+
+    def test_a_piece_that_waits_in_the_queue_of_the_service_waits_to_the_deadline(self):
+        # netcup, 85fa9339: three pieces at once queue in the container; the third answer comes after one piece's
+        # timeout, but well before the hook's deadline. With pieces at once it is waited for, so the text is checked
+        # whole; one after the other each request still waits only `timeout`
+        text = lines_of(3)
+        for parallel, state in ((3, "ok"), (1, "partial")):
+            with self.subTest(parallel=parallel):
+                arrived = {"n": 0}
+                lock = threading.Lock()
+
+                def answer(t):
+                    with lock:
+                        arrived["n"] += 1
+                        nth = arrived["n"]
+                    return (200, [], {}, 0.6 if nth == 3 else 0.05)
+                svc = self.svc(answer)
+                _spans, status = self.ask(svc, text, wait=2.0, parallel=parallel, timeout=0.3)
+                self.assertEqual(len(svc.received), 3)
+                self.assertEqual(status.state, state, status)
+                if state == "ok":
+                    self.assertEqual(status.checked_to, len(text), "the whole text was checked")
+                else:
+                    self.assertEqual(status.reason, "timeout")
+
+    def test_a_text_of_one_piece_is_asked_in_the_thread_of_ask_as_before(self):
+        svc = self.svc(lambda t: (200, None, {}, 0.0))
+        det = rm.RemoteDetector(svc.url, max_chars=SIZE, parallel=3)
+        names: list = []
+        real = det._request
+        det._request = lambda body, deadline, gate=None: (names.append(threading.current_thread().name),
+                                                          real(body, deadline, gate))[1]
+        spans, status = det.ask(f"ask {NAME} now", [], time.monotonic() + 2.0)
+        self.assertEqual((status.state, len(spans), names), ("ok", 1, ["maisecrets-remote"]))
+
+    def test_parallel_is_a_whole_number_from_1_to_the_maximum(self):
+        self.assertEqual(rm.RemoteDetector("http://127.0.0.1:1/").parallel, 1, "one after the other by default")
+        for bad in (0, rm.PARALLEL_MAX + 1, True, 2.0, "2", None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    rm.RemoteDetector("http://127.0.0.1:1/", parallel=bad)
 
 
 if __name__ == "__main__":

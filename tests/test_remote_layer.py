@@ -131,6 +131,17 @@ class RemoteLayerTests(unittest.TestCase):
         _post({"stdout": f"ask {NAME}, call {PHONE}\n", "stderr": ""})
         self.assertIn(PHONE, self.svc.received[0]["inputs"])
 
+    def test_a_service_on_this_computer_takes_three_pieces_at_once_and_one_on_the_network_one(self):
+        # #105: the url source and its fallback on this computer send up to PARALLEL_MAX pieces of one text at once;
+        # a service on the network gets no pieces, so one at a time
+        from maisecrets import remote_layer
+        from maisecrets.detection import remote
+        ner, _ = remote_layer.from_config({"remote_detector": {"url": self.svc.url}})
+        self.assertEqual((ner.pieces, ner.parallel), (True, 3))
+        self.assertEqual(remote.PARALLEL_MAX, 3)
+        ner, _ = remote_layer.from_config({"remote_detector": {"url": "http://10.0.0.5:9/", "allow_network": True}})
+        self.assertEqual((ner.pieces, ner.parallel), (False, 1))
+
     def test_a_name_in_a_key_is_asked_in_the_same_request(self):
         self.on()
         out = _out(_post({"stdout": "ok", "stderr": "", "owners": {NAME: "lead"}}))
@@ -208,11 +219,12 @@ class RemoteLayerTests(unittest.TestCase):
         start = vault.hook_window()[0]
         self.assertAlmostEqual(remote_layer.tool_deadline(0.0), start + 8.0 - remote_layer.RESERVE_MIN_S)
         self.assertAlmostEqual(remote_layer.tool_deadline(1.5), start + 8.0 - 1.5, msg="a slow scan: its own time")
-        text = f"ask {NAME}\n" + "row of the log\n" * 140
+        # six pieces, three at once (#105): two rounds of 0.6 s fit the hook's 2.5 s, not one wait of 1 s
+        text = f"ask {NAME}\n" + "row of the log\n" * 300
         conf = {"format": "hf", "max_chars": 1000, "timeout_ms": 1000, "timeout_scales": False}
         for hook, want in ((True, "ok"), (False, "partial")):
             with self.subTest(hook=hook):
-                svc = Scripted([(200, None, {}, 0.4)] * 4)     # each piece 0.4 s, within its own 1 s
+                svc = Scripted(by_text=lambda t: (200, None, {}, 0.6))     # each piece 0.6 s, within its own 1 s
                 self.addCleanup(svc.close)
                 _reset(remote_detector={"url": svc.url, **conf})
                 vault.hook_deadline(6.0 if hook else None)     # the tests' watchdog: 3 s, less 0.5 s, from now
@@ -267,6 +279,15 @@ class RemoteLayerTests(unittest.TestCase):
                                 "max_chars": 500})
         _post({"stdout": text, "stderr": ""})
         self.assertEqual(R._samples(), [], "a text in pieces that timed out: no sample")
+        # #105: a text whose pieces went at once and were all answered: its time is not the sum of its pieces
+        fast = Scripted()
+        self.addCleanup(fast.close)
+        _reset(remote_detector={"url": fast.url, "format": "hf", "timeout_ms": 1000, "max_timeout_ms": 3000,
+                                "max_chars": 500})
+        _post({"stdout": text, "stderr": ""})
+        self.assertEqual(R.NER_DOWN["state"], "ok", "premise: every piece answered")
+        self.assertGreater(len(fast.received), 1, "premise: more than one piece")
+        self.assertEqual(R._samples(), [], "pieces at once: no sample")
 
     def test_pieces_only_where_the_text_stays_on_this_computer(self):
         # review M2: the url source and the fallback get pieces only for a loopback or Unix-socket service
@@ -299,7 +320,7 @@ class RemoteLayerTests(unittest.TestCase):
         # string (a cut of each string replaced the strings of the shape, and the client sent the original)
         from maisecrets.file_reads import text_result
         from test_remote_detector import Scripted
-        down = Scripted([(500, {"error": "x"}, {}, 0.0)] * 4)
+        down = Scripted(by_text=lambda t: (500, {"error": "x"}, {}, 0.0))     # every piece, in any order
         self.addCleanup(down.close)
         _reset(remote_detector={"url": down.url, "format": "hf", "max_chars": 1000, "unavailable": "withhold"})
 
@@ -337,9 +358,10 @@ class RemoteLayerTests(unittest.TestCase):
         self.assertTrue(result.wasSuccessful(), result.failures)
 
     def test_a_result_checked_in_part_names_the_share_to_the_model_and_the_person(self):
-        # #105, B11: the first piece answered, the second did not in time
+        # #105, B11: the first piece answered, the second did not in time. Both go at once, so the fake knows the
+        # second one by its text: rows of the log without the first line
         from test_remote_detector import Scripted
-        svc = Scripted([(200, None, {}, 0.0), (200, None, {}, 3.0)])
+        svc = Scripted(by_text=lambda t: (200, None, {}, 3.0 if "row of the log" in t and "first" not in t else 0.0))
         self.addCleanup(svc.close)
         _reset(remote_detector={"url": svc.url, "format": "hf", "max_chars": 1000, "timeout_ms": 1000,
                                 "timeout_scales": False})
@@ -417,7 +439,13 @@ class RestWithheldTests(unittest.TestCase):
 
     def setUp(self):
         from maisecrets import vault
+        from maisecrets.detection import remote
         vault.hook_deadline(None)
+        # these tests script the answers in the order of the requests: one piece after the other. The pieces in
+        # flight at once and their order are the subject of test_remote_detector.ParallelPiecesTests
+        patch = mock.patch.object(remote, "PARALLEL_MAX", 1)
+        patch.start()
+        self.addCleanup(patch.stop)
         self.svc = self.service()
 
     def service(self):

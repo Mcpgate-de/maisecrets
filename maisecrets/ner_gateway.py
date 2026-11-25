@@ -2,10 +2,10 @@
 
 /maisecrets ner gateway URL sets the source: `remote_detector` gets {"gateway": <origin>, "url": <origin>,
 "allow_network": true}. At each tool result, from_config() asks here for the gateway's name endpoint (its protected
-resource metadata names `ner_endpoint`, `ner_scope`, `ner_max_chars`, and since #105 `ner_pieces` and
-`ner_deadline_ms`; kept for an hour in ner-gateway.json, never a token; /maisecrets sref uses an older record of the
-same MCP URL when the gateway does not answer) and for an access token of the login (sref_client, refreshed under
-its lock). The login must hold the name scope. One login asks for every scope the gateway offers
+resource metadata names `ner_endpoint`, `ner_scope`, `ner_max_chars`, and since #105 `ner_pieces`, `ner_deadline_ms`
+and `ner_parallel`; kept for an hour in ner-gateway.json, never a token; /maisecrets sref uses an older record of
+the same MCP URL when the gateway does not answer) and for an access token of the login (sref_client, refreshed
+under its lock). The login must hold the name scope. One login asks for every scope the gateway offers
 (sref_client.discover), so this source needs no second consent; a login of 0.9.24 or older, or one made while the
 gateway offered no name detection, needs one new consent (NO_SCOPE). A typed prompt goes to this source too, as to
 any source that is set (C30a: remote_layer.prompt_names); the rules' findings and the stored values go there as
@@ -36,6 +36,21 @@ DEADLINE_MARGIN_MS = 500
 def takes_pieces(v) -> bool:
     """Only a JSON true: a string "true" or a number is no switch."""
     return v is True
+
+
+# #105: `ner_parallel` is how many requests of one person's text the gateway takes at once (its slots serve all
+# persons together, so more than it says gives `busy` and spends the quota). No field, or any other value than an
+# integer: 1, one piece after the other; never more than remote.PARALLEL_MAX
+PARALLEL_DEFAULT = 1
+
+
+def parallel_of(v) -> int:
+    """The pieces of one text the gateway takes at once: an integer clamped to 1..PARALLEL_MAX, else 1 (a JSON true
+    clamps to 1 as well)."""
+    from .detection.remote import PARALLEL_MAX
+    if isinstance(v, int):
+        return max(1, min(PARALLEL_MAX, v))
+    return PARALLEL_DEFAULT
 
 
 def deadline_ms_of(v) -> int | None:
@@ -106,8 +121,8 @@ def found_for(cfg: dict, origin: str, url: str, deadline: float) -> dict | None:
     """The discovery of the gateway at `url` (sref_client.discover), from the cache while it is fresh."""
     from . import sref_client
     got = _cached(origin, url)
-    if got is not None and isinstance(got.get("ner"), dict) and "pieces" not in got["ner"]:
-        got = None      # a record of a version before #105 knows no ner_pieces: ask the gateway again, not in an hour
+    if got is not None and isinstance(got.get("ner"), dict) and not {"pieces", "parallel"} <= set(got["ner"]):
+        got = None      # a record of a version before #105 knows no ner_pieces or ner_parallel: ask the gateway again
     if got is None:
         got = sref_client.discover(cfg, url, deadline)
         if got:
@@ -182,8 +197,8 @@ def status_line(doc) -> str:
 
 
 def detector(cfg: dict, conf: dict, make, deadline: float | None = None) -> tuple:
-    """(RemoteDetector or None, why not). `make(url, token, max_chars, pieces=, deadline_ms=)` builds the detector
-    with the person's tuning and what the gateway announces.
+    """(RemoteDetector or None, why not). `make(url, token, max_chars, pieces=, deadline_ms=, parallel=)` builds the
+    detector with the person's tuning and what the gateway announces.
     No login, no name endpoint or a login without the name scope: no detector, and the rules alone, with the reason.
     `deadline`: the end of the whole prompt wait (remote_layer.prompt_names); the discovery and the token take their
     time from it, and the request gets what is left. Without one (a tool result) they take up to 2 s."""
@@ -233,4 +248,4 @@ def detector(cfg: dict, conf: dict, make, deadline: float | None = None) -> tupl
     # the cached record is checked again: a file of an older version has no such field, one edited by hand no other
     ner = found["ner"]
     return make(ner["endpoint"], token, int(ner.get("max_chars") or 20000), pieces=takes_pieces(ner.get("pieces")),
-                deadline_ms=deadline_ms_of(ner.get("deadline_ms"))), ""
+                deadline_ms=deadline_ms_of(ner.get("deadline_ms")), parallel=parallel_of(ner.get("parallel"))), ""

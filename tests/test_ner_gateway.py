@@ -318,6 +318,26 @@ class GatewaySourceTests(unittest.TestCase):
                 self.assertIs(self.fresh(**meta).pieces, want)
                 self.assertIs(S.discover(self.cfg, self.srv.url + "/mcp")["ner"]["pieces"], want)
 
+    def test_the_pieces_at_once_are_the_gateways_ner_parallel_from_1_to_3_and_1_without_it(self):
+        # #105: the gateway's slots serve all persons together; a person sends no more pieces of one text at once
+        # than it says. No field, or a value that is no integer: 1, one piece after the other
+        self.login(self.cfg)
+        for meta, want in (({}, 1), ({"ner_parallel": 2}, 2), ({"ner_parallel": 3}, 3), ({"ner_parallel": 4}, 3),
+                           ({"ner_parallel": 100}, 3), ({"ner_parallel": 1}, 1), ({"ner_parallel": 0}, 1),
+                           ({"ner_parallel": -2}, 1), ({"ner_parallel": "2"}, 1), ({"ner_parallel": True}, 1),
+                           ({"ner_parallel": 2.0}, 1), ({"ner_parallel": None}, 1)):
+            with self.subTest(meta=meta):
+                self.assertEqual(self.fresh(ner_pieces=True, **meta).parallel, want)
+                self.assertEqual(S.discover(self.cfg, self.srv.url + "/mcp")["ner"]["parallel"], want)
+        # a record in the cache of a version before the field: discovered again, not an hour at 1
+        self.fresh(ner_pieces=True, ner_parallel=2)
+        data = json.loads(ner_gateway.CACHE.read_text(encoding="utf-8"))
+        data[self.origin]["found"]["ner"].pop("parallel")
+        ner_gateway.CACHE.write_text(json.dumps(data), encoding="utf-8")
+        gets = self.srv.discovery_gets
+        det, _why = remote_layer.from_config(self.cfg)
+        self.assertEqual((det.parallel, self.srv.discovery_gets), (2, gets + 1))
+
     def test_a_request_waits_the_gateways_deadline_plus_a_margin_when_it_announces_one(self):
         self.login(self.cfg)
         for meta, want in (({"ner_deadline_ms": 5000}, 5.5), ({}, 3.0), ({"ner_deadline_ms": 499}, 3.0),
@@ -474,6 +494,16 @@ class GatewaySourceTests(unittest.TestCase):
                 self.assertEqual(code, 0, lines)
                 self.assertIn(want, lines)
                 self.assertIs(facts["pieces"], bool(meta))
+                if meta:
+                    self.assertIn("at once: 1 piece of one text (the gateway's ner_parallel, or none announced)",
+                                  lines)
+                    self.assertEqual(facts["parallel"], 1)
+        self.srv.ner_meta = {"ner_pieces": True, "ner_parallel": 2}
+        ner_gateway.CACHE.unlink(missing_ok=True)
+        facts = {}
+        _code, lines = ner_setup.report(self.cfg["remote_detector"], 0.0, facts)
+        self.assertIn("at once: 2 pieces of one text (the gateway's ner_parallel)", lines)
+        self.assertEqual(facts["parallel"], 2)
 
     def test_a_login_without_the_name_scope_gives_the_reason_and_sends_nothing(self):
         self.older_login()
