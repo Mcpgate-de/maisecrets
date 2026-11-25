@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.9.33] - 2026-11-25
+
+### Fixes
+
+- a busy gateway is asked again after its own estimate, not after a whole second (4bdfa1c)
+- a long tool result may wait up to 10 s for the name check, so results up to 100,000 characters are checked whole (8af64ea)
+- pieces of a long tool result that wait in the name service's queue are waited for up to the hook's deadline (aa79eeb)
+- a piece behind a failed one sends no request, and a hanging request no longer holds the check of a long result (cfde210)
+- a long tool result is checked in pieces at the same time, so up to 100,000 characters fit the wait (85fa933)
+
 ## [0.9.32] - 2026-11-25
 
 ### Fixes

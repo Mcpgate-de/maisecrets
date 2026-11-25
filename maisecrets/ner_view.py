@@ -140,7 +140,10 @@ def _gateway_checks(f: dict, client) -> list:
         return [Check("FAIL", "gateway", str(f.get("why") or "not asked")[:FACT_MAX], "/maisecrets ner all", None)]
     checks = [Check("ok", "login", "has the name scope", None, None)]
     if f.get("pieces") is True:
-        checks.append(Check("ok", "long texts", "checked in pieces", None, None))
+        at_once = f.get("parallel")
+        many = isinstance(at_once, int) and not isinstance(at_once, bool) and at_once > 1
+        checks.append(Check("ok", "long texts", f"checked in pieces, {at_once} at once" if many else
+                            "checked in pieces", None, None))
     elif f.get("pieces") is False:
         checks.append(Check("n/a", "long texts", f"over {f.get('max_chars') or 0:,} chars: rules alone", None, None))
     if f.get("own_wait"):
