@@ -35,8 +35,10 @@ MAX_TIMEOUT_MS = 3000    # the default cap; the setting may raise it to 5,000 (t
 # redaction, a store for each new name). The reserve is the time the rules' scan of this result took, at least
 # RESERVE_MIN_S: the walk after the check goes over the same text. The watchdog must never fire because of the name
 # check. With the 16 s of PostToolUse that is 10 s, and 6 s stay for that work: the whole hook without a name service
-# took at most 1.0 s for 100,000 characters (M-series, 2026-11-25). 8 s left 5 % of the results of 60,000 to 100,000
-# characters a rest against the gateway at the field peak (bench/ner/load.py on the reference host, 2026-11-25).
+# took at most 1.0 s for 100,000 characters on an M-series laptop and 0.63 s on the reference host (AMD EPYC 9645),
+# 2026-11-25, so a computer 6 times slower still fits. On a slower one the watchdog fires and the whole result is
+# withheld (fail closed) instead of a rest. 8 s left 5 % of the results of 60,000 to 100,000 characters a rest against
+# the gateway at the field peak (bench/ner/load.py on the reference host, 2026-11-25).
 TOOL_WAIT_MAX_S = 10.0
 TOOL_WORK_S = 6.0
 RESERVE_MIN_S = 0.5
