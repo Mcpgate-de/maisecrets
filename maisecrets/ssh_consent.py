@@ -809,7 +809,7 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     if pathed and command[m.end():m.end() + 1] not in ("", " ", "\t", "\n", ";", "&", "|", ")", "'", '"'):
         return ""                            # /etc/ssh/sshd_config, /var/log/ssh.log: a path, not the program
     if pathed and "://" in re.split(r"[\s'\"]", command[:pos])[-1]:
-        return ""                            # curl https://example.org/docs/ssh: a URL (codex, review round 4)
+        return ""                            # curl with a URL whose path ends in /docs/ssh (codex, review round 4)
     if command[m.end():m.end() + 3] == "://" or word == "ssh://":
         # 4. a URL a program connects to itself (curl scp://, docker -H ssh://), as an argument of its own; in git, sed,
         # or a data value (url=ssh://…) it is text
