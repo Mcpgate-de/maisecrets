@@ -52,6 +52,19 @@ class NerLoadTests(unittest.TestCase):
         self.assertIn("PASS", readme)
         self.assertIn("PASS:", said.getvalue())
 
+    def test_a_system_without_a_load_average_runs_too(self):
+        # Windows has no os.getloadavg: the dry run failed there with AttributeError (CI, 2026-11-25)
+        from unittest import mock
+        with mock.patch.object(os, "getloadavg", side_effect=AttributeError("no load average"), create=True):
+            self.assertIsNone(load.load_now())
+            self.assertFalse(load.quiet_host(), "no load average: the host is never taken as quiet")
+            with tempfile.TemporaryDirectory() as out, contextlib.redirect_stdout(io.StringIO()):
+                rc = load.main(["--dry-run", "--duration", "2", "--sessions", "1", "--out", out])
+                data = json.loads((Path(out) / "load.json").read_text(encoding="utf-8"))
+        self.assertEqual(rc, 0)
+        self.assertGreater(data["summary"]["results"], 0)
+        self.assertIsNone(data["meta"]["load_max"])
+
     def test_more_than_one_percent_with_a_rest_fails(self):
         meta = {"sessions": 1}
         rows = [row("ok")] * 98 + [row("partial", "busy", {"busy": 1}), row("unavailable", "rate_limited",

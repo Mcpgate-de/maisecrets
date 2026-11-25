@@ -216,12 +216,20 @@ def child_env(home: str) -> dict:
     return env
 
 
+def load_now() -> float | None:
+    """The 1-minute load average, or None where the system has none (Windows)."""
+    try:
+        return os.getloadavg()[0]
+    except (AttributeError, OSError):
+        return None
+
+
 def watch_load(stop: threading.Event, seen: list) -> None:
     while not stop.wait(5.0):
-        try:
-            seen.append(os.getloadavg()[0])
-        except OSError:
+        load = load_now()
+        if load is None:
             return
+        seen.append(load)
 
 
 def quiet_host() -> bool:
@@ -231,7 +239,8 @@ def quiet_host() -> bool:
                                timeout=20).stdout.split()
     except (OSError, subprocess.SubprocessError):
         names = []
-    return not any(n.startswith("runner-") for n in names) and os.getloadavg()[0] < 0.5
+    load = load_now()
+    return not any(n.startswith("runner-") for n in names) and load is not None and load < 0.5
 
 
 def driver(args) -> int:
@@ -267,7 +276,7 @@ def driver(args) -> int:
             "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "host": f"{platform.system()} {platform.machine()}, {os.cpu_count()} CPUs",
             "sessions": args.sessions, "duration_s": args.duration, "count": args.count, "pause_s": args.pause,
-            "seed": args.seed, "load_before": round(os.getloadavg()[0], 2)}
+            "seed": args.seed, "load_before": None if load_now() is None else round(load_now(), 2)}
     seen: list = []
     stop = threading.Event()
     threading.Thread(target=watch_load, args=(stop, seen), daemon=True).start()
@@ -298,7 +307,8 @@ def driver(args) -> int:
         return 2
     rows.sort(key=lambda r: (r["t_s"], r["session"]))
     first = rows[0] if rows else {}
-    meta.update(load_max=round(max(seen + [meta["load_before"]]), 2), max_chars=first.get("max_chars"),
+    loads = [x for x in seen + [meta["load_before"]] if x is not None]
+    meta.update(load_max=round(max(loads), 2) if loads else None, max_chars=first.get("max_chars"),
                 takes_pieces=first.get("takes_pieces"), deadline_ms=first.get("deadline_ms"))
     summary = summarize(rows, meta)
     (out / "load.json").write_text(json.dumps({"meta": meta, "summary": summary, "rows": rows}, indent=1) + "\n",
