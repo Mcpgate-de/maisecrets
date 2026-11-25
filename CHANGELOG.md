@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.9.32] - 2026-11-25
+
+### Fixes
+
+- a typed prompt that quotes the notification tag still brings in its placeholders (1e81bd8)
+- a command that needs the AI waits in your input box; the mod runs no slash command itself (50d0abf)
+- the detection core imports no links module; the default tracker comes from events.py (79e3c66)
+- a slow MCP call's background result reaches the AI with placeholders instead of being blocked (01f9850)
+- the load test of the name check runs on a system without a load average (Windows) (eced04c)
+
+### Security
+
+- a background notification the prompt hook judges is read as a tool result (43aeb69)
+- mask a background MCP result as a tool result, and let it admit no placeholder (0b6fac7)
+
 ## [0.9.31] - 2026-11-25
 
 ### Features

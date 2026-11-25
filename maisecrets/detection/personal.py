@@ -7,7 +7,7 @@ Each rule needs its label or its form. A name or an address without one stays te
 
 The rules come from the values that leaked in the public benchmark's holdout sets v2 to v7 (2026-10-14, 765 values).
 Rules p13 (a name before an e-mail address) and p14 (the columns of a CSV header) follow the rule families of the
-Cloakroom benchmark (https://github.com/shanjeevrajendran/cloakroom, Apache-2.0); the code here is written anew.
+Cloakroom benchmark (GitHub repository shanjeevrajendran/cloakroom, Apache-2.0); the code here is written anew.
 
 Channel: these rules run on tool results and files only. A typed prompt is blocked on a hit, and a person who types
 a name or an address means to send it; the prompt keeps the stricter rules it had (docs/THREAT-MODEL.md).
@@ -1486,7 +1486,7 @@ def _word_as_name(text: str, m, v: str) -> bool:
 # the scalar up to a space, a comma, a semicolon or a bracket) and judged as one: it is masked whole or not at all, so
 # `jdoe.x/tenant` never leaves `/tenant` in the clear. It must read as a person's account name: a service account, a
 # placeholder, a schema word, a Kubernetes principal (`system:serviceaccount:…`), a name of words (`database_owner`,
-# `ci_actor`) or a name in code (`username = os.environ[...]`, `username = account.name`) stays (Benchmark V1 bank and
+# `ci_actor`) or a name in code (`username = os.getlogin()`, `username = account.name`) stays (Benchmark V1 bank and
 # codex Gate A, 2026-10-19). An e-mail address after the label is left to the e-mail rule
 _USERNAME_LABEL_RE = _lazy(r"(?i)(?<![a-z_.-])(?:user[ _-]?name|benutzername|nutzername|login[ _-]?name)[\"']?"
                            r"([ \t]{0,3}[:=][ \t]{0,3})(?:\"([^\"\n]{1,64})\"|'([^'\n]{1,64})'"
@@ -1506,7 +1506,7 @@ _USER_ID_LABEL_RE = _lazy(r"(?i)(?<![a-z_.-])user[ _-]?id[\"']?([ \t]{0,3}[:=][ 
 _USER_ID_WORD_RE = _lazy(r"user[ _-]?id")
 _EXAMPLE_KEY_RE = _lazy(r"(?i)[\"']?examples?[\"']?[ \t]{0,3}:[ \t]*(?:\{|\|)?")
 _USERNAME_SHAPE_RE = _lazy(r"[\w][\w.@+\\/-]{1,63}")
-# a name in code, not a value: `username = os.environ[...]`, `user_name: self.user.name`
+# a name in code, not a value: `username = os.getlogin()`, `user_name: self.user.name`
 _USERNAME_CODE_START = ("self.", "this.", "os.", "request.", "req.", "user.", "config.", "settings.", "args.", "env.",
                         "process.", "params.", "form.", "data.", "props.", "ctx.", "context.", "options.", "opts.",
                         "cls.", "obj.", "row.", "item.", "record.", "payload.", "body.", "event.", "input.")

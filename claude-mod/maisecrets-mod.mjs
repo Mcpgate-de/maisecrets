@@ -527,6 +527,14 @@ async function ask($, prompt, session, cwd, origin) {
   return takeAnswer(JSON.parse(r.stdout), session)
 }
 
+// #107: an MCP task's result, sent by the client as a notification, is a tool's output: Python masks it when it proves
+// itself (hooks.rewrite_prompt), else the settings hook judges it as before (C19)
+async function taskResult($, e, next) {
+  let a = null
+  try { a = await ask($, e.text, await $.session.id(), await $.session.cwd(), e.origin.kind) } catch { /* the hook */ }
+  return next(a && typeof a.text === 'string' ? { ...e, text: a.text } : e)
+}
+
 // a parsed answer of mod-prompt for this session: what the steps below read, or null
 function takeAnswer(answer, session) {
   if (!answer || answer.maisecrets !== MARK) return null
@@ -1711,7 +1719,7 @@ function startOwn($, run, flight, title, entry = running.get(flight)) {
 
 // a command the mod runs itself, or Python's answer to an own-command shape: { drop } when it is answered here, else
 // { answer } with Python's answer for the steps of any prompt. `fill` empties the box for a prompt; a pane button leaves the box alone
-async function runOwn($, own, kind, runnable, ownCmd, fill, viaMs = false) {
+async function runOwn($, own, kind, runnable, ownCmd, fill, viaMs = false, passOn = false) {
   let ownAnswer = null      // Python's answer to an own-command shape: the steps below use it, not a second ask
   // one run per flight, taken before the first await, so two quick prompts cannot both pass
   const flight = runnable ? flightOf(own) : null
@@ -1746,10 +1754,17 @@ async function runOwn($, own, kind, runnable, ownCmd, fill, viaMs = false) {
   }
   if (ownAnswer === null && ownCmd) return { drop: OWN_FAILED }
   if (ownAnswer !== null && validEntry(ownAnswer.entry)) {
-    // a command that needs the model: the entry command file runs it, as the person's Enter on it would
-    if (fill) fillSoon($, '')
-    runEntrySoon($, ownAnswer.entry)
-    return { drop: `maisecrets: /maisecrets ${ownAnswer.entry.split(/\s+/)[0]} needs the AI; it runs now.` }
+    // a command that needs the model: the entry command file runs it. A line that already names that file goes on as
+    // typed (the prompt hook decides it, as without the mod); any other form waits in the box as that file's line,
+    // and the person's Enter runs it. The mod runs no command itself (the plugin directory: MOD_RUNS_COMMAND)
+    if (passOn) return { pass: true }
+    const form = `${ENTRY_FORM} ${ownAnswer.entry}`
+    const name = ownAnswer.entry.split(/\s+/)[0]
+    if (fill) {
+      fillSoon($, form)
+      return { drop: `maisecrets: /maisecrets ${name} needs the AI. It is in your input box: press Enter to run it.` }
+    }
+    return { drop: `maisecrets: /maisecrets ${name} needs the AI. Send ${form} to run it.`, entryBox: form }
   }
   if (ownAnswer !== null && typeof ownAnswer.drop === 'string') {
     if (fill) fillSoon($, typeof ownAnswer.fill === 'string' ? ownAnswer.fill : '')
@@ -1759,19 +1774,22 @@ async function runOwn($, own, kind, runnable, ownCmd, fill, viaMs = false) {
 }
 
 // the words of the entry for a command that needs the model (prompt_commands.mod_command): one line, a command name first
-const ENTRY_FILE = 'maisecrets:maisecrets'
+const ENTRY_FORM = '/maisecrets:maisecrets'
 function validEntry(words) {
   return typeof words === 'string' && words.length <= 2000 && !/[\r\n]/.test(words) &&
     COMMANDS.includes(words.split(/[ \t]+/)[0])
 }
-// the entry command file with these words, once the hook that asked has returned: a command.run inside a hook waits on
-// the turn that hook holds (measured on 2.1.330), so it starts after it
-function runEntrySoon($, words) {
+// a typed line that names an entry command file with words (commands/maisecrets.md, commands/ms.md): passed on, the
+// client runs that file with the words. Not `/maisecrets NAME`: that is the mod's own command (command.run only)
+const ENTRY_LINE = /^\s*\/(?:maisecrets:(?:maisecrets|ms)|ms)[ \t]+\S/i
+// the entry's line for a command from the command.run route: into the box only when it is empty, never over the
+// person's own text; the person's Enter sends it as their own prompt
+async function boxedEntry($, form) {
+  if (typeof form !== 'string' || !form.startsWith(ENTRY_FORM + ' ') || /[\r\n]/.test(form)) return false
   try {
-    $.clock.after(60, () => {
-      void $.command.run({ command: ENTRY_FILE, args: words }).catch(() => toast($, OWN_FAILED))
-    })
-  } catch { toast($, OWN_FAILED) }
+    if (!(await boxEmpty($))) return false
+    return (await $.prompt.fill({ text: form, mode: 'append' }))?.isFilled === true
+  } catch { return false }
 }
 
 // the person's own command typed as the mod's `/maisecrets NAME` or as a hidden `/maisecrets:NAME` (the client refuses
@@ -1817,6 +1835,7 @@ async function runTyped($, own) {
   let done = null
   try { done = await runOwn($, own, kind, RUN_CMD.test(own), true, false) } catch { done = null }
   if (typeof done?.drop === 'string' && await boxed($, done.box)) return ownText(filledNote(done.box))
+  if (typeof done?.drop === 'string' && await boxedEntry($, done.entryBox)) return ownText(filledNote(done.entryBox))
   return ownText(typeof done?.drop === 'string' ? done.drop : OWN_FAILED)
 }
 
@@ -2425,6 +2444,9 @@ export function register(on) {
     // a demo answer Python gave for an earlier prompt is never shown for this one (the hook may block this prompt, and
     // no step then takes it): only this prompt's answer sets it again below
     try { demoShow.delete(await $.session.id()) } catch { /* the step shows the demo line */ }
+    if (!person && e.origin?.kind === 'task-notification' && String(e.text ?? '').includes('<summary>MCP task ')) {
+      return await taskResult($, e, next)
+    }
     if (!person) return next(e)
     afterPrompt($, own)
     const near = meant ? null : nearCommand(e.text)
@@ -2459,7 +2481,8 @@ export function register(on) {
     const runnable = RUN_ORIGINS.has(kind) && RUN_CMD.test(own)
     const ownCmd = OWN_CMD.test(own)
     if (ownCmd || runnable) {
-      const done = await runOwn($, own, kind, runnable, ownCmd, true, MS_TYPED.test(e.text))
+      const done = await runOwn($, own, kind, runnable, ownCmd, true, MS_TYPED.test(e.text), ENTRY_LINE.test(e.text))
+      if (done.pass) return next(e)
       if (done.drop !== undefined) return { drop: done.drop }
       ownAnswer = done.answer
       // no command of the mod's: the steps below, as for any prompt (a slash command goes on to its command file)
