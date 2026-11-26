@@ -139,8 +139,8 @@ def hooks_verdict(log: Path, session, now: float | None = None, client: str | No
 # --- the mod of Claude Code ---------------------------------------------------------------------------------------
 
 MOD_EVENT = "mod"
-MOD_NOTE = ("The mod is off: no lock or click on values and references. Type commands as text, such as "
-            "maisecrets: sref login NAME.")
+MOD_NOTE = ("The mod is off: a prompt with a value is blocked, not rewritten; no lock or click on values and "
+            "references. Type commands as text, such as maisecrets: sref login NAME.")
 
 
 def note_mod(payload: dict) -> None:

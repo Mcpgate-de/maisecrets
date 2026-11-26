@@ -110,7 +110,9 @@ def _login_hint(payload: dict) -> str | None:
         (" " + name if name else "")
     return (f"maisecrets: {host} offers Sensitive References: its results hold references that maisecrets can put "
             f"into your commands and files as their values. To allow that, send {command} once: your browser opens, "
-            "and you give your consent at the gateway. Until then a command with such a reference is refused.")
+            "and you give your consent at the gateway. Your login at the gateway lets the AI call its tools; this "
+            "second consent is for maisecrets on this computer, so a value goes into your command, file or screen "
+            "without passing the AI. Until then a command with such a reference is refused.")
 
 
 # a server name that may go into the input box as an argument of the login: ASCII, as the mod's LOGIN_FILL
