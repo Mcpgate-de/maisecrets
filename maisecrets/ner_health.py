@@ -314,6 +314,53 @@ def start_line(cfg: dict, payload: dict, backend=None, starting: bool = False, c
     return line(cause, _conf(cfg), codex) if claim(payload.get("session_id"), cause, _conf(cfg)) else None
 
 
+SREF_HINT = ("💡 maisecrets: the MCP server {name} ({host}) can show you masked values on your screen. To allow it, "
+             "type: {step}")
+_SREF_HINT_MAX = 3          # store reads at a session start: one per gateway without a login, at most this many
+
+
+def sref_hint_lines(cfg: dict, payload: dict, backend=None, codex: bool = False) -> list[str]:
+    """#109: a gateway of the person's configuration offers Sensitive References and maisecrets holds no login for it.
+    One line per gateway (origin) and session at the session start, the same claim as a name-source cause (cause
+    `sref_offered`). From the file only: the metadata answer that vault_refs.endpoint read already (an anonymous
+    request, for a token in a result of that server) and the login in the store. No request, nothing to the gateway.
+    Not for a gateway that is the name source (start_line names its login), not in Cowork (a login there lasts one
+    task), and not for a server the person named in sref_hint_off. A name that cannot go into the command as one word
+    gets no line (sref_hooks._SERVER_NAME_RE); the line names the host, so the person sees where the login goes."""
+    from urllib.parse import urlsplit
+
+    from . import cowork, sref_client, vault_refs
+    from .sref_hooks import _SERVER_NAME_RE
+    from .vault import make_backend
+    if not _seen_by_person(payload, codex) or cowork.active():
+        return []
+    vault_refs.use_client("codex" if codex else "claude")     # the server list of this client (review of #109)
+    off = {str(x) for x in (cfg.get("sref_hint_off") or []) if isinstance(x, str)}
+    source = str(_conf(cfg).get("gateway") or "")
+    out: list[str] = []
+    origins: set = set()
+    for name, url in sorted(vault_refs.user_servers().items()):
+        origin = vault_refs.origin_of(url)
+        if name in off or not origin or origin == source or origin in origins or len(origins) >= _SREF_HINT_MAX \
+                or not _SERVER_NAME_RE.fullmatch(name) or not vault_refs.offers_sref(url):
+            continue
+        origins.add(origin)
+        try:
+            backend = backend if backend is not None else make_backend(cfg)
+            if sref_client.logged_in(backend, origin):
+                continue
+        except Exception:  # noqa: BLE001 - a store that does not answer gives no line, and the next server goes on
+            continue
+        if not claim(payload.get("session_id"), "sref_offered", {"url": origin, "gateway": origin}):
+            continue
+        step = f"/maisecrets sref login {name}"
+        if codex:
+            from .forms import codex as _codex
+            step = _codex(step)
+        out.append(SREF_HINT.format(name=name, host=urlsplit(origin).hostname, step=step))
+    return out
+
+
 def result_line(cfg: dict, payload: dict, reason: str, codex: bool = False) -> str | None:
     """The line of an unchecked tool result: once per session and cause, or None."""
     conf = _conf(cfg)

@@ -63,6 +63,7 @@ DEFAULT_CONFIG = {
     # Claude Code with mods (the mod): a prompt with a value goes through with placeholders; false blocks it
     "rewrite_prompts": True,
     "gateway_servers": [],           # MCP servers that resolve placeholders themselves; read by nothing yet
+    "sref_hint_off": [],             # MCP servers whose sign-in hint the session start does not show (#109)
     # country codes for the PII rules and the label languages; "auto" is the country of the system
     # setting (maisecrets/detection/regions.py). pii_regions is the old name and still read.
     "regions": ["auto"],
@@ -109,7 +110,7 @@ _CONFIG_TYPES = {
     "backend": str, "report_url": (str, type(None)), "ttl_seconds": dict, "max_ttl_seconds": int,
     "renew_on_use": bool, "scrub_transcript": bool, "block_at_mentions": bool, "rewrite_prompts": bool,
     "strip_hidden_characters": bool,
-    "gateway_servers": list,
+    "gateway_servers": list, "sref_hint_off": list,
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
