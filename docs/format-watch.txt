@@ -265,6 +265,8 @@ mailgun-pub-key
 mailgun-signing-key
 mapbox-api-token
 mapbox-secret-token
+maptiler-api-key
+maptiler-api-key-url
 mattermost-access-token
 maxmind-license-key
 mem0-api-key.1
@@ -426,6 +428,7 @@ tailscale-key
 tailscale-oauth-client-secret
 tailscale-scim-key
 tailscale-webhook-secret
+tavily-api-key
 telegram-bot-api-token
 telnyx-api-v2-key.1
 temporal-cloud-api-key.1

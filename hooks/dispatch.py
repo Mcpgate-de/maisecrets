@@ -398,6 +398,11 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         _names = None
     if _names:
         lines.insert(1 if _unprotected else 0, _names)
+    # a gateway that offers Sensitive References and has no login: how to sign in, once per session (#109)
+    try:
+        lines.extend(ner_health.sref_hint_lines(cfg, payload, v.backend, codex=codex))
+    except Exception:  # noqa: BLE001 - a hint never stops a session start
+        pass
     if lines:
         out["systemMessage"] = "\n".join(lines)
     # a newer version in the marketplace copy the client fetched (no network request; maisecrets/status_verdict.py)

@@ -1091,7 +1091,9 @@ class ShortcutTests(unittest.TestCase):
         self.assertIn("maisecrets is on: passwords, keys and personal data reach the AI only as", msg)
         self.assertIn("the value stays on this computer", msg)
         self.assertNotIn("stopped", msg, "the mod rewrites a prompt; it is not stopped there")
-        self.assertIn("/maisecrets ner local", msg, "NER is off in a new home: the start names how to turn it on")
+        # the overview with the choices, not the 690 MB download of the local container (UX review, 2026-11-26)
+        self.assertIn("/maisecrets ner (the choices)", msg,
+                      "NER is off in a new home: the start names how to turn it on")
         for line in msg.splitlines():
             if "test store" not in line:
                 for jargon in ("config.json", "Metadata:", '{"backend"', "mcpgate.de"):

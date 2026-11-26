@@ -1172,6 +1172,7 @@ def endpoint(cfg: dict, url: str, deadline: float) -> str | None:
         if isinstance(cached, str) and origin_of(cached) == origin:
             return cached
     found = None
+    sref = False
     try:
         status, headers, body = _request(cfg, "GET", f"{origin}/.well-known/oauth-protected-resource{path}",
                                          {"Accept": "application/json"}, None, deadline)
@@ -1183,16 +1184,36 @@ def endpoint(cfg: dict, url: str, deadline: float) -> str | None:
         candidate = meta.get("client_vault_endpoint")
         if origin_of(candidate) == origin:
             found = candidate
+        # the same answer names Sensitive References: the session start then names the login (#109)
+        block = meta.get("sensitive_references")
+        sref = isinstance(block, dict) and origin_of(block.get("resolve_endpoint")) == origin
     except (ValueError, RecursionError) + _net_errors():
         return None                             # not cached: the next call asks again (deep JSON: RecursionError)
     try:
         with _own_lock(deadline):
             cache = _read_json(ENDPOINTS) or {}
-            cache[cache_key] = {"endpoint": found, "t": time.time()}
+            cache[cache_key] = {"endpoint": found, "t": time.time(), **({"sref": True} if sref else {})}
             atomic_write(ENDPOINTS, json.dumps(cache, indent=1))
     except LockTimeout:
         pass                                    # the answer holds; a busy lock only costs the next call one request
     return found
+
+
+SREF_SEEN_KEEP = 7 * 86400
+
+
+def offers_sref(url: str) -> bool:
+    """The last metadata answer of this MCP URL (endpoint(), within SREF_SEEN_KEEP) named Sensitive References. Reads
+    the file only: no request (#109)."""
+    origin = origin_of(url)
+    if not origin:
+        return False
+    path = urlsplit(url).path
+    hit = (_read_json(ENDPOINTS) or {}).get(origin + ("" if path == "/" else path))
+    try:
+        return isinstance(hit, dict) and hit.get("sref") is True and 0 <= time.time() - float(hit["t"]) < SREF_SEEN_KEEP
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------- the resolve --

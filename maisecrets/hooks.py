@@ -23,9 +23,10 @@ import time
 import sys
 from typing import Any
 
-from . import check_value, detect, incidents, demo, not_a_secret, rehydration, term_files, value_files
+from . import check_value, detect, incidents, demo, not_a_secret, rehydration, term_files, value_files, value_origin
 from .lazy_regex import LazyRx as _LazyRx
 from .placeholder import KEY_RE, find_refs, whole_references as _whole_refs
+from .value_origin import _ref_fields
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
 # parts of this module, moved so that no file is over the size limit of the plugin directory: hooks.<name> stays the
@@ -163,7 +164,7 @@ def _clipboard_read() -> str:
 
 
 def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None,
-             tool: bool = False) -> tuple[str, list]:
+             tool: bool = False, found_in: str = "") -> tuple[str, list]:
     """Replace every match with its reference, right to left so offsets hold. Keys are minted in
     text order, in one vault transaction; above the per-result cap a value is masked as
     ⟦TYPE⟧ without a key (it is not stored and cannot be resolved). tool: the text is a tool result
@@ -173,7 +174,8 @@ def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str 
     # the store never holds the term. An imported value (values.py) goes in as its import id and value id
     entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind)
                                else value_files.store_value(m.kind) if value_files.is_import_kind(m.kind) else m.value,
-                               m.type, m.kind) for m in ordered], session=session, tool=tool)
+                               m.type, m.kind) for m in ordered], session=session, tool=tool,
+                             found=found_in and value_origin.found(text, ordered, found_in))
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
         out = out[: m.start] + (e.ref if e is not None else f"⟦{m.type}⟧") + out[m.end:]
@@ -2092,30 +2094,7 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
             "page). The real value goes out with it." if text_fields else "")
     return _rehydrated(payload, cfg, "mcp", new_input,
                        f"maisecrets: this call gets the real value of {names} in {', '.join(fields)} "
-                       f"of {tool}.{warn} Check the target and the value before you allow it.", fresh)
-
-
-def _ref_fields(node: Any, path: str = "") -> list[str]:
-    """Paths of the string fields that hold a placeholder (`messages[0].text`), once each. A
-    string that is itself a JSON object or array is walked too, so `{"params": "{\"text\": …}"}`
-    names `params.text` (review, 2026-09-27: the list index cut the path to `messages`)."""
-    out: list[str] = []
-    if isinstance(node, dict):
-        for k, v in node.items():
-            out.extend(_ref_fields(v, f"{path}.{k}" if path else str(k)))
-    elif isinstance(node, list):
-        for i, v in enumerate(node):
-            out.extend(_ref_fields(v, f"{path}[{i}]"))
-    elif isinstance(node, str) and find_refs(node):
-        inner = None
-        if node.lstrip()[:1] in ("{", "["):
-            try:
-                inner = json.loads(node)
-            except ValueError:
-                inner = None
-        nested = _ref_fields(inner, path) if isinstance(inner, (dict, list)) else []
-        out.extend(nested or [path or "(input)"])
-    return list(dict.fromkeys(out))
+                       f"of {tool}.{warn}" + value_origin.prompt_tail(vault, list(values), tool), fresh)
 
 
 def is_text_field(path: str) -> bool:
@@ -2655,7 +2634,8 @@ def post_tool(payload: dict) -> dict:
                 hit["n"] += len(put)
                 values.extend(put)
         if matches:
-            out, ents = _replace(s, matches, vault, session, tool=True)
+            out, ents = _replace(s, matches, vault, session, tool=True,
+                                    found_in=str(payload.get("tool_name") or ""))
             hit["n"] += len(matches)
             values.extend(m.value for m in matches)
             entries.extend(ents)
@@ -3010,7 +2990,8 @@ def post_tool_failure(payload: dict) -> dict:
     matches = _longest_wins(error, matches, vault, session, resolved)     # (C26)
     out = error
     if matches:
-        out, entries = _replace(error, matches, vault, session, tool=True)
+        out, entries = _replace(error, matches, vault, session, tool=True,
+                                found_in=str(payload.get("tool_name") or ""))
         hit["n"] += len(matches)
         values.extend(m.value for m in matches)
     _exact_redact(out, vault, session, hit, entries, resolved, values)

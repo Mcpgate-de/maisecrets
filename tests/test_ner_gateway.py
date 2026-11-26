@@ -266,7 +266,8 @@ class GatewaySourceTests(unittest.TestCase):
         self.assertEqual((spans, status.state, status.reason), ([], "unavailable", "not_enabled"))
         out = self.post_tool(self.cfg["remote_detector"])
         said = out.get("systemMessage", "")
-        self.assertIn("names are NOT checked \u2014 the gateway offers no name detection \u2192 /maisecrets ner", said)
+        self.assertIn("names are NOT checked (secrets still are) \u2014 the gateway offers no name detection "
+                      "\u2192 /maisecrets ner", said)
         self.assertNotIn("sref login", said, "no login helps here")
         self.assertIn("the gateway offers no name service", out["hookSpecificOutput"]["additionalContext"])
         self.assertIn("Okafor", json.dumps(out["hookSpecificOutput"].get("updatedToolOutput", TEXT)),
@@ -516,8 +517,9 @@ class GatewaySourceTests(unittest.TestCase):
     def test_a_source_that_cannot_be_asked_leaves_its_results_unchecked_on_the_screen_and_withheld(self):
         conf = self.cfg["remote_detector"]           # no login: from_config gives a reason, no detector
         out = self.post_tool(conf)
-        self.assertEqual(out.get("systemMessage"), "\u26a0\ufe0f maisecrets: names are NOT checked \u2014 not logged "
-                         "in at the gateway \u2192 /maisecrets sref login", "the cause and the step")
+        self.assertEqual(out.get("systemMessage"), "\u26a0\ufe0f maisecrets: names are NOT checked (secrets still "
+                         "are) \u2014 not logged in at the gateway \u2192 /maisecrets sref login",
+                         "the cause and the step")
         note = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("did not check the names", note, "the AI knows")
         self.assertIn("may stand in clear text", note)
@@ -694,7 +696,8 @@ class GatewaySourceTests(unittest.TestCase):
         self.login(self.cfg)
         self.srv.ner_answer = (503, {"error": "busy"})
         conf = self.cfg["remote_detector"]
-        line = "names are NOT checked \u2014 the gateway's name service is busy \u2192 /maisecrets ner"
+        line = ("names are NOT checked (secrets still are) \u2014 the gateway's name service is busy "
+                "\u2192 /maisecrets ner")
         for shown in (True, False):          # once per session, when the state turns bad
             out = self.post_tool(conf)
             self.assertEqual(line in out.get("systemMessage", ""), shown, out.get("systemMessage"))
@@ -756,7 +759,8 @@ class GatewaySourceTests(unittest.TestCase):
         conf = ner_setup.updated(self.cfg["remote_detector"], "unavailable:withhold")
         self.assertEqual(conf["unavailable"], "withhold")
         self.srv.ner_answer = (503, {"error": "busy"})
-        cause = "names are NOT checked \u2014 the gateway's name service is busy \u2192 /maisecrets ner"
+        cause = ("names are NOT checked (secrets still are) \u2014 the gateway's name service is busy "
+                 "\u2192 /maisecrets ner")
         for first, tool in ((True, "Bash"), (False, "Read")):
             with self.subTest(tool=tool):
                 out = self.post_tool(conf, tool)

@@ -271,6 +271,10 @@ the plugins). Not yet tested in a managed organization.
 ### Settings in config.json only
 
 - `gateway_servers`: the MCP servers that resolve placeholders themselves (a list of server names).
+- `sref_hint_off`: the MCP servers for which the session start does not say how to sign in (a list of server
+  names). Without it, a gateway that offers Sensitive References and has no login gets one line per session:
+  `/maisecrets sref login NAME`. maisecrets knows the offer from the metadata answer it reads for a token of that
+  server already; the line sends no request.
 - `ssh_host_groups`: hosts that one typed ssh window covers together (`{"web": ["web1", "web2"]}`).
 
 ### Settings the panel does not offer
@@ -981,7 +985,7 @@ a source, with one command typed as your own prompt:
 |---|---|
 | `/maisecrets ner local` | the service on this computer, `http://127.0.0.1:8765/` (`on` is the same) |
 | `/maisecrets ner url URL` | a service of your team on a private network |
-| `/maisecrets ner gateway URL` | the gateway of your `/maisecrets sref login`, when it offers name detection (log in once more after the switch) |
+| `/maisecrets ner gateway URL` | the gateway of your `/maisecrets sref login`, when it offers name detection (a login of 0.9.24 or older needs one new consent; `/maisecrets ner` says it) |
 | `/maisecrets ner gateway NAME` | the same, by the name of an MCP server of your configuration (the list of `/maisecrets sref`); the name alone, `/maisecrets ner NAME`, is the same when it is no word of the command |
 | `/maisecrets ner off` | the rules alone (the default) |
 | `/maisecrets ner fallback url URL` | a second service for tool results while the local one is not running (`fallback off` removes it) |
@@ -1175,7 +1179,7 @@ and keeps its other keys. Written by hand, the setting looks like this:
   the output of a failed command without the mod (Claude Code does not let a hook replace it); and a resumed Codex
   session, which reads the raw output from its own rollout file on disk.
 - When a source is set and cannot be used, you see one line with the cause and the step, for example
-  `⚠️ maisecrets: names are NOT checked — the gateway ended the login → /maisecrets sref login NAME`. The session
+  `⚠️ maisecrets: names are NOT checked (secrets still are) — the gateway ended the login → /maisecrets sref login NAME`. The session
   start checks the source (the gateway: a login in the store; a url or the local container: an answer within a
   second; a Unix socket: a connection within a second), and a tool result names it once per session, again only when the cause changes. `/maisecrets status`
   and the panel show it as a `names` note, and the head line then says "protects secrets in this session; names
