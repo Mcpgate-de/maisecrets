@@ -26,8 +26,8 @@ ORIGIN = "https://gw.example.test"
 URL = ORIGIN + "/mcp"
 SERVERS = {"team-gateway": URL, "other": "https://other.example.test/mcp"}
 META = {"resource": URL, "sensitive_references": {"resolve_endpoint": ORIGIN + "/sref/resolve"}}
-LINE = ("💡 maisecrets: the MCP server team-gateway can show you masked values on your screen. To allow it, type: "
-        "/maisecrets sref login team-gateway")
+LINE = ("💡 maisecrets: the MCP server team-gateway (gw.example.test) can show you masked values on your screen. "
+        "To allow it, type: /maisecrets sref login team-gateway")
 
 
 def P(session: str, **extra) -> dict:
@@ -121,6 +121,29 @@ class HintTests(Base):
         with mock.patch("maisecrets.cowork.active", return_value=True):
             self.assertEqual(self.lines(P("s3")), [], "Cowork: a login there lasts one task")
         self.assertEqual(self.lines(P("s1")), [LINE], "not claimed by the runs that did not show it")
+
+    def test_one_line_per_gateway_and_none_for_a_name_that_is_no_word(self):
+        self.seen()
+        servers = {"team-gateway": URL, "team-gateway-2": ORIGIN + "/other", "my gateway": URL}
+        with mock.patch("maisecrets.vault_refs.user_servers", return_value=servers):
+            self.seen(url=ORIGIN + "/other")
+            reads = []
+            with mock.patch.object(S, "logged_in", side_effect=lambda b, o: reads.append(o) or False):
+                self.assertEqual(self.lines(P("s1")), [LINE], "one origin, one login, one line")
+            self.assertEqual(reads, [ORIGIN], "one store read per gateway: each is a keychain call")
+        with mock.patch("maisecrets.vault_refs.user_servers", return_value={"my gateway": URL}):
+            self.assertEqual(self.lines(P("s2")), [], "a name with a space cannot go into the command")
+
+    def test_codex_reads_the_codex_server_list(self):
+        # the session start sets the client later; the hint sets it itself (review of #109)
+        from maisecrets import vault_refs
+        vault_refs.use_client("claude")
+        self.addCleanup(vault_refs.use_client, "claude")
+        seen = []
+        with mock.patch("maisecrets.vault_refs.user_servers", side_effect=lambda: seen.append(V.is_codex()) or {}), \
+                mock.patch("maisecrets.settings.person_sees_hook_lines", return_value=True):
+            self.lines(P("s1"), codex=True)
+        self.assertEqual(seen, [True])
 
     def test_codex_gets_its_prompt_form(self):
         self.seen()
