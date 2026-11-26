@@ -38,13 +38,24 @@ OWN = "Kx7Qp2" + "Zr9Lm4Wn"
 
 class FoundTests(unittest.TestCase):
     def test_the_key_before_a_value_is_named(self):
-        class M:
-            def __init__(self, start):
-                self.start = start
         for text, key in ((f'{{"grade_token": "{TOKEN}"}}', "grade_token"), (f"token={TOKEN}", "token"),
-                          (f"api_key: '{TOKEN}'", "api_key"), (f"the value {TOKEN}", None)):
+                          (f"api_key: '{TOKEN}'", "api_key"), (f"sessionId={TOKEN}", "sessionId"),
+                          (f"the value {TOKEN}", None)):
             with self.subTest(text=text):
-                self.assertEqual(value_origin.found(text, [M(text.index(TOKEN))], "t"), [("t", key)])
+                self.assertEqual(value_origin.found(text, [_M(text.index(TOKEN))], "t"), [("t", key)])
+
+    def test_a_key_that_names_no_credential_is_not_kept(self):
+        # the index holds no other text of a tool result: a name, a user or a domain that stands as a key (C10, C26)
+        for text in (f'{{"Jane Example": "{TOKEN}"}}', f"postgres://jdoe_admin:{TOKEN}@db",
+                     f"https://api_user:{TOKEN}@host.example",
+                     f'{{"user@acme-corp.example": "{TOKEN}"}}', f'{{"jdoe": "{TOKEN}"}}'):
+            with self.subTest(text=text):
+                self.assertEqual(value_origin.found(text, [_M(text.index(TOKEN))], "t"), [("t", None)])
+
+
+class _M:
+    def __init__(self, start):
+        self.start = start
 
 
 class PromptTests(unittest.TestCase):
@@ -85,25 +96,29 @@ class PromptTests(unittest.TestCase):
         meta = Vault().origin(key)
         self.assertEqual((meta.get("found_in"), meta.get("found_at")), (SERVER_READ, "grade_token"))
 
-    def test_a_value_sent_back_to_the_same_server_names_its_origin(self):
+    def test_the_prompt_names_the_origin_and_asks_about_the_target(self):
         key = self.result(f'{{"note_id": "n1", "grade_token": "{TOKEN}"}}')
         reason = self.ask(SERVER_WRITE, {"action": "grade", "token": f"⟦{key}⟧"})
-        self.assertIn(f"You did not store ⟦{key}⟧: maisecrets masked it by itself", reason)
-        self.assertIn("(key grade_token in a result of notes_read on gw)", reason)
-        self.assertIn("This call sends it back to the same server.", reason)
+        self.assertIn(f"maisecrets stored ⟦{key}⟧ by itself, because it looked like a secret "
+                      f"(key grade_token in a result of {SERVER_READ}). Check that this call may get this value.",
+                      reason)
         self.assertNotIn("Check the target and the value", reason, "no request to check a value the person never had")
 
-    def test_a_value_sent_to_another_server_asks_whether_that_place_may_get_it(self):
+    def test_the_prompt_gives_no_verdict(self):
+        # one server can serve many services (a gateway): the same server is not the same destination, and a text
+        # field publishes the value. The prompt states facts; it never says the value is probably no secret
         key = self.result(f'{{"grade_token": "{TOKEN}"}}')
-        reason = self.ask("mcp__other__post", {"token": f"⟦{key}⟧"})
-        self.assertIn("This call sends it to another place than the one that sent it.", reason)
-        self.assertNotIn("back to the same server", reason)
+        for tool, args in ((SERVER_WRITE, {"token": f"⟦{key}⟧"}), ("mcp__gw__chat_post", {"text": f"x ⟦{key}⟧"})):
+            with self.subTest(tool=tool):
+                reason = self.ask(tool, args)
+                for verdict in ("probably", "you can allow", "same server"):
+                    self.assertNotIn(verdict, reason)
 
     def test_a_stored_value_keeps_the_old_text(self):
         ref = Vault().put(OWN, "SECRET", "manual", session="S1").ref
         reason = self.ask(SERVER_WRITE, {"token": ref})
         self.assertTrue(reason.endswith(" Check the target and the value before you allow it."), reason)
-        self.assertNotIn("You did not store", reason)
+        self.assertNotIn("by itself", reason)
 
     def test_a_value_the_person_gives_later_is_the_persons_own(self):
         # put: /maisecrets put and the CLI; put_many without tool: a value found in a prompt the person typed
@@ -114,7 +129,7 @@ class PromptTests(unittest.TestCase):
                 key = self.result(f'{{"grade_token": "{TOKEN}"}}')
                 give(Vault())
                 reason = self.ask(SERVER_WRITE, {"token": f"⟦{key}⟧"})
-                self.assertNotIn("You did not store", reason)
+                self.assertNotIn("by itself", reason)
                 self.assertIn("Check the target and the value", reason)
 
 
