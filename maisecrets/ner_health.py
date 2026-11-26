@@ -101,7 +101,7 @@ def fact_and_step(cause: str, conf: dict, codex: bool = False) -> tuple:
 
 def line(cause: str, conf: dict, codex: bool = False) -> str:
     fact, step = fact_and_step(cause, conf, codex)
-    return f"⚠️ maisecrets: names are NOT checked — {fact} → {step}"
+    return f"⚠️ maisecrets: names are NOT checked (secrets still are) — {fact} → {step}"
 
 
 # ------------------------------------------------------------------ the state --

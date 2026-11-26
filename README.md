@@ -9,7 +9,8 @@
 
 Keeps passwords, tokens and personal data out of Claude Code and Codex. A value becomes a placeholder before the
 model sees it, and goes back in on your machine only where a command or a file needs it. No model, no download, no
-package: Python's standard library only. Install takes two commands.
+package: Python's standard library only (the optional name service, `/maisecrets ner local`, downloads a container of
+about 690 MB). Install takes two commands.
 
 [![maisecrets demo: values with a lock on your screen, placeholders for the AI](https://mcpgate.de/media/maisecrets-demo.gif)](https://mcpgate.de/maisecrets/)
 
@@ -39,6 +40,10 @@ Claude Code (CLI, desktop app, Cowork):
 claude plugin marketplace add Mcpgate-de/maisecrets
 claude plugin install maisecrets@maisecrets     # then start a new session
 ```
+
+In Cowork, the prompt you type reaches Anthropic before maisecrets runs in the cloud VM: maisecrets keeps the value
+from the model there, not from Anthropic's servers. On your own computer, Claude Code masks it before it leaves
+([Known gaps](docs/KNOWN-GAPS.md)).
 
 Codex (CLI, IDE extension, and the Codex agent inside the ChatGPT desktop app):
 
@@ -72,16 +77,15 @@ running session keeps its version until it restarts.
 ```bash
 claude plugin marketplace update maisecrets            # fetch the newest release first
 claude plugin update maisecrets@maisecrets             # or a new session with an org-synced plugin
-claude plugin uninstall maisecrets@maisecrets
-codex plugin remove maisecrets@maisecrets
 ```
 
-Uninstalling keeps the stored values until their TTL ends. To delete them,
-the metadata and the logs at once, run `maisecrets wipe --yes` from the plugin
-folder (`/maisecrets status` prints the folder):
+Uninstalling keeps the stored values until their TTL ends. To delete them, the metadata and the logs at once, run
+`wipe` first, while the plugin folder is still there (`/maisecrets status` prints the folder), then uninstall:
 
 ```bash
 bash <plugin folder>/hooks/run.sh wipe --yes
+claude plugin uninstall maisecrets@maisecrets
+codex plugin remove maisecrets@maisecrets
 ```
 
 or delete the `maisecrets` items in Keychain Access or Credential Manager and

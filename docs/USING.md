@@ -1042,8 +1042,9 @@ prompt. An image in the result of an MCP tool is not covered either.
 
 ## Terms: names, case numbers, customer names
 
-A name has no shape, so no rule finds it. Tell maisecrets the names you keep
-from the AI, and it masks them like a secret. The design is based on the
+A name alone has no shape, so the rules find it only after a label (`name:`, `full name`), before an e-mail
+address or in a name column. Tell maisecrets the names you keep from the AI, and it masks them like a secret; a name
+service (`/maisecrets ner`) finds more. The design is based on the
 personal-terms design by [@danszymkowiak](https://github.com/danszymkowiak):
 his file form, his match modes, and his rule that no message shows a term.
 
