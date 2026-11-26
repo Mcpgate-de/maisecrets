@@ -83,10 +83,12 @@ class ViewTests(unittest.TestCase):
     def test_off_is_one_line_and_how_to_turn_it_on(self):
         code, lines = self.render(None)
         self.assertEqual(code, 0)
-        self.assertEqual(lines, ["names: off (the rules alone)",
-                                 "to turn it on: /maisecrets ner local, url URL or gateway URL"])
+        self.assertEqual(lines, ["names: off (the rules alone: they find a name only after a label such as name:)",
+                                 "to turn it on: /maisecrets ner local (a container on this computer, about 690 MB), "
+                                 "url URL (a service of your team) or gateway URL (your MCP gateway)"])
         self.assertEqual(self.render(None, client="codex")[1][1],
-                         "to turn it on: maisecrets: ner local, url URL or gateway URL")
+                         "to turn it on: maisecrets: ner local (a container on this computer, about 690 MB), url URL "
+                         "(a service of your team) or gateway URL (your MCP gateway)")
 
     def test_the_gateway_fits_on_one_screen(self):
         conf = ner_setup.updated({}, "gateway:" + GW + "/mcp")
@@ -231,7 +233,7 @@ class ViewTests(unittest.TestCase):
         buf = io.StringIO()
         with redirect_stdout(buf):
             self.assertEqual(cli.cmd_ner([]), 0)
-        self.assertTrue(buf.getvalue().startswith("names: off (the rules alone)\n"))
+        self.assertTrue(buf.getvalue().startswith("names: off (the rules alone: "))
         buf = io.StringIO()
         with redirect_stdout(buf):
             cli.cmd_ner(["all"])
