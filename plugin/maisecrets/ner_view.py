@@ -217,8 +217,9 @@ def render(conf, wait: float = 0.0, show_all: bool = False, client=None) -> tupl
     code, details = ner_setup.report(conf, wait, facts)
     every = "/maisecrets ner all"
     if not (isinstance(conf, dict) and conf.get("url")):
-        lines = ["names: off (the rules alone)",
-                 _cmd("to turn it on: /maisecrets ner local, url URL or gateway URL", client)]
+        lines = ["names: off (the rules alone: in a tool result a name after a label such as name:, in a prompt none)",
+                 _cmd("to turn it on: /maisecrets ner local (a container on this computer, about 690 MB), url URL "
+                      "(a service of your team) or gateway URL (your MCP gateway)", client)]
         if show_all:
             lines += ["", "Details", ner_setup.counts_line()]
         return code, lines

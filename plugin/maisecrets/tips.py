@@ -62,10 +62,10 @@ def welcome_lines(codex: bool = False, lock: bool = False) -> list[str]:
     if codex:
         return [first,
                 "Try it: maisecrets: demo on (alone as your prompt, in a new session) \u00b7 Check: maisecrets: status",
-                "Names too: maisecrets: ner local \u00b7 Old leaks: ask for the secret-hygiene skill"]
+                "Names too: maisecrets: ner (the choices) \u00b7 Old leaks: ask for the secret-hygiene skill"]
     return [first + (" \U0001F512 marks such a value." if lock else ""),
             "Try it: /maisecrets demo on in a new session \u00b7 Check: /maisecrets status",
-            "Names too: /maisecrets ner local \u00b7 Old leaks: /maisecrets:secret-hygiene"]
+            "Names too: /maisecrets ner (the choices) \u00b7 Old leaks: /maisecrets:secret-hygiene"]
 
 
 NOT_PROTECTED = "\u26a0\ufe0f maisecrets is NOT protecting this session \u2192 {cmd}"

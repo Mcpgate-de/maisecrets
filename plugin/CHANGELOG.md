@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## [0.9.34] - 2026-11-26
+
+### Features
+
+- the session start says once how to sign in when a gateway offers values on your screen (ef17cc5)
+
+### Fixes
+
+- the Codex manifest names the optional name service download as the Claude one does (7cc5968)
+- the new texts say exactly where the rules find a name, what the gateway consent covers, and keep uninstall without wipe (8132e24)
+- the welcome names the choices for names, not the 690 MB download (c7b6468)
+- clearer texts at install, for names, for the gateway login, for not-a-secret and for uninstall (8279374)
+- the key pattern of the prompt origin compiles on first use, not when the hooks start (72f7144)
+- the sign-in hint names the host, reads the server list of its client, and stays one line per gateway (e71381d)
+- a key goes into the store only when each of its words is a credential or neutral word (e33e3a3)
+- the prompt for a value maisecrets stored by itself states facts and no verdict (40e3bd9)
+- the permission prompt says where a value came from that maisecrets masked by itself (9fd05aa)
+
 ## [0.9.33] - 2026-11-25
 
 ### Fixes
