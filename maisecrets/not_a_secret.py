@@ -190,8 +190,9 @@ def allow_typed(key: str, session: str | None, route: str, cfg: dict | None = No
                 f"own, or delete the value with /maisecrets forget {key}.")
     if needs_confirmation(type_) and not _confirmed(key, session):
         from .notices import type_word
-        return (f"maisecrets: {shown} is {type_word(type_)}, a key type. Type the command again within "
-                f"{CONFIRM_SECONDS // 60} minutes to allow it. Nothing was changed.")
+        return (f"maisecrets: {shown} is {type_word(type_)}, a key type. Once allowed, its value stands in clear "
+                f"text in your allow list. Type the command again within {CONFIRM_SECONDS // 60} minutes to allow "
+                "it. Nothing was changed.")
     value = v.backend.get(key)
     if not value:
         return f"maisecrets: the store did not give the value of {key}. Nothing was changed."

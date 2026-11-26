@@ -23,7 +23,8 @@ DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "r
                 "read_image", "show_values")
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
-            "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers", "client_header",
+            "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers", "sref_hint_off",
+            "client_header",
             "max_keys_per_session", "max_resolves_per_hour", "rule_dirs", "clean_dirs", "value_files",
             "remote_detector", "business_addresses")
 INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds", "max_new_entries_per_result",
@@ -40,7 +41,8 @@ TITLE = {
     "renew_on_use": "Renew on use",
     "tips": "Tips and hints",
     "shortcut": "/ms shortcut", "guard": "Update guard", "pass_agent_reports": "Subagent reports",
-    "gateway_servers": "Gateway servers", "client_header": "Values back from your MCP servers",
+    "gateway_servers": "Gateway servers", "sref_hint_off": "No sign-in hint",
+    "client_header": "Values back from your MCP servers",
     "rule_dirs": "Rule folders",
     "read_pdf": "PDFs the AI reads", "read_image": "Images the AI reads", "clean_dirs": "Folders with clean files",
     "value_files": "Value files", "remote_detector": "Names from a service", "show_values": "Values on your screen",
@@ -82,6 +84,7 @@ MEANING = {
     "guard": "A synced install registers the guard outside its folder.",
     "pass_agent_reports": "A subagent's report or a background command's notice is not blocked.",
     "gateway_servers": "MCP servers that resolve placeholders themselves.",
+    "sref_hint_off": "MCP servers for which the session start does not say how to sign in to see masked values.",
     "client_header": "A key header on your own MCP server once it sends a masked value and supports it, so it "
                      "can give its masked values back into your files and commands, never to the AI.",
     "max_keys_per_session": "How many different stored values one session may use in an hour. A brake against "
@@ -250,7 +253,7 @@ MORE_GROUPS = (("ssh", ("ssh_autonomous_hosts", "ssh_approval")),
 NOT_LISTED = ("strip_hidden_characters", "scrub_transcript", "block_at_mentions", "client_header", "ssh_via_sandbox",
               "pass_agent_reports", "max_keys_per_session", "max_resolves_per_hour", "remote_detector",
               # set in config.json only (docs/ADMIN.md)
-              "gateway_servers", "ssh_host_groups")
+              "gateway_servers", "sref_hint_off", "ssh_host_groups")
 
 
 def _mark(key: str, cfg: dict) -> str:
