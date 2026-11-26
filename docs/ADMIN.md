@@ -1179,7 +1179,7 @@ and keeps its other keys. Written by hand, the setting looks like this:
   the output of a failed command without the mod (Claude Code does not let a hook replace it); and a resumed Codex
   session, which reads the raw output from its own rollout file on disk.
 - When a source is set and cannot be used, you see one line with the cause and the step, for example
-  `⚠️ maisecrets: names are NOT checked — the gateway ended the login → /maisecrets sref login NAME`. The session
+  `⚠️ maisecrets: names are NOT checked (secrets still are) — the gateway ended the login → /maisecrets sref login NAME`. The session
   start checks the source (the gateway: a login in the store; a url or the local container: an answer within a
   second; a Unix socket: a connection within a second), and a tool result names it once per session, again only when the cause changes. `/maisecrets status`
   and the panel show it as a `names` note, and the head line then says "protects secrets in this session; names

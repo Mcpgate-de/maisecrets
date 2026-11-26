@@ -41,8 +41,9 @@ claude plugin marketplace add Mcpgate-de/maisecrets
 claude plugin install maisecrets@maisecrets     # then start a new session
 ```
 
-In Cowork, the prompt you type reaches Anthropic before maisecrets runs in the cloud VM: maisecrets keeps the value
-from the model there, not from Anthropic's servers. On your own computer, Claude Code masks it before it leaves
+When Cowork runs in the cloud (a new task on Pro, Max and Ultra) or you use Claude Code on the web or Remote Control,
+the prompt you type reaches Anthropic before maisecrets runs: maisecrets keeps the value from the model there, not
+from Anthropic's servers. In Claude Code on your own computer, the value does not leave it
 ([Known gaps](docs/KNOWN-GAPS.md)).
 
 Codex (CLI, IDE extension, and the Codex agent inside the ChatGPT desktop app):
@@ -79,13 +80,16 @@ claude plugin marketplace update maisecrets            # fetch the newest releas
 claude plugin update maisecrets@maisecrets             # or a new session with an org-synced plugin
 ```
 
+```bash
+claude plugin uninstall maisecrets@maisecrets
+codex plugin remove maisecrets@maisecrets
+```
+
 Uninstalling keeps the stored values until their TTL ends. To delete them, the metadata and the logs at once, run
-`wipe` first, while the plugin folder is still there (`/maisecrets status` prints the folder), then uninstall:
+`wipe` before you uninstall, while the plugin folder is still there (`/maisecrets status` prints the folder):
 
 ```bash
 bash <plugin folder>/hooks/run.sh wipe --yes
-claude plugin uninstall maisecrets@maisecrets
-codex plugin remove maisecrets@maisecrets
 ```
 
 or delete the `maisecrets` items in Keychain Access or Credential Manager and

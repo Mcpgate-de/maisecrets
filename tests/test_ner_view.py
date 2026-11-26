@@ -83,7 +83,8 @@ class ViewTests(unittest.TestCase):
     def test_off_is_one_line_and_how_to_turn_it_on(self):
         code, lines = self.render(None)
         self.assertEqual(code, 0)
-        self.assertEqual(lines, ["names: off (the rules alone: they find a name only after a label such as name:)",
+        self.assertEqual(lines, ["names: off (the rules alone: in a tool result a name after a label such as "
+                                 "name:, in a prompt none)",
                                  "to turn it on: /maisecrets ner local (a container on this computer, about 690 MB), "
                                  "url URL (a service of your team) or gateway URL (your MCP gateway)"])
         self.assertEqual(self.render(None, client="codex")[1][1],

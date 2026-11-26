@@ -148,7 +148,7 @@ The first session start in a maisecrets folder shows three lines:
 ```
 maisecrets is on: passwords, keys and personal data reach the AI only as ⟦…⟧; the value stays on this computer. 🔒 marks such a value.
 Try it: /maisecrets demo on in a new session · Check: /maisecrets status
-Names too: /maisecrets ner local · Old leaks: /maisecrets:secret-hygiene
+Names too: /maisecrets ner (the choices) · Old leaks: /maisecrets:secret-hygiene
 ```
 
 Codex shows the same with its sentence forms (`maisecrets: status`). After
@@ -1042,9 +1042,9 @@ prompt. An image in the result of an MCP tool is not covered either.
 
 ## Terms: names, case numbers, customer names
 
-A name alone has no shape, so the rules find it only after a label (`name:`, `full name`), before an e-mail
-address or in a name column. Tell maisecrets the names you keep from the AI, and it masks them like a secret; a name
-service (`/maisecrets ner`) finds more. The design is based on the
+A name alone has no shape. In a tool result the rules find it after a label (`name:`, `full name`), before an e-mail
+address or in a name column; in a prompt you type they find no name. Tell maisecrets the names you keep from the AI,
+and it masks them like a secret, also in a prompt; a name service (`/maisecrets ner`) finds more. The design is based on the
 personal-terms design by [@danszymkowiak](https://github.com/danszymkowiak):
 his file form, his match modes, and his rule that no message shows a term.
 
