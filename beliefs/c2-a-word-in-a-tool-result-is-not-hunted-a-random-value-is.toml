@@ -26,8 +26,8 @@ runner = [
 [[proof]]
 path = "the tool hook stores a word as a value to hunt in prompts, as 0.6.16 did"
 file = "maisecrets/hooks.py"
-find = "            out, ents = _replace(s, matches, vault, session, tool=True)"
-replace = "            out, ents = _replace(s, matches, vault, session)"
+find = "            out, ents = _replace(s, matches, vault, session, tool=True,"
+replace = "            out, ents = _replace(s, matches, vault, session, tool=False,"
 
 [[proof]]
 path = "every value of letters counts as a word, a random one too"

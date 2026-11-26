@@ -148,6 +148,7 @@
 "maisecrets/tool_withhold.py" = { controls = ["C30", "C30a"] }
 "maisecrets/user_rules.py" = { controls = ["C25"] }
 "maisecrets/value_files.py" = { controls = ["C26"] }
+"maisecrets/value_origin.py" = { none = "builds the text of the permission prompt for a call that gets stored values and names the fields that hold them; the decision stays in hooks.py and rehydration.py" }
 "maisecrets/values.py" = { controls = ["C26"] }
 "maisecrets/vault.py" = { controls = ["C1", "C2", "C4", "C7", "C9", "C10", "C11", "C12", "C14", "C22", "C30", "C31", "I5"] }
 "maisecrets/vault_refs.py" = { controls = ["C27", "C31"] }
