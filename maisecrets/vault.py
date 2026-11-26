@@ -116,6 +116,10 @@ class Entry:
     # an own rule or an import found the value after a built-in rule stored it: the first kind stays, and the deposit
     # takes the entry only at a target's path (deposit.MARKS_STRICT)
     strict: bool = False
+    # a new entry from a tool result: the tool whose result held the value and the key before it (#108). The prompt of
+    # a call that gets the value names them; a value the person gives clears them, it is the person's own
+    found_in: str | None = None
+    found_at: str | None = None
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -1165,6 +1169,7 @@ class Vault:
             if session and session not in e.sessions:
                 e.sessions.append(session)
             e.quiet = False             # a value given outside a tool result: hunted in prompts again
+            e.found_in = e.found_at = None
             e.fold = e.fold or self.fold_of(value, e.type)
             e.weak = e.weak and is_weak(kind, value)   # and in every text, unless it is a default word
             e.strict = e.strict or kind.startswith(_marks_strict())
@@ -1175,7 +1180,7 @@ class Vault:
         return e
 
     def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None,
-                 tool: bool = False) -> "Entry":
+                 tool: bool = False, found: tuple[str, str | None] | None = None) -> "Entry":
         fp = self.fingerprint(value)
         n = self._index["counters"].get(type_, 0) + 1
         self._index["counters"][type_] = n
@@ -1189,7 +1194,7 @@ class Vault:
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
                   session=session, uses=0, sessions=[session] if session else [],
                   weak=is_weak(kind, value, tool), quiet=is_quiet(kind, value, tool), fold=self.fold_of(value, type_),
-                  wordcheck=True)
+                  wordcheck=True, found_in=found[0] if found else None, found_at=found[1] if found else None)
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -1203,19 +1208,19 @@ class Vault:
 
     @_mutating
     def put_many(self, items: list[tuple[str, str, str]], session: str | None = None,
-                 tool: bool = False) -> list["Entry | None"]:
+                 tool: bool = False, found: list | None = None) -> list["Entry | None"]:
         """Store many values in one lock, one sweep and one index save; a tool result with
         hundreds of addresses called put() per value and rewrote the growing index each time
         (measured: 1000 e-mails 8.7 s, above the watchdog; review, 2026-09-26). Above
         `max_new_entries_per_result` new values, the rest is not stored: None in the result,
-        the caller masks the value without a key."""
+        the caller masks the value without a key. `found`: (tool, key) per item, for a tool result (value_origin)."""
         self.expire()
         cap = int(self.cfg.get("max_new_entries_per_result", 100))
         out: list[Entry | None] = []
         new = 0
         dirty = False
         from .detection.remote import is_never_stored_name
-        for value, type_, kind in items:
+        for i, (value, type_, kind) in enumerate(items):
             if type_ == "NAME" and kind.startswith("remote:") and is_never_stored_name(value):
                 out.append(None)        # masked where it stands, never stored: a stored word is masked everywhere
                 continue
@@ -1230,6 +1235,7 @@ class Vault:
                     e.weak = False      # a rule found the model's name too: evidence enough to hunt it
                 e.strict = e.strict or kind.startswith(_marks_strict())
                 if not tool:
+                    e.found_in = e.found_at = None
                     e.quiet = False     # a value the person gives in a prompt is hunted in prompts again
                     # a word a tool result stored weak is a chosen password once the person gives it (field report,
                     # 2026-10-25: the weak words of the list grew from base words to words with endings)
@@ -1244,7 +1250,7 @@ class Vault:
             if new >= cap:
                 out.append(None)
                 continue
-            out.append(self._put_new(value, type_, kind, session, None, tool))
+            out.append(self._put_new(value, type_, kind, session, None, tool, found[i] if found else None))
             new += 1
             dirty = True
             if new % 10 == 0:
@@ -1252,6 +1258,10 @@ class Vault:
         if dirty:
             self._save_index()
         return out
+
+    def origin(self, key: str) -> dict:
+        """The index record of `key` (its found_in and found_at, #108), or an empty one; reads no value."""
+        return dict(self._index["entries"].get(key) or {})
 
     def status(self, key: str, session: str | None = None) -> str:
         """ok | unknown | expired | no-session | foreign-session, without reading the value.
