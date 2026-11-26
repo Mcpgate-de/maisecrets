@@ -9,10 +9,11 @@ import json
 import re
 from typing import Any
 
+from .lazy_regex import LazyRx
 from .placeholder import find_refs
 
 # the key just before a value: `"grade_token": "`, `token=`, `api_key: '`. Not after `//` (the user part of a URL)
-_KEY_BEFORE = re.compile(r"""(?<![/\w])["']?([A-Za-z_][A-Za-z0-9_]{0,40})["']?\s*(?:=>|:=|[:=])\s*["'`]?\s*\Z""")
+_KEY_BEFORE = LazyRx(r"""(?<![/\w])["']?([A-Za-z_][A-Za-z0-9_]{0,40})["']?\s*(?:=>|:=|[:=])\s*["'`]?\s*\Z""")
 _LOOK_BACK = 64
 # a key is kept only when one of its words names a credential and every other word is one of these too or a neutral
 # word: the index holds no other text of a tool result, so a name, a user, a domain or a random string that stands as a
