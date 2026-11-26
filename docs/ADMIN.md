@@ -271,6 +271,10 @@ the plugins). Not yet tested in a managed organization.
 ### Settings in config.json only
 
 - `gateway_servers`: the MCP servers that resolve placeholders themselves (a list of server names).
+- `sref_hint_off`: the MCP servers for which the session start does not say how to sign in (a list of server
+  names). Without it, a gateway that offers Sensitive References and has no login gets one line per session:
+  `/maisecrets sref login NAME`. maisecrets knows the offer from the metadata answer it reads for a token of that
+  server already; the line sends no request.
 - `ssh_host_groups`: hosts that one typed ssh window covers together (`{"web": ["web1", "web2"]}`).
 
 ### Settings the panel does not offer

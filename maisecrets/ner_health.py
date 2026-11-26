@@ -314,6 +314,41 @@ def start_line(cfg: dict, payload: dict, backend=None, starting: bool = False, c
     return line(cause, _conf(cfg), codex) if claim(payload.get("session_id"), cause, _conf(cfg)) else None
 
 
+SREF_HINT = ("💡 maisecrets: the MCP server {name} can show you masked values on your screen. To allow it, type: "
+             "{step}")
+
+
+def sref_hint_lines(cfg: dict, payload: dict, backend=None, codex: bool = False) -> list[str]:
+    """#109: a gateway of the person's configuration offers Sensitive References and maisecrets holds no login for it.
+    One line per gateway and session at the session start, the same claim as a name-source cause (cause
+    `sref_offered`). From the file only: the metadata answer that vault_refs.endpoint read already (an anonymous
+    request, for a token in a result of that server) and the login in the store. No request, nothing to the gateway.
+    Not for a gateway that is the name source (start_line names its login), not in Cowork (a login there lasts one
+    task), and not for a server the person named in sref_hint_off."""
+    from . import cowork, sref_client, vault_refs
+    from .vault import make_backend
+    if not _seen_by_person(payload, codex) or cowork.active():
+        return []
+    off = {str(x) for x in (cfg.get("sref_hint_off") or []) if isinstance(x, str)}
+    source = str(_conf(cfg).get("gateway") or "")
+    out: list[str] = []
+    for name, url in sorted(vault_refs.user_servers().items()):
+        origin = vault_refs.origin_of(url)
+        if name in off or not origin or origin == source or not vault_refs.offers_sref(url):
+            continue
+        backend = backend if backend is not None else make_backend(cfg)
+        if sref_client.logged_in(backend, origin):
+            continue
+        if not claim(payload.get("session_id"), "sref_offered", {"url": url, "gateway": origin}):
+            continue
+        step = f"/maisecrets sref login {name}"
+        if codex:
+            from .forms import codex as _codex
+            step = _codex(step)
+        out.append(SREF_HINT.format(name=name, step=step))
+    return out
+
+
 def result_line(cfg: dict, payload: dict, reason: str, codex: bool = False) -> str | None:
     """The line of an unchecked tool result: once per session and cause, or None."""
     conf = _conf(cfg)
