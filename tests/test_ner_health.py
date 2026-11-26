@@ -76,8 +76,8 @@ class CauseTests(Base):
             self.assertEqual(H.cause_of(GATEWAY, "setup"), "other")
 
     def test_the_step_names_the_server_of_the_gateway_and_codex_gets_its_prompt_form(self):
-        self.assertEqual(H.line("login_ended", GATEWAY), "⚠️ maisecrets: names are NOT checked — the "
-                         "gateway ended the login → /maisecrets sref login team-gateway")
+        self.assertEqual(H.line("login_ended", GATEWAY), "⚠️ maisecrets: names are NOT checked (secrets still "
+                         "are) — the gateway ended the login → /maisecrets sref login team-gateway")
         self.assertTrue(H.line("no_login", GATEWAY, codex=True).endswith("→ maisecrets: sref login team-gateway"))
         self.assertTrue(H.line("local_down", {"url": "http://127.0.0.1:8765/"}).endswith("→ /maisecrets ner local"))
 
@@ -135,7 +135,7 @@ class StartTests(Base):
         S._mark_ended(ORIGIN)
         cfg = self.cfg(GATEWAY)
         line = H.start_line(cfg, P("s1"), self.backend)
-        self.assertEqual(line, "⚠️ maisecrets: names are NOT checked — the gateway ended the login "
+        self.assertEqual(line, "⚠️ maisecrets: names are NOT checked (secrets still are) — the gateway ended the login "
                          "→ /maisecrets sref login team-gateway")
         self.assertIsNone(H.start_line(cfg, P("s1"), self.backend), "the same session: not again")
         with mock.patch.dict(ner_gateway.LAST, {"cause": "login_ended"}):
@@ -145,7 +145,8 @@ class StartTests(Base):
         cfg = self.cfg(GATEWAY)
         S._mark_ended(ORIGIN, "uncertain")
         self.assertEqual(H.start_line(cfg, P("s1"), self.backend),
-                         "\u26a0\ufe0f maisecrets: names are NOT checked \u2014 the last renewal did not finish; log "
+                         "\u26a0\ufe0f maisecrets: names are NOT checked (secrets still are) \u2014 the last "
+                         "renewal did not finish; log "
                          "in again \u2192 /maisecrets sref login team-gateway")
         self.assertEqual(H.verdict(cfg, self.backend).fact, "the last renewal did not finish; log in again")
         S._mark_ended(ORIGIN, "revoked")
@@ -163,7 +164,8 @@ class StartTests(Base):
             S._mark_ended(ORIGIN, "revoked")
             self.assertEqual(H.ended_cause(ORIGIN), "older_ended", "the likely cause even with a mark")
             self.assertEqual(H.start_line(cfg, P("s1"), self.backend),
-                             "\u26a0\ufe0f maisecrets: names are NOT checked \u2014 not logged in at the gateway; an "
+                             "\u26a0\ufe0f maisecrets: names are NOT checked (secrets still are) \u2014 not logged "
+                             "in at the gateway; an "
                              "older maisecrets in another session can end the login \u2192 restart the sessions that "
                              "run it (/maisecrets status), then /maisecrets sref login team-gateway")
             self.assertTrue(H.line("older_ended", GATEWAY, codex=True).endswith(
@@ -216,7 +218,8 @@ class StartTests(Base):
                 self.assertEqual(r.returncode, 0, r.stderr)
                 return json.loads(r.stdout).get("systemMessage", "")
             first = start()
-            self.assertTrue(first.startswith("⚠️ maisecrets: names are NOT checked — the gateway ended "
+            self.assertTrue(first.startswith("⚠️ maisecrets: names are NOT checked (secrets still are) — the "
+                                             "gateway ended "
                                              "the login → /maisecrets sref login"), first)
             self.assertNotIn("names are NOT checked", start(), "once per session")
 

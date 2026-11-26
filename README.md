@@ -9,7 +9,8 @@
 
 Keeps passwords, tokens and personal data out of Claude Code and Codex. A value becomes a placeholder before the
 model sees it, and goes back in on your machine only where a command or a file needs it. No model, no download, no
-package: Python's standard library only. Install takes two commands.
+package: Python's standard library only (the optional name service, `/maisecrets ner local`, downloads a container of
+about 690 MB). Install takes two commands.
 
 [![maisecrets demo: values with a lock on your screen, placeholders for the AI](https://mcpgate.de/media/maisecrets-demo.gif)](https://mcpgate.de/maisecrets/)
 
@@ -39,6 +40,11 @@ Claude Code (CLI, desktop app, Cowork):
 claude plugin marketplace add Mcpgate-de/maisecrets
 claude plugin install maisecrets@maisecrets     # then start a new session
 ```
+
+When Cowork runs in the cloud (a new task on Pro, Max and Ultra) or you use Claude Code on the web or Remote Control,
+the prompt you type reaches Anthropic before maisecrets runs: maisecrets keeps the value from the model there, not
+from Anthropic's servers. In Claude Code on your own computer, the value does not leave it
+([Known gaps](docs/KNOWN-GAPS.md)).
 
 Codex (CLI, IDE extension, and the Codex agent inside the ChatGPT desktop app):
 
@@ -72,13 +78,15 @@ running session keeps its version until it restarts.
 ```bash
 claude plugin marketplace update maisecrets            # fetch the newest release first
 claude plugin update maisecrets@maisecrets             # or a new session with an org-synced plugin
+```
+
+```bash
 claude plugin uninstall maisecrets@maisecrets
 codex plugin remove maisecrets@maisecrets
 ```
 
-Uninstalling keeps the stored values until their TTL ends. To delete them,
-the metadata and the logs at once, run `maisecrets wipe --yes` from the plugin
-folder (`/maisecrets status` prints the folder):
+Uninstalling keeps the stored values until their TTL ends. To delete them, the metadata and the logs at once, run
+`wipe` before you uninstall, while the plugin folder is still there (`/maisecrets status` prints the folder):
 
 ```bash
 bash <plugin folder>/hooks/run.sh wipe --yes

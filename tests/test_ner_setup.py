@@ -421,7 +421,7 @@ class DownNoteTests(unittest.TestCase):
 
     # Windows answers a connection to a closed local port only after its SYN retries, so the cause there can be
     # "answers too slowly"; both name the service and the step
-    LINE = "names are NOT checked \u2014 the name service "
+    LINE = "names are NOT checked (secrets still are) \u2014 the name service "
 
     def assertNoted(self, message: str) -> None:
         self.assertIn(self.LINE, message)

@@ -540,7 +540,7 @@ class StatusOutputTests(unittest.TestCase):
         mod = [i for i, ln in enumerate(out) if ln.split()[:2] == ["!", "mod"]]
         self.assertEqual(len(mod), 1, out)
         self.assertIn("did not run", out[mod[0]])
-        self.assertIn("maisecrets: sref login NAME", " ".join(out[mod[0] + 1:mod[0] + 3]))
+        self.assertIn("maisecrets: sref login NAME", " ".join(" ".join(out[mod[0] + 1:mod[0] + 4]).split()))
         sv.note_mod({"session_id": sess})              # the mod asked in this session: no line
         with mock.patch.dict(os.environ, env):
             os.environ.pop("CODEX_THREAD_ID", None)
