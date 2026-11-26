@@ -14,16 +14,20 @@ from .placeholder import find_refs
 # the key just before a value: `"grade_token": "`, `token=`, `api_key: '`. Not after `//` (the user part of a URL)
 _KEY_BEFORE = re.compile(r"""(?<![/\w])["']?([A-Za-z_][A-Za-z0-9_]{0,40})["']?\s*(?:=>|:=|[:=])\s*["'`]?\s*\Z""")
 _LOOK_BACK = 64
-# a key is kept only when one of its words names a credential: the index holds no other text of a tool result, so a
-# name, a user or a domain that stands as a key never gets there (review of #108: C10, C26)
+# a key is kept only when one of its words names a credential and every other word is one of these too or a neutral
+# word: the index holds no other text of a tool result, so a name, a user, a domain or a random string that stands as a
+# key (or in it, `<name>_password`) never gets there (review of #108: C10, C26)
 _LABEL_WORDS = frozenset("token key secret password passwd pwd pass passphrase auth api apikey credential credentials "
                          "session cookie bearer access refresh client private signature sig hash code otp pin "
                          "grade nonce salt".split())
+_NEUTRAL_WORDS = frozenset("id x type value header my new old".split())
 
 
 def _label(key: str) -> str | None:
     words = [w.lower() for w in re.findall(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])", key)]
-    return key if words and any(w in _LABEL_WORDS for w in words) else None
+    ok = words and all(w in _LABEL_WORDS or w in _NEUTRAL_WORDS for w in words) and \
+        any(w in _LABEL_WORDS for w in words)
+    return key if ok else None
 
 
 def found(text: str, matches: list, tool: str) -> list[tuple[str, str | None]]:
@@ -41,18 +45,20 @@ def prompt_tail(vault, keys: list[str], tool: str) -> str:
     from a tool result, the prompt names the origin and asks only about the target: it says facts and no verdict. One
     MCP server can serve many services (a gateway), so the same server is not the same destination (review of #108)."""
     lines = []
-    own = False
+    own = []
     for key in keys:
         m = vault.origin(key)
         src = str(m.get("found_in") or "")
         if not src:
-            own = True
+            own.append(f"⟦{key}⟧")
             continue
         at = f"key {m['found_at']} in " if m.get("found_at") else ""
         lines.append(f" maisecrets stored ⟦{key}⟧ by itself, because it looked like a secret ({at}a result of {src}).")
     if lines:
         lines.append(" Check that this call may get " + ("these values." if len(lines) > 1 else "this value."))
-    if own:
+    if own and lines:
+        lines.append(f" Check the target and {', '.join(own)} before you allow it.")
+    elif own:
         lines.append(" Check the target and the value before you allow it.")
     return "".join(lines)
 

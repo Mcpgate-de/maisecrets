@@ -40,6 +40,8 @@ class FoundTests(unittest.TestCase):
     def test_the_key_before_a_value_is_named(self):
         for text, key in ((f'{{"grade_token": "{TOKEN}"}}', "grade_token"), (f"token={TOKEN}", "token"),
                           (f"api_key: '{TOKEN}'", "api_key"), (f"sessionId={TOKEN}", "sessionId"),
+                          (f"X-Auth-Token: {TOKEN}", "Token"),
+                          (f'{{"client_secret_id": "{TOKEN}"}}', "client_secret_id"),
                           (f"the value {TOKEN}", None)):
             with self.subTest(text=text):
                 self.assertEqual(value_origin.found(text, [_M(text.index(TOKEN))], "t"), [("t", key)])
@@ -48,7 +50,9 @@ class FoundTests(unittest.TestCase):
         # the index holds no other text of a tool result: a name, a user or a domain that stands as a key (C10, C26)
         for text in (f'{{"Jane Example": "{TOKEN}"}}', f"postgres://jdoe_admin:{TOKEN}@db",
                      f"https://api_user:{TOKEN}@host.example",
-                     f'{{"user@acme-corp.example": "{TOKEN}"}}', f'{{"jdoe": "{TOKEN}"}}'):
+                     f'{{"user@acme-corp.example": "{TOKEN}"}}', f'{{"jdoe": "{TOKEN}"}}',
+                     f'{{"jane_example_password": "{TOKEN}"}}', f'{{"jdoeApiKey": "{TOKEN}"}}',
+                     f'{{"Qz8PinWv3xRt": "{TOKEN}"}}'):
             with self.subTest(text=text):
                 self.assertEqual(value_origin.found(text, [_M(text.index(TOKEN))], "t"), [("t", None)])
 
@@ -119,6 +123,13 @@ class PromptTests(unittest.TestCase):
         reason = self.ask(SERVER_WRITE, {"token": ref})
         self.assertTrue(reason.endswith(" Check the target and the value before you allow it."), reason)
         self.assertNotIn("by itself", reason)
+
+    def test_a_stored_value_next_to_a_found_one_is_named(self):
+        key = self.result(f'{{"grade_token": "{TOKEN}"}}')
+        ref = Vault().put(OWN, "SECRET", "manual", session="S1").ref
+        reason = self.ask(SERVER_WRITE, {"token": f"⟦{key}⟧", "password": ref})
+        self.assertIn(f"Check that this call may get this value. Check the target and {ref} before you allow it.",
+                      reason)
 
     def test_a_value_the_person_gives_later_is_the_persons_own(self):
         # put: /maisecrets put and the CLI; put_many without tool: a value found in a prompt the person typed
