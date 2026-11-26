@@ -264,7 +264,9 @@ mailgun-private-api-token	c7ffbeaa94ae
 mailgun-pub-key	cc95bcc84028
 mailgun-signing-key	2f8338d975ef
 mapbox-api-token	29d5ad7033b4
-mapbox-secret-token	25913480c4bc
+mapbox-secret-token	d7665efe73ea
+maptiler-api-key	f36f4f1386d4
+maptiler-api-key-url	f1331ed6a3ea
 mattermost-access-token	24b2425e953c
 maxmind-license-key	c1a2b643bde6
 mem0-api-key.1	6583b08e9710
@@ -425,7 +427,8 @@ tailscale-auth-key	dd39dfe20d06
 tailscale-key	6ae66f296c3f
 tailscale-oauth-client-secret	c695e582c11d
 tailscale-scim-key	a4ab176be187
-tailscale-webhook-secret	166785508015
+tailscale-webhook-secret	d44ad633eb56
+tavily-api-key	72ec4cd850c3
 telegram-bot-api-token	0c3a1fd5e151
 telnyx-api-v2-key.1	40d2bc10d9cc
 temporal-cloud-api-key.1	aa86aadd0b61
