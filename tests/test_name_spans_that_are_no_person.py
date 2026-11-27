@@ -76,10 +76,20 @@ class SpanRuleTests(unittest.TestCase):
 
     def test_a_greeting_phrase_is_no_person(self):
         for span in ("Hallo Ihr Lieben", "Ihr Lieben", "Hallo zusammen", "Liebe alle", "Hallo Ihr Lieben,",
-                     "hallo Leute", "Hi Team"):
+                     "hallo Leute", "Hi Team", "Hi Guys", "Hello everyone", "Hey folks", "Hi all", "Hello people"):
             with self.subTest(span=span):
                 self.assertTrue(rm.is_greeting_phrase(span))
                 self.assertTrue(rm.is_no_person(span))
+
+    def test_guys_and_folks_alone_are_no_person_but_guy_is_a_name(self):
+        # field report 2026-11-27: "Hi Guys" in a prompt; the name service marked "Guys" alone, and the mod showed it
+        # as a stored name. The plural addresses a group and is never one person
+        for span in ("Guys", "guys", "Folks"):
+            with self.subTest(span=span):
+                self.assertTrue(rm.is_no_person(span))
+        for span in ("Guy", "Guy Example"):
+            with self.subTest(span=span):
+                self.assertFalse(rm.is_no_person(span))
 
     def test_a_greeting_with_a_name_or_an_address_word_alone_stays(self):
         for span in ("Hallo Anke", "Liebe Frau Feldkamp", "Ihr", "Sie", "Du", "Ihr Feldkamp", "Du Bois",

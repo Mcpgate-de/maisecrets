@@ -127,6 +127,22 @@ test('always without links (Terminal.app): the value is plain inline code, no UR
   await ui.unmount()
 })
 
+test('in a fenced code block a value stands as plain text, no link; a secret keeps its placeholder', async ($, on) => {
+  // field report 2026-11-27: a draft for Slack in a code block showed [`value 🔒`](https://…) as raw text, and a copy
+  // of the block took that along
+  const clock = world(on)
+  const text = ['Copy this:', '```', `Hi ${P('NAME_c1')}, write to ${P('EMAIL_c2')} with ${P('SECRET_c3')}.`, '```',
+    `after ${P('EMAIL_c2')}`, '~~~text', `also ${P('NAME_c1')}`, '```', `still ${P('NAME_c1')}`, '~~~'].join('\n')
+  const { ui, md } = await shown($, clock, 'terminal', FULL, text)
+  const lines = (md?.props.text as string).split('\n')
+  expect(lines[2]).toBe(`Hi Max Mustermann, write to max@example.com with ${P('SECRET_c3')}.`)
+  expect(lines[4]).toContain('`max@example.com \u{1F512}`')        // outside the block: drawn as before
+  expect(lines[6]).toBe('also Max Mustermann')                         // a ~~~ block too
+  expect(lines[8]).toBe('still Max Mustermann')                        // ``` does not close a ~~~ block
+  expect(lines.slice(0, 4).join('\n')).not.toContain(LINK)
+  await ui.unmount()
+})
+
 test('a placeholder in a link or a URL the model wrote keeps its placeholder: a click would send the value away',
   async ($, on) => {
     const clock = world(on)
