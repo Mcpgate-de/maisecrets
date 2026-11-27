@@ -777,6 +777,11 @@ shows on the screen in any mode, so a screenshot or a shared screen does not
 carry it. Its placeholder stays, with a 🔒 where the value is at hand, and a
 click copies it.
 
+In a code block (a text that Claude gives you to copy), a value of `always`
+stands as plain text, without the lock and without a link, so a copy of the
+block holds the value. A secret and a gateway's reference keep their
+placeholder there.
+
 Change it with `/maisecrets settings show_values click` as your own prompt. A
 policy can set `click` or `off` for everyone. A change towards `always` is
 logged as a loosened protection.
