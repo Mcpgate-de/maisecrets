@@ -188,9 +188,32 @@ function code(v) {
 // that the model wrote (`[x](https://host/?q=` + placeholder), and a click would send it away (Opus review)
 const LINKY = /:\/\/|\]\(|\]\[|^\s*\[[^\]]*\]:|<[a-z!/]|www\.|\b(?:mailto|data|file|tel|sms|javascript|ftp):|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\?/i
 
+// a fenced code block shows no Markdown: a link drawn there stood as raw text (``[`Guys 🔒`](https://…)``), and a copy
+// of the block took that text along (field report 2026-11-27). In a block a value of the store stands as plain text,
+// the text the person copies; a secret and a gateway's reference keep their placeholder (no click there)
+const FENCE = /^\s{0,3}(`{3,}|~{3,})/
+
 function rewrite(text, address) {
   const shown = open.get(address)?.keys
-  return text.split('\n').map(line => LINKY.test(line) ? line : rewriteLine(line, shown)).join('\n')
+  let fence = ''
+  return text.split('\n').map(line => {
+    const m = FENCE.exec(line)
+    if (m && (!fence || m[1][0] === fence[0] && m[1].length >= fence.length)) {
+      fence = fence ? '' : m[1]
+      return line
+    }
+    if (LINKY.test(line)) return line
+    return fence ? fencedLine(line) : rewriteLine(line, shown)
+  }).join('\n')
+}
+
+function fencedLine(text) {
+  return text.replace(PH, (all, k, ref) => {
+    if (ref || !k || isSecretKey(k)) return all
+    const v = cache.get(k)
+    // one line, never a line break that could end the block; not cut: the block is the text to copy
+    return mode === 'always' && v !== undefined ? v.replace(/[\r\n\t]+/g, ' ') : all
+  })
 }
 
 const isSecretRef = (ref) => ref.startsWith('sref:secret:')
