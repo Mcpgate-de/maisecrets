@@ -13,6 +13,9 @@ nginx
 openai
 opencms
 postgres
+# English words that address a group ("Hi guys"): plural, never one person. "Guy" alone stays a name.
+folks
+guys
 # words of a product name after a product word.
 actions
 registry
